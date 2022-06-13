@@ -1,19 +1,18 @@
 package commands
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -23,8 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
@@ -114,90 +111,107 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
-	blockNumbers := roaring.New()
-	blockNumbers.AddRange(begin, end+1) // [min,max)
+	var fromTxNum, toTxNum uint64
+	if begin > 0 {
+		fromTxNum = api._txNums[begin-1]
+	}
+	toTxNum = api._txNums[end] // end is an inclusive bound
 
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
+	txNumbers := roaring64.New()
+	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
+
+	topicsBitmap, err := getTopicsBitmap(api._agg, tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
 		return nil, err
 	}
 	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
+		txNumbers.And(topicsBitmap)
 	}
 
-	var addrBitmap *roaring.Bitmap
+	var addrBitmap *roaring64.Bitmap
 	for _, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
-		if err != nil {
-			return nil, err
+		var bitmapForORing roaring64.Bitmap
+		it := api._agg.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+		for it.HasNext() {
+			bitmapForORing.Add(it.Next())
 		}
 		if addrBitmap == nil {
-			addrBitmap = m
+			addrBitmap = &bitmapForORing
 			continue
 		}
-		addrBitmap = roaring.Or(addrBitmap, m)
+		addrBitmap = roaring64.Or(addrBitmap, &bitmapForORing)
 	}
 
 	if addrBitmap != nil {
-		blockNumbers.And(addrBitmap)
+		txNumbers.And(addrBitmap)
 	}
 
-	if blockNumbers.GetCardinality() == 0 {
+	if txNumbers.GetCardinality() == 0 {
 		return logs, nil
 	}
-
-	iter := blockNumbers.Iterator()
+	var lastBlockNum uint64
+	var lastBlockHash common.Hash
+	var lastHeader *types.Header
+	var lastSigner *types.Signer
+	var lastRules *params.Rules
+	stateReader := state.NewHistoryReader22(api._agg)
+	iter := txNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+		txNum := iter.Next()
+		// Find block number
+		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
+			return api._txNums[i] > txNum
+		}))
+		if blockNum > lastBlockNum {
+			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+				return nil, err
+			}
+			lastBlockNum = blockNum
+			lastBlockHash = lastHeader.Hash()
+			lastSigner = types.MakeSigner(chainConfig, blockNum)
+			lastRules = chainConfig.Rules(blockNum)
 		}
-
-		block := uint64(iter.Next())
-		var logIndex uint
-		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
-			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
-			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
-			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
-			if len(filtered) == 0 {
-				return nil
-			}
-			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
-			for _, log := range filtered {
-				log.TxIndex = txIndex
-			}
-			blockLogs = append(blockLogs, filtered...)
-
-			return nil
-		})
-		if err != nil {
-			return logs, err
+		var startTxNum uint64
+		if blockNum > 0 {
+			startTxNum = api._txNums[blockNum-1]
 		}
-		if len(blockLogs) == 0 {
-			continue
-		}
-
-		b, err := api.blockByNumberWithSenders(tx, block)
+		txIndex := txNum - startTxNum - 1
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			return nil, err
 		}
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", block)
+		txHash := txn.Hash()
+		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		if err != nil {
+			return nil, err
 		}
-		blockHash := b.Hash()
-		for _, log := range blockLogs {
-			log.BlockNumber = block
-			log.BlockHash = blockHash
-			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, contractHasTEVM, api._blockReader)
+		stateReader.SetTxNum(txNum)
+		vmConfig := vm.Config{}
+		ibs := state.New(stateReader)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			return nil, err
 		}
-		logs = append(logs, blockLogs...)
+		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
+		for _, log := range filtered {
+			log.BlockNumber = blockNum
+			log.BlockHash = lastBlockHash
+			log.TxHash = txHash
+			log.Index = 0
+		}
+		logs = append(logs, filtered...)
 	}
 
 	return logs, nil
@@ -214,30 +228,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
-	var result *roaring.Bitmap
+func getTopicsBitmap(a *libstate.Aggregator, c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
+	var result *roaring64.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing *roaring.Bitmap
+		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
-			if err != nil {
-				return nil, err
+			it := a.LogTopicIterator(topic.Bytes(), from, to, nil)
+			for it.HasNext() {
+				bitmapForORing.Add(it.Next())
 			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-				continue
-			}
-			bitmapForORing.Or(m)
 		}
 
-		if bitmapForORing == nil {
+		if bitmapForORing.GetCardinality() == 0 {
 			continue
 		}
 		if result == nil {
-			result = bitmapForORing
+			result = &bitmapForORing
 			continue
 		}
-		result = roaring.And(bitmapForORing, result)
+		result = roaring64.And(&bitmapForORing, result)
 	}
 	return result, nil
 }

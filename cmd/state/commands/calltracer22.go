@@ -4,7 +4,6 @@ import (
 	"math/big"
 	"time"
 
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -39,19 +38,5 @@ func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil
 }
 func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-func (ct *CallTracer) AddToAggregator(a *libstate.Aggregator) error {
-	for from := range ct.froms {
-		if err := a.AddTraceFrom(from[:]); err != nil {
-			return err
-		}
-	}
-	for to := range ct.tos {
-		if err := a.AddTraceTo(to[:]); err != nil {
-			return err
-		}
-	}
 	return nil
 }
