@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 )
@@ -33,7 +34,7 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, err error) {
 	var latestBlockNumber uint64
-	if latestBlockNumber, err = GetLatestBlockNumber(tx); err != nil {
+	if latestBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
 	}
 	var ok bool

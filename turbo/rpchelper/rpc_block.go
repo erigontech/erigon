@@ -52,6 +52,5 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 			return *forkchoiceSafeNum, nil
 		}
 	}
-	// if we dont have a safe hash we return earliest
 	return 0, UnknownBlockError
 }
