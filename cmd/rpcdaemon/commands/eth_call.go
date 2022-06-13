@@ -76,9 +76,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
+func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *rpchelper.Filters) (*types.Header, error) {
 	if blockLabel, ok := blockNrOrHash.Number(); ok {
-		blockNum, err := getBlockNumber(blockLabel, tx)
+		blockNum, err := getBlockNumber(blockLabel, tx, filters)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +147,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash, api.filters)
 		if err != nil {
 			return 0, err
 		}

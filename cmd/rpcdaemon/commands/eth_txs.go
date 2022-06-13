@@ -198,7 +198,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, tx)
+	blockNum, err := getBlockNumber(blockNr, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

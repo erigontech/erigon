@@ -6,15 +6,23 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
-func getBlockNumber(number rpc.BlockNumber, tx kv.Tx) (uint64, error) {
+func getBlockNumber(number rpc.BlockNumber, tx kv.Tx, filters *rpchelper.Filters) (uint64, error) {
 	var blockNum uint64
-	switch number {
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, err
+	}
 
+	switch number {
 	case rpc.LatestBlockNumber:
-		return rpchelper.GetLatestBlockNumber(tx)
+		return latest, nil
 
 	case rpc.PendingBlockNumber:
-		return rpchelper.GetLatestBlockNumber(tx)
+		pendingBlock := filters.LastPendingBlock()
+		if pendingBlock == nil {
+			return latest, nil
+		}
+		return pendingBlock.NumberU64(), nil
 
 	case rpc.EarliestBlockNumber:
 		blockNum = 0
