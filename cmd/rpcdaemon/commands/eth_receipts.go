@@ -154,17 +154,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		block := uint64(iter.Next())
-		var logIndex uint
+		//var logIndex uint
 		var blockLogs []*types.Log
 		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
+			//for _, log := range logs {
+			//log.Index = logIndex
+			//logIndex++
+			//}
 			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
