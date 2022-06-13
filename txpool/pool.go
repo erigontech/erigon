@@ -611,7 +611,8 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error {
 	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
 
 	best := p.pending.best
-	for i, j := 0, 0; j < int(n) && i < len(best.ms); i++ {
+	j := 0
+	for i := 0; j < int(n) && i < len(best.ms); i++ {
 		if best.ms[i].Tx.Gas >= p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
@@ -628,6 +629,7 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error {
 		txs.IsLocal[j] = isLocal
 		j++
 	}
+	txs.Resize(uint(j))
 	return nil
 }
 
