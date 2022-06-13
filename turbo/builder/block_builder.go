@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-type BlockBuilderFunc func(tx kv.Tx, param *core.BlockBuilderParameters) (*types.Block, error)
+type BlockBuilderFunc func(tx kv.Tx, param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error)
 
 // BlockBuilder builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {

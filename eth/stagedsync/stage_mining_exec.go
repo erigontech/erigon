@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -32,6 +33,7 @@ type MiningExecCfg struct {
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
 	tmpdir      string
+	interrupt   *int32
 }
 
 func StageMiningExecCfg(
@@ -42,6 +44,7 @@ func StageMiningExecCfg(
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
+	interrupt *int32,
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
@@ -52,6 +55,7 @@ func StageMiningExecCfg(
 		blockReader: snapshotsync.NewBlockReader(),
 		vmConfig:    vmConfig,
 		tmpdir:      tmpdir,
+		interrupt:   interrupt,
 	}
 }
 
@@ -89,7 +93,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt)
 			if err != nil {
 				return err
 			}
@@ -101,7 +105,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt)
 			if err != nil {
 				return err
 			}
@@ -165,7 +169,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	return nil
 }
 
-func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -197,26 +201,10 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 			return nil, err
 		}
 
-		// In the following three cases, we will interrupt the execution of the transaction.
-		// (1) new head block event arrival, the interrupt signal is 1
-		// (2) worker start or restart, the interrupt signal is 1
-		// (3) worker recreate the mining block with any newly arrived transactions, the interrupt signal is 2.
-		// For the first two cases, the semi-finished work will be discarded.
-		// For the third case, the semi-finished work will be submitted to the consensus engine.
-		//if interrupt != nil && atomic.LoadInt32(interrupt) != commitInterruptNone {
-		//	// Notify resubmit loop to increase resubmitting interval due to too frequent commits.
-		//	if atomic.LoadInt32(interrupt) == commitInterruptResubmit {
-		//		ratio := float64(header.GasLimit-w.env.gasPool.Gas()) / float64(header.GasLimit)
-		//		if ratio < 0.1 {
-		//			ratio = 0.1
-		//		}
-		//		w.resubmitAdjustCh <- &intervalAdjust{
-		//			ratio: ratio,
-		//			inc:   true,
-		//		}
-		//	}
-		//	return atomic.LoadInt32(interrupt) == commitInterruptNewHead
-		//}
+		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 {
+			log.Debug("Transaction adding was interrupted")
+			break
+		}
 		// If we don't have enough gas for any further transactions then we're done
 		if gasPool.Gas() < params.TxGas {
 			log.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
