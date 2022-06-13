@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 )
@@ -34,7 +33,7 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, err error) {
 	var latestBlockNumber uint64
-	if latestBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+	if latestBlockNumber, err = GetLatestBlockNumber(tx); err != nil {
 		return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
 	}
 	var ok bool
@@ -47,9 +46,15 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizeBlockNumber:
-			blockNumber = getFinalizedBlockNumber(tx)
+			blockNumber, err = GetFinalizedBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
 		case rpc.SafeBlockNumber:
-			blockNumber = getSafeBlockNumber(tx)
+			blockNumber, err = GetSafeBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
 		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
@@ -80,28 +85,6 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		}
 	}
 	return blockNumber, hash, blockNumber == latestBlockNumber, nil
-}
-
-func getFinalizedBlockNumber(db kv.Tx) uint64 {
-	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(db)
-	if forkchoiceFinalizedHash != (common.Hash{}) {
-		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(db, forkchoiceFinalizedHash)
-		if forkchoiceFinalizedNum != nil {
-			return *forkchoiceFinalizedNum
-		}
-	}
-	return 0
-}
-
-func getSafeBlockNumber(db kv.Tx) uint64 {
-	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(db)
-	if forkchoiceSafeHash != (common.Hash{}) {
-		forkchoiceSafeNum := rawdb.ReadHeaderNumber(db, forkchoiceSafeHash)
-		if forkchoiceSafeNum != nil {
-			return *forkchoiceSafeNum
-		}
-	}
-	return 0
 }
 
 func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
