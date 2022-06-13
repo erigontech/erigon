@@ -21,6 +21,8 @@ type BlockBuilder struct {
 	emptyHeader *types.Header
 }
 
+// Creates a new BlockBuilder.
+// BlockBuilder is responsible for rolling back the transaction eventually.
 func NewBlockBuilder(tx kv.Tx, build BlockBuilderFunc, param *core.BlockBuilderParameters, emptyHeader *types.Header) *BlockBuilder {
 	b := new(BlockBuilder)
 	b.emptyHeader = emptyHeader
