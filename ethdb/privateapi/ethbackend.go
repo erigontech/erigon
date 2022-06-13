@@ -503,14 +503,18 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, &InvalidPayloadAttributesErr
 	}
 
+	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
+	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
+	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
+
 	param := core.BlockBuilderParameters{
 		ParentHash:            forkChoice.HeadBlockHash,
 		Timestamp:             req.PayloadAttributes.Timestamp,
-		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient),
-		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao),
+		PrevRandao:            emptyHeader.MixDigest,
+		SuggestedFeeRecipient: emptyHeader.Coinbase,
 	}
 
-	s.builders[s.payloadId] = builder.NewBlockBuilder(tx2, s.builderFunc, &param)
+	s.builders[s.payloadId] = builder.NewBlockBuilder(tx2, s.builderFunc, &param, emptyHeader)
 
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{

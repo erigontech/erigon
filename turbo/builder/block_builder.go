@@ -14,14 +14,16 @@ type BlockBuilderFunc func(tx kv.Tx, param *core.BlockBuilderParameters, interru
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
-	interrupt int32
-	syncCond  *sync.Cond
-	block     *types.Block
-	err       error
+	interrupt   int32
+	syncCond    *sync.Cond
+	block       *types.Block
+	err         error
+	emptyHeader *types.Header
 }
 
-func NewBlockBuilder(tx kv.Tx, build BlockBuilderFunc, param *core.BlockBuilderParameters) *BlockBuilder {
+func NewBlockBuilder(tx kv.Tx, build BlockBuilderFunc, param *core.BlockBuilderParameters, emptyHeader *types.Header) *BlockBuilder {
 	b := new(BlockBuilder)
+	b.emptyHeader = emptyHeader
 	b.syncCond = sync.NewCond(new(sync.Mutex))
 
 	go func() {
@@ -49,8 +51,8 @@ func (b *BlockBuilder) Stop() *types.Block {
 
 	if b.err != nil {
 		log.Error("BlockBuilder", "err", b.err)
+		return types.NewBlock(b.emptyHeader, nil, nil, nil)
 	}
 
-	// TODO(yperbasis): MakeEmptyBlock failback
 	return b.block
 }
