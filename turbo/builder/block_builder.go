@@ -25,8 +25,8 @@ type BlockBuilder struct {
 // BlockBuilder is responsible for rolling back the transaction eventually.
 func NewBlockBuilder(tx kv.Tx, build BlockBuilderFunc, param *core.BlockBuilderParameters, emptyHeader *types.Header) *BlockBuilder {
 	b := new(BlockBuilder)
-	b.emptyHeader = emptyHeader
 	b.syncCond = sync.NewCond(new(sync.Mutex))
+	b.emptyHeader = emptyHeader
 
 	go func() {
 		block, err := build(tx, param, &b.interrupt)
