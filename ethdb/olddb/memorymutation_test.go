@@ -35,7 +35,7 @@ func TestLastMiningDB(t *testing.T) {
 
 	initializeDB(rwTx)
 
-	batch := NewMiningBatch(rwTx)
+	batch := NewMemoryBatch(rwTx)
 	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HashedAccounts, []byte("BCAA"), []byte("value5"))
 
@@ -60,7 +60,7 @@ func TestLastMiningMem(t *testing.T) {
 
 	initializeDB(rwTx)
 
-	batch := NewMiningBatch(rwTx)
+	batch := NewMemoryBatch(rwTx)
 	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
 
@@ -84,7 +84,7 @@ func TestDeleteMining(t *testing.T) {
 	require.NoError(t, err)
 
 	initializeDB(rwTx)
-	batch := NewMiningBatch(rwTx)
+	batch := NewMemoryBatch(rwTx)
 	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
 	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
@@ -104,4 +104,25 @@ func TestDeleteMining(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, key, []byte(nil))
 	require.Equal(t, value, []byte(nil))
+}
+
+func TestFlush(t *testing.T) {
+	rwTx, err := memdb.New().BeginRw(context.Background())
+	require.NoError(t, err)
+
+	initializeDB(rwTx)
+	batch := NewMemoryBatch(rwTx)
+	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HashedAccounts, []byte("AAAA"), []byte("value5"))
+	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
+
+	require.NoError(t, batch.Flush(rwTx))
+
+	value, err := rwTx.GetOne(kv.HashedAccounts, []byte("BAAA"))
+	require.NoError(t, err)
+	require.Equal(t, value, []byte("value4"))
+
+	value, err = rwTx.GetOne(kv.HashedAccounts, []byte("AAAA"))
+	require.NoError(t, err)
+	require.Equal(t, value, []byte("value5"))
 }
