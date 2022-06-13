@@ -161,10 +161,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
-			//for _, log := range logs {
-			//log.Index = logIndex
-			//logIndex++
-			//}
+			for _, log := range logs {
+				log.Index = 0
+				//logIndex++
+			}
 			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
