@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
@@ -20,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
@@ -70,7 +70,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpcservices.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
+	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, nil, txPool, nil, 5000000)
 

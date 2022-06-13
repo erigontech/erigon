@@ -365,26 +365,31 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
-		switch err {
-		case vm.ErrInvalidJump:
-			topTrace.Error = "Bad jump destination"
-		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
-			topTrace.Error = "Out of gas"
-		case vm.ErrExecutionReverted:
+		if err == vm.ErrExecutionReverted {
 			topTrace.Error = "Reverted"
-		case vm.ErrWriteProtection:
-			topTrace.Error = "Mutable Call In Static Context"
-		default:
-			switch err.(type) {
-			case *vm.ErrStackUnderflow:
-				topTrace.Error = "Stack underflow"
-			case *vm.ErrInvalidOpCode:
-				topTrace.Error = "Bad instruction"
+			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+		} else {
+			topTrace.Result = nil
+			switch err {
+			case vm.ErrInvalidJump:
+				topTrace.Error = "Bad jump destination"
+			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
+				topTrace.Error = "Out of gas"
+			case vm.ErrWriteProtection:
+				topTrace.Error = "Mutable Call In Static Context"
 			default:
-				topTrace.Error = err.Error()
+				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
+				case *vm.ErrInvalidOpCode:
+					topTrace.Error = "Bad instruction"
+				default:
+					topTrace.Error = err.Error()
+				}
 			}
 		}
-		topTrace.Result = nil
 	} else {
 		if len(output) > 0 {
 			switch topTrace.Type {
@@ -935,7 +940,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -1161,7 +1166,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true

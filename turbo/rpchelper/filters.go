@@ -1,4 +1,4 @@
-package rpcservices
+package rpchelper
 
 import (
 	"bytes"
@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
@@ -54,7 +53,7 @@ type Filters struct {
 	pendingTxsStores   map[PendingTxsSubID][][]types.Transaction
 }
 
-func New(ctx context.Context, ethBackend rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
+func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{

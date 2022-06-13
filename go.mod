@@ -34,7 +34,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220609100618-fec29e42265c
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220612091418-6cad65e62b27
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
@@ -53,7 +53,6 @@ require (
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.8
 	github.com/valyala/fastjson v1.6.3
-	github.com/wcharczuk/go-chart/v2 v2.1.0
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20220507011949-2cf3adece122
@@ -101,7 +100,6 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
@@ -143,7 +141,6 @@ require (
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/valyala/histogram v1.2.0 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	golang.org/x/image v0.0.0-20200927104501-e162460cd6b5 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
 	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
 	golang.org/x/text v0.3.7 // indirect
