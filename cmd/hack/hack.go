@@ -1303,6 +1303,16 @@ func readEf(file string, addr []byte) error {
 	return nil
 }
 
+func readBodies(file string) error {
+	datPath := file + ".dat"
+	decomp, err := compress.NewDecompressor(datPath)
+	if err != nil {
+		return err
+	}
+	defer decomp.Close()
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1433,6 +1443,8 @@ func main() {
 		err = findPrefix(*chaindata)
 	case "readEf":
 		err = readEf(*chaindata, common.FromHex(*account))
+	case "readBodies":
+		err = readBodies(*chaindata)
 	}
 
 	if err != nil {
