@@ -96,11 +96,15 @@ func (m *memorymutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, 
 }
 
 func (m *memorymutationcursor) convertAutoDupsort(key []byte, value []byte) []byte {
-	// The only dupsorted table we are interested is HashedStorage
-	if m.table != kv.HashedStorage {
+	config, ok := kv.ChaindataTablesCfg[m.table]
+	// If we do not have the configuration we assume it is not dupsorted
+	if !ok || !config.AutoDupSortKeysConversion {
 		return key
 	}
-	return append(key, value[:32]...)
+	if len(key) != config.DupToLen {
+		return key
+	}
+	return append(key, value[:config.DupFromLen-config.DupToLen]...)
 }
 
 // Current return the current key and values the cursor is on.
@@ -111,6 +115,11 @@ func (m *memorymutationcursor) Current() ([]byte, []byte, error) {
 func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, dup bool) (newDbKey []byte, newDbValue []byte, err error) {
 	newDbKey = dbKey
 	newDbValue = dbValue
+	config, ok := kv.ChaindataTablesCfg[m.table]
+	dupsortOffset := 0
+	if ok && config.AutoDupSortKeysConversion {
+		dupsortOffset = config.DupFromLen - config.DupToLen
+	}
 	// Check for duplicates
 	if bytes.Compare(memKey, dbKey) == 0 {
 		if !dup {
@@ -121,7 +130,7 @@ func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue
 			if newDbKey, newDbValue, err = m.getNextOnDb(dup); err != nil {
 				return
 			}
-		} else if len(memValue) >= 32 && len(dbValue) >= 32 && m.table == kv.HashedStorage && bytes.Compare(memValue[:32], dbValue[:32]) == 0 {
+		} else if dupsortOffset != 0 && len(memValue) >= dupsortOffset && len(dbValue) >= dupsortOffset && bytes.Compare(memValue[:dupsortOffset], dbValue[:dupsortOffset]) == 0 {
 			if newDbKey, newDbValue, err = m.getNextOnDb(dup); err != nil {
 				return
 			}
