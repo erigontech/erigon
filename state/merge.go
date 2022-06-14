@@ -412,6 +412,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			if err = comp.Compress(); err != nil {
 				return outItems, err
 			}
+			comp.Close()
 			comp = nil
 			if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 				return outItems, fmt.Errorf("merge %s remove vals decompressor(no val) %s [%d-%d]: %w", d.filenameBase, fType.String(), startTxNum, endTxNum, err)
