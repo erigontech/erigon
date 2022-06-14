@@ -21,12 +21,12 @@ import (
 )
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 14_909_200
+const MainnetNotCheckedFrom uint64 = 14_961_400
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const BSCNotCheckedFrom uint64 = 18_589_376
+const BSCNotCheckedFrom uint64 = 18_682_505
 
-const BorMainnetNotCheckedFrom uint64 = 24_673_536
+const BorMainnetNotCheckedFrom uint64 = 29_447_463
 
 const RopstenNotCheckedFrom uint64 = 12_331_664
 
