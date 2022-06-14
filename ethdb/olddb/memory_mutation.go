@@ -30,7 +30,6 @@ type memorymutation struct {
 	memDb          kv.RwDB
 	deletedEntries map[string]map[string]struct{}
 	clearedTables  map[string]struct{}
-	dupsortTables  map[string]struct{}
 	db             kv.Tx
 }
 
@@ -54,11 +53,6 @@ func NewMemoryBatch(tx kv.Tx) *memorymutation {
 		memTx:          memTx,
 		deletedEntries: make(map[string]map[string]struct{}),
 		clearedTables:  make(map[string]struct{}),
-		dupsortTables: map[string]struct{}{
-			kv.AccountChangeSet: {},
-			kv.StorageChangeSet: {},
-			kv.HashedStorage:    {},
-		},
 	}
 }
 
@@ -305,7 +299,7 @@ func (m *memorymutation) Flush(tx kv.RwTx) error {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
-		if _, ok := m.dupsortTables[bucket]; ok && bucket != kv.HashedStorage {
+		if isTablePurelyDupsort(bucket) {
 			cbucket, err := m.memTx.CursorDupSort(bucket)
 			if err != nil {
 				return err
@@ -343,6 +337,16 @@ func (m *memorymutation) Flush(tx kv.RwTx) error {
 	return nil
 }
 
+// Check if a bucket is dupsorted and has dupsort conversion off
+func isTablePurelyDupsort(bucket string) bool {
+	config, ok := kv.ChaindataTablesCfg[bucket]
+	// If we do not have the configuration we assume it is not dupsorted
+	if !ok {
+		return false
+	}
+	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
+}
+
 // Cursor creates a new cursor (the real fun begins here)
 func (m *memorymutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c := &memorymutationcursor{}
@@ -361,8 +365,6 @@ func (m *memorymutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, isDupsort := m.dupsortTables[bucket]
-	c.isDupsort = isDupsort
 	c.memCursor = c.memDupCursor
 	c.mutation = m
 	return c, err
