@@ -125,7 +125,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, tx)
+	blockNum, err := getBlockNumber(blockNr, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

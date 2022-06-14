@@ -30,7 +30,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	blockNum, err := getBlockNumber(blockNumber, tx)
+	blockNum, err := getBlockNumber(blockNumber, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

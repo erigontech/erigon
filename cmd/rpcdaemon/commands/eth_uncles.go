@@ -20,7 +20,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, err := getBlockNumber(number, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, err := getBlockNumber(number, tx, api.filters)
 	if err != nil {
 		return &n, err
 	}
