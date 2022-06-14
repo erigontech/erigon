@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -89,7 +90,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		end = *number
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := getLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +335,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, err := getBlockNumber(number, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

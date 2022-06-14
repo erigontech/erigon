@@ -54,7 +54,7 @@ func getHeaderByNumber(number rpc.BlockNumber, api *BorImpl, tx kv.Tx) (*types.H
 		return block.Header(), nil
 	}
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, err := getBlockNumber(number, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
