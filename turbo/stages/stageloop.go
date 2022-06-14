@@ -235,26 +235,34 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, block *types.Block) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, block *types.Block) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	tx, err := kv.BeginRo(ctx)
-	if err != nil {
+	// Prepare memory state for block execution
+	if err = rawdb.WriteBlock(batch, block); err != nil {
 		return err
 	}
-	defer tx.Rollback()
 
-	memoryBatch := olddb.NewMiningBatch(tx)
-	defer miningBatch.Rollback()
-
-	if err = mining.Run(nil, miningBatch, false); err != nil {
+	if err = rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64()); err != nil {
 		return err
 	}
-	tx.Rollback()
+
+	if err = stages.SaveStageProgress(batch, stages.Headers, block.NumberU64()); err != nil {
+		return err
+	}
+
+	if err = stages.SaveStageProgress(batch, stages.Bodies, block.NumberU64()); err != nil {
+		return err
+	}
+
+	// Run state sync
+	if err = stateSync.Run(nil, batch, false); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -351,6 +359,7 @@ func NewInMemoryExecution(
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
+			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, blockRetire),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
