@@ -217,7 +217,7 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 		return api.pendingBlock(), nil
 	}
 
-	n, err := getBlockNumber(number, tx, api.filters)
+	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

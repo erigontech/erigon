@@ -77,39 +77,33 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 }
 
 func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *rpchelper.Filters) (*types.Header, error) {
-	if blockLabel, ok := blockNrOrHash.Number(); ok {
-		blockNum, err := getBlockNumber(blockLabel, tx, filters)
+	_, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
+	if err != nil {
+		return nil, err
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errors.New("header for hash not found")
+	}
+
+	if blockNrOrHash.RequireCanonical {
+		can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
-		return rawdb.ReadHeaderByNumber(tx, blockNum), nil
+		if can != hash {
+			return nil, errors.New("hash is not currently canonical")
+		}
 	}
-	if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err := rawdb.ReadHeaderByHash(tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			return nil, errors.New("header for hash not found")
-		}
 
-		if blockNrOrHash.RequireCanonical {
-			can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-			if err != nil {
-				return nil, err
-			}
-			if can != hash {
-				return nil, errors.New("hash is not currently canonical")
-			}
-		}
-
-		h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
-		if h == nil {
-			return nil, errors.New("header found, but block body is missing")
-		}
-		return h, nil
+	h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
+	if h == nil {
+		return nil, errors.New("header found, but block body is missing")
 	}
-	return nil, errors.New("invalid arguments; neither block nor hash specified")
+	return h, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
