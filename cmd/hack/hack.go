@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1304,12 +1305,114 @@ func readEf(file string, addr []byte) error {
 }
 
 func readBodies(file string) error {
-	datPath := file + ".dat"
-	decomp, err := compress.NewDecompressor(datPath)
+	decomp, err := compress.NewDecompressor(file)
 	if err != nil {
 		return err
 	}
 	defer decomp.Close()
+	gg := decomp.MakeGetter()
+	buf, _ := gg.Next(nil)
+	firstBody := &types.BodyForStorage{}
+	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
+		return err
+	}
+	//var blockFrom uint64 = 12300000
+	//var blockTo uint64 = 12400000
+	firstTxID := firstBody.BaseTxId
+
+	lastBody := new(types.BodyForStorage)
+	i := uint64(0)
+	for gg.HasNext() {
+		i++
+		//if i == blockTo-blockFrom-1 {
+		//fmt.Printf("lastBody\n")
+		buf, _ = gg.Next(buf[:0])
+		if err = rlp.DecodeBytes(buf, lastBody); err != nil {
+			return err
+		}
+		//if gg.HasNext() {
+		//	panic(1)
+		//}
+		//} else {
+		if gg.HasNext() {
+			gg.Skip()
+		}
+		//}
+	}
+	expectedCount := lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
+	fmt.Printf("i=%d, firstBody=%v, lastBody=%v, firstTxID=%d, expectedCount=%d\n", i, firstBody, lastBody, firstTxID, expectedCount)
+
+	return nil
+}
+
+func findLogs(chaindata string, block uint64, blockTotal uint64) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+	logs, err := tx.Cursor(kv.Log)
+	if err != nil {
+		return err
+	}
+	defer logs.Close()
+
+	reader := bytes.NewReader(nil)
+	addrs := map[common.Address]int{}
+	topics := map[string]int{}
+
+	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
+		if err != nil {
+			return err
+		}
+
+		blockNum := binary.BigEndian.Uint64(k[:8])
+		if blockNum >= block+blockTotal {
+			break
+		}
+
+		var ll types.Logs
+		reader.Reset(v)
+		if err := cbor.Unmarshal(&ll, reader); err != nil {
+			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+		}
+
+		for _, l := range ll {
+			addrs[l.Address]++
+			for _, topic := range l.Topics {
+				topics[fmt.Sprintf("%x | %x", l.Address, topic)]++
+			}
+		}
+	}
+	addrsInv := map[int][]common.Address{}
+	topicsInv := map[int][]string{}
+	for a, c := range addrs {
+		addrsInv[c] = append(addrsInv[c], a)
+	}
+	counts := make([]int, 0, len(addrsInv))
+	for c := range addrsInv {
+		counts = append(counts, -c)
+	}
+	sort.Ints(counts)
+	for i := 0; i < 10 && i < len(counts); i++ {
+		as := addrsInv[-counts[i]]
+		fmt.Printf("%d=%x\n", -counts[i], as)
+	}
+	for t, c := range topics {
+		topicsInv[c] = append(topicsInv[c], t)
+	}
+	counts = make([]int, 0, len(topicsInv))
+	for c := range topicsInv {
+		counts = append(counts, -c)
+	}
+	sort.Ints(counts)
+	for i := 0; i < 10 && i < len(counts); i++ {
+		as := topicsInv[-counts[i]]
+		fmt.Printf("%d=%s\n", -counts[i], as)
+	}
 	return nil
 }
 
@@ -1445,6 +1548,8 @@ func main() {
 		err = readEf(*chaindata, common.FromHex(*account))
 	case "readBodies":
 		err = readBodies(*chaindata)
+	case "findLogs":
+		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	}
 
 	if err != nil {
