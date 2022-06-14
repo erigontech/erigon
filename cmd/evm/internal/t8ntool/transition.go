@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
@@ -195,7 +194,7 @@ func Main(ctx *cli.Context) error {
 
 	vmConfig := vm.Config{
 		Tracer: nil,
-		Debug:  true,
+		Debug:  ctx.Bool(TraceFlag.Name),
 	}
 	// Construct the chainconfig
 	var chainConfig *params.ChainConfig
@@ -294,7 +293,7 @@ func Main(ctx *cli.Context) error {
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true, getTracer)
 
 	if hashError != nil {
-		return fmt.Errorf("hash error on EBE: %w", err)
+		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
 
 	if err != nil {
@@ -303,13 +302,11 @@ func Main(ctx *cli.Context) error {
 
 	body, _ := rlp.EncodeToBytes(txs)
 
-	var root common.Hash
-	root, err = trie.CalcRoot("", tx)
-	if err != nil {
-		return err
-	}
-	fmt.Print("dfasdg")
-	fmt.Printf("root for block %d=[%s]\n", block, root)
+	// //var root common.Hash
+	// root, err = trie.CalcRoot("", tx)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// Dump the excution result
 	collector := make(Alloc)
