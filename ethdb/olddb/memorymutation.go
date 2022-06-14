@@ -365,7 +365,6 @@ func (m *memorymutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.isDupsort = isTablePurelyDupsort(bucket)
 	c.memCursor = c.memDupCursor
 	c.mutation = m
 	return c, err

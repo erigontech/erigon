@@ -36,8 +36,6 @@ type memorymutationcursor struct {
 	memDupCursor kv.RwCursorDupSort
 	// we keep the index in the slice of pairs we are at.
 	isPrevFromDb bool
-	// Flag for dupsort mode
-	isDupsort bool
 	// entry history
 	currentPair     cursorentry
 	currentDbEntry  cursorentry
@@ -65,7 +63,7 @@ func (m *memorymutationcursor) First() ([]byte, []byte, error) {
 		}
 	}
 
-	return m.goForward(memKey, memValue, dbKey, dbValue)
+	return m.goForward(memKey, memValue, dbKey, dbValue, false)
 }
 
 func (m *memorymutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, err error) {
@@ -110,21 +108,21 @@ func (m *memorymutationcursor) Current() ([]byte, []byte, error) {
 	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
 }
 
-func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte) (newDbKey []byte, newDbValue []byte, err error) {
+func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, dup bool) (newDbKey []byte, newDbValue []byte, err error) {
 	newDbKey = dbKey
 	newDbValue = dbValue
 	// Check for duplicates
 	if bytes.Compare(memKey, dbKey) == 0 {
-		if !m.isDupsort {
-			if newDbKey, newDbValue, err = m.getNextOnDb(false); err != nil {
+		if !dup {
+			if newDbKey, newDbValue, err = m.getNextOnDb(dup); err != nil {
 				return
 			}
 		} else if bytes.Compare(memValue, dbValue) == 0 {
-			if newDbKey, newDbValue, err = m.getNextOnDb(true); err != nil {
+			if newDbKey, newDbValue, err = m.getNextOnDb(dup); err != nil {
 				return
 			}
 		} else if len(memValue) >= 32 && len(dbValue) >= 32 && m.table == kv.HashedStorage && bytes.Compare(memValue[:32], dbValue[:32]) == 0 {
-			if newDbKey, newDbValue, err = m.getNextOnDb(true); err != nil {
+			if newDbKey, newDbValue, err = m.getNextOnDb(dup); err != nil {
 				return
 			}
 		}
@@ -132,13 +130,13 @@ func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	return
 }
 
-func (m *memorymutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte) ([]byte, []byte, error) {
+func (m *memorymutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte, dup bool) ([]byte, []byte, error) {
 	var err error
 	if memValue == nil && dbValue == nil {
 		return nil, nil, nil
 	}
 
-	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue)
+	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, dup)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -173,7 +171,7 @@ func (m *memorymutationcursor) Next() ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v)
+		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v, false)
 	}
 
 	memK, memV, err := m.memCursor.Next()
@@ -181,7 +179,7 @@ func (m *memorymutationcursor) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value)
+	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, false)
 }
 
 // NextDup returns the next element of the mutation.
@@ -192,7 +190,7 @@ func (m *memorymutationcursor) NextDup() ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v)
+		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v, true)
 	}
 
 	memK, memV, err := m.memDupCursor.NextDup()
@@ -200,7 +198,7 @@ func (m *memorymutationcursor) NextDup() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value)
+	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, true)
 }
 
 // Seek move pointer to a key at a certain position.
@@ -222,7 +220,7 @@ func (m *memorymutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return m.goForward(memKey, memValue, dbKey, dbValue)
+	return m.goForward(memKey, memValue, dbKey, dbValue, false)
 }
 
 // Seek move pointer to a key at a certain position.
@@ -309,7 +307,7 @@ func (m *memorymutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	_, retValue, err := m.goForward(key, memValue, key, dbValue)
+	_, retValue, err := m.goForward(key, memValue, key, dbValue, true)
 	return retValue, err
 }
 
@@ -325,7 +323,7 @@ func (m *memorymutationcursor) Last() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue)
+	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, false)
 	if err != nil {
 		return nil, nil, err
 	}
