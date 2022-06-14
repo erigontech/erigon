@@ -289,6 +289,20 @@ func (m *memorymutation) Flush(tx kv.RwTx) error {
 	if err != nil {
 		return err
 	}
+	// Obliterate buckets who are to be deleted
+	for bucket := range m.clearedTables {
+		if err := tx.ClearBucket(bucket); err != nil {
+			return err
+		}
+	}
+	// Obliterate entries who are to be deleted
+	for bucket, keys := range m.deletedEntries {
+		for key := range keys {
+			if err := tx.Delete(bucket, []byte(key), nil); err != nil {
+				return err
+			}
+		}
+	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
 		if _, ok := m.dupsortTables[bucket]; ok && bucket != kv.HashedStorage {
