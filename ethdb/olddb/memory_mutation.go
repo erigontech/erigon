@@ -314,7 +314,7 @@ func (m *memorymutation) Flush(tx kv.RwTx) error {
 				if err != nil {
 					return err
 				}
-				if err := dbCursor.AppendDup(k, v); err != nil {
+				if err := dbCursor.Put(k, v); err != nil {
 					return err
 				}
 			}
