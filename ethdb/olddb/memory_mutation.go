@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-type memorymutation struct {
+type MemoryMutation struct {
 	// Bucket => Key => Value
 	memTx          kv.RwTx
 	memDb          kv.RwDB
@@ -41,13 +41,13 @@ type memorymutation struct {
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.Tx) *memorymutation {
+func NewMemoryBatch(tx kv.Tx) *MemoryMutation {
 	tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
-	return &memorymutation{
+	return &MemoryMutation{
 		db:             tx,
 		memDb:          tmpDB,
 		memTx:          memTx,
@@ -56,19 +56,19 @@ func NewMemoryBatch(tx kv.Tx) *memorymutation {
 	}
 }
 
-func (m *memorymutation) RwKV() kv.RwDB {
+func (m *MemoryMutation) RwKV() kv.RwDB {
 	if casted, ok := m.db.(ethdb.HasRwKV); ok {
 		return casted.RwKV()
 	}
 	return nil
 }
 
-func (m *memorymutation) isTableCleared(table string) bool {
+func (m *MemoryMutation) isTableCleared(table string) bool {
 	_, ok := m.clearedTables[table]
 	return ok
 }
 
-func (m *memorymutation) isEntryDeleted(table string, key []byte) bool {
+func (m *MemoryMutation) isEntryDeleted(table string, key []byte) bool {
 	_, ok := m.deletedEntries[table]
 	if !ok {
 		return ok
@@ -78,7 +78,7 @@ func (m *memorymutation) isEntryDeleted(table string, key []byte) bool {
 }
 
 // getMem Retrieve database entry from memory (hashed storage will be left out for now because it is the only non auto-DupSorted table)
-func (m *memorymutation) getMem(table string, key []byte) ([]byte, bool) {
+func (m *MemoryMutation) getMem(table string, key []byte) ([]byte, bool) {
 	val, err := m.memTx.GetOne(table, key)
 	if err != nil {
 		panic(err)
@@ -86,10 +86,10 @@ func (m *memorymutation) getMem(table string, key []byte) ([]byte, bool) {
 	return val, val != nil
 }
 
-func (m *memorymutation) DBSize() (uint64, error) { panic("not implemented") }
-func (m *memorymutation) PageSize() uint64        { panic("not implemented") }
+func (m *MemoryMutation) DBSize() (uint64, error) { panic("not implemented") }
+func (m *MemoryMutation) PageSize() uint64        { panic("not implemented") }
 
-func (m *memorymutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
+func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	v, ok := m.getMem(kv.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.GetOne(kv.Sequence, []byte(bucket))
@@ -112,7 +112,7 @@ func (m *memorymutation) IncrementSequence(bucket string, amount uint64) (res ui
 	return currentV, nil
 }
 
-func (m *memorymutation) ReadSequence(bucket string) (res uint64, err error) {
+func (m *MemoryMutation) ReadSequence(bucket string) (res uint64, err error) {
 	v, ok := m.getMem(kv.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.GetOne(kv.Sequence, []byte(bucket))
@@ -129,7 +129,7 @@ func (m *memorymutation) ReadSequence(bucket string) (res uint64, err error) {
 }
 
 // Can only be called from the worker thread
-func (m *memorymutation) GetOne(table string, key []byte) ([]byte, error) {
+func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {
 		if value == nil {
 			return nil, nil
@@ -148,7 +148,7 @@ func (m *memorymutation) GetOne(table string, key []byte) ([]byte, error) {
 }
 
 // Can only be called from the worker thread
-func (m *memorymutation) Get(table string, key []byte) ([]byte, error) {
+func (m *MemoryMutation) Get(table string, key []byte) ([]byte, error) {
 	value, err := m.GetOne(table, key)
 	if err != nil {
 		return nil, err
@@ -161,12 +161,12 @@ func (m *memorymutation) Get(table string, key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (m *memorymutation) Last(table string) ([]byte, []byte, error) {
-	panic("not implemented. (memorymutation.Last)")
+func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
+	panic("not implemented. (MemoryMutation.Last)")
 }
 
 // Has return whether a key is present in a certain table.
-func (m *memorymutation) Has(table string, key []byte) (bool, error) {
+func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	if _, ok := m.getMem(table, key); ok {
 		return ok, nil
 	}
@@ -177,38 +177,38 @@ func (m *memorymutation) Has(table string, key []byte) (bool, error) {
 }
 
 // Put insert a new entry in the database, if it is hashed storage it will add it to a slice instead of a map.
-func (m *memorymutation) Put(table string, key []byte, value []byte) error {
+func (m *MemoryMutation) Put(table string, key []byte, value []byte) error {
 	return m.memTx.Put(table, key, value)
 }
 
-func (m *memorymutation) Append(table string, key []byte, value []byte) error {
+func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
 	return m.Put(table, key, value)
 }
 
-func (m *memorymutation) AppendDup(table string, key []byte, value []byte) error {
+func (m *MemoryMutation) AppendDup(table string, key []byte, value []byte) error {
 	return m.Put(table, key, value)
 }
 
-func (m *memorymutation) BatchSize() int {
+func (m *MemoryMutation) BatchSize() int {
 	return 0
 }
 
-func (m *memorymutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForEach(bucket, fromPrefix, walker)
 }
 
-func (m *memorymutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForPrefix(bucket, prefix, walker)
 }
 
-func (m *memorymutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *memorymutation) Delete(table string, k, v []byte) error {
+func (m *MemoryMutation) Delete(table string, k, v []byte) error {
 	if _, ok := m.deletedEntries[table]; !ok {
 		m.deletedEntries[table] = make(map[string]struct{})
 	}
@@ -216,68 +216,68 @@ func (m *memorymutation) Delete(table string, k, v []byte) error {
 	return m.memTx.Delete(table, k, v)
 }
 
-func (m *memorymutation) Commit() error {
+func (m *MemoryMutation) Commit() error {
 	return nil
 }
 
-func (m *memorymutation) Rollback() {
+func (m *MemoryMutation) Rollback() {
 	m.memTx.Rollback()
 	m.memDb.Close()
 	return
 }
 
-func (m *memorymutation) Close() {
+func (m *MemoryMutation) Close() {
 	m.Rollback()
 }
 
-func (m *memorymutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
+func (m *MemoryMutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
 	panic("mutation can't start transaction, because doesn't own it")
 }
 
-func (m *memorymutation) panicOnEmptyDB() {
+func (m *MemoryMutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
 	}
 }
 
-func (m *memorymutation) SetRwKV(kv kv.RwDB) {
+func (m *MemoryMutation) SetRwKV(kv kv.RwDB) {
 	m.db.(ethdb.HasRwKV).SetRwKV(kv)
 }
 
-func (m *memorymutation) BucketSize(bucket string) (uint64, error) {
+func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return 0, nil
 }
 
-func (m *memorymutation) DropBucket(bucket string) error {
+func (m *MemoryMutation) DropBucket(bucket string) error {
 	panic("Not implemented")
 }
 
-func (m *memorymutation) ExistsBucket(bucket string) (bool, error) {
+func (m *MemoryMutation) ExistsBucket(bucket string) (bool, error) {
 	panic("Not implemented")
 }
 
-func (m *memorymutation) ListBuckets() ([]string, error) {
+func (m *MemoryMutation) ListBuckets() ([]string, error) {
 	panic("Not implemented")
 }
 
-func (m *memorymutation) ClearBucket(bucket string) error {
+func (m *MemoryMutation) ClearBucket(bucket string) error {
 	m.clearedTables[bucket] = struct{}{}
 	return m.memTx.ClearBucket(bucket)
 }
 
-func (m *memorymutation) isBucketCleared(bucket string) bool {
+func (m *MemoryMutation) isBucketCleared(bucket string) bool {
 	_, ok := m.clearedTables[bucket]
 	return ok
 }
 
-func (m *memorymutation) CollectMetrics() {
+func (m *MemoryMutation) CollectMetrics() {
 }
 
-func (m *memorymutation) CreateBucket(bucket string) error {
+func (m *MemoryMutation) CreateBucket(bucket string) error {
 	panic("Not implemented")
 }
 
-func (m *memorymutation) Flush(tx kv.RwTx) error {
+func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListBuckets()
 	if err != nil {
@@ -348,8 +348,8 @@ func isTablePurelyDupsort(bucket string) bool {
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *memorymutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
-	c := &memorymutationcursor{}
+func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
+	c := &memoryMutationCursor{}
 	// We can filter duplicates in dup sorted table
 	c.table = bucket
 
@@ -371,26 +371,26 @@ func (m *memorymutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *memorymutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
+func (m *MemoryMutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
 	return m.makeCursor(bucket)
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *memorymutation) RwCursor(bucket string) (kv.RwCursor, error) {
+func (m *MemoryMutation) RwCursor(bucket string) (kv.RwCursor, error) {
 	return m.makeCursor(bucket)
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *memorymutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+func (m *MemoryMutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	return m.makeCursor(bucket)
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *memorymutation) Cursor(bucket string) (kv.Cursor, error) {
+func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 	return m.makeCursor(bucket)
 }
 
 // ViewID creates a new cursor (the real fun begins here)
-func (m *memorymutation) ViewID() uint64 {
+func (m *MemoryMutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
 }
