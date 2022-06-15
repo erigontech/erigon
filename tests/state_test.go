@@ -50,10 +50,6 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
 	st.skipLoad(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json`)
 	st.skipLoad(`^stSStoreTest/InitCollision.json`)
-	st.skipLoad(`^stEIP1559/typeTwoBerlin.json`)
-
-	// value exceeding 256 bit is not supported
-	st.skipLoad(`^stTransactionTest/ValueOverflow.json`)
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		db := memdb.NewTestDB(t)
