@@ -176,13 +176,13 @@ func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *typ
 	return CommitGenesisBlockWithOverride(db, genesis, nil, nil)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty)
 	if err != nil {
 		return c, b, err
 	}
@@ -201,7 +201,7 @@ func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, 
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -217,8 +217,8 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, ove
 			genesis = DefaultGenesisBlock()
 			custom = false
 		}
-		if overrideMergeForkBlock != nil {
-			genesis.Config.MergeForkBlock = overrideMergeForkBlock
+		if overrideMergeNetsplitBlock != nil {
+			genesis.Config.MergeNetsplitBlock = overrideMergeNetsplitBlock
 		}
 		if overrideTerminalTotalDifficulty != nil {
 			genesis.Config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
@@ -250,8 +250,8 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, ove
 	}
 	// Get the existing chain configuration.
 	newCfg := genesis.configOrDefault(storedHash)
-	if overrideMergeForkBlock != nil {
-		newCfg.MergeForkBlock = overrideMergeForkBlock
+	if overrideMergeNetsplitBlock != nil {
+		newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
 	}
 	if overrideTerminalTotalDifficulty != nil {
 		newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
@@ -274,7 +274,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, ove
 	// Special case: don't change the existing config of a non-mainnet chain if no new
 	// config is supplied. These chains would get AllProtocolChanges (and a compatibility error)
 	// if we just continued here.
-	if genesis == nil && storedHash != params.MainnetGenesisHash && overrideMergeForkBlock == nil && overrideTerminalTotalDifficulty == nil {
+	if genesis == nil && storedHash != params.MainnetGenesisHash && overrideMergeNetsplitBlock == nil && overrideTerminalTotalDifficulty == nil {
 		return storedCfg, storedBlock, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
@@ -704,6 +704,19 @@ func DefaultBorMainnetGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultBorDevnetGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.BorDevnetChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/bor_devnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
@@ -780,6 +793,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultMumbaiGenesisBlock()
 	case networkname.BorMainnetChainName:
 		return DefaultBorMainnetGenesisBlock()
+	case networkname.BorDevnetChainName:
+		return DefaultBorDevnetGenesisBlock()
 	case networkname.KilnDevnetChainName:
 		return DefaultKilnDevnetGenesisBlock()
 	default:

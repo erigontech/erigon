@@ -10,7 +10,7 @@ import (
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.EthashDatasetDirFlag,
-	utils.SyncModeFlag,
+	utils.SnapshotFlag,
 	utils.TxPoolDisableFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,
@@ -125,5 +125,5 @@ var DefaultFlags = []cli.Flag{
 	utils.WithoutHeimdallFlag,
 	utils.EthStatsURLFlag,
 	utils.OverrideTerminalTotalDifficulty,
-	utils.OverrideMergeForkBlock,
+	utils.OverrideMergeNetsplitBlock,
 }

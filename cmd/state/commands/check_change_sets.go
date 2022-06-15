@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -31,9 +30,8 @@ import (
 )
 
 var (
-	historyfile   string
-	nocheck       bool
-	writeReceipts bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
@@ -42,7 +40,6 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn on writing receipts as the execution ongoing")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -51,13 +48,13 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, writeReceipts)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
+func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -114,8 +111,8 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
-	if syncMode == ethconfig.SnapSync {
+	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
+	if useSnapshots {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {
@@ -150,7 +147,6 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-
 		reader := state.NewPlainState(historyTx, blockNum)
 		reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
@@ -162,22 +158,22 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, e := blockReader.Header(ctx, rwtx, hash, number)
+			if e != nil {
+				panic(e)
+			}
+			return h
+		}
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
-		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig, blockNum == uint64(block))
 		if err1 != nil {
 			return err1
 		}
-		if writeReceipts {
-			if chainConfig.IsByzantium(blockNum) {
-				receiptSha := types.DeriveSha(receipts)
-				if receiptSha != b.ReceiptHash() {
-					return fmt.Errorf("mismatched receipt headers for block %d", blockNum)
-				}
-			}
-
-			if err := rawdb.AppendReceipts(rwtx, blockNum, receipts); err != nil {
-				return err
+		if chainConfig.IsByzantium(blockNum) {
+			receiptSha := types.DeriveSha(receipts)
+			if receiptSha != b.ReceiptHash() {
+				return fmt.Errorf("mismatched receipt headers for block %d", blockNum)
 			}
 		}
 
@@ -190,9 +186,22 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			i := 0
 			match := true
 			err = changeset.ForPrefix(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(accountChanges.Changes) {
+					if len(v) != 0 {
+						fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+						fmt.Printf("In the database: ======================\n")
+						fmt.Printf("%d: 0x%x: %x\n", i, k, v)
+						match = false
+					}
+					i++
+					return nil
+				}
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
+					return nil
+				}
+				if len(v) == 0 {
 					return nil
 				}
 
@@ -202,6 +211,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				fmt.Printf("%d: 0x%x: %x\n", i, k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("%d: 0x%x %x\n", i, c.Key, c.Value)
+				i++
 				return nil
 			})
 			if err != nil {
@@ -221,21 +231,33 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
+			match = true
 			err = changeset.ForPrefix(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(expectedStorageChanges.Changes) {
+					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+					fmt.Printf("0x%x: %x\n", k, v)
+					match = false
+					i++
+					return nil
+				}
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					return nil
 				}
-
+				match = false
 				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 				fmt.Printf("0x%x: %x\n", k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("0x%x %x\n", c.Key, c.Value)
-				return fmt.Errorf("check change set failed")
+				i++
+				return nil
 			})
 			if err != nil {
 				return err
+			}
+			if !match {
+				return fmt.Errorf("check change set failed")
 			}
 		}
 
@@ -248,30 +270,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		select {
 		case interrupt = <-interruptCh:
 			fmt.Println("interrupted, please wait for cleanup...")
-		case <-commitEvery.C:
-			if writeReceipts {
-				log.Info("Committing receipts", "up to block", b.NumberU64())
-				if err = rwtx.Commit(); err != nil {
-					return err
-				}
-				rwtx, err = chainDb.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				defer rwtx.Rollback()
-				historyTx.Rollback()
-				historyTx, err = historyDb.BeginRo(context.Background())
-				if err != nil {
-					return err
-				}
-			}
 		default:
-		}
-	}
-	if writeReceipts {
-		log.Info("Committing final receipts", "batch size")
-		if err = rwtx.Commit(); err != nil {
-			return err
 		}
 	}
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))

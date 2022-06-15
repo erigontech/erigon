@@ -145,6 +145,76 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	}
 }
 
+// DeleteHeaderNumber removes hash->number mapping.
+func DeleteHeaderNumber(db kv.Deleter, hash common.Hash) {
+	if err := db.Delete(kv.HeaderNumber, hash[:], nil); err != nil {
+		log.Crit("Failed to delete hash mapping", "err", err)
+	}
+}
+
+// ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceHead(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceHead failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceHead stores headBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceHead(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("headBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store head block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceSafe retrieves safeBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceSafe(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("safeBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceSafe failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceSafe stores safeBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceSafe(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("safeBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store safe block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceFinalized retrieves finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceFinalize failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to safe finalized block hash", "err", err)
+	}
+}
+
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
@@ -885,7 +955,9 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.
 	if receipts == nil {
 		return nil
 	}
-	block.SendersToTxs(senders)
+	if len(senders) > 0 {
+		block.SendersToTxs(senders)
+	}
 	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
 		return nil
@@ -1147,10 +1219,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 				}
 			}
 		}
-		if err = tx.Delete(kv.Headers, k, nil); err != nil {
+		// Copying k because otherwise the same memory will be reused
+		// for the next key and Delete below will end up deleting 1 more record than required
+		kCopy := common.CopyBytes(k)
+		if err = tx.Delete(kv.Headers, kCopy, nil); err != nil {
 			return
 		}
-		if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err = tx.Delete(kv.BlockBody, kCopy, nil); err != nil {
 			return
 		}
 	}
@@ -1257,10 +1332,13 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				return err
 			}
 		}
-		if err := tx.Delete(kv.Headers, k, nil); err != nil {
+		// Copying k because otherwise the same memory will be reused
+		// for the next key and Delete below will end up deleting 1 more record than required
+		kCopy := common.CopyBytes(k)
+		if err := tx.Delete(kv.Headers, kCopy, nil); err != nil {
 			return err
 		}
-		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err := tx.Delete(kv.BlockBody, kCopy, nil); err != nil {
 			return err
 		}
 

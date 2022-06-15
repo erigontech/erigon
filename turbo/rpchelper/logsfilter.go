@@ -1,4 +1,4 @@
-package rpcservices
+package rpchelper
 
 import (
 	"sync"

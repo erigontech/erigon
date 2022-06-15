@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -223,7 +222,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 
 		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
 			log.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			os.Exit(1)
+			return libcommon.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -252,14 +251,14 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		return err
 	}
 
-	if err := printLogs(tx, s.timings); err != nil {
+	if err := printLogs(db, tx, s.timings); err != nil {
 		return err
 	}
 	s.currentStage = 0
 	return nil
 }
 
-func printLogs(tx kv.RwTx, timings []Timing) error {
+func printLogs(db kv.RoDB, tx kv.RwTx, timings []Timing) error {
 	var logCtx []interface{}
 	count := 0
 	for i := range timings {
@@ -288,14 +287,13 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 
 	if len(logCtx) > 0 { // also don't print this logs if everything is fast
 		buckets := []string{
-			"freelist",
 			kv.PlainState,
 			kv.AccountChangeSet,
 			kv.StorageChangeSet,
 			kv.EthTx,
 			kv.Log,
 		}
-		bucketSizes := make([]interface{}, 0, 2*len(buckets))
+		bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
 		for _, bucket := range buckets {
 			sz, err1 := tx.BucketSize(bucket)
 			if err1 != nil {
@@ -303,6 +301,14 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 			}
 			bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
 		}
+
+		sz, err1 := tx.BucketSize("freelist")
+		if err1 != nil {
+			return err1
+		}
+		bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
+		amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 		log.Info("Tables", bucketSizes...)
 	}
 	tx.CollectMetrics()

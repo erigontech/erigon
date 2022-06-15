@@ -9,6 +9,8 @@
 
 # Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
 
+version: '2.2'
+
 # Basic erigon's service
 x-erigon-service: &default-erigon-servie
   image: thorax/erigon:${TAG:-latest}
@@ -18,7 +20,6 @@ x-erigon-service: &default-erigon-servie
   mem_swappiness: 0
 
 services:
-
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build: .

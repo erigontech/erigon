@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -133,8 +134,8 @@ var (
 		Name:  "override.terminaltotaldifficulty",
 		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
 	}
-	OverrideMergeForkBlock = BigFlag{
-		Name:  "override.mergeForkBlock",
+	OverrideMergeNetsplitBlock = BigFlag{
+		Name:  "override.mergeNetsplitBlock",
 		Usage: "Manually specify FORK_NEXT_VALUE (see EIP-3675), overriding the bundled setting",
 	}
 	// Ethash settings
@@ -156,9 +157,9 @@ var (
 		Name:  "ethash.dagslockmmap",
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
-	SyncModeFlag = cli.StringFlag{
-		Name:  "syncmode",
-		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "full" in all other cases`,
+	SnapshotFlag = cli.BoolTFlag{
+		Name:  "snapshots",
+		Usage: `Default: use snapshots "true" for BSC, Mainnet and Goerli. use snapshots "false" in all other cases`,
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -307,7 +308,7 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
-		Usage: "Enabled by default. Use --http=false to disable the HTTP-RPC server",
+		Usage: "Disabled by default. Use --http to enable the HTTP-RPC server",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
@@ -815,7 +816,7 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 //  - doesn't setup bootnodes - they will set when genesisHash will know
 func NewP2PConfig(
 	nodiscover bool,
-	datadir string,
+	dirs datadir.Dirs,
 	netRestrict string,
 	natSetting string,
 	maxPeers int,
@@ -829,12 +830,12 @@ func NewP2PConfig(
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
-		enodeDBPath = filepath.Join(datadir, "nodes", "eth66")
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
 
-	serverKey, err := nodeKey(datadir)
+	serverKey, err := nodeKey(dirs.DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -940,7 +941,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
+	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName || ctx.GlobalString(ChainFlag.Name) == networkname.BorDevnetChainName {
 		if etherbase == "" {
 			cfg.Miner.SigKey = core.DevnetSignPrivateKey
 			cfg.Miner.Etherbase = core.DevnetEtherbase
@@ -1018,7 +1019,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setDataDir(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
-	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
+	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir)
 
 	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 	cfg.SentryLogPeerInfo = ctx.GlobalIsSet(SentryLogPeerInfoFlag.Name)
@@ -1053,6 +1054,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
 		return filepath.Join(datadir, "bor-mainnet")
+	case networkname.BorDevnetChainName:
+		return filepath.Join(datadir, "bor-devnet")
 	case networkname.SepoliaChainName:
 		return filepath.Join(datadir, "sepolia")
 	default:
@@ -1064,10 +1067,11 @@ func DataDirForNetwork(datadir string, network string) string {
 
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.GlobalIsSet(DataDirFlag.Name) {
-		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
+		cfg.Dirs.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
-		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
+		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
+	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 
 	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
 		panic(err)
@@ -1095,13 +1099,13 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 		panic(err)
 	}
 	if dirname != "" {
-		cfg.DataDir = dirname
+		cfg.Dirs.DataDir = dirname
 	} else {
-		cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
+		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
 	}
 
-	cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
-
+	cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
+	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
@@ -1369,8 +1373,8 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.Sync.ModeCli = ctx.GlobalString(SyncModeFlag.Name)
-	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
+	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
+	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
@@ -1388,7 +1392,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent, err = torrentcfg.New(cfg.SnapDir,
+		cfg.Torrent, err = torrentcfg.New(cfg.Dirs.Snap,
 			lvl,
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
@@ -1412,12 +1416,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	setTxPool(ctx, &cfg.DeprecatedTxPool)
 	cfg.TxPool = core.DefaultTxPool2Config(cfg.DeprecatedTxPool)
-	cfg.TxPool.DBDir = filepath.Join(nodeConfig.DataDir, "txpool")
+	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
 
-	setEthash(ctx, nodeConfig.DataDir, cfg)
-	setClique(ctx, &cfg.Clique, nodeConfig.DataDir)
-	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)
-	setParlia(ctx, &cfg.Parlia, nodeConfig.DataDir)
+	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
+	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
+	setAuRa(ctx, &cfg.Aura, nodeConfig.Dirs.DataDir)
+	setParlia(ctx, &cfg.Parlia, nodeConfig.Dirs.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
@@ -1493,8 +1497,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
 		cfg.OverrideTerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
 	}
-	if ctx.GlobalIsSet(OverrideMergeForkBlock.Name) {
-		cfg.OverrideMergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
+	if ctx.GlobalIsSet(OverrideMergeNetsplitBlock.Name) {
+		cfg.OverrideMergeNetsplitBlock = GlobalBig(ctx, OverrideMergeNetsplitBlock.Name)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -25,38 +24,50 @@ func (e nonCanonocalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *rpcservices.Filters) (uint64, common.Hash, bool, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (uint64, common.Hash, bool, error) {
 	return _GetBlockNumber(blockNrOrHash.RequireCanonical, blockNrOrHash, tx, filters)
 }
 
-func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *rpcservices.Filters) (uint64, common.Hash, bool, error) {
+func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (uint64, common.Hash, bool, error) {
 	return _GetBlockNumber(true, blockNrOrHash, tx, filters)
 }
 
-func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *rpcservices.Filters) (blockNumber uint64, hash common.Hash, latest bool, err error) {
-	var latestBlockNumber uint64
-	if latestBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
+func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, err error) {
+	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
+	// from the block block number corresponding to the plain state
+	var plainStateBlockNumber uint64
+	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return 0, common.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
-		if number == rpc.LatestBlockNumber {
-			blockNumber = latestBlockNumber
-		} else if number == rpc.EarliestBlockNumber {
+		switch number {
+		case rpc.LatestBlockNumber:
+			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.EarliestBlockNumber:
 			blockNumber = 0
-		} else if number == rpc.PendingBlockNumber {
+		case rpc.FinalizeBlockNumber:
+			blockNumber, err = GetFinalizedBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.SafeBlockNumber:
+			blockNumber, err = GetSafeBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
-				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-				if err != nil {
-					return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
-				}
+				blockNumber = plainStateBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
-		} else {
+		default:
 			blockNumber = uint64(number.Int64())
 		}
 		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
@@ -78,7 +89,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			return 0, common.Hash{}, false, nonCanonocalHashError{hash}
 		}
 	}
-	return blockNumber, hash, blockNumber == latestBlockNumber, nil
+	return blockNumber, hash, blockNumber == plainStateBlockNumber, nil
 }
 
 func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
@@ -86,7 +97,7 @@ func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts
 	return reader.ReadAccountData(address)
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *rpcservices.Filters, stateCache kvcache.Cache) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters, stateCache kvcache.Cache) (state.StateReader, error) {
 	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err

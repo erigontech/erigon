@@ -207,7 +207,9 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if !safeIsCanonical {
+		if safeIsCanonical {
+			rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			if sendErrResponse {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -223,7 +225,9 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if !finalizedIsCanonical {
+		if finalizedIsCanonical {
+			rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			if sendErrResponse {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -256,6 +260,7 @@ func startHandlingForkChoice(
 	if currentHeadHash == headerHash { // no-op
 		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
+		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
@@ -366,6 +371,7 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
 	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
 	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
@@ -568,7 +574,7 @@ func verifyAndSaveNewPoSHeader(
 		}
 	} else {
 		// Side chain or something weird
-		// TODO(yperbasis): considered non-canonical because some missing headers were donloaded but not canonized
+		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
@@ -710,8 +716,6 @@ func HeadersPOW(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
-	var skeletonReqCount, reqCount int                        // How many requests have been issued in the last logging interval
-	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
@@ -729,16 +733,15 @@ Loop:
 			}
 			break
 		}
-		currentTime := uint64(time.Now().Unix())
+		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-				log.Trace("Sent request", "height", req.Number)
-				reqCount++
+				cfg.hd.UpdateStats(req, false /* skeleton */)
 			}
+			// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
+			cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -749,20 +752,10 @@ Loop:
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
-					log.Trace("Sent request", "height", req.Number)
-					reqCount++
-					// We know that req is reverse request, with Skip == 0, therefore comparing Number with reqMax
-					if req.Number > reqMax {
-						reqMax = req.Number
-					}
-					if reqMin == 0 || req.Number < reqMin+req.Length {
-						if req.Number >= req.Length {
-							reqMin = req.Number - req.Length
-						}
-					}
+					cfg.hd.UpdateStats(req, false /* skeleton */)
 				}
+				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
@@ -776,14 +769,7 @@ Loop:
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					log.Trace("Sent skeleton request", "height", req.Number)
-					skeletonReqCount++
-					if skeletonReqMin == 0 || req.Number < skeletonReqMin {
-						skeletonReqMin = req.Number
-					}
-					if req.Number+req.Length*req.Skip > skeletonReqMax {
-						skeletonReqMax = req.Number + req.Length*req.Skip
-					}
+					cfg.hd.UpdateStats(req, true /* skeleton */)
 					lastSkeletonTime = time.Now()
 				}
 			}
@@ -820,25 +806,21 @@ Loop:
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
+			stats := cfg.hd.ExtractStats()
 			if prevProgress == progress {
 				noProgressCounter++
-				respCount, respMin, respMax := cfg.hd.ExtractRespStats()
-				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
-					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
-					"resp", respCount, "respMin", respMin, "respMax", respMax)
-				cfg.hd.LogAnchorState()
-				if noProgressCounter >= 5 && wasProgress {
-					log.Warn("Looks like chain is not progressing, moving to the next stage")
-					break Loop
+				if noProgressCounter >= 5 {
+					log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+						"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+						"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					cfg.hd.LogAnchorState()
+					if wasProgress {
+						log.Warn("Looks like chain is not progressing, moving to the next stage")
+						break Loop
+					}
 				}
 			}
 			prevProgress = progress
-			reqCount = 0
-			reqMin = 0
-			reqMax = 0
-			skeletonReqCount = 0
-			skeletonReqMin = 0
-			skeletonReqMax = 0
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:

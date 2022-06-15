@@ -71,7 +71,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=full`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
+Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
 
 Use `--datadir` to choose where to store data.
 
@@ -296,7 +296,7 @@ Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on
 ```sh
 make docker-compose
 # or
-XDG_DATA_HOME=/preferred/data/folder make docker-compose
+XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon

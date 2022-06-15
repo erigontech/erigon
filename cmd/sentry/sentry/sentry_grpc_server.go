@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -75,6 +76,14 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 		}
 	}()
 	return p
+}
+
+func (pi *PeerInfo) Close() {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	if pi.tasks != nil {
+		close(pi.tasks)
+	}
 }
 
 func (pi *PeerInfo) ID() [64]byte {
@@ -493,6 +502,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			log.Trace(fmt.Sprintf("[%s] Start with peer", peerID))
 
 			peerInfo := NewPeerInfo(peer, rw)
+			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
 			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
@@ -532,8 +542,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(ctx context.Context, datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	dir.MustExist(datadir)
+func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
+	dir.MustExist(dirs.DataDir)
 	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 

@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 const (
@@ -54,7 +55,7 @@ func getHeaderByNumber(number rpc.BlockNumber, api *BorImpl, tx kv.Tx) (*types.H
 		return block.Header(), nil
 	}
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

@@ -63,7 +63,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, nil
 	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -76,40 +76,34 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
-	if blockLabel, ok := blockNrOrHash.Number(); ok {
-		blockNum, err := getBlockNumber(blockLabel, tx)
+func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *rpchelper.Filters) (*types.Header, error) {
+	_, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
+	if err != nil {
+		return nil, err
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errors.New("header for hash not found")
+	}
+
+	if blockNrOrHash.RequireCanonical {
+		can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
-		return rawdb.ReadHeaderByNumber(tx, blockNum), nil
+		if can != hash {
+			return nil, errors.New("hash is not currently canonical")
+		}
 	}
-	if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err := rawdb.ReadHeaderByHash(tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			return nil, errors.New("header for hash not found")
-		}
 
-		if blockNrOrHash.RequireCanonical {
-			can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-			if err != nil {
-				return nil, err
-			}
-			if can != hash {
-				return nil, errors.New("hash is not currently canonical")
-			}
-		}
-
-		h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
-		if h == nil {
-			return nil, errors.New("header found, but block body is missing")
-		}
-		return h, nil
+	h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
+	if h == nil {
+		return nil, errors.New("header found, but block body is missing")
 	}
-	return nil, errors.New("invalid arguments; neither block nor hash specified")
+	return h, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -147,7 +141,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash, api.filters)
 		if err != nil {
 			return 0, err
 		}
@@ -234,7 +228,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		}
 
 		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
-			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
+			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM, api._blockReader)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
@@ -400,7 +394,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas())
