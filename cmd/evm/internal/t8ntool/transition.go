@@ -384,7 +384,11 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 
 	switch txJson.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		legacyTx := types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
+		var toAddr common.Address = common.Address{}
+		if txJson.To != nil {
+			toAddr = *txJson.To
+		}
+		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
 		legacyTx.V.SetFromBig(txJson.V.ToInt())
 		legacyTx.S.SetFromBig(txJson.S.ToInt())
 		legacyTx.R.SetFromBig(txJson.R.ToInt())
