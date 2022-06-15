@@ -338,7 +338,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 			}
 
 			if len(account.Code) > 0 || len(account.Storage) > 0 {
-				statedb.SetIncarnation(addr, 1)
+				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
 		if err := statedb.FinalizeTx(&params.Rules{}, w); err != nil {
@@ -401,7 +401,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 		return nil, nil, err
 	}
 	for addr, account := range g.Alloc {
-		if len(account.Code) == 0 && len(account.Storage) > 0 {
+		if len(account.Code) > 0 || len(account.Storage) > 0 {
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
