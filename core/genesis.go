@@ -338,7 +338,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 			}
 
 			if len(account.Code) > 0 || len(account.Storage) > 0 {
-				statedb.SetIncarnation(addr, 1)
+				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
 		if err := statedb.FinalizeTx(&params.Rules{}, w); err != nil {
