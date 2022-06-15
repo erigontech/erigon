@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -275,8 +276,15 @@ func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, b
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, 1)
+
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
+			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err

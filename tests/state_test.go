@@ -46,11 +46,6 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	// Broken tests:
-	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
-	st.skipLoad(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json`)
-	st.skipLoad(`^stSStoreTest/InitCollision.json`)
-
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		db := memdb.NewTestDB(t)
 		for _, subtest := range test.Subtests() {
