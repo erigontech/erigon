@@ -71,6 +71,8 @@ type BlockNumber int64
 type Timestamp uint64
 
 const (
+	FinalizeBlockNumber = BlockNumber(-4)
+	SafeBlockNumber     = BlockNumber(-3)
 	PendingBlockNumber  = BlockNumber(-2)
 	LatestBlockNumber   = BlockNumber(-1)
 	EarliestBlockNumber = BlockNumber(0)

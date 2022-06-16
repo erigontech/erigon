@@ -33,29 +33,41 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 }
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, err error) {
-	var latestBlockNumber uint64
-	if latestBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
+	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
+	// from the block block number corresponding to the plain state
+	var plainStateBlockNumber uint64
+	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return 0, common.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
 	var ok bool
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
-		if number == rpc.LatestBlockNumber {
-			blockNumber = latestBlockNumber
-		} else if number == rpc.EarliestBlockNumber {
+		switch number {
+		case rpc.LatestBlockNumber:
+			if blockNumber, err = GetLatestBlockNumber(tx); err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.EarliestBlockNumber:
 			blockNumber = 0
-		} else if number == rpc.PendingBlockNumber {
+		case rpc.FinalizeBlockNumber:
+			blockNumber, err = GetFinalizedBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.SafeBlockNumber:
+			blockNumber, err = GetSafeBlockNumber(tx)
+			if err != nil {
+				return 0, common.Hash{}, false, err
+			}
+		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
-				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-				if err != nil {
-					return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
-				}
+				blockNumber = plainStateBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
-		} else {
+		default:
 			blockNumber = uint64(number.Int64())
 		}
 		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
@@ -77,7 +89,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			return 0, common.Hash{}, false, nonCanonocalHashError{hash}
 		}
 	}
-	return blockNumber, hash, blockNumber == latestBlockNumber, nil
+	return blockNumber, hash, blockNumber == plainStateBlockNumber, nil
 }
 
 func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {

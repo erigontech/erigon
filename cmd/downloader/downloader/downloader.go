@@ -205,7 +205,7 @@ func (d *Downloader) onComplete() {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
-	fmt.Printf("alex1: %s\n", d.cfg.DataDir)
+	// fmt.Printf("alex1: %s\n", d.cfg.DataDir)
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
