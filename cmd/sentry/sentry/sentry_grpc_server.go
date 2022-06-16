@@ -83,6 +83,8 @@ func (pi *PeerInfo) Close() {
 	defer pi.lock.Unlock()
 	if pi.tasks != nil {
 		close(pi.tasks)
+		// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
+		pi.tasks = nil
 	}
 }
 
@@ -144,11 +146,16 @@ func (pi *PeerInfo) Remove() {
 func (pi *PeerInfo) Async(f func()) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
+	if pi.tasks == nil {
+		// Too late, the task channel has been closed
+		return
+	}
 	select {
 	case <-pi.removed: // noop if peer removed
 	case <-pi.ctx.Done():
 		if pi.tasks != nil {
 			close(pi.tasks)
+			// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 			pi.tasks = nil
 		}
 	case pi.tasks <- f:
