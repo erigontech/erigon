@@ -234,7 +234,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH67, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }

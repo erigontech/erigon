@@ -197,7 +197,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
 	// Hardcoding to avoid import cycle
-	return &remote.ProtocolVersionReply{Id: 66}, nil
+	return &remote.ProtocolVersionReply{Id: 67}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {

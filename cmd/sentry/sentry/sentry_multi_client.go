@@ -64,8 +64,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
+		eth.ToProto[eth.ETH67][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH67][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -80,7 +80,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[eth.ETH67][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -95,10 +95,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
-		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
+		eth.ToProto[eth.ETH67][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH67][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH67][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH67][eth.NewBlockMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -649,7 +649,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 
 func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	switch inreq.Id {
-	// ========= eth 66 ==========
+	// ========= eth 67 ==========
 
 	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
 		return cs.newBlockHashes66(ctx, inreq, sentry)
