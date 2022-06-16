@@ -107,7 +107,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	if err = statedb.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
-
+	// checks if current header is an Euler block or not (returns false for all the chains except BSC)
 	if config.IsEuler(header.Number) {
 		*usedGas += result.UsedGas * 3
 	} else {
