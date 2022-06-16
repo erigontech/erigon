@@ -16,7 +16,9 @@ FROM docker.io/library/alpine:3.15
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
-RUN adduser -H -u 1000 -g 1000 -D erigon
+ARG PUID=1000
+ARG PGID=1000
+RUN adduser -H -u ${PUID} -g ${PGID} -D erigon
 RUN mkdir -p /home/erigon
 RUN mkdir -p /home/erigon/.local/share/erigon
 RUN chown -R erigon:erigon /home/erigon
