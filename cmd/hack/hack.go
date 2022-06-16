@@ -1427,9 +1427,14 @@ func decompress(chaindata string) error {
 		if !strings.HasSuffix(name, ".dat") {
 			continue
 		}
-		if err = decompressAll(dir, filepath.Join(dir, name), strings.HasPrefix(name, "code")); err != nil {
+		if err = decompressAll(dir, filepath.Join(dir, name), strings.Contains(name, "code")); err != nil {
 			return err
 		}
+	}
+	// Re-read directory
+	files, err = os.ReadDir(dir)
+	if err != nil {
+		return err
 	}
 	for _, f := range files {
 		name := f.Name()
