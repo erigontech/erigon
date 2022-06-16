@@ -123,7 +123,6 @@ func TestT8n(t *testing.T) {
 			input: t8nInput{
 				"alloc.json", "txs.json", "env.json", "Berlin",
 			},
-			output:      t8nOutput{alloc: true, result: true},
 			expExitCode: 4,
 		},
 		{ // Uncle test

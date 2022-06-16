@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
@@ -42,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
@@ -86,18 +88,8 @@ type input struct {
 	Txs   []*txWithKey      `json:"txs,omitempty"`
 }
 
-// dlv exec ./build/bin/evm -- --help
-// from cmd/evm:
-// go run *.go t8n --input.alloc=testdata/1/alloc.json --input.txs testdata/1/txs.json --input.env testdata/1/env.json
 func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	/*
-		// Configure the go-ethereum logger
-		glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-		glogger.Verbosity(log.Lvl(ctx.Int(VerbosityFlag.Name)))
-		log.Root().SetHandler(glogger)
-	*/
-
 	var (
 		err     error
 		baseDir = ""
@@ -300,15 +292,14 @@ func Main(ctx *cli.Context) error {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
+	root, err := CalculateStateRoot(tx)
+	if err != nil {
+		return err
+	}
+	result.StateRoot = *root
+
+	// Dump the execution result
 	body, _ := rlp.EncodeToBytes(txs)
-
-	// //var root common.Hash
-	// root, err = trie.CalcRoot("", tx)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// Dump the excution result
 	collector := make(Alloc)
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
@@ -563,25 +554,62 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv, Eip1559 bool) *types.Header {
 	var header types.Header
-	//header.ParentHash =
 	header.UncleHash = env.ParentUncleHash
 	header.Coinbase = env.Coinbase
-	//header.Root =  //stateRoot
-	//header.TxHash =
-	// header.ReceiptHash =
-	//header.Bloom
 	header.Difficulty = env.Difficulty
 	header.Number = big.NewInt(int64(env.Number))
 	header.GasLimit = env.GasLimit
-	//header.GasUsed =
 	header.Time = env.Timestamp
-	//header.Extra
-	//header.MixDigest =
-	//header.Nonce =
 	header.BaseFee = env.BaseFee
 	header.Eip1559 = Eip1559
-	//header.Seal =
-	//header.WithSeal=
 
 	return &header
+}
+
+func CalculateStateRoot(tx kv.RwTx) (*common.Hash, error) {
+	// Generate hashed state
+	c, err := tx.RwCursor(kv.PlainState)
+	if err != nil {
+		return nil, err
+	}
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, fmt.Errorf("interate over plain state: %w", err)
+		}
+		var newK []byte
+		if len(k) == common.AddressLength {
+			newK = make([]byte, common.HashLength)
+		} else {
+			newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+		}
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[:common.AddressLength])
+		//nolint:errcheck
+		h.Sha.Read(newK[:common.HashLength])
+		if len(k) > common.AddressLength {
+			copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+			h.Sha.Reset()
+			//nolint:errcheck
+			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+			//nolint:errcheck
+			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
+				return nil, fmt.Errorf("insert hashed key: %w", err)
+			}
+		} else {
+			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
+				return nil, fmt.Errorf("insert hashed key: %w", err)
+			}
+		}
+	}
+	c.Close()
+	root, err := trie.CalcRoot("", tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &root, nil
 }
