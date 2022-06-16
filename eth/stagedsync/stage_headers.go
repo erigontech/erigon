@@ -293,9 +293,13 @@ func startHandlingForkChoice(
 		return nil
 	}
 
-	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
+	// Header itself may already be in the snapshots, if CL starts off at much ealier state than Erigon
+	header, err := headerReader.HeaderByHash(ctx, tx, headerHash)
 	if err != nil {
-		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+		return err
+	}
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading header by hash %x)", s.LogPrefix(), headerHash), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -304,7 +308,7 @@ func startHandlingForkChoice(
 	}
 
 	if header == nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
 		hashToDownload := headerHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
@@ -314,37 +318,49 @@ func startHandlingForkChoice(
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
-
-	forkingPoint := uint64(0)
-	if headerNumber > 0 {
-		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
-		if err != nil {
-			return err
+	// If header is canononical, then no reorgs are required
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading canonical hash of %d)", s.LogPrefix(), headerNumber), "err", err)
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		if requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
-		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
-		if err != nil {
-			if requestStatus == engineapi.New {
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		return err
+	}
+	if headerHash != canonicalHash {
+		cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+
+		forkingPoint := uint64(0)
+		if headerNumber > 0 {
+			parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+			if err != nil {
+				return err
 			}
-			return err
+			forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
+			if err != nil {
+				if requestStatus == engineapi.New {
+					cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+				}
+				return err
+			}
 		}
-	}
 
-	if requestStatus == engineapi.New {
-		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
-			// TODO(yperbasis): what if some bodies are missing and we have to download them?
-			cfg.hd.SetPendingPayloadStatus(headerHash)
-		} else {
-			log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+		if requestStatus == engineapi.New {
+			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
+				log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+				// TODO(yperbasis): what if some bodies are missing and we have to download them?
+				cfg.hd.SetPendingPayloadStatus(headerHash)
+			} else {
+				log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			}
 		}
-	}
 
-	log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
-	u.UnwindTo(forkingPoint, common.Hash{})
-	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
+		log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
+		u.UnwindTo(forkingPoint, common.Hash{})
+		log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
+	}
 
 	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
