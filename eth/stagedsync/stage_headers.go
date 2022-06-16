@@ -343,7 +343,7 @@ func startHandlingForkChoice(
 		if canonical && requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: headerHash,
 			}
 		}
 		return nil
@@ -459,7 +459,7 @@ func handleNewPayload(
 	}
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
-		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header %d", s.LogPrefix(), headerNumber))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{

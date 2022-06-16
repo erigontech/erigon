@@ -93,7 +93,7 @@ func BodiesForward(
 		return err
 	}
 	bodyProgress = s.BlockNumber
-	if bodyProgress == headerProgress {
+	if bodyProgress >= headerProgress {
 		return nil
 	}
 
