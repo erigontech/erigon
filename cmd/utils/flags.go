@@ -306,9 +306,9 @@ var (
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
 	}
-	HTTPEnabledFlag = cli.BoolFlag{
+	HTTPEnabledFlag = cli.BoolTFlag{
 		Name:  "http",
-		Usage: "Disabled by default. Use --http to enable the HTTP-RPC server",
+		Usage: "HTTP-RPC server (enabled by default). Use --http false to disable it",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
