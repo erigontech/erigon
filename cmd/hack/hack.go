@@ -1511,6 +1511,12 @@ func decompressAll(dir string, filename string, onlyKeys bool) error {
 	if err = idx.RewriteWithOffsets(w, offsets); err != nil {
 		return err
 	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
