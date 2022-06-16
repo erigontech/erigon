@@ -83,6 +83,7 @@ func (pi *PeerInfo) Close() {
 	defer pi.lock.Unlock()
 	if pi.tasks != nil {
 		close(pi.tasks)
+		// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 		pi.tasks = nil
 	}
 }
@@ -154,6 +155,7 @@ func (pi *PeerInfo) Async(f func()) {
 	case <-pi.ctx.Done():
 		if pi.tasks != nil {
 			close(pi.tasks)
+			// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 			pi.tasks = nil
 		}
 	case pi.tasks <- f:
