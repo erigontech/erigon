@@ -328,39 +328,57 @@ func startHandlingForkChoice(
 		}
 		return err
 	}
-	if headerHash != canonicalHash {
-		cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
-
-		forkingPoint := uint64(0)
-		if headerNumber > 0 {
-			parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
-			if err != nil {
-				return err
+	if headerHash == canonicalHash {
+		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		if err != nil {
+			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			}
-			forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
-			if err != nil {
-				if requestStatus == engineapi.New {
-					cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-				}
-				return err
+			return err
+		}
+		if canonical && requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: currentHeadHash,
 			}
 		}
-
-		if requestStatus == engineapi.New {
-			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-				log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
-				// TODO(yperbasis): what if some bodies are missing and we have to download them?
-				cfg.hd.SetPendingPayloadStatus(headerHash)
-			} else {
-				log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-			}
-		}
-
-		log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
-		u.UnwindTo(forkingPoint, common.Hash{})
-		log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
+		return nil
 	}
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+
+	forkingPoint := uint64(0)
+	if headerNumber > 0 {
+		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return err
+		}
+		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
+		if err != nil {
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
+		}
+	}
+
+	if requestStatus == engineapi.New {
+		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
+			log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+			// TODO(yperbasis): what if some bodies are missing and we have to download them?
+			cfg.hd.SetPendingPayloadStatus(headerHash)
+		} else {
+			log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+		}
+	}
+
+	log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
+	u.UnwindTo(forkingPoint, common.Hash{})
+	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
 	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
