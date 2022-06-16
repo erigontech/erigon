@@ -300,7 +300,7 @@ func (hd *HeaderDownload) logAnchorState() {
 	sort.Strings(ss)
 	log.Info("Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	for _, s := range ss {
-		log.Info(s)
+		log.Debug(s)
 	}
 }
 
