@@ -54,6 +54,7 @@ type HeadersCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
+	execPayload        ExecutePayloadFunc
 }
 
 func StageHeadersCfg(
@@ -70,7 +71,8 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	tmpdir string,
-	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
+	dbEventNotifier snapshotsync.DBEventNotifier,
+	execPayload ExecutePayloadFunc) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
@@ -86,6 +88,7 @@ func StageHeadersCfg(
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
+		execPayload:        execPayload,
 	}
 }
 
