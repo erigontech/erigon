@@ -13,6 +13,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -22,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -225,7 +225,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	}
 	defer tx.Rollback()
 
-	miningBatch := olddb.NewMemoryBatch(tx)
+	miningBatch := memdb.NewMemoryBatch(tx)
 	defer miningBatch.Rollback()
 
 	if err = mining.Run(nil, miningBatch, false); err != nil {
@@ -294,7 +294,22 @@ func NewStagedSync(
 	isBor := controlServer.ChainConfig.Bor != nil
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
-			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, snapshots, snapshotDownloader, blockReader, tmpdir, notifications.Events, execPayload),
+			stagedsync.StageHeadersCfg(
+				db,
+				controlServer.Hd,
+				controlServer.Bd,
+				*controlServer.ChainConfig,
+				controlServer.SendHeaderRequest,
+				controlServer.PropagateNewBlockHashes,
+				controlServer.Penalize,
+				cfg.BatchSize,
+				p2pCfg.NoDiscovery,
+				snapshots,
+				snapshotDownloader,
+				blockReader,
+				tmpdir,
+				notifications.Events,
+				execPayload),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageBodiesCfg(

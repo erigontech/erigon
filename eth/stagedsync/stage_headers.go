@@ -296,9 +296,13 @@ func startHandlingForkChoice(
 		return nil
 	}
 
-	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
+	// Header itself may already be in the snapshots, if CL starts off at much ealier state than Erigon
+	header, err := headerReader.HeaderByHash(ctx, tx, headerHash)
 	if err != nil {
-		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+		return err
+	}
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading header by hash %x)", s.LogPrefix(), headerHash), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -307,7 +311,7 @@ func startHandlingForkChoice(
 	}
 
 	if header == nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
 		hashToDownload := headerHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
@@ -317,6 +321,36 @@ func startHandlingForkChoice(
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
+	// If header is canononical, then no reorgs are required
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading canonical hash of %d)", s.LogPrefix(), headerNumber), "err", err)
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		if requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		}
+		return err
+	}
+	if headerHash == canonicalHash {
+		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		if err != nil {
+			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
+		}
+		if canonical && requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: headerHash,
+			}
+		}
+		return nil
+	}
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	forkingPoint := uint64(0)
@@ -428,7 +462,7 @@ func handleNewPayload(
 	}
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
-		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header %d", s.LogPrefix(), headerNumber))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
