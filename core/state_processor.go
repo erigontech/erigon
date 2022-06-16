@@ -108,7 +108,11 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		return nil, nil, err
 	}
 
-	*usedGas += result.UsedGas
+	if config.IsEuler(header.Number) {
+		*usedGas += result.UsedGas * 3
+	} else {
+		*usedGas += result.UsedGas
+	}
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
