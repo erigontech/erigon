@@ -1431,6 +1431,15 @@ func decompress(chaindata string) error {
 			return err
 		}
 	}
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasSuffix(name, ".d") {
+			continue
+		}
+		if err = os.Rename(filepath.Join(dir, name), filepath.Join(dir, name[:len(name)-2])); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1442,7 +1451,7 @@ func decompressAll(dir string, filename string, onlyKeys bool) error {
 	}
 	defer d.Close()
 	newDatPath := filename + ".d"
-	comp, err := compress.NewCompressor(context.Background(), "comp", newDatPath, dir, compress.MinPatternScore, 1, log.LvlDebug)
+	comp, err := compress.NewCompressor(context.Background(), "comp", newDatPath, dir, compress.MinPatternScore, 1, log.LvlInfo)
 	if err != nil {
 		return err
 	}
