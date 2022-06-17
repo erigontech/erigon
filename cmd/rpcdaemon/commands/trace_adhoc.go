@@ -367,9 +367,16 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 	if err != nil && !ignoreError {
 		if err == vm.ErrExecutionReverted {
 			topTrace.Error = "Reverted"
-			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
-			topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+			switch topTrace.Type {
+			case CALL:
+				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+			case CREATE:
+				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*CreateTraceResult).Output = common.CopyBytes(output)
+			}
 		} else {
 			topTrace.Result = nil
 			switch err {
