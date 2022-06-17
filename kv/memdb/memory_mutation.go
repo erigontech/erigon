@@ -56,6 +56,10 @@ func NewMemoryBatch(tx kv.Tx) *MemoryMutation {
 	}
 }
 
+func (m *MemoryMutation) UpdateTxn(tx kv.Tx) {
+	m.db = tx
+}
+
 func (m *MemoryMutation) isTableCleared(table string) bool {
 	_, ok := m.clearedTables[table]
 	return ok
