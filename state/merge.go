@@ -289,27 +289,19 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			g.Reset(0)
 			if g.HasNext() {
 				key, _ := g.NextUncompressed()
-				if d.compressVals && fType != EfHistory && item.endTxNum-item.startTxNum > d.aggregationStep {
-					val, _ := g.Next(nil)
-					heap.Push(&cp, &CursorItem{
-						t:             FILE_CURSOR,
-						dg:            g,
-						key:           key,
-						val:           val,
-						endTxNum:      item.endTxNum,
-						valCompressed: true,
-					})
+				var val []byte
+				if d.compressVals {
+					val, _ = g.Next(nil)
 				} else {
-					val, _ := g.NextUncompressed()
-					heap.Push(&cp, &CursorItem{
-						t:             FILE_CURSOR,
-						dg:            g,
-						key:           key,
-						val:           val,
-						endTxNum:      item.endTxNum,
-						valCompressed: false,
-					})
+					val, _ = g.NextUncompressed()
 				}
+				heap.Push(&cp, &CursorItem{
+					t:        FILE_CURSOR,
+					dg:       g,
+					key:      key,
+					val:      val,
+					endTxNum: item.endTxNum,
+				})
 			}
 		}
 		count := 0
@@ -335,7 +327,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 				}
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.NextUncompressed()
-					if ci1.valCompressed {
+					if d.compressVals {
 						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
 					} else {
 						ci1.val, _ = ci1.dg.NextUncompressed()

@@ -378,12 +378,11 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
-	t             CursorType // Whether this item represents state file or DB record, or tree
-	endTxNum      uint64
-	key, val      []byte
-	dg            *compress.Getter
-	c             kv.CursorDupSort
-	valCompressed bool
+	t        CursorType // Whether this item represents state file or DB record, or tree
+	endTxNum uint64
+	key, val []byte
+	dg       *compress.Getter
+	c        kv.CursorDupSort
 }
 
 type CursorHeap []*CursorItem
