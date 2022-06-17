@@ -1416,6 +1416,110 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
+func decompress(chaindata string) error {
+	dir := filepath.Join(chaindata, "erigon22")
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasSuffix(name, ".dat") {
+			continue
+		}
+		if err = decompressAll(dir, filepath.Join(dir, name), strings.Contains(name, "code")); err != nil {
+			return err
+		}
+	}
+	// Re-read directory
+	files, err = os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasSuffix(name, ".d") {
+			continue
+		}
+		if err = os.Rename(filepath.Join(dir, name), filepath.Join(dir, name[:len(name)-2])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decompressAll(dir string, filename string, onlyKeys bool) error {
+	fmt.Printf("decompress file %s, onlyKeys=%t\n", filename, onlyKeys)
+	d, err := compress.NewDecompressor(filename)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	newDatPath := filename + ".d"
+	comp, err := compress.NewCompressor(context.Background(), "comp", newDatPath, dir, compress.MinPatternScore, 1, log.LvlInfo)
+	if err != nil {
+		return err
+	}
+	defer comp.Close()
+	idxPath := filename[:len(filename)-3] + "idx"
+	idx, err := recsplit.OpenIndex(idxPath)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+	g := d.MakeGetter()
+	var isKey bool
+	var word []byte
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		if onlyKeys && !isKey {
+			if err := comp.AddWord(word); err != nil {
+				return err
+			}
+		} else {
+			if err := comp.AddUncompressedWord(word); err != nil {
+				return err
+			}
+		}
+		isKey = !isKey
+	}
+	if err = comp.Compress(); err != nil {
+		return err
+	}
+	comp.Close()
+	offsets := idx.ExtractOffsets()
+	newD, err := compress.NewDecompressor(newDatPath)
+	if err != nil {
+		return err
+	}
+	defer newD.Close()
+	newG := newD.MakeGetter()
+	g.Reset(0)
+	offset := uint64(0)
+	newOffset := uint64(0)
+	for g.HasNext() {
+		offsets[offset] = newOffset
+		offset = g.Skip()
+		newOffset = newG.Skip()
+	}
+	newIdxPath := idxPath + ".d"
+	f, err := os.Create(newIdxPath)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	if err = idx.RewriteWithOffsets(w, offsets); err != nil {
+		return err
+	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1550,6 +1654,8 @@ func main() {
 		err = readBodies(*chaindata)
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
+	case "decompress":
+		err = decompress(*chaindata)
 	}
 
 	if err != nil {
