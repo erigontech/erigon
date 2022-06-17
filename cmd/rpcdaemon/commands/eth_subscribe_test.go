@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -54,6 +55,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
+		fmt.Printf("Got header %d\n", header.Number.Uint64())
 		require.Equal(i, header.Number.Uint64())
 	}
 }

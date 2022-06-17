@@ -235,7 +235,11 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, block *types.Block) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, block *types.Block) (err error) {
+	// Setup
+	height := block.NumberU64()
+	hash := block.Hash()
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -251,12 +255,46 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, b
 		return err
 	}
 
+	if err := rawdb.WriteHeadHeaderHash(batch, block.Hash()); err != nil {
+		return err
+	}
+
 	if err = stages.SaveStageProgress(batch, stages.Headers, block.NumberU64()); err != nil {
 		return err
 	}
 
 	if err = stages.SaveStageProgress(batch, stages.Bodies, block.NumberU64()); err != nil {
 		return err
+	}
+
+	if height == 0 {
+		return nil
+	}
+	ancestorHash := hash
+	ancestorHeight := height
+
+	var ch common.Hash
+	for ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight) {
+		if err = rawdb.WriteCanonicalHash(batch, ancestorHash, ancestorHeight); err != nil {
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
+		}
+
+		ancestor, err := headerReader.Header(context.Background(), batch, ancestorHash, ancestorHeight)
+		if err != nil {
+			return err
+		}
+		if ancestor == nil {
+			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
+		}
+
+		select {
+		default:
+		}
+		ancestorHash = ancestor.ParentHash
+		ancestorHeight--
+	}
+	if err != nil {
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
 	// Run state sync
@@ -392,7 +430,7 @@ func NewInMemoryExecution(
 			),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
-		stagedsync.DefaultUnwindOrder,
-		stagedsync.DefaultPruneOrder,
+		nil,
+		nil,
 	), nil
 }

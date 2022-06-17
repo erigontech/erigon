@@ -257,11 +257,11 @@ func startHandlingForkChoice(
 	headerReader services.HeaderReader,
 ) error {
 	headerHash := forkChoice.HeadBlockHash
-	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
+	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
-		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
+		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
@@ -283,7 +283,7 @@ func startHandlingForkChoice(
 
 	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
 	if bad {
-		log.Info(fmt.Sprintf("[%s] Fork choice bad head block", s.LogPrefix()), "headerHash", headerHash)
+		log.Warn(fmt.Sprintf("[%s] Fork choice bad head block", s.LogPrefix()), "headerHash", headerHash)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -296,7 +296,7 @@ func startHandlingForkChoice(
 		return nil
 	}
 
-	// Header itself may already be in the snapshots, if CL starts off at much ealier state than Erigon
+	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
 	header, err := headerReader.HeaderByHash(ctx, tx, headerHash)
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func startHandlingForkChoice(
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
-	// If header is canononical, then no reorgs are required
+	// If header is canonical, then no reorgs are required
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
 		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading canonical hash of %d)", s.LogPrefix(), headerNumber), "err", err)
@@ -374,26 +374,22 @@ func startHandlingForkChoice(
 		if err := cfg.hd.FlushNextForkState(tx); err != nil {
 			return err
 		}
-		log.Info(fmt.Sprintf("%x,\n", headerHash))
 		cfg.hd.SetPendingPayloadStatus(headerHash)
 
 		return nil
 	}
+	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 
 	if requestStatus == engineapi.New {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
-			log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 	}
 
-	log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
 	u.UnwindTo(forkingPoint, common.Hash{})
-	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
 	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
@@ -459,8 +455,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
-	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-	fmt.Printf("%x\n", header.ParentHash)
+	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -598,8 +593,6 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	fmt.Printf("[%x]\n", currentHeadHash)
-	fmt.Printf("[%x]\n", header.ParentHash)
 	if currentHeadHash == header.ParentHash || header.ParentHash == cfg.hd.GetNextForkHash() {
 		if err = cfg.hd.ValidatePayload(tx, block, cfg.execPayload); err != nil {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}

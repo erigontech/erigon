@@ -1196,7 +1196,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, tmpdir, &stagedsync.Notifications{}, nil, allSn, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, tmpdir, &stagedsync.Notifications{}, nil, allSn, nil, nil)
 	if err != nil {
 		panic(err)
 	}
