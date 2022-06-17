@@ -195,6 +195,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, contractHasTEVM, api._blockReader)
 		stateReader.SetTxNum(txNum)
 		vmConfig := vm.Config{}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		ibs := state.New(stateReader)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
