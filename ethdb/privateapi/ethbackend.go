@@ -482,6 +482,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	s.evictOldBuilders()
 
+	time.Sleep(100 * time.Millisecond)
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 

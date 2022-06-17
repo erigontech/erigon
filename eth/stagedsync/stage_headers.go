@@ -351,6 +351,7 @@ func startHandlingForkChoice(
 		}
 		return nil
 	}
+
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	forkingPoint := uint64(0)
@@ -366,6 +367,17 @@ func startHandlingForkChoice(
 			}
 			return err
 		}
+	}
+
+	if headerHash == cfg.hd.GetNextForkHash() {
+		log.Info("Flushing in-memory state")
+		if err := cfg.hd.FlushNextForkState(tx); err != nil {
+			return err
+		}
+		log.Info(fmt.Sprintf("%x,\n", headerHash))
+		cfg.hd.SetPendingPayloadStatus(headerHash)
+
+		return nil
 	}
 
 	if requestStatus == engineapi.New {
@@ -447,8 +459,8 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
-	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-
+	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	fmt.Printf("%x\n", header.ParentHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -537,7 +549,7 @@ func handleNewPayload(
 	}
 
 	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
-	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
+	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, types.NewBlock(header, transactions, nil, nil), headerInserter)
 	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return err
@@ -556,9 +568,10 @@ func verifyAndSaveNewPoSHeader(
 	s *StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	header *types.Header,
+	block *types.Block,
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
+	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
@@ -585,8 +598,15 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash == header.ParentHash {
-		// OK, we're on the canonical chain
+	fmt.Printf("[%x]\n", currentHeadHash)
+	fmt.Printf("[%x]\n", header.ParentHash)
+	if currentHeadHash == header.ParentHash || header.ParentHash == cfg.hd.GetNextForkHash() {
+		if err = cfg.hd.ValidatePayload(tx, block, cfg.execPayload); err != nil {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
+			return
+		}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_VALID}
+		/*// OK, we're on the canonical chain
 		if requestStatus == engineapi.New {
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		}
@@ -608,7 +628,7 @@ func verifyAndSaveNewPoSHeader(
 		err = s.Update(tx, headerNumber)
 		if err != nil {
 			return
-		}
+		}*/
 	} else {
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized

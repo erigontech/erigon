@@ -402,12 +402,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, block); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, block); err != nil {
 			return err
 		}
 		return nil
 	}
-	_ = inMemoryExecution
 
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
