@@ -613,15 +613,17 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error {
 	best := p.pending.best
 	j := 0
 	for i := 0; j < int(n) && i < len(best.ms); i++ {
-		if best.ms[i].Tx.Gas >= p.blockGasLimit.Load() {
+		mt := best.ms[i]
+		if mt.Tx.Gas >= p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
-		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, best.ms[i].Tx.IDHash[:])
+		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, mt.Tx.IDHash[:])
 		if err != nil {
 			return err
 		}
 		if len(rlpTx) == 0 {
+			p.pending.Remove(mt)
 			continue
 		}
 		txs.Txs[j] = rlpTx
