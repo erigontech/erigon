@@ -315,6 +315,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	t.Cleanup(func() {
 		cancel()
 		conn.Close()
+		server.Stop()
 	})
 	return ctx, conn
 }
