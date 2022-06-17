@@ -375,7 +375,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
 				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
-				topTrace.Result.(*CreateTraceResult).Output = common.CopyBytes(output)
+				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
 			topTrace.Result = nil
