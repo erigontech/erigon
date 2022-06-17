@@ -213,7 +213,7 @@ func (it *InvertedIterator) advanceInFiles() {
 			offset := item.indexReader.Lookup(it.key)
 			g := item.getter
 			g.Reset(offset)
-			if keyMatch, _ := g.Match(it.key); keyMatch {
+			if k, _ := g.NextUncompressed(); bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 				it.efIt = ef.Iterator()

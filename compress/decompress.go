@@ -497,6 +497,25 @@ func (g *Getter) Skip() uint64 {
 	return g.dataP
 }
 
+func (g *Getter) SkipUncompressed() uint64 {
+	wordLen := g.nextPos(true)
+	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
+	if wordLen == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
+		return g.dataP
+	}
+	g.nextPos(false)
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
+	g.dataP += wordLen
+	return g.dataP
+}
+
 // Match returns true and next offset if the word at current offset fully matches the buf
 // returns false and current offset otherwise.
 func (g *Getter) Match(buf []byte) (bool, uint64) {

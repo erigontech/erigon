@@ -51,7 +51,7 @@ func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
 		}
 	}).MustOpen()
-	d, err := NewDomain(path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, prefixLen)
+	d, err := NewDomain(path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, prefixLen, true /* compressVals */)
 	require.NoError(t, err)
 	return path, db, d
 }
@@ -533,7 +533,7 @@ func TestScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
 	d.Close()
-	d, err = NewDomain(path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.historyKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen)
+	d, err = NewDomain(path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.historyKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
 	require.NoError(t, err)
 	d.SetTxNum(txNum)
 	// Check the history

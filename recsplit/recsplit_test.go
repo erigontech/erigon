@@ -174,7 +174,7 @@ func TestTwoLayerIndex(t *testing.T) {
 		if e != uint64(i) {
 			t.Errorf("expected enumeration: %d, lookup up: %d", i, e)
 		}
-		offset := idx.Lookup2(e)
+		offset := idx.OrdinalLookup(e)
 		if offset != uint64(i*17) {
 			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
 		}

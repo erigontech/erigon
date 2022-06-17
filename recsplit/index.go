@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2022 Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@
 package recsplit
 
 import (
+	"bufio"
 	"encoding/binary"
+	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"unsafe"
 
@@ -242,6 +245,61 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	return binary.BigEndian.Uint64(idx.data[1+8+idx.bytesPerRec*(rec+1):]) & idx.recMask
 }
 
-func (idx *Index) Lookup2(i uint64) uint64 {
+// OrdinalLookup returns the offset of i-th element in the index
+// Perfect hash table lookup is not performed, only access to the
+// Elias-Fano structure containing all offsets.
+func (idx *Index) OrdinalLookup(i uint64) uint64 {
 	return idx.offsetEf.Get(i)
+}
+
+func (idx *Index) ExtractOffsets() map[uint64]uint64 {
+	m := map[uint64]uint64{}
+	pos := 1 + 8 + idx.bytesPerRec
+	for rec := uint64(0); rec < idx.keyCount; rec++ {
+		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+		m[offset] = 0
+		pos += idx.bytesPerRec
+	}
+	return m
+}
+
+func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {
+	// New max offset
+	var maxOffset uint64
+	for _, offset := range m {
+		if offset > maxOffset {
+			maxOffset = offset
+		}
+	}
+	bytesPerRec := (bits.Len64(maxOffset) + 7) / 8
+	var numBuf [8]byte
+	// Write baseDataID
+	binary.BigEndian.PutUint64(numBuf[:], idx.baseDataID)
+	if _, err := w.Write(numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+
+	// Write number of keys
+	binary.BigEndian.PutUint64(numBuf[:], idx.keyCount)
+	if _, err := w.Write(numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+	// Write number of bytes per index record
+	if err := w.WriteByte(byte(bytesPerRec)); err != nil {
+		return fmt.Errorf("write bytes per record: %w", err)
+	}
+	pos := 1 + 8 + idx.bytesPerRec
+	for rec := uint64(0); rec < idx.keyCount; rec++ {
+		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+		pos += idx.bytesPerRec
+		binary.BigEndian.PutUint64(numBuf[:], m[offset])
+		if _, err := w.Write(numBuf[8-bytesPerRec:]); err != nil {
+			return err
+		}
+	}
+	// Write the rest as it is (TODO - wrong for indices with enums)
+	if _, err := w.Write(idx.data[16+1+int(idx.keyCount)*idx.bytesPerRec:]); err != nil {
+		return err
+	}
+	return nil
 }

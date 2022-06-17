@@ -45,9 +45,26 @@ func (r *IndexReader) sum(key []byte) (uint64, uint64) {
 	return r.hasher.Sum128()
 }
 
+func (r *IndexReader) sum2(key1, key2 []byte) (uint64, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hasher.Reset()
+	r.hasher.Write(key1) //nolint:errcheck
+	r.hasher.Write(key2) //nolint:errcheck
+	return r.hasher.Sum128()
+}
+
 // Lookup wraps index Lookup
 func (r *IndexReader) Lookup(key []byte) uint64 {
 	bucketHash, fingerprint := r.sum(key)
+	if r.index != nil {
+		return r.index.Lookup(bucketHash, fingerprint)
+	}
+	return 0
+}
+
+func (r *IndexReader) Lookup2(key1, key2 []byte) uint64 {
+	bucketHash, fingerprint := r.sum2(key1, key2)
 	if r.index != nil {
 		return r.index.Lookup(bucketHash, fingerprint)
 	}

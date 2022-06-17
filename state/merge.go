@@ -251,7 +251,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 		}
 	}()
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		compressVal := fType != EfHistory
+		compressVal := d.compressVals && fType != EfHistory
 		var startTxNum, endTxNum uint64
 		if fType == Values {
 			if !r.values {
@@ -288,17 +288,28 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			g := item.decompressor.MakeGetter()
 			g.Reset(0)
 			if g.HasNext() {
-				key, _ := g.Next(nil)
-				val, _ := g.Next(nil)
-				heap.Push(&cp, &CursorItem{
-					t:             FILE_CURSOR,
-					dg:            g,
-					key:           key,
-					val:           val,
-					endTxNum:      item.endTxNum,
-					keyCompressed: item.endTxNum-item.startTxNum > d.aggregationStep,
-					valCompressed: fType != EfHistory && item.endTxNum-item.startTxNum > d.aggregationStep,
-				})
+				key, _ := g.NextUncompressed()
+				if d.compressVals && fType != EfHistory && item.endTxNum-item.startTxNum > d.aggregationStep {
+					val, _ := g.Next(nil)
+					heap.Push(&cp, &CursorItem{
+						t:             FILE_CURSOR,
+						dg:            g,
+						key:           key,
+						val:           val,
+						endTxNum:      item.endTxNum,
+						valCompressed: true,
+					})
+				} else {
+					val, _ := g.NextUncompressed()
+					heap.Push(&cp, &CursorItem{
+						t:             FILE_CURSOR,
+						dg:            g,
+						key:           key,
+						val:           val,
+						endTxNum:      item.endTxNum,
+						valCompressed: false,
+					})
+				}
 			}
 		}
 		count := 0
@@ -323,11 +334,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 					mergedOnce = true
 				}
 				if ci1.dg.HasNext() {
-					if ci1.keyCompressed {
-						ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-					} else {
-						ci1.key, _ = ci1.dg.NextUncompressed()
-					}
+					ci1.key, _ = ci1.dg.NextUncompressed()
 					if ci1.valCompressed {
 						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
 					} else {
@@ -349,7 +356,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			}
 			if !skip {
 				if keyBuf != nil && (d.prefixLen == 0 || len(keyBuf) != d.prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
-					if err = comp.AddWord(keyBuf); err != nil {
+					if err = comp.AddUncompressedWord(keyBuf); err != nil {
 						return outItems, err
 					}
 					count++ // Only counting keys, not values
@@ -368,7 +375,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			}
 		}
 		if keyBuf != nil {
-			if err = comp.AddWord(keyBuf); err != nil {
+			if err = comp.AddUncompressedWord(keyBuf); err != nil {
 				return outItems, err
 			}
 			count++ // Only counting keys, not values
@@ -402,10 +409,17 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 			var count int
 			g.Reset(0)
 			for g.HasNext() {
-				g.Skip() // Skip key on on the first pass
-				val, _ = g.Next(val[:0])
-				if err = comp.AddWord(val); err != nil {
-					return outItems, fmt.Errorf("merge %s remove vals add val %s [%d-%d]: %w", d.filenameBase, fType.String(), startTxNum, endTxNum, err)
+				g.SkipUncompressed() // Skip key on on the first pass
+				if compressVal {
+					val, _ = g.Next(val[:0])
+					if err = comp.AddWord(val); err != nil {
+						return outItems, fmt.Errorf("merge %s remove vals add val %s [%d-%d]: %w", d.filenameBase, fType.String(), startTxNum, endTxNum, err)
+					}
+				} else {
+					val, _ = g.NextUncompressed()
+					if err = comp.AddUncompressedWord(val); err != nil {
+						return outItems, fmt.Errorf("merge %s remove vals add val %s [%d-%d]: %w", d.filenameBase, fType.String(), startTxNum, endTxNum, err)
+					}
 				}
 				count++
 			}
@@ -438,7 +452,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 				g1.Reset(0)
 				var lastOffset uint64
 				for g.HasNext() {
-					key, _ = g.Next(key[:0])
+					key, _ = g.NextUncompressed()
 					g.Skip() // Skip value
 					_, pos := g1.Next(nil)
 					if err = rs.AddKey(key, lastOffset); err != nil {
@@ -520,12 +534,11 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
-				t:             FILE_CURSOR,
-				dg:            g,
-				key:           key,
-				val:           val,
-				endTxNum:      item.endTxNum,
-				keyCompressed: item.endTxNum-item.startTxNum > ii.aggregationStep,
+				t:        FILE_CURSOR,
+				dg:       g,
+				key:      key,
+				val:      val,
+				endTxNum: item.endTxNum,
 			})
 		}
 	}
@@ -551,11 +564,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 				mergedOnce = true
 			}
 			if ci1.dg.HasNext() {
-				if ci1.keyCompressed {
-					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-				} else {
-					ci1.key, _ = ci1.dg.NextUncompressed()
-				}
+				ci1.key, _ = ci1.dg.NextUncompressed()
 				ci1.val, _ = ci1.dg.NextUncompressed()
 				heap.Fix(&cp, 0)
 			} else {
@@ -563,7 +572,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 			}
 		}
 		if keyBuf != nil {
-			if err = comp.AddWord(keyBuf); err != nil {
+			if err = comp.AddUncompressedWord(keyBuf); err != nil {
 				return nil, err
 			}
 			count++ // Only counting keys, not values
@@ -575,7 +584,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 		valBuf = append(valBuf[:0], lastVal...)
 	}
 	if keyBuf != nil {
-		if err = comp.AddWord(keyBuf); err != nil {
+		if err = comp.AddUncompressedWord(keyBuf); err != nil {
 			return nil, err
 		}
 		count++ // Only counting keys, not values
