@@ -82,8 +82,8 @@ func (m *MemoryMutation) getMem(table string, key []byte) ([]byte, bool) {
 	return val, val != nil
 }
 
-func (m *MemoryMutation) DBSize() (uint64, error) { panic("not implemented") }
-func (m *MemoryMutation) PageSize() uint64        { panic("not implemented") }
+func (m *MemoryMutation) DBSize() (uint64, error) { return 0, nil }
+func (m *MemoryMutation) PageSize() uint64        { return 0 }
 
 func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	memRes, err := m.memTx.ReadSequence(bucket)
