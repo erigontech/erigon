@@ -56,6 +56,7 @@ type ExecuteBlockCfg struct {
 	chainConfig   *params.ChainConfig
 	engine        consensus.Engine
 	vmConfig      *vm.Config
+	badBlockHalt  bool
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
@@ -72,6 +73,7 @@ func StageExecuteBlocksCfg(
 	vmConfig *vm.Config,
 	accumulator *shards.Accumulator,
 	stateStream bool,
+	badBlockHalt bool,
 	tmpdir string,
 	blockReader services.FullBlockReader,
 ) ExecuteBlockCfg {
@@ -86,6 +88,7 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		badBlockHalt:  badBlockHalt,
 		blockReader:   blockReader,
 	}
 }
@@ -288,6 +291,9 @@ Loop:
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
+			if cfg.badBlockHalt {
+				return err
+			}
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}

@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type ExecutePayloadFunc func(batch kv.RwTx, block *types.Block) error
+type ExecutePayloadFunc func(batch kv.RwTx, header *types.Header, body *types.RawBody) error
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.

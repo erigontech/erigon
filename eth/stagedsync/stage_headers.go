@@ -544,7 +544,7 @@ func handleNewPayload(
 	}
 
 	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
-	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, types.NewBlock(header, transactions, nil, nil), headerInserter)
+	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, payloadMessage.Body, headerInserter)
 	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return err
@@ -563,10 +563,10 @@ func verifyAndSaveNewPoSHeader(
 	s *StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	block *types.Block,
+	header *types.Header,
+	body *types.RawBody,
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
-	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
@@ -594,7 +594,7 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == header.ParentHash || header.ParentHash == cfg.hd.GetNextForkHash() {
-		if err = cfg.hd.ValidatePayload(tx, block, cfg.execPayload); err != nil {
+		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
 			return
 		}
