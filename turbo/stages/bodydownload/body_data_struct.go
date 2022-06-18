@@ -16,6 +16,7 @@ type Delivery struct {
 	peerID          [64]byte
 	txs             [][][]byte
 	uncles          [][]*types.Header
+	doubleHashes    []DoubleHash // For each block body, the concatenation of tx root and uncle root (to match the header)
 	lenOfP2PMessage uint64
 }
 

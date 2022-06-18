@@ -196,7 +196,17 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID [64]byte) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
+	var doubleHashes []DoubleHash
+	for i := range txs {
+		uncleHash := types.CalcUncleHash(uncles[i])
+		txHash := types.DeriveSha(RawTransactions(txs[i]))
+		var doubleHash DoubleHash
+		copy(doubleHash[:], uncleHash.Bytes())
+		copy(doubleHash[common.HashLength:], txHash.Bytes())
+		doubleHashes = append(doubleHashes, doubleHash)
+	}
+
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, doubleHashes: doubleHashes, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -241,19 +251,12 @@ Loop:
 		}
 
 		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage, _ := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
 		var delivered, undelivered int
 
-		for i := range txs {
-			uncleHash := types.CalcUncleHash(uncles[i])
-			txHash := types.DeriveSha(RawTransactions(txs[i]))
-			var doubleHash DoubleHash
-			copy(doubleHash[:], uncleHash.Bytes())
-			copy(doubleHash[common.HashLength:], txHash.Bytes())
-
+		for i, txs := range delivery.txs {
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
-			blockNum, ok := bd.requestedMap[doubleHash]
+			blockNum, ok := bd.requestedMap[delivery.doubleHashes[i]]
 			if !ok {
 				undelivered++
 				continue
@@ -264,9 +267,9 @@ Loop:
 					reqMap[req.BlockNums[0]] = req
 				}
 			}
-			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+			delete(bd.requestedMap, delivery.doubleHashes[i]) // Delivered, cleaning up
 
-			bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{Transactions: txs[i], Uncles: uncles[i]}
+			bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{Transactions: txs, Uncles: delivery.uncles[i]}
 			bd.delivered.Add(blockNum)
 			delivered++
 		}
@@ -279,7 +282,7 @@ Loop:
 		total := delivered + undelivered
 		if total > 0 {
 			// Approximate numbers
-			bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
+			bd.DeliverySize(float64(delivery.lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(delivery.lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 		}
 	}
 	return nil
