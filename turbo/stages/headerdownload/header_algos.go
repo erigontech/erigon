@@ -1085,7 +1085,7 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, block *types.Block, execPayload func(batch kv.RwTx, block *types.Block) error) error {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, execPayload func(batch kv.RwTx, header *types.Header, body *types.RawBody) error) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.nextForkState == nil {
@@ -1093,8 +1093,8 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, block *types.Block, execPa
 	} else {
 		hd.nextForkState.UpdateTxn(tx)
 	}
-	hd.nextForkHash = block.Hash()
-	return execPayload(hd.nextForkState, block)
+	hd.nextForkHash = header.Hash()
+	return execPayload(hd.nextForkState, header, body)
 }
 
 func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
