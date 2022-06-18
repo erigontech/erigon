@@ -883,7 +883,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	return td, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash, writeHeader bool) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 
@@ -895,8 +895,9 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-
-	rawdb.WriteHeader(db, header)
+	if writeHeader {
+		rawdb.WriteHeader(db, header)
+	}
 
 	hi.highest = blockHeight
 	hi.highestHash = hash
