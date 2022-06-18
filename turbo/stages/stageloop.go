@@ -235,10 +235,10 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, block *types.Block) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody) (err error) {
 	// Setup
-	height := block.NumberU64()
-	hash := block.Hash()
+	height := header.Number.Uint64()
+	hash := header.Hash()
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -247,23 +247,28 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	}() // avoid crash because Erigon's core does many things
 
 	// Prepare memory state for block execution
-	if err = rawdb.WriteBlock(batch, block); err != nil {
+	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
 		return err
 	}
 
-	if err = rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64()); err != nil {
+	rawdb.WriteHeader(batch, header)
+	if err = rawdb.WriteHeaderNumber(batch, hash, height); err != nil {
 		return err
 	}
 
-	if err := rawdb.WriteHeadHeaderHash(batch, block.Hash()); err != nil {
+	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
 		return err
 	}
 
-	if err = stages.SaveStageProgress(batch, stages.Headers, block.NumberU64()); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(batch, hash); err != nil {
 		return err
 	}
 
-	if err = stages.SaveStageProgress(batch, stages.Bodies, block.NumberU64()); err != nil {
+	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
+		return err
+	}
+
+	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 		return err
 	}
 
@@ -374,6 +379,7 @@ func NewStagedSync(
 				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
 				notifications.Accumulator,
 				cfg.StateStream,
+				false,
 				tmpdir,
 				blockReader,
 			),
@@ -425,6 +431,7 @@ func NewInMemoryExecution(
 				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
 				notifications.Accumulator,
 				cfg.StateStream,
+				true,
 				tmpdir,
 				blockReader,
 			),
