@@ -347,6 +347,7 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
+				cfg.MemoryOverlay,
 				snapshots,
 				snapshotDownloader,
 				blockReader,

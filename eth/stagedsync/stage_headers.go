@@ -48,6 +48,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	memoryOverlay     bool
 	tmpdir            string
 
 	snapshots          *snapshotsync.RoSnapshots
@@ -67,6 +68,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	memoryOverlay bool,
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
@@ -89,6 +91,7 @@ func StageHeadersCfg(
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
 		execPayload:        execPayload,
+		memoryOverlay:      memoryOverlay,
 	}
 }
 
@@ -369,7 +372,7 @@ func startHandlingForkChoice(
 		}
 	}
 
-	if headerHash == cfg.hd.GetNextForkHash() {
+	if headerHash == cfg.hd.GetNextForkHash() && cfg.memoryOverlay {
 		log.Info("Flushing in-memory state")
 		if err := cfg.hd.FlushNextForkState(tx); err != nil {
 			return err
@@ -594,12 +597,17 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == header.ParentHash || header.ParentHash == cfg.hd.GetNextForkHash() {
-		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
+		if cfg.memoryOverlay {
+			if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
+				return
+			}
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_VALID}
+			success = true
 			return
 		}
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_VALID}
-		/*// OK, we're on the canonical chain
+
+		// OK, we're on the canonical chain
 		if requestStatus == engineapi.New {
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		}
@@ -621,7 +629,7 @@ func verifyAndSaveNewPoSHeader(
 		err = s.Update(tx, headerNumber)
 		if err != nil {
 			return
-		}*/
+		}
 	} else {
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
