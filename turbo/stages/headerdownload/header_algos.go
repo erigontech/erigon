@@ -1108,6 +1108,13 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	return nil
 }
 
+func (hd *HeaderDownload) CleanNextForkState() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.nextForkHash = common.Hash{}
+	hd.nextForkState = nil
+}
+
 func (hd *HeaderDownload) GetNextForkHash() common.Hash {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
