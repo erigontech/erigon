@@ -596,7 +596,7 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash == header.ParentHash || header.ParentHash == cfg.hd.GetNextForkHash() {
+	if currentHeadHash == header.ParentHash || (header.ParentHash == cfg.hd.GetNextForkHash() && cfg.memoryOverlay) {
 		if cfg.memoryOverlay {
 			if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
