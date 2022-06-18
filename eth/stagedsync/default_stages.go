@@ -236,24 +236,12 @@ func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders Sende
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
-			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from tx signatures",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
 			},
 		},
 		{
@@ -262,24 +250,12 @@ func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders Sende
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
-			},
 		},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnHashStateStage(s, tx, hashState, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
 			},
 		},
 		{
