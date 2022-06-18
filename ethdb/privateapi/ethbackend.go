@@ -274,7 +274,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	log.Info("[NewPayload] acquiring lock")
+	log.Debug("[NewPayload] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	log.Debug("[NewPayload] lock acquired")

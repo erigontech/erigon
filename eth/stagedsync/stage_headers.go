@@ -267,7 +267,6 @@ func startHandlingForkChoice(
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		fmt.Println("A23")
 		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
@@ -284,7 +283,6 @@ func startHandlingForkChoice(
 		}
 		return nil
 	}
-	fmt.Println("A6")
 
 	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
 	if bad {
@@ -315,7 +313,6 @@ func startHandlingForkChoice(
 		return err
 	}
 
-	fmt.Println("A4")
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
 		hashToDownload := headerHash
@@ -323,7 +320,6 @@ func startHandlingForkChoice(
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
 		return nil
 	}
-	fmt.Println("A3")
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
@@ -338,7 +334,7 @@ func startHandlingForkChoice(
 		}
 		return err
 	}
-	fmt.Println("A2")
+
 	if headerHash == canonicalHash {
 		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
@@ -361,15 +357,12 @@ func startHandlingForkChoice(
 	}
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
-	fmt.Println("A1")
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
-		fmt.Println("A234")
 		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
 		if err != nil {
 			return err
 		}
-		fmt.Println("A2341")
 		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
 		if err != nil {
 			if requestStatus == engineapi.New {
@@ -377,7 +370,6 @@ func startHandlingForkChoice(
 			}
 			return err
 		}
-		fmt.Println("A23414")
 	}
 
 	if headerHash == cfg.hd.GetNextForkHash() && cfg.memoryOverlay {
@@ -466,7 +458,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
-	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -595,7 +587,7 @@ func verifyAndSaveNewPoSHeader(
 		return
 	}
 
-	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
+	err = headerInserter.FeedHeaderPoS(tx, header, headerHash, !cfg.memoryOverlay)
 	if err != nil {
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -701,7 +693,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
 		}
-		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash(), true)
 	}
 
 	err := cfg.hd.HeadersCollector().Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
