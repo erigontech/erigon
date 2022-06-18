@@ -195,7 +195,7 @@ func StageLoopStep(
 
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil {
+		if header != nil && header.Number.Uint64() != finishProgressBefore {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {

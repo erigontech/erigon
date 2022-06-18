@@ -587,7 +587,7 @@ func verifyAndSaveNewPoSHeader(
 		return
 	}
 
-	err = headerInserter.FeedHeaderPoS(tx, header, headerHash, !cfg.memoryOverlay)
+	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
 	if err != nil {
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -693,7 +693,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
 		}
-		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash(), true)
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
 
 	err := cfg.hd.HeadersCollector().Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
