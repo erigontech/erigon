@@ -98,6 +98,10 @@ func ParseFileType(s string) (FileType, bool) {
 	}
 }
 
+type DomainStats struct {
+	HistoryQueries int
+}
+
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 type Domain struct {
@@ -115,6 +119,7 @@ type Domain struct {
 	files            [NumberOfTypes]*btree.BTree // Static files pertaining to this domain, items are of type `filesItem`
 	prefixLen        int                         // Number of bytes in the keys that can be used for prefix iteration
 	compressVals     bool
+	stats            DomainStats
 }
 
 func NewDomain(
@@ -157,6 +162,12 @@ func NewDomain(
 		}
 	}
 	return d, nil
+}
+
+func (d *Domain) GetAndResetStats() DomainStats {
+	r := d.stats
+	d.stats = DomainStats{}
+	return r
 }
 
 func (d *Domain) scanStateFiles(files []fs.DirEntry) {
@@ -984,6 +995,7 @@ func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	d.stats.HistoryQueries++
 	var search filesItem
 	search.startTxNum = txNum
 	search.endTxNum = txNum
@@ -1008,6 +1020,8 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 				found = true
 				return false
 			}
+		} else if item.endTxNum > txNum {
+			return false
 		}
 		return true
 	})
