@@ -56,6 +56,9 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 		go cs.RecvUploadHeadersMessageLoop(ctx, sentry, nil)
 		go cs.PeerEventsLoop(ctx, sentry, nil)
 	}
+	for i := 0; i < 4; i ++ {
+		go cs.preprocessBodyLoop(ctx)
+	}
 }
 
 func (cs *MultiClient) RecvUploadMessageLoop(
@@ -120,6 +123,22 @@ func (cs *MultiClient) PeerEventsLoop(
 	}
 
 	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg)
+}
+
+func (cs *MultiClient) preprocessBodyLoop(ctx context.Context) {
+	for {
+		select {
+		case <- ctx.Done():
+			return
+		case inreq := <- cs.blockBodyCh:
+			var request eth.BlockRawBodiesPacket66
+			if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+				log.Error("decode BlockBodiesPacket66", "error", err, "rlp", fmt.Sprintf("[%x]", inreq.Data))
+			}
+			txs, uncles := request.BlockRawBodiesPacket.Unpack()
+			cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+		}
+	}
 }
 
 func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
@@ -256,6 +275,7 @@ type MultiClient struct {
 	Engine      consensus.Engine
 	blockReader services.HeaderAndCanonicalReader
 	logPeerInfo bool
+	blockBodyCh chan *proto_sentry.InboundMessage
 }
 
 func NewMultiClient(
@@ -301,6 +321,7 @@ func NewMultiClient(
 		cs.headHeight, cs.headHash, cs.headTd, err = cs.Bd.UpdateFromDb(tx)
 		return err
 	})
+	cs.blockBodyCh = make(chan *proto_sentry.InboundMessage, 4)
 	return cs, err
 }
 
@@ -495,12 +516,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 }
 
 func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
-	var request eth.BlockRawBodiesPacket66
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
-	}
-	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+	cs.blockBodyCh <- inreq
 	return nil
 }
 
