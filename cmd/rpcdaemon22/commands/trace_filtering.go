@@ -433,6 +433,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		cachedReader := state.NewCachedReader(stateReader, stateCache)
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
 		vmConfig := vm.Config{}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		ot.compat = api.compatibility
