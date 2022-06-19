@@ -16,7 +16,7 @@ import (
 )
 
 type mapmutation struct {
-	puts              map[string]map[string][]byte
+	puts              map[string]map[string][]byte // table -> key -> value ie. blocks -> hash -> blockBody
 	whitelistedTables map[string]byte
 	whitelistCache    *lru.Cache
 	db                kv.RwTx
@@ -55,7 +55,7 @@ func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, whitelistedTa
 		quit:              quit,
 		clean:             clean,
 		tmpdir:            tmpdir,
-		whitelistedTables: make(map[string]byte),
+		whitelistedTables: whitelistedTablesMap,
 	}
 }
 
