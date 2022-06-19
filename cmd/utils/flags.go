@@ -365,6 +365,10 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	HTTPTraceFlag = cli.BoolFlag{
+		Name:  "http.trace",
+		Usage: "Trace HTTP requests with INFO level",
+	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",

@@ -70,6 +70,7 @@ type handler struct {
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
 	maxBatchConcurrency uint
+	traceRequests       bool
 }
 
 type callProc struct {
@@ -77,7 +78,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 	h := &handler{
@@ -95,6 +96,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		forbiddenList:  forbiddenList,
 
 		maxBatchConcurrency: maxBatchConcurrency,
+		traceRequests:       traceRequests,
 	}
 
 	if conn.remoteAddr() != "" {
@@ -341,7 +343,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
-		h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		if h.traceRequests {
+			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		} else {
+			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		}
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg, stream)
@@ -354,7 +360,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 					"err", resp.Error.Message)
 			}
 		}
-		h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		if h.traceRequests {
+			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		} else {
+			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		}
 		return resp
 	case msg.hasValidID():
 		return msg.errorResponse(&invalidRequestError{"invalid request"})

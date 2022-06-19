@@ -223,23 +223,6 @@ func checkPath(r *http.Request, path string) bool {
 	return len(r.URL.Path) >= len(path) && r.URL.Path[:len(path)] == path
 }
 
-// validatePrefix checks if 'path' is a valid configuration value for the RPC prefix option.
-func validatePrefix(what, path string) error {
-	if path == "" {
-		return nil
-	}
-	if path[0] != '/' {
-		return fmt.Errorf(`%s RPC path prefix %q does not contain leading "/"`, what, path)
-	}
-	if strings.ContainsAny(path, "?#") {
-		// This is just to avoid confusion. While these would match correctly (i.e. they'd
-		// match if URL-escaped into path), it's not easy to understand for users when
-		// setting that on the command line.
-		return fmt.Errorf("%s RPC path prefix %q contains URL meta-characters", what, path)
-	}
-	return nil
-}
-
 // stop shuts down the HTTP server.
 func (h *httpServer) stop() {
 	h.mu.Lock()
@@ -282,7 +265,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50)
+	srv := rpc.NewServer(50, false /* traceRequests */)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
@@ -315,7 +298,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50)
+	srv := rpc.NewServer(50, false /* traceRequests */)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
