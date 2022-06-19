@@ -416,12 +416,11 @@ func NewInMemoryExecution(
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, blockRetire),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
