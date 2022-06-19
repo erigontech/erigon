@@ -475,10 +475,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	s.evictOldBuilders()
-	// payload IDs start from 1 (0 signifies null)
-	s.payloadId++
-
 	tx2, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
