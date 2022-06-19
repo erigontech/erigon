@@ -552,7 +552,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// Register the backend on the node
-	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
 	return backend, nil
 }

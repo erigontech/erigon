@@ -308,7 +308,7 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolTFlag{
 		Name:  "http",
-		Usage: "HTTP-RPC server (enabled by default). Use --http false to disable it",
+		Usage: "HTTP-RPC server (enabled by default). Use --http=false to disable it",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
@@ -364,6 +364,10 @@ var (
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
+	}
+	HTTPTraceFlag = cli.BoolFlag{
+		Name:  "http.trace",
+		Usage: "Trace HTTP requests with INFO level",
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",

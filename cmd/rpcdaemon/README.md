@@ -474,7 +474,7 @@ Currently batch requests are spawn multiple goroutines and process all sub-reque
 huge batch to other users - added flag `--rpc.batch.concurrency` (default: 2). Increase it to process large batches
 faster.
 
-Known Issue: if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will
+Known Issue: if at least 1 request is "streamable" (has parameter of type *jsoniter.Stream) - then whole batch will
 processed sequentially (on 1 goroutine).
 
 ## For Developers
