@@ -372,7 +372,7 @@ func startHandlingForkChoice(
 		}
 	}
 
-	if headerHash == cfg.hd.GetNextForkHash() && cfg.memoryOverlay {
+	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
 		log.Info("Flushing in-memory state")
 		if err := cfg.hd.FlushNextForkState(tx); err != nil {
 			return err
@@ -597,7 +597,7 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == header.ParentHash {
-		if header.ParentHash == cfg.hd.GetNextForkHash() && cfg.memoryOverlay {
+		if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
 			if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
 				return
