@@ -56,7 +56,7 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 		go cs.RecvUploadHeadersMessageLoop(ctx, sentry, nil)
 		go cs.PeerEventsLoop(ctx, sentry, nil)
 	}
-	for i := 0; i < 4; i ++ {
+	for i := 0; i < 4; i++ {
 		go cs.preprocessBodyLoop(ctx)
 	}
 }
@@ -128,9 +128,9 @@ func (cs *MultiClient) PeerEventsLoop(
 func (cs *MultiClient) preprocessBodyLoop(ctx context.Context) {
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return
-		case inreq := <- cs.blockBodyCh:
+		case inreq := <-cs.blockBodyCh:
 			var request eth.BlockRawBodiesPacket66
 			if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 				log.Error("decode BlockBodiesPacket66", "error", err, "rlp", fmt.Sprintf("[%x]", inreq.Data))
