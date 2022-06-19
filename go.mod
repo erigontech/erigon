@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/RoaringBitmap/roaring v1.2.0
+	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.10.0
 	github.com/VictoriaMetrics/metrics v1.18.1
 	github.com/anacrolix/go-libutp v1.2.0
@@ -51,7 +51,7 @@ require (
 	github.com/torquem-ch/mdbx-go v0.24.3-0.20220617162422-62075faa81e3
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli v1.22.8
+	github.com/urfave/cli v1.22.9
 	github.com/valyala/fastjson v1.6.3
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.9.0

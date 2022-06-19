@@ -659,21 +659,6 @@ type Block struct {
 	ReceivedFrom interface{}
 }
 
-// [deprecated by eth/63]
-// StorageBlock defines the RLP encoding of a Block stored in the
-// state database. The StorageBlock encoding contains fields that
-// would otherwise need to be recomputed.
-type StorageBlock Block
-
-// [deprecated by eth/63]
-// "storage" block encoding. used for database.
-type storageblock struct {
-	Header *Header
-	Txs    []Transaction
-	Uncles []*Header
-	TD     *big.Int
-}
-
 // Copy transaction senders from body into the transactions
 func (b *Body) SendersToTxs(senders []common.Address) {
 	if senders == nil {
@@ -1154,16 +1139,6 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	return nil
-}
-
-// [deprecated by eth/63]
-func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
-	var sb storageblock
-	if err := s.Decode(&sb); err != nil {
-		return err
-	}
-	b.header, b.uncles, b.transactions = sb.Header, sb.Uncles, sb.Txs
 	return nil
 }
 
