@@ -187,6 +187,7 @@ func (m *mapmutation) Has(table string, key []byte) (bool, error) {
 	return false, nil
 }
 
+// puts a table key with a value and if the table is not found then it appends a table
 func (m *mapmutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -244,6 +245,7 @@ func (m *mapmutation) Delete(table string, k, v []byte) error {
 	return m.Put(table, k, nil)
 }
 
+// commits the tables from mapmutation.put to cache
 func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
