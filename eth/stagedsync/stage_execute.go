@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -222,15 +221,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	startTime := time.Now()
 
-	whitelistedTables := []string{kv.Code, kv.ContractCode}
 	var batch ethdb.DbWithPendingMutations
-	// Contract code is unlikely to change too much, so let's keep it cached
-	contractCodeCache, err := lru.New(lruDefaultSize)
-	if err != nil {
-		return err
-	}
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 
 	defer batch.Rollback()
 	// changes are stored through memory buffer
@@ -313,7 +306,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}

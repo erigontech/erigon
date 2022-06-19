@@ -8,7 +8,6 @@ import (
 	"time"
 	"unsafe"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -16,16 +15,14 @@ import (
 )
 
 type mapmutation struct {
-	puts              map[string]map[string][]byte // table -> key -> value ie. blocks -> hash -> blockBody
-	whitelistedTables map[string]byte
-	whitelistCache    *lru.Cache
-	db                kv.RwTx
-	quit              <-chan struct{}
-	clean             func()
-	mu                sync.RWMutex
-	size              int
-	count             uint64
-	tmpdir            string
+	puts   map[string]map[string][]byte // table -> key -> value ie. blocks -> hash -> blockBod
+	db     kv.RwTx
+	quit   <-chan struct{}
+	clean  func()
+	mu     sync.RWMutex
+	size   int
+	count  uint64
+	tmpdir string
 }
 
 // NewBatch - starts in-mem batch
@@ -36,7 +33,7 @@ type mapmutation struct {
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, whitelistedTables []string, whitelistCache *lru.Cache) *mapmutation {
+func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string) *mapmutation {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})
@@ -44,23 +41,13 @@ func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, whitelistedTa
 		quit = ch
 	}
 
-	whitelistedTablesMap := make(map[string]byte)
-	for idx, table := range whitelistedTables {
-		whitelistedTablesMap[table] = byte(idx)
-	}
 	return &mapmutation{
-		db:                tx,
-		puts:              make(map[string]map[string][]byte),
-		whitelistCache:    whitelistCache,
-		quit:              quit,
-		clean:             clean,
-		tmpdir:            tmpdir,
-		whitelistedTables: whitelistedTablesMap,
+		db:     tx,
+		puts:   make(map[string]map[string][]byte),
+		quit:   quit,
+		clean:  clean,
+		tmpdir: tmpdir,
 	}
-}
-
-func (m *mapmutation) makeCacheKey(table string, key []byte) string {
-	return string(append(key, m.whitelistedTables[table]))
 }
 
 func (m *mapmutation) RwKV() kv.RwDB {
@@ -68,11 +55,6 @@ func (m *mapmutation) RwKV() kv.RwDB {
 		return casted.RwKV()
 	}
 	return nil
-}
-
-func (m *mapmutation) isWhitelisted(table string) bool {
-	_, ok := m.whitelistedTables[table]
-	return ok
 }
 
 func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
@@ -85,11 +67,6 @@ func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
 		return value, ok
 	}
 
-	if m.whitelistCache != nil && m.isWhitelisted(table) {
-		if value, ok := m.whitelistCache.Get(m.makeCacheKey(table, key)); ok {
-			return value.([]byte), ok
-		}
-	}
 	return nil, false
 }
 
@@ -145,10 +122,6 @@ func (m *mapmutation) GetOne(table string, key []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if m.whitelistCache != nil && m.isWhitelisted(table) {
-			m.whitelistCache.Add(m.makeCacheKey(table, key), value)
-		}
-
 		return value, nil
 	}
 	return nil, nil
@@ -245,7 +218,6 @@ func (m *mapmutation) Delete(table string, k, v []byte) error {
 	return m.Put(table, k, nil)
 }
 
-// commits the tables from mapmutation.put to cache
 func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -256,10 +228,6 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 		defer collector.Close()
 		for key, value := range bucket {
 			collector.Collect([]byte(key), value)
-			// Update cache on commits
-			if m.isWhitelisted(table) {
-				m.whitelistCache.Add(m.makeCacheKey(table, []byte(key)), value)
-			}
 			count++
 			select {
 			default:
