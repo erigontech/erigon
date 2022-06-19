@@ -396,6 +396,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return block, nil
 	}
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody) error {
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, nil)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.sentriesClient.Hd.BeaconRequestList, backend.sentriesClient.Hd.PayloadStatusCh,
@@ -478,7 +490,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		headCh = make(chan *types.Block, 1)
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, inMemoryExecution)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -894,7 +895,6 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-
 	rawdb.WriteHeader(db, header)
 
 	hi.highest = blockHeight
@@ -1082,6 +1082,42 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headersCollector = collector
+}
+
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, execPayload func(batch kv.RwTx, header *types.Header, body *types.RawBody) error) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if hd.nextForkState == nil {
+		hd.nextForkState = memdb.NewMemoryBatch(tx)
+	} else {
+		hd.nextForkState.UpdateTxn(tx)
+	}
+	hd.nextForkHash = header.Hash()
+	return execPayload(hd.nextForkState, header, body)
+}
+
+func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if err := hd.nextForkState.Flush(tx); err != nil {
+		return err
+	}
+	hd.nextForkHash = common.Hash{}
+	hd.nextForkState = nil
+	return nil
+}
+
+func (hd *HeaderDownload) CleanNextForkState() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.nextForkHash = common.Hash{}
+	hd.nextForkState = nil
+}
+
+func (hd *HeaderDownload) GetNextForkHash() common.Hash {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	return hd.nextForkHash
 }
 
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {

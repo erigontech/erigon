@@ -48,12 +48,14 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	memoryOverlay     bool
 	tmpdir            string
 
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
+	execPayload        ExecutePayloadFunc
 }
 
 func StageHeadersCfg(
@@ -66,11 +68,13 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	memoryOverlay bool,
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	tmpdir string,
-	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
+	dbEventNotifier snapshotsync.DBEventNotifier,
+	execPayload ExecutePayloadFunc) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
@@ -86,6 +90,8 @@ func StageHeadersCfg(
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
+		execPayload:        execPayload,
+		memoryOverlay:      memoryOverlay,
 	}
 }
 
@@ -255,7 +261,9 @@ func startHandlingForkChoice(
 ) error {
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
-
+	if cfg.memoryOverlay {
+		defer cfg.hd.CleanNextForkState()
+	}
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
@@ -328,6 +336,7 @@ func startHandlingForkChoice(
 		}
 		return err
 	}
+
 	if headerHash == canonicalHash {
 		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
@@ -350,7 +359,6 @@ func startHandlingForkChoice(
 	}
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
-
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
 		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
@@ -366,6 +374,15 @@ func startHandlingForkChoice(
 		}
 	}
 
+	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
+		log.Info("Flushing in-memory state")
+		if err := cfg.hd.FlushNextForkState(tx); err != nil {
+			return err
+		}
+		cfg.hd.SetPendingPayloadStatus(headerHash)
+
+		return nil
+	}
 	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 
 	if requestStatus == engineapi.New {
@@ -444,7 +461,6 @@ func handleNewPayload(
 	headerHash := header.Hash()
 
 	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -533,7 +549,7 @@ func handleNewPayload(
 	}
 
 	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
-	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
+	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, payloadMessage.Body, headerInserter)
 	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return err
@@ -553,6 +569,7 @@ func verifyAndSaveNewPoSHeader(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	header *types.Header,
+	body *types.RawBody,
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
 	headerNumber := header.Number.Uint64()
@@ -582,6 +599,19 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == header.ParentHash {
+		if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
+			if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
+				return
+			}
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: headerHash,
+			}
+			success = true
+			return
+		}
+
 		// OK, we're on the canonical chain
 		if requestStatus == engineapi.New {
 			cfg.hd.SetPendingPayloadStatus(headerHash)
