@@ -380,7 +380,7 @@ func NewStagedSync(
 				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
 				notifications.Accumulator,
 				cfg.StateStream,
-				/*stateStream=*/false,
+				/*stateStream=*/ false,
 				tmpdir,
 				blockReader,
 			),
