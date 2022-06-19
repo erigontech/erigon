@@ -308,7 +308,9 @@ func printLogs(db kv.RoDB, tx kv.RwTx, timings []Timing) error {
 		}
 		bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
 		amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
-		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
+		if db != nil {
+			bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
+		}
 		log.Info("Tables", bucketSizes...)
 	}
 	tx.CollectMetrics()
