@@ -308,7 +308,7 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolTFlag{
 		Name:  "http",
-		Usage: "HTTP-RPC server (enabled by default). Use --http false to disable it",
+		Usage: "HTTP-RPC server (enabled by default). Use --http=false to disable it",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
