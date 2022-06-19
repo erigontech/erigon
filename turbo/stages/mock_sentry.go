@@ -336,7 +336,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				&vm.Config{},
 				mock.Notifications.Accumulator,
 				cfg.StateStream,
-				false,
+				/*stateStream=*/ false,
 				mock.tmpdir,
 				blockReader,
 			),
