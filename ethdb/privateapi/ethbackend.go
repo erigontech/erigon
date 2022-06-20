@@ -322,6 +322,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, req.BlockNumber-1)
 	if err != nil {
 		return nil, err
@@ -437,6 +438,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
+	defer tx1.Rollback()
 	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
 	tx1.Rollback()
 	if err != nil {
@@ -479,6 +481,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
+	defer tx2.Rollback()
 	headHash := rawdb.ReadHeadBlockHash(tx2)
 	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)

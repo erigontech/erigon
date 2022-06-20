@@ -18,14 +18,12 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mmap_span"
-	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
 

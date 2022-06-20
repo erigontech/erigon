@@ -365,6 +365,10 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	HTTPTraceFlag = cli.BoolFlag{
+		Name:  "http.trace",
+		Usage: "Trace HTTP requests with INFO level",
+	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
@@ -394,6 +398,10 @@ var (
 	TevmFlag = cli.BoolFlag{
 		Name:  "experimental.tevm",
 		Usage: "Enables Transpiled EVM experiment",
+	}
+	MemoryOverlayFlag = cli.BoolFlag{
+		Name:  "experimental.overlay",
+		Usage: "Enables In-Memory Overlay for PoS",
 	}
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
@@ -1375,6 +1383,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
+	cfg.MemoryOverlay = ctx.GlobalBool(MemoryOverlayFlag.Name)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {

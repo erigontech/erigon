@@ -212,6 +212,8 @@ type Config struct {
 
 	StateStream bool
 
+	MemoryOverlay bool
+
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
 
