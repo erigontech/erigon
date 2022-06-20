@@ -309,7 +309,7 @@ func startHandlingForkChoice(
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
 		hashToDownload := headerHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		schedulePoSDownload(requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -491,7 +491,7 @@ func handleNewPayload(
 		hashToDownload := header.ParentHash
 		heightToDownload := headerNumber - 1
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
+		schedulePoSDownload(requestId, hashToDownload, heightToDownload, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -609,7 +609,6 @@ func verifyAndSaveNewPoSHeader(
 }
 
 func schedulePoSDownload(
-	requestStatus engineapi.RequestStatus,
 	requestId int,
 	hashToDownload common.Hash,
 	heightToDownload uint64,
