@@ -319,7 +319,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(api._agg)
+	stateReader := state.NewHistoryReader22(api._agg, nil /* ReadIndices */)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := uint64(it.Next())
