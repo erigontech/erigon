@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -50,7 +51,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
+		headBlockHash, err := StageLoopStep(ctx, db, sync, hd, height, notifications, initialCycle, updateHead, nil)
 
 		pendingPayloadStatus := hd.GetPendingPayloadStatus()
 		if pendingPayloadStatus != (common.Hash{}) {
@@ -105,6 +106,7 @@ func StageLoopStep(
 	ctx context.Context,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
+	hd *headerdownload.HeaderDownload,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
@@ -132,6 +134,15 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 
+	var interrupt engineapi.Interrupt
+	var requestWithStatus *engineapi.RequestWithStatus
+	var requestId int
+	if hd.POSSync() {
+		log.Info("Waiting for Beacon Chain...")
+		onlyNewRequest := hd.PosStatus() == headerdownload.Syncing
+		interrupt, requestId, requestWithStatus = hd.BeaconRequestList.WaitForRequest(onlyNewRequest)
+	}
+
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+8096 && highestSeenHeader < finishProgressBefore+8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
@@ -147,7 +158,7 @@ func StageLoopStep(
 		notifications.Accumulator.Reset(tx.ViewID())
 	}
 
-	err = sync.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle, interrupt, requestWithStatus, requestId)
 	if err != nil {
 		return headBlockHash, err
 	}
@@ -228,7 +239,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	miningBatch := memdb.NewMemoryBatch(tx)
 	defer miningBatch.Rollback()
 
-	if err = mining.Run(nil, miningBatch, false); err != nil {
+	if err = mining.Run(nil, miningBatch, false, 0, nil, 0); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -303,7 +314,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	}
 
 	// Run state sync
-	if err = stateSync.Run(nil, batch, false); err != nil {
+	if err = stateSync.Run(nil, batch, false, 0, nil, 0); err != nil {
 		return err
 	}
 	return nil

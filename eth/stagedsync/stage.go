@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -19,7 +20,15 @@ type ExecutePayloadFunc func(batch kv.RwTx, header *types.Header, body *types.Ra
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx) error
+type ExecFunc func(
+	firstCycle bool,
+	badBlockUnwind bool,
+	s *StageState,
+	unwinder Unwinder,
+	tx kv.RwTx,
+	interrupt engineapi.Interrupt,
+	requestWithStatus *engineapi.RequestWithStatus,
+	requestId int) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.

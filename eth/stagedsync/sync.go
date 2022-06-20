@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -189,7 +190,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageS
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -232,7 +233,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind, interrupt, requestWithStatus, requestId); err != nil {
 			return err
 		}
 
@@ -317,14 +318,20 @@ func printLogs(db kv.RoDB, tx kv.RwTx, timings []Timing) error {
 	return nil
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
+func (s *Sync) runStage(
+	stage *Stage, db kv.RwDB,
+	tx kv.RwTx, firstCycle bool,
+	badBlockUnwind bool,
+	interrupt engineapi.Interrupt,
+	requestWithStatus *engineapi.RequestWithStatus,
+	requestId int) (err error) {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx); err != nil {
+	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, interrupt, requestWithStatus, requestId); err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 

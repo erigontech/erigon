@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -36,7 +37,7 @@ func MiningStages(
 		{
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from tx pool",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done())
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
@@ -45,7 +46,7 @@ func MiningStages(
 		{
 			ID:          stages.MiningExecution,
 			Description: "Mining: construct new block from tx pool",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done())
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
@@ -54,7 +55,7 @@ func MiningStages(
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 				return SpawnHashStateStage(s, tx, hashStateCfg, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
@@ -63,7 +64,7 @@ func MiningStages(
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 				stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
 				if err != nil {
 					return err
@@ -77,7 +78,7 @@ func MiningStages(
 		{
 			ID:          stages.MiningFinish,
 			Description: "Mining: create and propagate valid block",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, interrupt engineapi.Interrupt, requestWithStatus *engineapi.RequestWithStatus, requestId int) error {
 				return SpawnMiningFinishStage(s, tx, finish, ctx.Done())
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },

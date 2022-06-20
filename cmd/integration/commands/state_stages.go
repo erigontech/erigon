@@ -307,7 +307,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx) error {
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, 0, nil, 0) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 					quit)
@@ -331,7 +331,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if err := miningStages.Run(db, tx, false); err != nil {
+			if err := miningStages.Run(db, tx, false, 0, nil, 0); err != nil {
 				return err
 			}
 			tx.Rollback()

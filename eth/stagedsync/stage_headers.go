@@ -103,6 +103,9 @@ func SpawnStageHeaders(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	interrupt engineapi.Interrupt,
+	requestWithStatus *engineapi.RequestWithStatus,
+	requestId int,
 ) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -129,13 +132,18 @@ func SpawnStageHeaders(
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
+	// if we already started syncing POS then we dont need to check transition
+	isTrans := cfg.hd.PosStatus() == 1
+	if !isTrans {
+		var err error
+		isTrans, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		if err != nil {
+			return err
+		}
 	}
 
 	if isTrans {
-		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx, interrupt, requestWithStatus, requestId)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -150,12 +158,10 @@ func HeadersPOS(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	useExternalTx bool,
+	interrupt engineapi.Interrupt,
+	requestWithStatus *engineapi.RequestWithStatus,
+	requestId int,
 ) error {
-	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
-
-	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
-
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
