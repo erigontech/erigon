@@ -206,7 +206,6 @@ func safeAndFinalizedBlocksAreCanonical(
 	s *StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	sendErrResponse bool,
 ) (bool, error) {
 	if forkChoice.SafeBlockHash != (common.Hash{}) {
 		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
@@ -217,11 +216,6 @@ func safeAndFinalizedBlocksAreCanonical(
 			rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
 		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-			if sendErrResponse {
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					CriticalError: &privateapi.InvalidForkchoiceStateErr,
-				}
-			}
 			return false, nil
 		}
 	}
@@ -235,11 +229,6 @@ func safeAndFinalizedBlocksAreCanonical(
 			rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
 		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-			if sendErrResponse {
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					CriticalError: &privateapi.InvalidForkchoiceStateErr,
-				}
-			}
 			return false, nil
 		}
 	}
@@ -269,7 +258,7 @@ func startHandlingForkChoice(
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			if requestStatus == engineapi.New {
@@ -277,10 +266,16 @@ func startHandlingForkChoice(
 			}
 			return err
 		}
-		if canonical && requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+		if requestStatus == engineapi.New {
+			if canonical {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					Status:          remote.EngineStatus_VALID,
+					LatestValidHash: currentHeadHash,
+				}
+			} else {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
 			}
 		}
 		return nil
@@ -341,7 +336,7 @@ func startHandlingForkChoice(
 		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			if requestStatus == engineapi.New {
@@ -349,10 +344,16 @@ func startHandlingForkChoice(
 			}
 			return err
 		}
-		if canonical && requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
+		if requestStatus == engineapi.New {
+			if canonical {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					Status:          remote.EngineStatus_VALID,
+					LatestValidHash: currentHeadHash,
+				}
+			} else {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
 			}
 		}
 		return nil
@@ -423,13 +424,9 @@ func finishHandlingForkChoice(
 	}
 	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
-	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
-	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
+	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
 	if err != nil {
 		return err
-	}
-	if !canonical {
-		cfg.hd.ClearPendingPayloadStatus()
 	}
 
 	if err := s.Update(tx, headHeight); err != nil {
@@ -440,6 +437,15 @@ func finishHandlingForkChoice(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+	}
+
+	if !canonical {
+		if cfg.hd.GetPendingPayloadStatus() != (common.Hash{}) {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: &privateapi.InvalidForkchoiceStateErr,
+			}
+		}
+		cfg.hd.ClearPendingPayloadStatus()
 	}
 
 	cfg.hd.ClearUnsettledForkChoice()
