@@ -200,13 +200,16 @@ func HeadersPOS(
 		return err
 	}
 
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+
 	if response != nil && status == engineapi.New {
 		cfg.hd.PayloadStatusCh <- *response
 	}
 
-	if !useExternalTx {
-		return tx.Commit()
-	}
 	return nil
 }
 
