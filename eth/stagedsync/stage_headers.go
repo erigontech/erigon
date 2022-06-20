@@ -190,7 +190,7 @@ func HeadersPOS(
 	if forkChoiceInsteadOfNewPayload {
 		response, err = startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader)
 	} else {
-		err = handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter)
+		response, err = handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
 	if err != nil {
@@ -442,7 +442,7 @@ func handleNewPayload(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
-) error {
+) (*privateapi.PayloadStatus, error) {
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -454,19 +454,16 @@ func handleNewPayload(
 	if err != nil {
 		log.Warn(fmt.Sprintf("[%s] New payload err", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		return err
+		return nil, err
 	}
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
 		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header %d", s.LogPrefix(), headerNumber))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
-			}
-		}
-		return nil
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: headerHash,
+		}, nil
 	}
 
 	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
@@ -476,20 +473,16 @@ func handleNewPayload(
 	if bad {
 		log.Info(fmt.Sprintf("[%s] Previously known bad block", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: lastValidHash,
-			}
-		} else {
-			cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
-		}
-		return nil
+		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: lastValidHash,
+		}, nil
 	}
 
 	parent, err := cfg.blockReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
@@ -497,49 +490,38 @@ func handleNewPayload(
 		heightToDownload := headerNumber - 1
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-		}
-		return nil
+		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	for _, tx := range payloadMessage.Body.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(tx) {
-			if requestStatus == engineapi.New {
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					Status:          remote.EngineStatus_INVALID,
-					LatestValidHash: header.ParentHash,
-					ValidationError: errors.New("typed txn marshalled as RLP string"),
-				}
-			} else {
-				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-			}
-			return nil
+			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+			return &privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: header.ParentHash,
+				ValidationError: errors.New("typed txn marshalled as RLP string"),
+			}, nil
 		}
 	}
 
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: header.ParentHash,
-				ValidationError: err,
-			}
-		} else {
-			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-		}
-		return nil
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: header.ParentHash,
+			ValidationError: err,
+		}, nil
 	}
 
 	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
-	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, payloadMessage.Body, headerInserter)
+	response, success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, payloadMessage.Body, headerInserter)
 	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
-		return err
+		return response, err
 	}
 
 	if cfg.bodyDownload != nil {
@@ -547,7 +529,7 @@ func handleNewPayload(
 		cfg.bodyDownload.AddToPrefetch(block)
 	}
 
-	return nil
+	return response, nil
 }
 
 func verifyAndSaveNewPoSHeader(
@@ -558,77 +540,70 @@ func verifyAndSaveNewPoSHeader(
 	header *types.Header,
 	body *types.RawBody,
 	headerInserter *headerdownload.HeaderInserter,
-) (success bool, err error) {
+) (response *privateapi.PayloadStatus, success bool, err error) {
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: header.ParentHash,
-				ValidationError: verificationErr,
-			}
-		} else {
-			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-		}
-		return false, nil
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: header.ParentHash,
+			ValidationError: verificationErr,
+		}, false, nil
 	}
 
 	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash == header.ParentHash {
-		if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-			if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
-				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}
-				return false, nil
-			}
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
-			}
-			return true, nil
-		}
-
-		// OK, we're on the canonical chain
-		if requestStatus == engineapi.New {
-			cfg.hd.SetPendingPayloadStatus(headerHash)
-		}
-
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		// Extend canonical chain by the new header
-		err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
-		if err != nil {
-			return false, err
-		}
-
-		err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-		if err != nil {
-			return false, err
-		}
-
-		err = s.Update(tx, headerNumber)
-		if err != nil {
-			return false, err
-		}
-	} else {
+	if currentHeadHash != header.ParentHash {
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
-		}
+
 		// No canonization, HeadHeaderHash & StageProgress are not updated
+		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
-	return true, nil
+	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
+		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
+			return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
+		}
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: headerHash,
+		}, true, nil
+	}
+
+	// OK, we're on the canonical chain
+	if requestStatus == engineapi.New {
+		cfg.hd.SetPendingPayloadStatus(headerHash)
+	}
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	// Extend canonical chain by the new header
+	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
+	if err != nil {
+		return nil, false, err
+	}
+
+	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
+	if err != nil {
+		return nil, false, err
+	}
+
+	err = s.Update(tx, headerNumber)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return nil, true, nil
 }
 
 func schedulePoSDownload(
