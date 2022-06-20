@@ -271,12 +271,6 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 		}
 		return newCfg, storedBlock, nil
 	}
-	// Special case: don't change the existing config of a non-mainnet chain if no new
-	// config is supplied. These chains would get AllProtocolChanges (and a compatibility error)
-	// if we just continued here.
-	if genesis == nil && storedHash != params.MainnetGenesisHash && overrideMergeNetsplitBlock == nil && overrideTerminalTotalDifficulty == nil {
-		return storedCfg, storedBlock, nil
-	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
