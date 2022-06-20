@@ -42,4 +42,5 @@ type HttpCfg struct {
 	GRPCHealthCheckEnabled  bool
 	StarknetGRPCAddress     string
 	JWTSecretPath           string // Engine API Authentication
+	TraceRequests           bool   // Always trace requests in INFO level
 }

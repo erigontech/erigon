@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -38,8 +37,7 @@ import (
 )
 
 const (
-	logInterval    = 20 * time.Second
-	lruDefaultSize = 1_000_000 // 56 MB
+	logInterval = 20 * time.Second
 )
 
 type HasChangeSetWriter interface {
@@ -56,6 +54,7 @@ type ExecuteBlockCfg struct {
 	chainConfig   *params.ChainConfig
 	engine        consensus.Engine
 	vmConfig      *vm.Config
+	badBlockHalt  bool
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
@@ -72,6 +71,7 @@ func StageExecuteBlocksCfg(
 	vmConfig *vm.Config,
 	accumulator *shards.Accumulator,
 	stateStream bool,
+	badBlockHalt bool,
 	tmpdir string,
 	blockReader services.FullBlockReader,
 ) ExecuteBlockCfg {
@@ -86,6 +86,7 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		badBlockHalt:  badBlockHalt,
 		blockReader:   blockReader,
 	}
 }
@@ -222,15 +223,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	startTime := time.Now()
 
-	whitelistedTables := []string{kv.Code, kv.ContractCode}
 	var batch ethdb.DbWithPendingMutations
-	// Contract code is unlikely to change too much, so let's keep it cached
-	contractCodeCache, err := lru.New(lruDefaultSize)
-	if err != nil {
-		return err
-	}
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 
 	defer batch.Rollback()
 	// changes are stored through memory buffer
@@ -288,6 +283,9 @@ Loop:
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
+			if cfg.badBlockHalt {
+				return err
+			}
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
@@ -313,7 +311,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}

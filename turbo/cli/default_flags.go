@@ -58,6 +58,7 @@ var DefaultFlags = []cli.Flag{
 	utils.HTTPApiFlag,
 	utils.WSEnabledFlag,
 	utils.WsCompressionFlag,
+	utils.HTTPTraceFlag,
 	utils.StateCacheFlag,
 	utils.RpcBatchConcurrencyFlag,
 	utils.DBReadConcurrencyFlag,
@@ -66,6 +67,7 @@ var DefaultFlags = []cli.Flag{
 	utils.RpcGasCapFlag,
 	utils.StarknetGrpcAddressFlag,
 	utils.TevmFlag,
+	utils.MemoryOverlayFlag,
 	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,
 

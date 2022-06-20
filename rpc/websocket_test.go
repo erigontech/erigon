@@ -163,7 +163,7 @@ func TestClientWebsocketPing(t *testing.T) {
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
 	var (
-		srv     = NewServer(50)
+		srv     = NewServer(50, false /* traceRequests */)
 		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)

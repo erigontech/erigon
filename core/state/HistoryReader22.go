@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -21,17 +22,29 @@ func bytesToUint64(buf []byte) (x uint64) {
 // Implements StateReader and StateWriter
 type HistoryReader22 struct {
 	a     *libstate.Aggregator
+	ri    *libstate.ReadIndices
 	txNum uint64
 	trace bool
 }
 
-func NewHistoryReader22(a *libstate.Aggregator) *HistoryReader22 {
-	return &HistoryReader22{a: a}
+func NewHistoryReader22(a *libstate.Aggregator, ri *libstate.ReadIndices) *HistoryReader22 {
+	return &HistoryReader22{a: a, ri: ri}
+}
+
+func (hr *HistoryReader22) SetTx(tx kv.RwTx) {
+	hr.ri.SetTx(tx)
 }
 
 func (hr *HistoryReader22) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
 	hr.a.SetTxNum(txNum)
+	if hr.ri != nil {
+		hr.ri.SetTxNum(txNum)
+	}
+}
+
+func (hr *HistoryReader22) FinishTx() error {
+	return hr.ri.FinishTx()
 }
 
 func (hr *HistoryReader22) SetTrace(trace bool) {
@@ -39,6 +52,11 @@ func (hr *HistoryReader22) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountData(address.Bytes()); err != nil {
+			return nil, err
+		}
+	}
 	enc, err := hr.a.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
@@ -85,6 +103,11 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountStorage(address.Bytes(), key.Bytes()); err != nil {
+			return nil, err
+		}
+	}
 	enc, err := hr.a.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
@@ -103,6 +126,9 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	if err := hr.ri.ReadAccountCode(address.Bytes()); err != nil {
+		return nil, err
+	}
 	enc, err := hr.a.ReadAccountCodeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
@@ -114,6 +140,11 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 }
 
 func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountCodeSize(address.Bytes()); err != nil {
+			return 0, err
+		}
+	}
 	size, err := hr.a.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return 0, err

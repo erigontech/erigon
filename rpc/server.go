@@ -49,11 +49,12 @@ type Server struct {
 	codecs          mapset.Set
 
 	batchConcurrency uint
+	traceRequests    bool // Whether to print requests at INFO level
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint) *Server {
-	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency}
+func NewServer(batchConcurrency uint, traceRequests bool) *Server {
+	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency, traceRequests: traceRequests}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -105,7 +106,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
