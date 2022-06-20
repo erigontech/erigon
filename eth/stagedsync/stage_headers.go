@@ -120,29 +120,12 @@ func SpawnStageHeaders(
 		return err
 	}
 
-	var blockNumber uint64
-	if s == nil {
-		blockNumber = 0
-	} else {
-		blockNumber = s.BlockNumber
-	}
-
 	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
 	if unsettledForkChoice != nil { // some work left to do after unwind
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	// if we already started syncing POS then we dont need to check transition
-	isTrans := cfg.hd.PosStatus() == 1
-	if !isTrans {
-		var err error
-		isTrans, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-		if err != nil {
-			return err
-		}
-	}
-
-	if isTrans {
+	if cfg.hd.POSSync() {
 		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx, interrupt, requestWithStatus, requestId)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
@@ -162,7 +145,6 @@ func HeadersPOS(
 	requestWithStatus *engineapi.RequestWithStatus,
 	requestId int,
 ) error {
-	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 

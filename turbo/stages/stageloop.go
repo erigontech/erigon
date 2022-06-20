@@ -133,16 +133,6 @@ func StageLoopStep(
 	}); err != nil {
 		return headBlockHash, err
 	}
-
-	var interrupt engineapi.Interrupt
-	var requestWithStatus *engineapi.RequestWithStatus
-	var requestId int
-	if hd.POSSync() {
-		log.Info("Waiting for Beacon Chain...")
-		onlyNewRequest := hd.PosStatus() == headerdownload.Syncing
-		interrupt, requestId, requestWithStatus = hd.BeaconRequestList.WaitForRequest(onlyNewRequest)
-	}
-
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+8096 && highestSeenHeader < finishProgressBefore+8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
@@ -152,6 +142,39 @@ func StageLoopStep(
 			return headBlockHash, err
 		}
 		defer tx.Rollback()
+	}
+
+	// if we havent been on POS yet then we check wether we are on it now
+	if !hd.POSSync() {
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		header := rawdb.ReadHeaderByNumber(tx, highestSeenHeader)
+		chainConfig, err := rawdb.ReadChainConfig(tx, header.Hash())
+		if err != nil {
+			return header.Hash(), err
+		}
+		isTrans, err := rawdb.Transitioned(tx, highestSeenHeader, chainConfig.TerminalTotalDifficulty)
+		if err != nil {
+			return header.Hash(), err
+		}
+
+		if isTrans {
+			hd.SetPOSSync(true)
+		}
+
+		tx.Rollback()
+	}
+
+	var interrupt engineapi.Interrupt
+	var requestWithStatus *engineapi.RequestWithStatus
+	var requestId int
+	if hd.POSSync() {
+		log.Info("Waiting for Beacon Chain...")
+		onlyNewRequest := hd.PosStatus() == headerdownload.Syncing
+		interrupt, requestId, requestWithStatus = hd.BeaconRequestList.WaitForRequest(onlyNewRequest)
 	}
 
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
