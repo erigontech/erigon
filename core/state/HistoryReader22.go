@@ -38,7 +38,9 @@ func (hr *HistoryReader22) SetTx(tx kv.RwTx) {
 func (hr *HistoryReader22) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
 	hr.a.SetTxNum(txNum)
-	hr.ri.SetTxNum(txNum)
+	if hr.ri != nil {
+		hr.ri.SetTxNum(txNum)
+	}
 }
 
 func (hr *HistoryReader22) FinishTx() error {
@@ -50,8 +52,10 @@ func (hr *HistoryReader22) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	if err := hr.ri.ReadAccountData(address.Bytes()); err != nil {
-		return nil, err
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountData(address.Bytes()); err != nil {
+			return nil, err
+		}
 	}
 	enc, err := hr.a.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
@@ -99,8 +103,10 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	if err := hr.ri.ReadAccountStorage(address.Bytes(), key.Bytes()); err != nil {
-		return nil, err
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountStorage(address.Bytes(), key.Bytes()); err != nil {
+			return nil, err
+		}
 	}
 	enc, err := hr.a.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
@@ -134,8 +140,10 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 }
 
 func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	if err := hr.ri.ReadAccountCodeSize(address.Bytes()); err != nil {
-		return 0, err
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountCodeSize(address.Bytes()); err != nil {
+			return 0, err
+		}
 	}
 	size, err := hr.a.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
