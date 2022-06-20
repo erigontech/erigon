@@ -1004,6 +1004,11 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 	var foundStartTxNum uint64
 	var found bool
 	var anyItem bool // Whether any filesItem has been looked at in the loop below
+	var topState *filesItem
+	d.files[Values].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
+		topState = i.(*filesItem)
+		return false
+	})
 	d.files[EfHistory].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
 		item := i.(*filesItem)
 		anyItem = true
@@ -1019,20 +1024,15 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 				foundStartTxNum = item.startTxNum
 				found = true
 				return false
+			} else if item.endTxNum > txNum && item.endTxNum >= topState.endTxNum {
+				return false
 			}
-		} else if item.endTxNum > txNum {
-			return false
 		}
 		return true
 	})
 	if !found {
 		if anyItem {
 			// If there were no changes but there were history files, the value can be obtained from value files
-			var topState *filesItem
-			d.files[Values].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
-				topState = i.(*filesItem)
-				return false
-			})
 			var val []byte
 			d.files[Values].DescendLessOrEqual(topState, func(i btree.Item) bool {
 				item := i.(*filesItem)

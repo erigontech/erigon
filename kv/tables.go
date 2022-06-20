@@ -360,6 +360,13 @@ const (
 	TracesFromIdx  = "TracesFromIdx"
 	TracesToKeys   = "TracesToKeys"
 	TracesToIdx    = "TracesToIdx"
+
+	RAccountKeys = "RAccountKeys"
+	RAccountIdx  = "RAccountIdx"
+	RStorageKeys = "RStorageKeys"
+	RStorageIdx  = "RStorageIdx"
+	RCodeKeys    = "RCodeKeys"
+	RCodeIdx     = "RCodeIdx"
 )
 
 // Keys
@@ -477,6 +484,13 @@ var ChaindataTables = []string{
 	TracesFromIdx,
 	TracesToKeys,
 	TracesToIdx,
+
+	RAccountKeys,
+	RAccountIdx,
+	RStorageKeys,
+	RStorageIdx,
+	RCodeKeys,
+	RCodeIdx,
 }
 
 const (
@@ -570,6 +584,12 @@ var ChaindataTablesCfg = TableCfg{
 	TracesFromIdx:      {Flags: DupSort},
 	TracesToKeys:       {Flags: DupSort},
 	TracesToIdx:        {Flags: DupSort},
+	RAccountKeys:       {Flags: DupSort},
+	RAccountIdx:        {Flags: DupSort},
+	RStorageKeys:       {Flags: DupSort},
+	RStorageIdx:        {Flags: DupSort},
+	RCodeKeys:          {Flags: DupSort},
+	RCodeIdx:           {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

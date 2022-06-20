@@ -168,9 +168,7 @@ func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggC
 	closeColl := true
 	defer func() {
 		if closeColl {
-			ac.accounts.Close()
-			ac.storage.Close()
-			ac.code.Close()
+			ac.Close()
 		}
 	}()
 	if ac.accounts, err = a.accounts.collate(step, txFrom, txTo, roTx); err != nil {
@@ -223,13 +221,7 @@ func (a *Aggregator) buildFiles(step uint64, collation AggCollation) (AggStaticF
 	closeFiles := true
 	defer func() {
 		if closeFiles {
-			sf.accounts.Close()
-			sf.storage.Close()
-			sf.code.Close()
-			sf.logAddrs.Close()
-			sf.logTopics.Close()
-			sf.tracesFrom.Close()
-			sf.tracesTo.Close()
+			sf.Close()
 		}
 	}()
 	var wg sync.WaitGroup
@@ -418,15 +410,15 @@ func (sf SelectedStaticFiles) Close() {
 				}
 			}
 		}
-		for _, group := range [][]*filesItem{sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
-			for _, item := range group {
-				if item != nil {
-					if item.decompressor != nil {
-						item.decompressor.Close()
-					}
-					if item.decompressor != nil {
-						item.index.Close()
-					}
+	}
+	for _, group := range [][]*filesItem{sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
+		for _, item := range group {
+			if item != nil {
+				if item.decompressor != nil {
+					item.decompressor.Close()
+				}
+				if item.decompressor != nil {
+					item.index.Close()
 				}
 			}
 		}
@@ -481,14 +473,14 @@ func (mf MergedFiles) Close() {
 				}
 			}
 		}
-		for _, item := range []*filesItem{mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.decompressor != nil {
-					item.index.Close()
-				}
+	}
+	for _, item := range []*filesItem{mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
+		if item != nil {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			if item.decompressor != nil {
+				item.index.Close()
 			}
 		}
 	}
