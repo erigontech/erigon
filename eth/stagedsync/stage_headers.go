@@ -336,7 +336,7 @@ func startHandlingForkChoice(
 		if canonical {
 			return &privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: headerHash,
 			}, nil
 		} else {
 			return &privateapi.PayloadStatus{
