@@ -599,7 +599,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "petersburgBlock", block: c.PetersburgBlock},
 		{name: "istanbulBlock", block: c.IstanbulBlock},
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
-		{name: "eulerBlock", block: c.EulerBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
 		{name: "londonBlock", block: c.LondonBlock},
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
@@ -675,9 +674,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.GrayGlacierBlock, newcfg.GrayGlacierBlock, head) {
 		return newCompatError("Gray Glacier fork block", c.GrayGlacierBlock, newcfg.GrayGlacierBlock)
-	}
-	if isForkIncompatible(c.EulerBlock, newcfg.EulerBlock, head) {
-		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
 	}
 	return nil
 }
