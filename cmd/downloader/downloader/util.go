@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -352,6 +353,11 @@ var ErrSkip = fmt.Errorf("skip")
 func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
+
+	tmpSnapDir := filepath.Join(snapDir, "tmp") // snapshots are in sub-dir "tmp", if not fully downloaded
+	if !common.FileExist(tmpSnapDir) {
+		snapDir = tmpSnapDir
+	}
 	files, err := AllTorrentPaths(snapDir)
 	if err != nil {
 		return err
