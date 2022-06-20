@@ -9,7 +9,7 @@ DOCKER_PID ?= 1000
 DOCKER_TAG ?= thorax/erigon:latest
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
