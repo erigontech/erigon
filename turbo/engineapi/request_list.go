@@ -38,8 +38,7 @@ type RequestWithStatus struct {
 type Interrupt int
 
 const ( // Interrupt values
-	None  = iota
-	Yield // e.g. yield RW transaction to block building
+	None = iota
 	Synced
 	Stopping
 )
