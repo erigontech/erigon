@@ -369,13 +369,12 @@ func startHandlingForkChoice(
 
 	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 
-	var response *privateapi.PayloadStatus
 	if requestStatus == engineapi.New {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
-			response = &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 	}
 
@@ -383,7 +382,7 @@ func startHandlingForkChoice(
 
 	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
-	return response, nil
+	return nil, nil
 }
 
 func finishHandlingForkChoice(
