@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/rlp"
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
@@ -54,6 +56,17 @@ const (
 // statsReportLimit is the time limit during import and export after which we
 // always print out progress. This avoids the user wondering what's going on.
 const statsReportLimit = 8 * time.Second
+
+type ExecutionResultNew struct {
+	// StateRoot   common.Hash    `json:"stateRoot"` I think we don't need this
+	TxRoot            common.Hash    `json:"txRoot"`
+	ReceiptRoot       common.Hash    `json:"receiptRoot"`
+	LogsHash          common.Hash    `json:"logsHash"`
+	Bloom             types.Bloom    `json:"logsBloom"        gencodec:"required"`
+	Receipts          types.Receipts `json:"receipts"`
+	Rejected          []*rejectedTx  `json:"rejected,omitempty"`
+	ReceiptForStorage *types.ReceiptForStorage
+}
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
@@ -218,11 +231,16 @@ func ExecuteBlockEphemerallyForBSC(
 	return receipts, nil
 }
 
+type rejectedTx struct {
+	Index int    `json:"index"`
+	Err   string `json:"error"`
+}
+
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
-	vmConfig *vm.Config, // configuration options for the interpreter
+	vmConfig *vm.Config,
 	blockHashFunc func(n uint64) common.Hash,
 	engine consensus.Engine,
 	block *types.Block,
@@ -231,7 +249,8 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-) (types.Receipts, *types.ReceiptForStorage, error) {
+) (*ExecutionResultNew, error) {
+
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
@@ -241,9 +260,14 @@ func ExecuteBlockEphemerally(
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
 
+	var (
+		rejectedTxs []*rejectedTx
+		includedTxs types.Transactions
+	)
+
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -277,7 +301,9 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
+		} else {
+			includedTxs = append(includedTxs, tx)
 		}
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
@@ -287,23 +313,23 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.ReceiptHash() {
-			return nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	if *usedGas != header.GasUsed {
-		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
 		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
-			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
 		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -330,7 +356,26 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	return receipts, stateSyncReceipt, nil
+	execRs := &ExecutionResultNew{
+		// StateRoot:   root,
+		TxRoot:            types.DeriveSha(includedTxs),
+		ReceiptRoot:       types.DeriveSha(receipts),
+		Bloom:             types.CreateBloom(receipts),
+		LogsHash:          rlpHash(ibs.Logs()),
+		Receipts:          receipts,
+		Rejected:          rejectedTxs,
+		ReceiptForStorage: stateSyncReceipt,
+	}
+
+	// return receipts, stateSyncReceipt, execRs, nil
+	return execRs, nil
+}
+
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewLegacyKeccak256()
+	rlp.Encode(hw, x) //nolint:errcheck
+	hw.Sum(h[:0])
+	return h
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
