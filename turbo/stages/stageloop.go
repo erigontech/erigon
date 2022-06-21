@@ -235,7 +235,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	// Setup
 	height := header.Number.Uint64()
 	hash := header.Hash()
@@ -246,6 +246,29 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	// Construct side fork if we have one
+	if unwindPoint > 0 {
+		// Run it through the unwind
+
+		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+		for i := range headersChain {
+			currentHeader := headersChain[i]
+			currentBody := bodiesChain[i]
+			currentHeight := headersChain[i].Number.Uint64()
+			currentHash := headersChain[i].Hash()
+			// Prepare memory state for block execution
+			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+				return err
+			}
+			rawdb.WriteHeader(batch, currentHeader)
+			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
+				return err
+			}
+			if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+				return err
+			}
+		}
+	}
 	// Prepare memory state for block execution
 	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
 		return err
@@ -419,7 +442,34 @@ func NewInMemoryExecution(
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
-			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
+			stagedsync.StageHeadersCfg(
+				db,
+				controlServer.Hd,
+				controlServer.Bd,
+				*controlServer.ChainConfig,
+				controlServer.SendHeaderRequest,
+				controlServer.PropagateNewBlockHashes,
+				controlServer.Penalize,
+				cfg.BatchSize,
+				p2pCfg.NoDiscovery,
+				cfg.MemoryOverlay,
+				snapshots,
+				snapshotDownloader,
+				blockReader,
+				tmpdir,
+				notifications.Events,
+				nil), stagedsync.StageBodiesCfg(
+				db,
+				controlServer.Bd,
+				controlServer.SendBodyRequest,
+				controlServer.Penalize,
+				controlServer.BroadcastNewBlock,
+				cfg.Sync.BodyDownloadTimeoutSeconds,
+				*controlServer.ChainConfig,
+				cfg.BatchSize,
+				snapshots,
+				blockReader,
+			), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
@@ -437,7 +487,7 @@ func NewInMemoryExecution(
 			),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
-		nil,
+		stagedsync.StateUnwindOrder,
 		nil,
 	), nil
 }

@@ -1084,16 +1084,72 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, execPayload func(batch kv.RwTx, header *types.Header, body *types.RawBody) error) error {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (checked bool, err error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if hd.nextForkState == nil {
-		hd.nextForkState = memdb.NewMemoryBatch(tx)
-	} else {
-		hd.nextForkState.UpdateTxn(tx)
+	maxDepth := uint64(128)
+	if store {
+		// If it is a continuation of the canonical chain we can stack it up.
+		if hd.nextForkState == nil {
+			hd.nextForkState = memdb.NewMemoryBatch(tx)
+		} else {
+			hd.nextForkState.UpdateTxn(tx)
+		}
+		hd.nextForkHash = header.Hash()
+		checked = true
+		// Let's assemble the side fork chain if we have others building.
+		err = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		return
 	}
-	hd.nextForkHash = header.Hash()
-	return execPayload(hd.nextForkState, header, body)
+	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
+	if currentHeight == nil {
+		err = fmt.Errorf("could not read block number.")
+		return
+	}
+	// if the header is in the future or too much in the past we accept it.
+	if *currentHeight < header.Number.Uint64() || *currentHeight-header.Number.Uint64() > maxDepth {
+		checked = false
+		return
+	}
+	// if it is not canonical we validate it as a side fork.
+	batch := memdb.NewMemoryBatch(tx)
+	// Let's assemble the side fork backwards
+	var foundCanonical bool
+	currentHash := header.ParentHash
+	foundCanonical, err = rawdb.IsCanonicalHash(tx, currentHash)
+	if err != nil {
+		return
+	}
+
+	var bodiesChain []*types.RawBody
+	var headersChain []*types.Header
+	unwindPoint := header.Number.Uint64() - 1
+	for !foundCanonical {
+		var sb sideForkBlock
+		var ok bool
+		if sb, ok = hd.sideForksBlock[currentHash]; !ok {
+			// We miss some components so we did not check validity.
+			checked = false
+			return
+		}
+		headersChain = append(headersChain, sb.header)
+		bodiesChain = append(bodiesChain, sb.body)
+		foundCanonical, err = rawdb.IsCanonicalHash(tx, sb.header.Hash())
+		if err != nil {
+			return
+		}
+		unwindPoint = sb.header.Number.Uint64() - 1
+	}
+	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
+	checked = true
+	err = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	// After the we finished executing, we clean up old forks
+	for hash, sb := range hd.sideForksBlock {
+		if *currentHeight-sb.header.Number.Uint64() < maxDepth {
+			delete(hd.sideForksBlock, hash)
+		}
+	}
+	return
 }
 
 func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {

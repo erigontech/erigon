@@ -566,13 +566,24 @@ func verifyAndSaveNewPoSHeader(
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
-
+		if cfg.memoryOverlay {
+			var checked bool
+			if checked, err = cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload); err != nil {
+				return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
+			}
+			if checked {
+				return &privateapi.PayloadStatus{
+					Status:          remote.EngineStatus_VALID,
+					LatestValidHash: currentHeadHash,
+				}, true, nil
+			}
+		}
 		// No canonization, HeadHeaderHash & StageProgress are not updated
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
+		if _, err = cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload); err != nil {
 			return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
 		}
 		return &privateapi.PayloadStatus{

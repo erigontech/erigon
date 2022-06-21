@@ -228,13 +228,36 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 	}
 }
 
-func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg) []*Stage {
+func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg) []*Stage {
 	return []*Stage{
+		{
+			ID:          stages.Headers,
+			Description: "Download headers",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return HeadersUnwind(u, s, tx, headers, false)
+			},
+		},
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
+			},
+		},
+		{
+			ID:          stages.Bodies,
+			Description: "Download block bodies",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 		},
 		{
@@ -243,6 +266,9 @@ func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders Sende
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx)
 			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindSendersStage(u, tx, senders, ctx)
+			},
 		},
 		{
 			ID:          stages.Execution,
@@ -250,12 +276,18 @@ func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders Sende
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle)
 			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
+			},
 		},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnHashStateStage(s, tx, hashState, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindHashStateStage(u, s, tx, hashState, ctx)
 			},
 		},
 		{
@@ -266,10 +298,7 @@ func StateStages(ctx context.Context, blockHashCfg BlockHashesCfg, senders Sende
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return nil
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
+				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx)
 			},
 		},
 	}
@@ -317,6 +346,17 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.Execution,
 	stages.Senders,
 
+	stages.Bodies,
+	stages.BlockHashes,
+	stages.Headers,
+}
+
+var StateUnwindOrder = UnwindOrder{
+	// Unwinding of IHashes needs to happen after unwinding HashState
+	stages.HashState,
+	stages.IntermediateHashes,
+	stages.Execution,
+	stages.Senders,
 	stages.Bodies,
 	stages.BlockHashes,
 	stages.Headers,
