@@ -167,6 +167,15 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: params.MainnetChainConfig,
 		},
 		{
+			name: "custom block in DB, genesis == nil",
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
+				customg.MustCommit(db)
+				return core.CommitGenesisBlock(db, nil)
+			},
+			wantHash:   customghash,
+			wantConfig: customg.Config,
+		},
+		{
 			name: "custom block in DB, genesis == ropsten",
 			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
