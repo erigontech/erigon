@@ -71,7 +71,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
+func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
 	var blockNr uint64 = 0
 	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(stateReader) //ibs
