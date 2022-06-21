@@ -210,22 +210,9 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 			return h
 		}
 
-		txNum++ // Pre-block transaction
-		agg.SetTxNum(txNum)
-
 		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
-		agg.SetTxNum(txNum)
-		if err := agg.FinishTx(); err != nil {
-			return fmt.Errorf("failed to finish tx: %w", err)
-		}
-		if trace {
-			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
-		}
-
-		txNum++ // Post-block transaction
-		agg.SetTxNum(txNum)
 
 		// Check for interrupts
 		select {
@@ -313,17 +300,40 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
 
+	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	if daoFork {
+		ibs := state.New(rw)
+		ct := NewCallTracer()
+		vmConfig.Tracer = ct
+		// TODO Actually add tracing to the DAO related accounts
+		misc.ApplyDAOHardFork(ibs)
+		for from := range ct.froms {
+			if err := ww.w.AddTraceFrom(from[:]); err != nil {
+				return 0, nil, err
+			}
+		}
+		for to := range ct.tos {
+			if err := ww.w.AddTraceTo(to[:]); err != nil {
+				return 0, nil, err
+			}
+		}
+		if err := ibs.FinalizeTx(rules, ww); err != nil {
+			return 0, nil, err
+		}
+		if err := ww.w.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish daoFork failed: %w", err)
+		}
+	}
+
+	txNum++ // Pre-block transaction
+	ww.w.SetTxNum(txNum)
+
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
-		if daoBlock {
-			misc.ApplyDAOHardFork(ibs)
-			daoBlock = false
-		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		ct := NewCallTracer()
 		vmConfig.Tracer = ct
@@ -380,6 +390,17 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	if err := ibs.CommitBlock(rules, ww); err != nil {
 		return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 	}
+
+	ww.w.SetTxNum(txNum)
+	if err := ww.w.FinishTx(); err != nil {
+		return 0, nil, fmt.Errorf("failed to finish tx: %w", err)
+	}
+	if trace {
+		fmt.Printf("FinishTx called for %d block %d\n", txNum, block.NumberU64())
+	}
+
+	txNum++ // Post-block transaction
+	ww.w.SetTxNum(txNum)
 
 	return txNum, receipts, nil
 }

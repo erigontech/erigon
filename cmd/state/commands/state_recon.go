@@ -18,6 +18,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -26,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -153,8 +153,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	stateWriter.SetTx(rwTx)
 	it := bitmap.Iterator()
 	count := 0
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, historyTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
+	}
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	for it.HasNext() {
 		txNum := uint64(it.Next())
+		agg.SetTxNum(txNum)
+		stateReader.SetTxNum(txNum)
+		stateWriter.SetTxNum(txNum)
 		// Find block number
 		blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
 			return txNums[i] > txNum
@@ -172,37 +183,40 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if blockNum > 0 {
 			startTxNum = txNums[blockNum-1]
 		}
-		txIndex := txNum - startTxNum - 1
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := blockReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
-		if err != nil {
-			return err
-		}
-		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
-		if err != nil {
-			return err
-		}
-		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, historyTx, contractHasTEVM, blockReader)
-		agg.SetTxNum(txNum)
-		stateReader.SetTxNum(txNum)
-		stateWriter.SetTxNum(txNum)
-		vmConfig := vm.Config{}
-		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		ibs := state.New(stateReader)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
+		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
+		if daoForkTx {
+			misc.ApplyDAOHardFork(ibs)
+			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
+				return err
+			}
+		} else {
+			txIndex := txNum - startTxNum - 1
+			//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+			txn, err := blockReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
+			if err != nil {
+				return err
+			}
+			txHash := txn.Hash()
+			msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+			if err != nil {
+				return err
+			}
+			gp := new(core.GasPool).AddGas(msg.Gas())
+			usedGas := new(uint64)
+			vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(chainConfig, blockNum)}
+			contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+			ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+			_, _, err = core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, lastHeader, txn, usedGas, vmConfig, contractHasTEVM)
+			if err != nil {
+				return fmt.Errorf("could not apply tx %d [%x] failed: %w", txIndex, txHash, err)
+			}
+		}
+		if err = ibs.CommitBlock(lastRules, stateWriter); err != nil {
 			return err
 		}
-		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			return err
-		}
-		if err = ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-			return err
+		if err := agg.FinishTx(); err != nil {
+			return fmt.Errorf("finish dao fork failed: %w", err)
 		}
 		doneBitmap.Add(txNum)
 		count++

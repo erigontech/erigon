@@ -175,7 +175,6 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}
 		writeWrapper := state.NewNoopWriter()
-		txNum++ // Pre block transaction
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, historyTx, hash, number)
 			if err != nil {
@@ -227,15 +226,24 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
+	hw.SetTxNum(txNum)
+	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	if daoFork {
+		ibs := state.New(hw)
+		misc.ApplyDAOHardFork(ibs)
+		if err := ibs.FinalizeTx(rules, ww); err != nil {
+			return 0, nil, err
+		}
+		if err := hw.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish dao fork failed: %w", err)
+		}
+	}
+	txNum++ // Pre block transaction
 	for i, tx := range block.Transactions() {
 		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
-		if daoBlock {
-			misc.ApplyDAOHardFork(ibs)
-			daoBlock = false
-		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
