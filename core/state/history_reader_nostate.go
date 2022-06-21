@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -19,6 +20,7 @@ func (r RequiredStateError) Error() string {
 // Implements StateReader and StateWriter
 type HistoryReaderNoState struct {
 	a     *libstate.Aggregator
+	tx    kv.Tx
 	txNum uint64
 	trace bool
 }
@@ -26,9 +28,14 @@ type HistoryReaderNoState struct {
 func NewHistoryReaderNoState(a *libstate.Aggregator) *HistoryReaderNoState {
 	return &HistoryReaderNoState{a: a}
 }
+
 func (hr *HistoryReaderNoState) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
 	hr.a.SetTxNum(txNum)
+}
+
+func (hr *HistoryReaderNoState) SetTx(tx kv.Tx) {
+	hr.tx = tx
 }
 
 func (hr *HistoryReaderNoState) SetTrace(trace bool) {
