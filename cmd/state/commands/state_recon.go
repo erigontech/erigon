@@ -11,6 +11,7 @@ import (
 	"sort"
 	"syscall"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -144,7 +145,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReaderNoState(agg)
+	var doneBitmap roaring64.Bitmap
+	stateReader := state.NewHistoryReaderNoState(agg, &doneBitmap)
 	noop := state.NewNoopWriter()
 	stateWriter := state.NewStateReconWriter(agg)
 	stateReader.SetTx(rwTx)
@@ -202,6 +204,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if err = ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 			return err
 		}
+		doneBitmap.Add(txNum)
 		count++
 		commit := !it.HasNext()
 		if !commit && count%100_000 == 0 {
