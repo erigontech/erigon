@@ -150,6 +150,7 @@ func StageLoopStep(
 		if err != nil {
 			return common.Hash{}, err
 		}
+		defer tx.Rollback()
 
 		header := rawdb.ReadHeaderByNumber(tx, highestSeenHeader)
 		chainConfig, err := rawdb.ReadChainConfig(tx, header.Hash())
@@ -164,8 +165,6 @@ func StageLoopStep(
 		if isTrans {
 			hd.SetPOSSync(true)
 		}
-
-		tx.Rollback()
 	}
 
 	var interrupt engineapi.Interrupt
