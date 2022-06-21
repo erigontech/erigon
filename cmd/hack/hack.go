@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -14,7 +13,6 @@ import (
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime/pprof"
 	"sort"
 	"strings"
@@ -22,10 +20,8 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -1166,126 +1162,6 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
-type ReconItem struct {
-	key    []byte
-	txNum  uint64
-	decomp *compress.Decompressor
-	g      *compress.Getter
-}
-
-type ReconHeap []ReconItem
-
-func (rh ReconHeap) Len() int {
-	return len(rh)
-}
-
-// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
-// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
-// insert headers in the ascending order of their block heights.
-func (rh ReconHeap) Less(i, j int) bool {
-	c := bytes.Compare(rh[i].key, rh[j].key)
-	if c == 0 {
-		return rh[i].txNum < rh[i].txNum
-	}
-	return c < 0
-}
-
-// Swap (part of heap.Interface) moves two links in the queue into each other's places. Note that each link has idx attribute that is getting adjusted during
-// the swap. The idx attribute allows the removal of links from the middle of the queue (in case if links are getting invalidated due to
-// failed verification of unavailability of parent headers)
-func (rh ReconHeap) Swap(i, j int) {
-	rh[i], rh[j] = rh[j], rh[i]
-}
-
-// Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
-func (rh *ReconHeap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	l := x.(ReconItem)
-	*rh = append(*rh, l)
-}
-
-// Pop (part of heap.Interface) removes the first link from the queue
-func (rh *ReconHeap) Pop() interface{} {
-	old := *rh
-	n := len(old)
-	x := old[n-1]
-	*rh = old[0 : n-1]
-	return x
-}
-
-func reconstitute(datadir string) error {
-	dir := filepath.Join(datadir, "erigon23")
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
-	heaps := map[string]*ReconHeap{
-		"accounts": &ReconHeap{},
-		"storage":  &ReconHeap{},
-		"code":     &ReconHeap{},
-	}
-
-	re := regexp.MustCompile("(accounts|storage|code)-efhistory.([0-9]+)-([0-9]+).dat")
-	for _, f := range files {
-		name := f.Name()
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 4 {
-			//if len(subs) != 0 {
-			//	log.Warn("File ignored by doman scan, more than 5 submatches", "name", name, "submatches", len(subs))
-			//}
-			continue
-		}
-		fmt.Printf("%s, heap = %s\n", name, subs[1])
-		decomp, err := compress.NewDecompressor(filepath.Join(dir, name))
-		if err != nil {
-			return err
-		}
-		defer decomp.Close()
-		g := decomp.MakeGetter()
-		if g.HasNext() {
-			key, _ := g.NextUncompressed()
-			val, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(val)
-			heap.Push(heaps[subs[1]], ReconItem{decomp: decomp, g: g, txNum: ef.Max(), key: key})
-		}
-	}
-	var bitmap roaring64.Bitmap
-	for heapName, h := range heaps {
-		fmt.Printf("Processing heap name: %s\n", heapName)
-		count := 0
-		var lastKey []byte
-		var lastTxNum uint64
-		for h.Len() > 0 {
-			top := heap.Pop(h).(ReconItem)
-			count++
-			if count%1_000_000 == 0 {
-				fmt.Printf("Processed %d mln records, bitmap cardinality: %d\n", count/1_000_000, bitmap.GetCardinality())
-			}
-			if !bytes.Equal(top.key, lastKey) {
-				if lastKey != nil {
-					bitmap.Add(lastTxNum)
-				}
-				lastKey = top.key
-			}
-			lastTxNum = top.txNum
-			if top.g.HasNext() {
-				top.key, _ = top.g.NextUncompressed()
-				val, _ := top.g.NextUncompressed()
-				ef, _ := eliasfano32.ReadEliasFano(val)
-				top.txNum = ef.Max()
-				heap.Push(h, top)
-			}
-		}
-		if lastKey != nil {
-			bitmap.Add(lastTxNum)
-		}
-	}
-	fmt.Printf("%d\n", bitmap.GetCardinality())
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1408,8 +1284,6 @@ func main() {
 		err = findPrefix(*chaindata)
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
-	case "reconstitute":
-		err = reconstitute(*chaindata)
 	}
 
 	if err != nil {

@@ -8,6 +8,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
+type RequiredStateError struct {
+	stateTxNum uint64
+}
+
+func (r RequiredStateError) Error() string {
+	return fmt.Sprintf("required state at txNum %d", r.stateTxNum)
+}
+
 // Implements StateReader and StateWriter
 type HistoryReaderNoState struct {
 	a     *libstate.Aggregator
@@ -28,9 +36,12 @@ func (hr *HistoryReaderNoState) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, _, _, err := hr.a.ReadAccountDataNoState(address.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.a.ReadAccountDataNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
+	}
+	if !noState {
+		return nil, RequiredStateError{stateTxNum: stateTxNum}
 	}
 	if len(enc) == 0 {
 		if hr.trace {
@@ -74,9 +85,12 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 }
 
 func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, _, _, err := hr.a.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.a.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
+	}
+	if !noState {
+		return nil, RequiredStateError{stateTxNum: stateTxNum}
 	}
 	if hr.trace {
 		if enc == nil {
@@ -92,9 +106,12 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, _, _, err := hr.a.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.a.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
+	}
+	if !noState {
+		return nil, RequiredStateError{stateTxNum: stateTxNum}
 	}
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
@@ -103,9 +120,12 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	size, _, _, err := hr.a.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
+	size, noState, stateTxNum, err := hr.a.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return 0, err
+	}
+	if !noState {
+		return 0, RequiredStateError{stateTxNum: stateTxNum}
 	}
 	if hr.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d]\n", address, size)
