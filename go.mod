@@ -18,7 +18,7 @@ require (
 	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v0.16.0
-	github.com/emirpasic/gods v1.12.0
+	github.com/emirpasic/gods v1.18.1
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.9.7
@@ -162,3 +162,5 @@ require (
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect
 )
+
+require gotest.tools/v3 v3.3.0 // indirect

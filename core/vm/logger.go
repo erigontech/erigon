@@ -130,7 +130,7 @@ type Tracer interface {
 	CaptureAccountWrite(account common.Address) error
 }
 
-// FlushableTracer is a Tracer extension whose accumulate traces can be
+// FlushableTracer is a Tracer extension whose accumulated traces has to be
 // flushed once the tracing is completed.
 type FlushableTracer interface {
 	Tracer

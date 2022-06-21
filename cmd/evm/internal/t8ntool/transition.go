@@ -277,7 +277,6 @@ func Main(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	//defer tx.Commit()
 
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
@@ -292,6 +291,7 @@ func Main(ctx *cli.Context) error {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
+	// state root calculation
 	root, err := CalculateStateRoot(tx)
 	if err != nil {
 		return err
