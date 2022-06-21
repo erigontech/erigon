@@ -1,8 +1,6 @@
 package state
 
 import (
-	"encoding/binary"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -33,29 +31,27 @@ func (w *StateReconWriter) SetTx(rwTx kv.RwTx) {
 }
 
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	found, txNum := w.a.MaxAccountsTxNum(address.Bytes())
+	if !found || txNum != w.txNum {
+		return nil
+	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	return w.rwTx.Put(kv.PlainState, address[:], value)
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	found, txNum := w.a.MaxCodeTxNum(address.Bytes())
+	if !found || txNum != w.txNum {
+		return nil
+	}
 	if err := w.rwTx.Put(kv.Code, codeHash[:], code); err != nil {
 		return err
 	}
-	return w.rwTx.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
+	return w.rwTx.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), codeHash[:])
 }
 
 func (w *StateReconWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if err := w.rwTx.Delete(kv.PlainState, address[:], nil); err != nil {
-		return err
-	}
-	if original.Incarnation > 0 {
-		var b [8]byte
-		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := w.rwTx.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -63,7 +59,11 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	if *original == *value {
 		return nil
 	}
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	found, txNum := w.a.MaxStorageTxNum(address.Bytes(), key.Bytes())
+	if !found || txNum != w.txNum {
+		return nil
+	}
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
 	v := value.Bytes()
 	if len(v) == 0 {
 		return w.rwTx.Delete(kv.PlainState, compositeKey, nil)
