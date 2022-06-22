@@ -1150,22 +1150,22 @@ func (hd *HeaderDownload) FetchingNew() bool {
 	return hd.fetchingNew
 }
 
-func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadHash() common.Hash {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.pendingPayloadStatus
+	return hd.pendingPayloadHash
 }
 
-func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadHash(header common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = header
+	hd.pendingPayloadHash = header
 }
 
-func (hd *HeaderDownload) ClearPendingPayloadStatus() {
+func (hd *HeaderDownload) ClearPendingPayloadHash() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = common.Hash{}
+	hd.pendingPayloadHash = common.Hash{}
 }
 
 func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {
