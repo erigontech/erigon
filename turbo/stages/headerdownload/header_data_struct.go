@@ -301,22 +301,22 @@ type HeaderDownload struct {
 	headerReader          services.HeaderReader
 
 	// Proof of Stake (PoS)
-	topSeenHeightPoS       uint64
-	requestId              int
-	posAnchor              *Anchor
-	posStatus              SyncStatus
-	posSync                bool                          // Whether the chain is syncing in the PoS mode
-	headersCollector       *etl.Collector                // ETL collector for headers
-	BeaconRequestList      *engineapi.RequestList        // Requests from ethbackend to staged sync
-	PayloadStatusCh        chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadHash     common.Hash                   // Header whose status we still should send to PayloadStatusCh
-	pendingPayloadResponse *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
-	unsettledForkChoice    *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
-	unsettledHeadHeight    uint64                        // Height of unsettledForkChoice.headBlockHash
-	posDownloaderTip       common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-	badPoSHeaders          map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
-	nextForkState          *memdb.MemoryMutation         // The db state of the next fork.
-	nextForkHash           common.Hash                   // Hash of the next fork
+	topSeenHeightPoS     uint64
+	requestId            int
+	posAnchor            *Anchor
+	posStatus            SyncStatus
+	posSync              bool                          // Whether the chain is syncing in the PoS mode
+	headersCollector     *etl.Collector                // ETL collector for headers
+	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
+	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
+	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
+	nextForkState        *memdb.MemoryMutation         // The db state of the next fork.
+	nextForkHash         common.Hash                   // Hash of the next fork
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header

@@ -174,7 +174,7 @@ func HeadersPOS(
 	}
 
 	request := requestWithStatus.Message
-	status := requestWithStatus.Status
+	requestStatus := requestWithStatus.Status
 
 	// Decide what kind of action we need to take place
 	var payloadMessage *engineapi.PayloadMessage
@@ -184,18 +184,18 @@ func HeadersPOS(
 	}
 
 	cfg.hd.ClearPendingPayloadHash()
-	cfg.hd.SetPendingPayloadResponse(nil)
+	cfg.hd.SetPendingPayloadStatus(nil)
 
-	var response *privateapi.PayloadStatus
+	var payloadStatus *privateapi.PayloadStatus
 	var err error
 	if forkChoiceInsteadOfNewPayload {
-		response, err = startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader)
 	} else {
-		response, err = handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
 	if err != nil {
-		if status == engineapi.New {
+		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
 		return err
@@ -207,8 +207,8 @@ func HeadersPOS(
 		}
 	}
 
-	if status == engineapi.New {
-		cfg.hd.SetPendingPayloadResponse(response)
+	if requestStatus == engineapi.New {
+		cfg.hd.SetPendingPayloadStatus(payloadStatus)
 	}
 
 	return nil

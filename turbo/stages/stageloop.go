@@ -31,12 +31,12 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func SendEngineApiResponse(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
-	if pendingPayloadResponse := hd.GetPendingPayloadResponse(); pendingPayloadResponse != nil {
+func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
 		if err != nil {
 			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		} else {
-			hd.PayloadStatusCh <- *pendingPayloadResponse
+			hd.PayloadStatusCh <- *pendingPayloadStatus
 		}
 	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
 		if err != nil {
@@ -55,7 +55,7 @@ func SendEngineApiResponse(hd *headerdownload.HeaderDownload, headBlockHash comm
 		}
 	}
 	hd.ClearPendingPayloadHash()
-	hd.SetPendingPayloadResponse(nil)
+	hd.SetPendingPayloadStatus(nil)
 }
 
 // StageLoop runs the continuous loop of staged sync
@@ -79,7 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		SendEngineApiResponse(hd, headBlockHash, err)
+		SendPayloadStatus(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
