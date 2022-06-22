@@ -126,7 +126,12 @@ func executeBlock(
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 	if isPoSa {
-		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
+			return vm.NewStructLogger(&vm.LogConfig{}), nil
+		}
+		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
+		receipts = execRs.Receipts
+		stateSyncReceipt = execRs.ReceiptForStorage
 	} else {
 		getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
 			return vm.NewStructLogger(&vm.LogConfig{}), nil
