@@ -174,7 +174,7 @@ func HeadersPOS(
 	}
 
 	request := requestWithStatus.Message
-	status := requestWithStatus.Status
+	requestStatus := requestWithStatus.Status
 
 	// Decide what kind of action we need to take place
 	var payloadMessage *engineapi.PayloadMessage
@@ -183,18 +183,19 @@ func HeadersPOS(
 		payloadMessage = request.(*engineapi.PayloadMessage)
 	}
 
-	cfg.hd.ClearPendingPayloadStatus()
+	cfg.hd.ClearPendingPayloadHash()
+	cfg.hd.SetPendingPayloadStatus(nil)
 
-	var response *privateapi.PayloadStatus
+	var payloadStatus *privateapi.PayloadStatus
 	var err error
 	if forkChoiceInsteadOfNewPayload {
-		response, err = startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader)
 	} else {
-		response, err = handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
 	if err != nil {
-		if status == engineapi.New {
+		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
 		return err
@@ -206,8 +207,8 @@ func HeadersPOS(
 		}
 	}
 
-	if response != nil && status == engineapi.New {
-		cfg.hd.PayloadStatusCh <- *response
+	if requestStatus == engineapi.New {
+		cfg.hd.SetPendingPayloadStatus(payloadStatus)
 	}
 
 	return nil
@@ -363,7 +364,7 @@ func startHandlingForkChoice(
 		if err := cfg.hd.FlushNextForkState(tx); err != nil {
 			return nil, err
 		}
-		cfg.hd.SetPendingPayloadStatus(headerHash)
+		cfg.hd.SetPendingPayloadHash(headerHash)
 		return nil, nil
 	}
 
@@ -372,7 +373,7 @@ func startHandlingForkChoice(
 	if requestStatus == engineapi.New {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// TODO(yperbasis): what if some bodies are missing and we have to download them?
-			cfg.hd.SetPendingPayloadStatus(headerHash)
+			cfg.hd.SetPendingPayloadHash(headerHash)
 		} else {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
@@ -423,12 +424,12 @@ func finishHandlingForkChoice(
 	}
 
 	if !canonical {
-		if cfg.hd.GetPendingPayloadStatus() != (common.Hash{}) {
+		if cfg.hd.GetPendingPayloadHash() != (common.Hash{}) {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				CriticalError: &privateapi.InvalidForkchoiceStateErr,
 			}
 		}
-		cfg.hd.ClearPendingPayloadStatus()
+		cfg.hd.ClearPendingPayloadHash()
 	}
 
 	cfg.hd.ClearUnsettledForkChoice()
@@ -583,7 +584,7 @@ func verifyAndSaveNewPoSHeader(
 
 	// OK, we're on the canonical chain
 	if requestStatus == engineapi.New {
-		cfg.hd.SetPendingPayloadStatus(headerHash)
+		cfg.hd.SetPendingPayloadHash(headerHash)
 	}
 
 	logEvery := time.NewTicker(logInterval)
