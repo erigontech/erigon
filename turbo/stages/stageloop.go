@@ -31,6 +31,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func ProcessEngineApiResponse(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+	if pendingPayloadResponse := hd.GetPendingPayloadResponse(); pendingPayloadResponse != nil {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			hd.PayloadStatusCh <- *pendingPayloadResponse
+		}
+	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			var status remote.EngineStatus
+			if headBlockHash == pendingPayloadHash {
+				status = remote.EngineStatus_VALID
+			} else {
+				status = remote.EngineStatus_INVALID
+			}
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: headBlockHash,
+			}
+		}
+	}
+	hd.ClearPendingPayloadHash()
+	hd.SetPendingPayloadResponse(nil)
+}
+
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
@@ -52,25 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingPayloadHash := hd.GetPendingPayloadHash()
-		if pendingPayloadHash != (common.Hash{}) {
-			if err != nil {
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-			} else {
-				var status remote.EngineStatus
-				if headBlockHash == pendingPayloadHash {
-					status = remote.EngineStatus_VALID
-				} else {
-					status = remote.EngineStatus_INVALID
-				}
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					Status:          status,
-					LatestValidHash: headBlockHash,
-				}
-			}
-
-			hd.ClearPendingPayloadHash()
-		}
+		ProcessEngineApiResponse(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {

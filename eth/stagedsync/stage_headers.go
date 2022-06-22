@@ -184,6 +184,7 @@ func HeadersPOS(
 	}
 
 	cfg.hd.ClearPendingPayloadHash()
+	cfg.hd.SetPendingPayloadResponse(nil)
 
 	var response *privateapi.PayloadStatus
 	var err error
@@ -206,8 +207,8 @@ func HeadersPOS(
 		}
 	}
 
-	if response != nil && status == engineapi.New {
-		cfg.hd.PayloadStatusCh <- *response
+	if status == engineapi.New {
+		cfg.hd.SetPendingPayloadResponse(response)
 	}
 
 	return nil

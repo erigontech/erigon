@@ -532,3 +532,7 @@ func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage
 func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
+
+func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
+	return ms.sentriesClient.Hd
+}

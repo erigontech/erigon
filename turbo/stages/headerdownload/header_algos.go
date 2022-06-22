@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -1166,6 +1167,18 @@ func (hd *HeaderDownload) ClearPendingPayloadHash() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadHash = common.Hash{}
+}
+
+func (hd *HeaderDownload) GetPendingPayloadResponse() *privateapi.PayloadStatus {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingPayloadResponse
+}
+
+func (hd *HeaderDownload) SetPendingPayloadResponse(response *privateapi.PayloadStatus) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadResponse = response
 }
 
 func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {
