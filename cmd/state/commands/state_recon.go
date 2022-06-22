@@ -168,7 +168,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 		ibs := state.New(stateReader)
 		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
-		if daoForkTx {
+		if blockNum == 0 {
+			// Genesis block
+		} else if daoForkTx {
 			misc.ApplyDAOHardFork(ibs)
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
 				return err
@@ -236,5 +238,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			stateWriter.SetTx(rwTx)
 		}
 	}
+	log.Info("Completed tx replay phase")
 	return nil
 }
