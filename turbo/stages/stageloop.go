@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func ProcessEngineApiResponse(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+func SendEngineApiResponse(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
 	if pendingPayloadResponse := hd.GetPendingPayloadResponse(); pendingPayloadResponse != nil {
 		if err != nil {
 			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -79,7 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		ProcessEngineApiResponse(hd, headBlockHash, err)
+		SendEngineApiResponse(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {

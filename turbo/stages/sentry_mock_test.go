@@ -521,7 +521,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	assert.Equal(t, m.Genesis.Hash(), headBlockHash)
 
@@ -542,7 +542,7 @@ func TestBogusForkchoice(t *testing.T) {
 
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	payloadStatus := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus.Status)
@@ -557,7 +557,7 @@ func TestBogusForkchoice(t *testing.T) {
 
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	payloadStatus = m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
@@ -579,7 +579,7 @@ func TestPoSDownloader(t *testing.T) {
 	m.SendPayloadRequest(&payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	payloadStatus := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus.Status)
@@ -599,12 +599,12 @@ func TestPoSDownloader(t *testing.T) {
 	// First cycle: save the downloaded header
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	// Second cycle: process the previous beacon request
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	// Point forkChoice to the head
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -615,7 +615,7 @@ func TestPoSDownloader(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 }
@@ -645,7 +645,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m.SendPayloadRequest(&payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	payloadStatus1 := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus1.Status)
@@ -664,7 +664,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	// Point forkChoice to the invalid tip
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -675,7 +675,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.ProcessEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
+	stages.SendEngineApiResponse(m.HeaderDownload(), headBlockHash, err)
 
 	payloadStatus2 := m.ReceivePayloadStatus()
 	require.Equal(t, remote.EngineStatus_INVALID, payloadStatus2.Status)
