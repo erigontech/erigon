@@ -307,20 +307,8 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(rw)
-		ct := NewCallTracer()
-		vmConfig.Tracer = ct
 		// TODO Actually add tracing to the DAO related accounts
 		misc.ApplyDAOHardFork(ibs)
-		for from := range ct.froms {
-			if err := ww.w.AddTraceFrom(from[:]); err != nil {
-				return 0, nil, err
-			}
-		}
-		for to := range ct.tos {
-			if err := ww.w.AddTraceTo(to[:]); err != nil {
-				return 0, nil, err
-			}
-		}
 		if err := ibs.FinalizeTx(rules, ww); err != nil {
 			return 0, nil, err
 		}

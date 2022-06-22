@@ -18,11 +18,14 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -170,6 +173,16 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
 		if blockNum == 0 {
 			// Genesis block
+			_, genesisIbs, err := genesis.ToBlock()
+			if err != nil {
+				return err
+			}
+			if err = genesisIbs.CommitBlock(lastRules, stateWriter); err != nil {
+				return fmt.Errorf("cannot write genesis state: %w", err)
+			}
+			if err = agg.FinishTx(); err != nil {
+				return err
+			}
 		} else if daoForkTx {
 			misc.ApplyDAOHardFork(ibs)
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
@@ -239,5 +252,125 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	log.Info("Completed tx replay phase")
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	count = 0
+	accountsIt := agg.IterateAccountsHistory(txNum)
+	for accountsIt.HasNext() {
+		key, val := accountsIt.Next()
+		if len(val) > 0 {
+			var a accounts.Account
+			a.Reset()
+			pos := 0
+			nonceBytes := int(val[pos])
+			pos++
+			if nonceBytes > 0 {
+				a.Nonce = bytesToUint64(val[pos : pos+nonceBytes])
+				pos += nonceBytes
+			}
+			balanceBytes := int(val[pos])
+			pos++
+			if balanceBytes > 0 {
+				a.Balance.SetBytes(val[pos : pos+balanceBytes])
+				pos += balanceBytes
+			}
+			codeHashBytes := int(val[pos])
+			pos++
+			if codeHashBytes > 0 {
+				copy(a.CodeHash[:], val[pos:pos+codeHashBytes])
+				pos += codeHashBytes
+			}
+			if pos >= len(val) {
+				fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", key, val)
+			}
+			incBytes := int(val[pos])
+			pos++
+			if incBytes > 0 {
+				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
+			}
+			value := make([]byte, a.EncodingLengthForStorage())
+			a.EncodeForStorage(value)
+			if err = rwTx.Put(kv.PlainState, key, value); err != nil {
+				return err
+			}
+			count++
+			if count%1_000_000 == 0 {
+				log.Info("Processed", "accounts", count)
+				var spaceDirty uint64
+				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+					return fmt.Errorf("retrieving spaceDirty: %w", err)
+				}
+				if spaceDirty >= dirtySpaceThreshold {
+					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				}
+			}
+		}
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	count = 0
+	storageIt := agg.IterateStorageHistory(txNum)
+	for storageIt.HasNext() {
+		key, val := storageIt.Next()
+		if len(val) > 0 {
+			compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
+			if err = rwTx.Put(kv.PlainState, compositeKey, val); err != nil {
+				return err
+			}
+			count++
+			if count%1_000_000 == 0 {
+				log.Info("Processed", "storage", count)
+				var spaceDirty uint64
+				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+					return fmt.Errorf("retrieving spaceDirty: %w", err)
+				}
+				if spaceDirty >= dirtySpaceThreshold {
+					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				}
+			}
+		}
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	count = 0
+	codeIt := agg.IterateCodeHistory(txNum)
+	for codeIt.HasNext() {
+		key, val := codeIt.Next()
+		if len(val) > 0 {
+			codeHash := crypto.Keccak256(val)
+			if err = rwTx.Put(kv.Code, codeHash[:], val); err != nil {
+				return err
+			}
+			if err = rwTx.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation), codeHash[:]); err != nil {
+				return err
+			}
+			count++
+			if count%1_000_000 == 0 {
+				log.Info("Processed", "code", count)
+				var spaceDirty uint64
+				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+					return fmt.Errorf("retrieving spaceDirty: %w", err)
+				}
+				if spaceDirty >= dirtySpaceThreshold {
+					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				}
+			}
+		}
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
 	return nil
 }
