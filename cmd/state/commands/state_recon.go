@@ -55,17 +55,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
-	if err != nil {
-		return fmt.Errorf("opening chaindata as read only: %v", err)
-	}
-	defer historyDb.Close()
 	ctx := context.Background()
-	historyTx, err1 := historyDb.BeginRo(ctx)
-	if err1 != nil {
-		return err1
-	}
-	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "erigon22")
 	agg, err := libstate.NewAggregator(aggPath, AggregationStep)
 	if err != nil {
@@ -96,19 +86,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	agg.SetTx(rwTx)
-	/*
-		chainConfig := genesis.Config
-		vmConfig := vm.Config{}
-
-		interrupt := false
-		blockNum := uint64(0)
-		var txNum uint64 = 2
-		trace := false
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-		prevBlock := blockNum
-		prevTime := time.Now()
-	*/
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
@@ -136,8 +113,14 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
 		return txNums[i] > endTxNumMinimax
 	}))
-	txNum := txNums[blockNum-1]
+	if blockNum == 0 {
+		return fmt.Errorf("not enough transactions in the history data")
+	}
+	txNum := txNums[blockNum-1] + 1
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
+	if block > blockNum {
+		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
+	}
 	bitmap := agg.ReconBitmap(txNum)
 	fmt.Printf("Bitmap length = %d\n", bitmap.GetCardinality())
 	var lastBlockNum uint64
@@ -154,7 +137,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	it := bitmap.Iterator()
 	count := 0
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, err := blockReader.Header(ctx, historyTx, hash, number)
+		h, err := blockReader.Header(ctx, nil, hash, number)
 		if err != nil {
 			panic(err)
 		}
@@ -190,6 +173,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
 				return err
 			}
+		} else if txNum+1 == txNums[blockNum] {
+			// End of block transaction in a block
+			block, _, err := blockReader.BlockWithSenders(ctx, nil, lastBlockHash, blockNum)
+			if err != nil {
+				return err
+			}
+			if _, _, err := engine.Finalize(chainConfig, lastHeader, ibs, block.Transactions(), block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+				return fmt.Errorf("finalize of block %d failed: %w", blockNum, err)
+			}
 		} else {
 			txIndex := txNum - startTxNum - 1
 			//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
@@ -221,7 +213,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		doneBitmap.Add(txNum)
 		count++
 		commit := !it.HasNext()
-		if !commit && count%100_000 == 0 {
+		if !commit && count%1_000_000 == 0 {
+			log.Info("Processed", "transactions", count)
 			var spaceDirty uint64
 			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
 				return fmt.Errorf("retrieving spaceDirty: %w", err)
