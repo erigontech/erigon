@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -56,6 +57,7 @@ type HeadersCfg struct {
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
 	execPayload        ExecutePayloadFunc
+	notifications      *Notifications
 }
 
 func StageHeadersCfg(
@@ -74,6 +76,7 @@ func StageHeadersCfg(
 	blockReader services.FullBlockReader,
 	tmpdir string,
 	dbEventNotifier snapshotsync.DBEventNotifier,
+	notifications *Notifications,
 	execPayload ExecutePayloadFunc) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
@@ -91,6 +94,7 @@ func StageHeadersCfg(
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
 		execPayload:        execPayload,
+		notifications:      notifications,
 		memoryOverlay:      memoryOverlay,
 	}
 }
@@ -576,6 +580,8 @@ func verifyAndSaveNewPoSHeader(
 		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
 			return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
 		}
+		pendingBaseFee := misc.CalcBaseFee(cfg.notifications.Accumulator.ChainConfig(), header)
+		cfg.notifications.Accumulator.SendAndReset(context.Background(), cfg.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
 			LatestValidHash: headerHash,
