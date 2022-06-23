@@ -309,7 +309,8 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w

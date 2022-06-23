@@ -33,7 +33,7 @@ and [mdbx.h](https://github.com/torquem-ch/libmdbx/blob/master/mdbx.h)
 
 ### How RAM used
 
-Erigon will use all available RAM, but this RAM will not belong to Eroigon’s process. OS will own all this
+Erigon will use all available RAM, but this RAM will not belong to Erigon’s process. OS will own all this
 memory. And OS will maintain hot part of DB in RAM. If OS will need RAM for other programs or for second Erigon instance
 OS will manage all the work. This called PageCache. Erigon itself using under 2Gb. So, Erigon will benefit from more
 RAM and will use all RAM without re-configuration. Same PageCache can be used by other processes if they run on same
