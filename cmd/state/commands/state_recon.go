@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -66,14 +67,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer agg.Close()
 	reconDbPath := path.Join(datadir, "recondb")
-	if block == 0 {
-		if _, err = os.Stat(reconDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(reconDbPath); err != nil {
+	if _, err = os.Stat(reconDbPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+	} else if err = os.RemoveAll(reconDbPath); err != nil {
+		return err
 	}
 	db, err := kv2.NewMDBX(logger).Path(reconDbPath).WriteMap().Open()
 	if err != nil {
@@ -111,21 +110,27 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
+	fmt.Printf("txNums = %d\n", txNums[:20])
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
 	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
 		return txNums[i] > endTxNumMinimax
 	}))
+	if blockNum == uint64(len(txNums)) {
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
+	}
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
-	txNum := txNums[blockNum-1] + 1
-	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
-	if block > blockNum {
+	if block+1 > blockNum {
 		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
 	}
+	blockNum = block + 1
+	txNum := txNums[blockNum-1]
+	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	bitmap := agg.ReconBitmap(txNum)
 	fmt.Printf("Bitmap length = %d\n", bitmap.GetCardinality())
+	firstBlock := true
 	var lastBlockNum uint64
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
@@ -156,7 +161,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
 			return txNums[i] > txNum
 		}))
-		if blockNum > lastBlockNum {
+		if firstBlock || blockNum > lastBlockNum {
 			if lastHeader, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				return err
 			}
@@ -164,6 +169,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
+			firstBlock = false
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
@@ -172,23 +178,20 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		ibs := state.New(stateReader)
 		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
 		if blockNum == 0 {
+			fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
 			// Genesis block
-			_, genesisIbs, err := genesis.ToBlock()
+			_, ibs, err = genesis.ToBlock()
 			if err != nil {
 				return err
 			}
-			if err = genesisIbs.CommitBlock(lastRules, stateWriter); err != nil {
-				return fmt.Errorf("cannot write genesis state: %w", err)
-			}
-			if err = agg.FinishTx(); err != nil {
-				return err
-			}
 		} else if daoForkTx {
+			fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 			misc.ApplyDAOHardFork(ibs)
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
 				return err
 			}
 		} else if txNum+1 == txNums[blockNum] {
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			block, _, err := blockReader.BlockWithSenders(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
@@ -199,7 +202,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			}
 		} else {
 			txIndex := txNum - startTxNum - 1
-			//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+			fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 			txn, err := blockReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 			if err != nil {
 				return err
@@ -223,12 +226,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 		if err := agg.FinishTx(); err != nil {
-			return fmt.Errorf("finish dao fork failed: %w", err)
+			return fmt.Errorf("finish tx failed: %w", err)
 		}
 		doneBitmap.Add(txNum)
 		count++
 		commit := !it.HasNext()
-		if !commit && count%1_000_000 == 0 {
+		if count%1_000_000 == 0 {
 			log.Info("Processed", "transactions", count)
 			var spaceDirty uint64
 			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
@@ -252,9 +255,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	log.Info("Completed tx replay phase")
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
 	count = 0
 	accountsIt := agg.IterateAccountsHistory(txNum)
 	for accountsIt.HasNext() {
@@ -294,6 +294,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			if err = rwTx.Put(kv.PlainState, key, value); err != nil {
 				return err
 			}
+			fmt.Printf("Account [%x]=>[%+v]\n", key, &a)
 			count++
 			if count%1_000_000 == 0 {
 				log.Info("Processed", "accounts", count)
@@ -303,6 +304,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				}
 				if spaceDirty >= dirtySpaceThreshold {
 					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+					if err = rwTx.Commit(); err != nil {
+						return err
+					}
+					if rwTx, err = db.BeginRw(ctx); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -322,6 +329,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			if err = rwTx.Put(kv.PlainState, compositeKey, val); err != nil {
 				return err
 			}
+			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 			count++
 			if count%1_000_000 == 0 {
 				log.Info("Processed", "storage", count)
@@ -331,6 +339,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				}
 				if spaceDirty >= dirtySpaceThreshold {
 					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+					if err = rwTx.Commit(); err != nil {
+						return err
+					}
+					if rwTx, err = db.BeginRw(ctx); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -350,9 +364,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			if err = rwTx.Put(kv.Code, codeHash[:], val); err != nil {
 				return err
 			}
-			if err = rwTx.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation), codeHash[:]); err != nil {
+			compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
+			if err = rwTx.Put(kv.PlainContractCode, compositeKey, codeHash[:]); err != nil {
 				return err
 			}
+			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 			count++
 			if count%1_000_000 == 0 {
 				log.Info("Processed", "code", count)
@@ -362,6 +378,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				}
 				if spaceDirty >= dirtySpaceThreshold {
 					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+					if err = rwTx.Commit(); err != nil {
+						return err
+					}
+					if rwTx, err = db.BeginRw(ctx); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -370,6 +392,23 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	log.Info("Computing hashed state")
+	tmpDir := filepath.Join(datadir, "tmp")
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(nil, tmpDir), make(chan struct{}, 1)); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(nil, false /* checkRoot */, false /* saveHashesToDB */, tmpDir, blockReader), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
 		return err
 	}
 	return nil
