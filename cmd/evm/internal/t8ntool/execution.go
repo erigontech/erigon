@@ -22,7 +22,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -31,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type Prestate struct {
@@ -102,13 +100,6 @@ func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAll
 		panic(err)
 	}
 	return stateReader, stateWriter
-}
-
-func rlpHash(x interface{}) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
-	rlp.Encode(hw, x) //nolint:errcheck
-	hw.Sum(h[:0])
-	return h
 }
 
 // calcDifficulty is based on ethash.CalcDifficulty. This method is used in case
