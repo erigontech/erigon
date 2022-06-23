@@ -362,6 +362,7 @@ func NewStagedSync(
 				blockReader,
 				tmpdir,
 				notifications.Events,
+				notifications,
 				execPayload),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
