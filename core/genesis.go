@@ -271,10 +271,17 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 		}
 		return newCfg, storedBlock, nil
 	}
-	// Special case: don't change the existing config of an unknown chain if no new
+	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
-	if genesis == nil && params.ChainConfigByGenesisHash(storedHash) == nil && overrideMergeNetsplitBlock == nil && overrideTerminalTotalDifficulty == nil {
-		return storedCfg, storedBlock, nil
+	// In that case, only apply the overrides.
+	if genesis == nil && params.ChainConfigByGenesisHash(storedHash) == nil {
+		newCfg = storedCfg
+		if overrideMergeNetsplitBlock != nil {
+			newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
