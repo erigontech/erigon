@@ -37,8 +37,8 @@ docker: git-submodules
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
-		--build-arg PUID=${DOCKER_UID} \
-		--build-arg PGID=${DOCKER_PID} \
+		--build-arg DOCKER_UID=${DOCKER_UID} \
+		--build-arg DOCKER_GID=${DOCKER_GID} \
 		${DOCKER_FLAGS} \
 		.
 
@@ -47,6 +47,10 @@ ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
 docker-compose:
+	@echo "USER:       $(USER)"
+	@echo "DOCKER_UID: $(DOCKER_UID)"
+	@echo "DOCKER_GID: $(DOCKER_GID)"
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
 	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
 	docker-compose up
 

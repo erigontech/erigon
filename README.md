@@ -48,11 +48,11 @@ System Requirements
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* BSC Archive: 7TB. BSC Full: 1TB. 
+* BSC Archive: 7TB. BSC Full: 1TB.
 
 * Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
 
-SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
+SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
@@ -71,7 +71,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
+Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
@@ -190,18 +190,18 @@ In order to establish a secure connection between the Consensus Layer and the Ex
 The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
 
 This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
-    
+
 ### Multiple Instances / One Machine
 
 Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
 
 ```
 # mainnet
-./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
 # rinkeby
-./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
+./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
@@ -210,7 +210,7 @@ Quote your path if it has spaces.
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
 Key features
-============ 
+============
 
 <code>🔬 See more
 detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
@@ -261,11 +261,11 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process. 
+Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
-Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code> 
+Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 #### **For remote DB**
 
@@ -291,12 +291,73 @@ command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 ### Run all components by docker-compose
 
+#### Setup user
+User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
+
+It is recommended to setup a dedicated user/group.
+```sh
+USER_NAME=erigon
+UID=1000
+GID=1000
+
+# create user/group
+addgroup --gid $GID $USER_NAME 2> /dev/null || true
+adduser --disabled-password --gecos '' --uid $UID --gid $GID $USER_NAME 2> /dev/null || true
+
+# user must have "go" command installed and linked in PATH
+echo 'export PATH=$PATH:/usr/local/go/bin' | sudo -u $USER_NAME tee ~$USER_NAME/.bash_aliases >/dev/null
+
+# optional: if you want to call docker using this user
+usermod -aG docker $USER_NAME
+
+# optional: setup data dir for user
+sudo -u ${USER_NAME} mkdir /home/${USER_NAME}/.ethereum
+```
+
+#### Run
 Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
 
 ```sh
+#
+# Must be ran by user with UID=1000, GID=1000
+#
+# Will use default UID=1000, GID=1000 set in Dockerfile
+# Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
+#
+# Note: Calling user must have UID=1000, GID=1000
+#       because ~/.local/share/erigon is mounted, "~" is the home dir of the caller,
+#       so files written in the container to the docker-mounted ~/.local/share/erigon will
+#       have UID/GID set to the running user in the docker (UID=1000, GID=1000)
+#       (discouraged: technically, username can be different from "erigon" default in container)
+#
 make docker-compose
+
+#
 # or
-XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+#
+# if you want to use a custom data directory
+#
+# or, you want to use different UID/GID for a dedicated user,
+# the UID/GID will not be 1000,1000
+#
+# To solve this, pass in the UID/GID parameters into the container.
+#
+# UID: the user id (default: 1000)
+# GID: the group id (default: 1000)
+# XDG_DATA_HOME: the data directory (default: ~/.local/share)
+#
+# Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
+#       if you followed above instructions
+#
+DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+
+#
+# or
+#
+# To run the command via another user, use
+#
+USER_NAME=erigon
+sudo -u ${USER_NAME} DOCKER_UID=$(id -u ${USER_NAME}) DOCKER_GID=$(id -g ${USER_NAME}) XDG_DATA_HOME=~${USER_NAME}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
@@ -382,7 +443,7 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
   run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
   run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
-    
+
 ### How to run local devnet?
 <code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
@@ -455,7 +516,7 @@ Application
 
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
 because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
-because most of that `90%` is "OS pages cache".  
+because most of that `90%` is "OS pages cache".
 OS automatically free this cache any time it needs memory. Smaller "page cache size" may not impact performance of
 Erigon at all.
 
