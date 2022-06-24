@@ -595,9 +595,9 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 			return
 		}
 
-		/*if jwtSecret != nil && !rpc.CheckJwtSecret(w, r, jwtSecret) {
+		if jwtSecret != nil && !rpc.CheckJwtSecret(w, r, jwtSecret) {
 			return
-		}*/
+		}
 
 		httpHandler.ServeHTTP(w, r)
 	})
