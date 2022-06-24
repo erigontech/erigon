@@ -384,10 +384,12 @@ $MyContext.Directory  = (Split-Path (Resolve-Path $MyInvocation.MyCommand.Defini
 $MyContext.StartDir   = (Get-Location -PSProvider FileSystem).ProviderPath
 $MyContext.WinVer     = (Get-WmiObject Win32_OperatingSystem).Version.Split(".")
 $MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
+$MyContext.Cancelling = $False
 
 # ====================================================================
 # ## Test requirements
 # ====================================================================
+Set-Location $MyContext.Directory
 
 ## Test we're a git cloned repo
 if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType Directory) {
@@ -401,7 +403,6 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
 "@
     exit 1
 }
-
 
 ## Test Git is installed
 if(!(Test-Git-Installed)) { exit 1 }
@@ -446,7 +447,6 @@ Write-Host @"
 if (!$wnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean") {
     Write-Host " Updating git submodules ..."
     Invoke-Expression -Command "git.exe submodule update --init --recursive --force --quiet"
-    git.exe submodule update --init --recursive --force --quiet
     if (!($?)) {
         Write-Host " ERROR : Update submodules failed"
         exit 1
@@ -561,5 +561,5 @@ if ($BuildTarget -eq "db-tools") {
 }
 }
 
-# Return to source folder
-Set-Location $MyContext.Directory
+# Return to origin folder
+Set-Location $MyContext.StartDir
