@@ -309,7 +309,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, nil),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, mock.Notifications, nil),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -531,4 +531,8 @@ func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage
 
 func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
+}
+
+func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
+	return ms.sentriesClient.Hd
 }
