@@ -46,6 +46,10 @@ func NewMemoryBatch(tx kv.Tx) *MemoryMutation {
 	if err != nil {
 		panic(err)
 	}
+	if err := initSequences(tx, memTx); err != nil {
+		return nil
+	}
+
 	return &MemoryMutation{
 		db:             tx,
 		memDb:          tmpDB,
@@ -85,32 +89,46 @@ func (m *MemoryMutation) getMem(table string, key []byte) ([]byte, bool) {
 func (m *MemoryMutation) DBSize() (uint64, error) { return 0, nil }
 func (m *MemoryMutation) PageSize() uint64        { return 0 }
 
-func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	memRes, err := m.memTx.ReadSequence(bucket)
+func initSequences(db kv.Tx, memTx kv.RwTx) error {
+	cursor, err := db.Cursor(kv.Sequence)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if memRes == 0 {
-		base, err := m.db.ReadSequence(bucket)
+	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
 		if err != nil {
-			return 0, err
+			return err
 		}
-		if _, err := m.memTx.IncrementSequence(bucket, base); err != nil {
-			return 0, err
+		if err := memTx.Put(kv.Sequence, k, v); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	return m.memTx.IncrementSequence(bucket, amount)
 }
 
 func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
-	memRes, err := m.memTx.ReadSequence(bucket)
+	return m.memTx.ReadSequence(bucket)
+}
+
+func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	cursor, err := m.Cursor(bucket)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if memRes == 0 {
-		return m.db.ReadSequence(bucket)
+	count := uint32(0)
+	for k, v, err := cursor.Seek(prefix); k != nil && count < amount; k, v, err = cursor.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		count++
 	}
-	return memRes, nil
+	return nil
 }
 
 // Can only be called from the worker thread
@@ -186,14 +204,6 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForPrefix(bucket, prefix, walker)
-}
-
-func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	if err := m.db.ForAmount(bucket, prefix, amount, walker); err != nil {
-		return err
-	}
-	return m.memTx.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *MemoryMutation) Delete(table string, k, v []byte) error {
