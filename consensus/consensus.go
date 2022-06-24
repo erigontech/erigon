@@ -166,5 +166,5 @@ type PoSA interface {
 type AsyncEngine interface {
 	Engine
 
-	SetExecutionContext(context.Context) context.Context
+	WithExecutionContext(context.Context) AsyncEngine
 }
