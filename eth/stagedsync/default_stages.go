@@ -228,6 +228,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 	}
 }
 
+// StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
 func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg) []*Stage {
 	return []*Stage{
 		{
