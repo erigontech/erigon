@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -1207,22 +1208,34 @@ func (hd *HeaderDownload) FetchingNew() bool {
 	return hd.fetchingNew
 }
 
-func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadHash() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingPayloadHash
+}
+
+func (hd *HeaderDownload) SetPendingPayloadHash(header common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadHash = header
+}
+
+func (hd *HeaderDownload) ClearPendingPayloadHash() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadHash = common.Hash{}
+}
+
+func (hd *HeaderDownload) GetPendingPayloadStatus() *privateapi.PayloadStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(response *privateapi.PayloadStatus) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = header
-}
-
-func (hd *HeaderDownload) ClearPendingPayloadStatus() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = common.Hash{}
+	hd.pendingPayloadStatus = response
 }
 
 func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {

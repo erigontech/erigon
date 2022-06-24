@@ -31,6 +31,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			hd.PayloadStatusCh <- *pendingPayloadStatus
+		}
+	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			var status remote.EngineStatus
+			if headBlockHash == pendingPayloadHash {
+				status = remote.EngineStatus_VALID
+			} else {
+				status = remote.EngineStatus_INVALID
+			}
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: headBlockHash,
+			}
+		}
+	}
+	hd.ClearPendingPayloadHash()
+	hd.SetPendingPayloadStatus(nil)
+}
+
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
@@ -52,25 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingPayloadStatus := hd.GetPendingPayloadStatus()
-		if pendingPayloadStatus != (common.Hash{}) {
-			if err != nil {
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-			} else {
-				var status remote.EngineStatus
-				if headBlockHash == pendingPayloadStatus {
-					status = remote.EngineStatus_VALID
-				} else {
-					status = remote.EngineStatus_INVALID
-				}
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					Status:          status,
-					LatestValidHash: headBlockHash,
-				}
-			}
-
-			hd.ClearPendingPayloadStatus()
-		}
+		SendPayloadStatus(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -349,6 +358,7 @@ func NewStagedSync(
 				blockReader,
 				tmpdir,
 				notifications.Events,
+				notifications,
 				execPayload),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),

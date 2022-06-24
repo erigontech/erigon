@@ -59,8 +59,11 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 }
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
-func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
+	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, v []byte) error {
+		if deleteHeaders {
+			deleteHeader(tx, common.BytesToHash(v), blockFrom)
+		}
 		return tx.Delete(kv.HeaderCanonical, k, nil)
 	}); err != nil {
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
@@ -768,7 +771,7 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 }
 
 // MakeBodiesNonCanonical - move all txs of canonical blocks to NonCanonicalTxs bucket
-func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	var firstMovedTxnID uint64
 	var firstMovedTxnIDIsSet bool
 	for blockNum := from; ; blockNum++ {
@@ -793,17 +796,22 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 			firstMovedTxnID = bodyForStorage.BaseTxId
 		}
 
-		// move txs to NonCanonical bucket, it has own sequence
-		newBaseId, err := tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
-		if err != nil {
-			return err
+		newBaseId := uint64(0)
+		if !deleteBodies {
+			// move txs to NonCanonical bucket, it has own sequence
+			newBaseId, err = tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
+			if err != nil {
+				return err
+			}
 		}
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
 		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-			id := newBaseId + 1 + i
-			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
-				return err
+			if !deleteBodies {
+				id := newBaseId + 1 + i
+				if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
+					return err
+				}
 			}
 			if err := tx.Delete(kv.EthTx, k, nil); err != nil {
 				return err
@@ -813,9 +821,14 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 		}); err != nil {
 			return err
 		}
-		bodyForStorage.BaseTxId = newBaseId
-		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
-			return err
+
+		if deleteBodies {
+			deleteBody(tx, h, blockNum)
+		} else {
+			bodyForStorage.BaseTxId = newBaseId
+			if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
+				return err
+			}
 		}
 
 		select {
@@ -1158,8 +1171,8 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 
 // DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // returns [deletedFrom, deletedTo)
 func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deletedFrom, deletedTo uint64, err error) {
 	c, err := tx.Cursor(kv.Headers)
@@ -1283,8 +1296,8 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 }
 
 // TruncateBlocks - delete block >= blockFrom
-// does decrement sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
