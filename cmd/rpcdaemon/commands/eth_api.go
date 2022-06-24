@@ -53,9 +53,9 @@ type EthAPI interface {
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
-	NewPendingTransactionFilter(_ context.Context) (common.Hash, error)
-	NewBlockFilter(_ context.Context) (common.Hash, error)
-	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (common.Hash, error)
+	NewPendingTransactionFilter(_ context.Context) (string, error)
+	NewBlockFilter(_ context.Context) (string, error)
+	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]interface{}, error)
 
