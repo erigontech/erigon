@@ -203,6 +203,9 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	if err != nil {
 		return nil, err
 	}
+	if block == nil {
+		return nil, nil
+	}
 	return block.Header(), nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
