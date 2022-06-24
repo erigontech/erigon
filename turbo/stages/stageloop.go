@@ -249,7 +249,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-
+		stateSync.UnwindTo(unwindPoint, common.Hash{})
+		if err = stateSync.Run(nil, batch, false); err != nil {
+			return err
+		}
 		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 		for i := range headersChain {
 			currentHeader := headersChain[i]
@@ -293,36 +296,6 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 
 	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 		return err
-	}
-
-	if height == 0 {
-		return nil
-	}
-	ancestorHash := hash
-	ancestorHeight := height
-
-	var ch common.Hash
-	for ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight) {
-		if err = rawdb.WriteCanonicalHash(batch, ancestorHash, ancestorHeight); err != nil {
-			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
-		}
-
-		ancestor, err := headerReader.Header(context.Background(), batch, ancestorHash, ancestorHeight)
-		if err != nil {
-			return err
-		}
-		if ancestor == nil {
-			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
-		}
-
-		select {
-		default:
-		}
-		ancestorHash = ancestor.ParentHash
-		ancestorHeight--
-	}
-	if err != nil {
-		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
 	// Run state sync

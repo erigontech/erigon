@@ -1134,7 +1134,8 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		}
 		headersChain = append(headersChain, sb.header)
 		bodiesChain = append(bodiesChain, sb.body)
-		foundCanonical, err = rawdb.IsCanonicalHash(tx, sb.header.Hash())
+		currentHash = sb.header.ParentHash
+		foundCanonical, err = rawdb.IsCanonicalHash(tx, currentHash)
 		if err != nil {
 			return
 		}
@@ -1145,7 +1146,7 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	err = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
 	// After the we finished executing, we clean up old forks
 	for hash, sb := range hd.sideForksBlock {
-		if *currentHeight-sb.header.Number.Uint64() < maxDepth {
+		if *currentHeight-sb.header.Number.Uint64() > maxDepth {
 			delete(hd.sideForksBlock, hash)
 		}
 	}
