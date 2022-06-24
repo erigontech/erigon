@@ -40,7 +40,7 @@ Param(
         "all"
     )]
     [string[]]$BuildTargets=@("erigon", "rpcdaemon", "sentry", "downloader", "integration"),
-    [switch]$wnoSubmoduleUpdate
+    [switch]$WnoSubmoduleUpdate
 )
 
 # Sanity checks on $BuildTargets
@@ -444,7 +444,7 @@ Write-Host @"
 
 "@
 
-if (!$wnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean") {
+if (!$WnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean") {
     Write-Host " Updating git submodules ..."
     Invoke-Expression -Command "git.exe submodule update --init --recursive --force --quiet"
     if (!($?)) {
