@@ -384,7 +384,6 @@ $MyContext.Directory  = (Split-Path (Resolve-Path $MyInvocation.MyCommand.Defini
 $MyContext.StartDir   = (Get-Location -PSProvider FileSystem).ProviderPath
 $MyContext.WinVer     = (Get-WmiObject Win32_OperatingSystem).Version.Split(".")
 $MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
-$MyContext.Cancelling = $False
 
 # ====================================================================
 # ## Test requirements
