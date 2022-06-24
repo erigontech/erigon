@@ -321,7 +321,7 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 	if err != nil {
 		return err
 	}
-	for v, err := m.dupCursor.FirstDup(); v != nil; k, v, err = m.dupCursor.NextDup() {
+	for v, err := m.dupCursor.SeekBothRange(k, nil); v != nil; k, v, err = m.dupCursor.NextDup() {
 		if err != nil {
 			return err
 		}
