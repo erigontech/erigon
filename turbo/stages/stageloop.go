@@ -441,7 +441,7 @@ func NewInMemoryExecution(
 				blockReader,
 				tmpdir,
 				notifications.Events,
-				nil), stagedsync.StageBodiesCfg(
+				nil, nil), stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,
 				controlServer.SendBodyRequest,
