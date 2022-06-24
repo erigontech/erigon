@@ -250,6 +250,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		return err
 	}
 	var stoppedErr error
+
+	if asyncEngine, ok := cfg.engine.(consensus.AsyncEngine); ok {
+		prevEngineCtx := asyncEngine.SetExecutionContext(ctx)
+		defer asyncEngine.SetExecutionContext(prevEngineCtx)
+	}
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
