@@ -55,7 +55,7 @@ func ResetBlocks(tx kv.RwTx) error {
 	}
 
 	// remove all canonical markers from this point
-	if err := rawdb.TruncateCanonicalHash(tx, 1); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
 		return err
 	}
 	if err := rawdb.TruncateTd(tx, 1); err != nil {
@@ -69,7 +69,7 @@ func ResetBlocks(tx kv.RwTx) error {
 		return err
 	}
 
-	// ensure no grabage records left (it may happen if db is inconsistent)
+	// ensure no garbage records left (it may happen if db is inconsistent)
 	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k, nil) }); err != nil {
 		return err
 	}

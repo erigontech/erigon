@@ -59,8 +59,11 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 }
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
-func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
+	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, v []byte) error {
+		if deleteHeaders {
+			deleteHeader(tx, common.BytesToHash(v), blockFrom)
+		}
 		return tx.Delete(kv.HeaderCanonical, k, nil)
 	}); err != nil {
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
@@ -1158,8 +1161,8 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 
 // DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // returns [deletedFrom, deletedTo)
 func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deletedFrom, deletedTo uint64, err error) {
 	c, err := tx.Cursor(kv.Headers)
@@ -1283,8 +1286,8 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 }
 
 // TruncateBlocks - delete block >= blockFrom
-// does decrement sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
