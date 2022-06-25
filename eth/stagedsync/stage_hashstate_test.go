@@ -73,7 +73,7 @@ func TestUnwindHashed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), nil)
+	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), context.Background())
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
