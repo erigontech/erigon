@@ -1,7 +1,9 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"expvar"
 	"fmt"
 	"io/fs"
 	"os"
@@ -289,6 +291,15 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 }
 
 func MainLoop(ctx context.Context, d *Downloader, silent bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			w := bytes.NewBuffer(nil)
+			expvar.Handler()(w, nil)
+			log.Warn("aaaaa", "and", w.String())
+			panic(rec)
+		}
+	}()
+
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
 	go func() {
