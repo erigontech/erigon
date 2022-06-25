@@ -1086,10 +1086,17 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
+func abs64(n int64) uint64 {
+	if n < 0 {
+		return uint64(-n)
+	}
+	return uint64(n)
+}
+
 func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	maxDepth := uint64(128)
+	maxDepth := uint64(16)
 	if store {
 		// If it is a continuation of the canonical chain we can stack it up.
 		if hd.nextForkState == nil {
@@ -1111,8 +1118,8 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		criticalError = fmt.Errorf("could not read block number.")
 		return
 	}
-	// if the header is in the future or too much in the past we accept it.
-	if *currentHeight < header.Number.Uint64() || *currentHeight-header.Number.Uint64() > maxDepth {
+	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
+	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxDepth {
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
@@ -1154,7 +1161,7 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	}
 	// After the we finished executing, we clean up old forks
 	for hash, sb := range hd.sideForksBlock {
-		if *currentHeight-sb.header.Number.Uint64() > maxDepth {
+		if abs64(int64(*currentHeight)-sb.header.Number.Int64()) > maxDepth {
 			delete(hd.sideForksBlock, hash)
 		}
 	}
