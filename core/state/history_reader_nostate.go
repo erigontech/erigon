@@ -14,26 +14,27 @@ type RequiredStateError struct {
 	StateTxNum uint64
 }
 
-func (r RequiredStateError) Error() string {
+func (r *RequiredStateError) Error() string {
 	return fmt.Sprintf("required state at txNum %d", r.StateTxNum)
 }
 
 // Implements StateReader and StateWriter
 type HistoryReaderNoState struct {
-	a     *libstate.Aggregator
-	tx    kv.Tx
-	txNum uint64
-	trace bool
-	rs    *ReconState
+	ac         *libstate.AggregatorContext
+	tx         kv.Tx
+	txNum      uint64
+	trace      bool
+	rs         *ReconState
+	readError  bool
+	stateTxNum uint64
 }
 
-func NewHistoryReaderNoState(a *libstate.Aggregator, rs *ReconState) *HistoryReaderNoState {
-	return &HistoryReaderNoState{a: a, rs: rs}
+func NewHistoryReaderNoState(ac *libstate.AggregatorContext, rs *ReconState) *HistoryReaderNoState {
+	return &HistoryReaderNoState{ac: ac, rs: rs}
 }
 
 func (hr *HistoryReaderNoState) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
-	hr.a.SetTxNum(txNum)
 }
 
 func (hr *HistoryReaderNoState) SetTx(tx kv.Tx) {
@@ -45,13 +46,15 @@ func (hr *HistoryReaderNoState) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, noState, stateTxNum, err := hr.a.ReadAccountDataNoState(address.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.ac.ReadAccountDataNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !noState {
 		if !hr.rs.Done(stateTxNum) {
-			return nil, RequiredStateError{StateTxNum: stateTxNum}
+			hr.readError = true
+			hr.stateTxNum = stateTxNum
+			return nil, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		enc = hr.rs.Get(kv.PlainState, address.Bytes())
 		if enc != nil {
@@ -114,13 +117,15 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 }
 
 func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, noState, stateTxNum, err := hr.a.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.ac.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !noState {
 		if !hr.rs.Done(stateTxNum) {
-			return nil, RequiredStateError{StateTxNum: stateTxNum}
+			hr.readError = true
+			hr.stateTxNum = stateTxNum
+			return nil, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
 		enc = hr.rs.Get(kv.PlainState, compositeKey)
@@ -145,13 +150,15 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, noState, stateTxNum, err := hr.a.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
+	enc, noState, stateTxNum, err := hr.ac.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !noState {
 		if !hr.rs.Done(stateTxNum) {
-			return nil, RequiredStateError{StateTxNum: stateTxNum}
+			hr.readError = true
+			hr.stateTxNum = stateTxNum
+			return nil, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		enc = hr.rs.Get(kv.Code, codeHash.Bytes())
 		if enc == nil {
@@ -168,13 +175,15 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	size, noState, stateTxNum, err := hr.a.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
+	size, noState, stateTxNum, err := hr.ac.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
 	if err != nil {
 		return 0, err
 	}
 	if !noState {
 		if !hr.rs.Done(stateTxNum) {
-			return 0, RequiredStateError{StateTxNum: stateTxNum}
+			hr.readError = true
+			hr.stateTxNum = stateTxNum
+			return 0, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		enc := hr.rs.Get(kv.Code, codeHash.Bytes())
 		if enc == nil {
@@ -193,4 +202,12 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 
 func (hr *HistoryReaderNoState) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
+}
+
+func (hr *HistoryReaderNoState) ResetError() {
+	hr.readError = false
+}
+
+func (hr *HistoryReaderNoState) ReadError() (uint64, bool) {
+	return hr.stateTxNum, hr.readError
 }

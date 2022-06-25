@@ -48,6 +48,7 @@ type ReconState struct {
 	triggers map[uint64][]uint64
 	queue theap[uint64]
 	changes map[string]map[string][]byte
+	sizeEstimate uint64
 }
 
 func NewReconState(workBitmap *roaring64.Bitmap) *ReconState {
@@ -68,6 +69,7 @@ func (rs *ReconState) Put(table string,	key, val []byte) {
 		rs.changes[table] = t
 	}
 	t[string(key)] = val
+	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
 }
 
 func (rs *ReconState) Get(table string, key []byte) []byte {
@@ -91,13 +93,14 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 		}
 	}
 	rs.changes = map[string]map[string][]byte{}
+	rs.sizeEstimate = 0
 	return nil
 }
 
 func (rs *ReconState) Schedule() (uint64, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	if rs.queue.Len() < 16 && rs.workIterator.HasNext() {
+	for rs.queue.Len() < 16 && rs.workIterator.HasNext() {
 		heap.Push(&rs.queue, rs.workIterator.Next())
 	}
 	if rs.queue.Len() > 0 {
@@ -121,9 +124,13 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 func (rs *ReconState) RollbackTxNum(txNum, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	tt, _ := rs.triggers[dependency]
-	tt = append(tt, txNum)
-	rs.triggers[dependency] = tt
+	if rs.doneBitmap.Contains(dependency) {
+		heap.Push(&rs.queue, txNum)
+	} else {
+		tt, _ := rs.triggers[dependency]
+		tt = append(tt, txNum)
+		rs.triggers[dependency] = tt
+	}
 }
 
 func (rs *ReconState) Done(txNum uint64) bool {
@@ -138,26 +145,31 @@ func (rs *ReconState) DoneCount() uint64 {
 	return rs.doneBitmap.GetCardinality()
 }
 
+func (rs *ReconState) SizeEstimate() uint64 {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.sizeEstimate
+}
+
 type StateReconWriter struct {
-	a     *libstate.Aggregator
+	ac     *libstate.AggregatorContext
 	rs *ReconState
 	txNum uint64
 }
 
-func NewStateReconWriter(a *libstate.Aggregator, rs *ReconState) *StateReconWriter {
+func NewStateReconWriter(ac *libstate.AggregatorContext, rs *ReconState) *StateReconWriter {
 	return &StateReconWriter{
-		a: a,
+		ac: ac,
 		rs: rs,
 	}
 }
 
 func (w *StateReconWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
-	w.a.SetTxNum(txNum)
 }
 
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	found, txNum := w.a.MaxAccountsTxNum(address.Bytes())
+	found, txNum := w.ac.MaxAccountsTxNum(address.Bytes())
 	if !found {
 		return nil
 	}
@@ -173,7 +185,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	found, txNum := w.a.MaxCodeTxNum(address.Bytes())
+	found, txNum := w.ac.MaxCodeTxNum(address.Bytes())
 	if !found {
 		return nil
 	}
@@ -194,7 +206,7 @@ func (w *StateReconWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	found, txNum := w.a.MaxStorageTxNum(address.Bytes(), key.Bytes())
+	found, txNum := w.ac.MaxStorageTxNum(address.Bytes(), key.Bytes())
 	if !found {
 		return nil
 	}

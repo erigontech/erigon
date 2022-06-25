@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"path"
@@ -11,12 +12,12 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -80,6 +81,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 	a *libstate.Aggregator, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 ) *ReconWorker {
+	ac := a.MakeContext()
 	return &ReconWorker{
 		lock:         lock,
 		wg:           wg,
@@ -87,8 +89,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		blockReader:  blockReader,
 		allSnapshots: allSnapshots,
 		ctx:          context.Background(),
-		stateWriter:  state.NewStateReconWriter(a, rs),
-		stateReader:  state.NewHistoryReaderNoState(a, rs),
+		stateWriter:  state.NewStateReconWriter(ac, rs),
+		stateReader:  state.NewHistoryReaderNoState(ac, rs),
 		txNums:       txNums,
 		chainConfig:  chainConfig,
 		logger:       logger,
@@ -101,6 +103,7 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 }
 
 func (rw *ReconWorker) run() {
+	defer rw.wg.Done()
 	rw.firstBlock = true
 	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
 		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
@@ -113,13 +116,13 @@ func (rw *ReconWorker) run() {
 	for txNum, ok := rw.rs.Schedule(); ok; txNum, ok = rw.rs.Schedule() {
 		rw.runTxNum(txNum)
 	}
-	rw.wg.Done()
 }
 
 func (rw *ReconWorker) runTxNum(txNum uint64) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txNum)
+	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txNum)
 	noop := state.NewNoopWriter()
 	// Find block number
@@ -192,14 +195,101 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 	if err = ibs.CommitBlock(rw.lastRules, rw.stateWriter); err != nil {
 		panic(err)
 	}
-	if err = ibs.Error(); err == nil {
-		rw.rs.CommitTxNum(txNum)
-	} else if rse, ok := err.(state.RequiredStateError); ok {
-		rw.rs.RollbackTxNum(txNum, rse.StateTxNum)
+	if dependency, ok := rw.stateReader.ReadError(); ok {
+		rw.rs.RollbackTxNum(txNum, dependency)
 	} else {
-		panic(err)
+		rw.rs.CommitTxNum(txNum)
 	}
+}
 
+type FillWorker struct {
+	txNum          uint64
+	doneCount      *uint64
+	rs             *state.ReconState
+	ac             *libstate.AggregatorContext
+	fromKey, toKey []byte
+}
+
+func NewFillWorker(txNum uint64, doneCount *uint64, rs *state.ReconState, a *libstate.Aggregator, fromKey, toKey []byte) *FillWorker {
+	fw := &FillWorker{
+		doneCount: doneCount,
+		rs:        rs,
+		ac:        a.MakeContext(),
+		fromKey:   fromKey,
+		toKey:     toKey,
+	}
+	return fw
+}
+
+func (fw *FillWorker) fillAccounts() {
+	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
+	for it.HasNext() {
+		key, val := it.Next()
+		if len(val) > 0 {
+			var a accounts.Account
+			a.Reset()
+			pos := 0
+			nonceBytes := int(val[pos])
+			pos++
+			if nonceBytes > 0 {
+				a.Nonce = bytesToUint64(val[pos : pos+nonceBytes])
+				pos += nonceBytes
+			}
+			balanceBytes := int(val[pos])
+			pos++
+			if balanceBytes > 0 {
+				a.Balance.SetBytes(val[pos : pos+balanceBytes])
+				pos += balanceBytes
+			}
+			codeHashBytes := int(val[pos])
+			pos++
+			if codeHashBytes > 0 {
+				copy(a.CodeHash[:], val[pos:pos+codeHashBytes])
+				pos += codeHashBytes
+			}
+			if pos >= len(val) {
+				fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", key, val)
+			}
+			incBytes := int(val[pos])
+			pos++
+			if incBytes > 0 {
+				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
+			}
+			value := make([]byte, a.EncodingLengthForStorage())
+			a.EncodeForStorage(value)
+			fw.rs.Put(kv.PlainState, key, value)
+			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+		}
+	}
+	atomic.AddUint64(fw.doneCount, 1)
+}
+
+func (fw *FillWorker) fillStorage() {
+	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
+	for it.HasNext() {
+		key, val := it.Next()
+		if len(val) > 0 {
+			compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
+			fw.rs.Put(kv.PlainState, compositeKey, val)
+			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+		}
+	}
+	atomic.AddUint64(fw.doneCount, 1)
+}
+
+func (fw *FillWorker) fillCode() {
+	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
+	for it.HasNext() {
+		key, val := it.Next()
+		if len(val) > 0 {
+			codeHash := crypto.Keccak256(val)
+			fw.rs.Put(kv.Code, codeHash[:], val)
+			compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
+			fw.rs.Put(kv.PlainContractCode, compositeKey, codeHash[:])
+			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+		}
+	}
+	atomic.AddUint64(fw.doneCount, 1)
 }
 
 func Recon(genesis *core.Genesis, logger log.Logger) error {
@@ -300,11 +390,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	count := uint64(0)
-	prevCommitCount := uint64(0)
 	total := bitmap.GetCardinality()
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].run()
 	}
+	commitThreshold := uint64(256 * 1024 * 1024)
 	for count < total {
 		select {
 		case <-logEvery.C:
@@ -313,11 +403,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 
 			count = rs.DoneCount()
 			progress := 100.0 * float64(count) / float64(total)
-			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
+			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "total", total, "count", count,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
-			if prevCommitCount+1_000_000 <= count {
-				prevCommitCount = count
+			sizeEstimate := rs.SizeEstimate()
+			if sizeEstimate >= commitThreshold {
 				err := func() error {
 					lock.Lock()
 					defer lock.Unlock()
@@ -368,142 +458,114 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	log.Info("Completed tx replay phase")
+	fillWorkers := make([]*FillWorker, workerCount)
+	var fromKey, toKey []byte
+	bigCount := big.NewInt(int64(workerCount))
+	bigStep := big.NewInt(0x100000000)
+	bigStep.Div(bigStep, bigCount)
+	bigCurrent := big.NewInt(0)
+	var doneCount uint64
+	for i := 0; i < workerCount; i++ {
+		fromKey = toKey
+		if i == workerCount-1 {
+			toKey = nil
+		} else {
+			bigCurrent.Add(bigCurrent, bigStep)
+			toKey = make([]byte, 4)
+			bigCurrent.FillBytes(toKey)
+		}
+		fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
+		fillWorkers[i] = NewFillWorker(txNum, &doneCount, rs, agg, fromKey, toKey)
+	}
+	for i := 0; i < workerCount; i++ {
+		go fillWorkers[i].fillAccounts()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+
+			log.Info("Filling accounts", "workers", workerCount,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+			sizeEstimate := rs.SizeEstimate()
+			if sizeEstimate >= commitThreshold {
+				rwTx, err := db.BeginRw(ctx)
+				if err != nil {
+					return err
+				}
+				if err = rs.Flush(rwTx); err != nil {
+					return err
+				}
+				if err = rwTx.Commit(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		go fillWorkers[i].fillStorage()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+
+			log.Info("Filling storage", "workers", workerCount,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+			sizeEstimate := rs.SizeEstimate()
+			if sizeEstimate >= commitThreshold {
+				rwTx, err := db.BeginRw(ctx)
+				if err != nil {
+					return err
+				}
+				if err = rs.Flush(rwTx); err != nil {
+					return err
+				}
+				if err = rwTx.Commit(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		go fillWorkers[i].fillCode()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+
+			log.Info("Filling code", "workers", workerCount,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+			sizeEstimate := rs.SizeEstimate()
+			if sizeEstimate >= commitThreshold {
+				rwTx, err := db.BeginRw(ctx)
+				if err != nil {
+					return err
+				}
+				if err = rs.Flush(rwTx); err != nil {
+					return err
+				}
+				if err = rwTx.Commit(); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	rwTx, err = db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
-	count = 0
-	accountsIt := agg.IterateAccountsHistory(txNum)
-	for accountsIt.HasNext() {
-		key, val := accountsIt.Next()
-		if len(val) > 0 {
-			var a accounts.Account
-			a.Reset()
-			pos := 0
-			nonceBytes := int(val[pos])
-			pos++
-			if nonceBytes > 0 {
-				a.Nonce = bytesToUint64(val[pos : pos+nonceBytes])
-				pos += nonceBytes
-			}
-			balanceBytes := int(val[pos])
-			pos++
-			if balanceBytes > 0 {
-				a.Balance.SetBytes(val[pos : pos+balanceBytes])
-				pos += balanceBytes
-			}
-			codeHashBytes := int(val[pos])
-			pos++
-			if codeHashBytes > 0 {
-				copy(a.CodeHash[:], val[pos:pos+codeHashBytes])
-				pos += codeHashBytes
-			}
-			if pos >= len(val) {
-				fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", key, val)
-			}
-			incBytes := int(val[pos])
-			pos++
-			if incBytes > 0 {
-				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
-			}
-			value := make([]byte, a.EncodingLengthForStorage())
-			a.EncodeForStorage(value)
-			if err = rwTx.Put(kv.PlainState, key, value); err != nil {
-				return err
-			}
-			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
-			count++
-			if count%1_000_000 == 0 {
-				log.Info("Processed", "accounts", count)
-				var spaceDirty uint64
-				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-					return fmt.Errorf("retrieving spaceDirty: %w", err)
-				}
-				if spaceDirty >= dirtySpaceThreshold {
-					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-					if err = rwTx.Commit(); err != nil {
-						return err
-					}
-					if rwTx, err = db.BeginRw(ctx); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-	if err = rwTx.Commit(); err != nil {
+	if err = rs.Flush(rwTx); err != nil {
 		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	count = 0
-	storageIt := agg.IterateStorageHistory(txNum)
-	for storageIt.HasNext() {
-		key, val := storageIt.Next()
-		if len(val) > 0 {
-			compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
-			if err = rwTx.Put(kv.PlainState, compositeKey, val); err != nil {
-				return err
-			}
-			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
-			count++
-			if count%1_000_000 == 0 {
-				log.Info("Processed", "storage", count)
-				var spaceDirty uint64
-				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-					return fmt.Errorf("retrieving spaceDirty: %w", err)
-				}
-				if spaceDirty >= dirtySpaceThreshold {
-					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-					if err = rwTx.Commit(); err != nil {
-						return err
-					}
-					if rwTx, err = db.BeginRw(ctx); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	count = 0
-	codeIt := agg.IterateCodeHistory(txNum)
-	for codeIt.HasNext() {
-		key, val := codeIt.Next()
-		if len(val) > 0 {
-			codeHash := crypto.Keccak256(val)
-			if err = rwTx.Put(kv.Code, codeHash[:], val); err != nil {
-				return err
-			}
-			compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
-			if err = rwTx.Put(kv.PlainContractCode, compositeKey, codeHash[:]); err != nil {
-				return err
-			}
-			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
-			count++
-			if count%1_000_000 == 0 {
-				log.Info("Processed", "code", count)
-				var spaceDirty uint64
-				if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-					return fmt.Errorf("retrieving spaceDirty: %w", err)
-				}
-				if spaceDirty >= dirtySpaceThreshold {
-					log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-					if err = rwTx.Commit(); err != nil {
-						return err
-					}
-					if rwTx, err = db.BeginRw(ctx); err != nil {
-						return err
-					}
-				}
-			}
-		}
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
