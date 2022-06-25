@@ -524,9 +524,11 @@ if ($BuildTarget -eq "db-tools") {
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
+        Remove-Item Env:\GODEBUG
         exit 1
     } else {
         Write-Host "`n Tests completed"
+        Remove-Item Env:\GODEBUG
     }
 
 } elseif ($BuildTarget -eq "test-integration") {
