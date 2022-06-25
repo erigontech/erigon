@@ -3,7 +3,6 @@ package state
 import (
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -12,24 +11,24 @@ import (
 )
 
 type RequiredStateError struct {
-	stateTxNum uint64
+	StateTxNum uint64
 }
 
 func (r RequiredStateError) Error() string {
-	return fmt.Sprintf("required state at txNum %d", r.stateTxNum)
+	return fmt.Sprintf("required state at txNum %d", r.StateTxNum)
 }
 
 // Implements StateReader and StateWriter
 type HistoryReaderNoState struct {
-	a      *libstate.Aggregator
-	tx     kv.Tx
-	txNum  uint64
-	trace  bool
-	bitmap *roaring64.Bitmap
+	a     *libstate.Aggregator
+	tx    kv.Tx
+	txNum uint64
+	trace bool
+	rs    *ReconState
 }
 
-func NewHistoryReaderNoState(a *libstate.Aggregator, bitmap *roaring64.Bitmap) *HistoryReaderNoState {
-	return &HistoryReaderNoState{a: a, bitmap: bitmap}
+func NewHistoryReaderNoState(a *libstate.Aggregator, rs *ReconState) *HistoryReaderNoState {
+	return &HistoryReaderNoState{a: a, rs: rs}
 }
 
 func (hr *HistoryReaderNoState) SetTxNum(txNum uint64) {
@@ -51,12 +50,15 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(stateTxNum) {
-			return nil, RequiredStateError{stateTxNum: stateTxNum}
+		if !hr.rs.Done(stateTxNum) {
+			return nil, RequiredStateError{StateTxNum: stateTxNum}
 		}
-		enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
-		if err != nil {
-			return nil, err
+		enc = hr.rs.Get(kv.PlainState, address.Bytes())
+		if enc != nil {
+			enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
+			if err != nil {
+				return nil, err
+			}
 		}
 		var a accounts.Account
 		if err = a.DecodeForStorage(enc); err != nil {
@@ -117,13 +119,16 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(stateTxNum) {
-			return nil, RequiredStateError{stateTxNum: stateTxNum}
+		if !hr.rs.Done(stateTxNum) {
+			return nil, RequiredStateError{StateTxNum: stateTxNum}
 		}
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
-		enc, err = hr.tx.GetOne(kv.PlainState, compositeKey)
-		if err != nil {
-			return nil, err
+		enc = hr.rs.Get(kv.PlainState, compositeKey)
+		if enc == nil {
+			enc, err = hr.tx.GetOne(kv.PlainState, compositeKey)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if hr.trace {
@@ -145,12 +150,15 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(stateTxNum) {
-			return nil, RequiredStateError{stateTxNum: stateTxNum}
+		if !hr.rs.Done(stateTxNum) {
+			return nil, RequiredStateError{StateTxNum: stateTxNum}
 		}
-		enc, err = hr.tx.GetOne(kv.Code, codeHash.Bytes())
-		if err != nil {
-			return nil, err
+		enc = hr.rs.Get(kv.Code, codeHash.Bytes())
+		if enc == nil {
+			enc, err = hr.tx.GetOne(kv.Code, codeHash.Bytes())
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if hr.trace {
@@ -165,12 +173,15 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 		return 0, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(stateTxNum) {
-			return 0, RequiredStateError{stateTxNum: stateTxNum}
+		if !hr.rs.Done(stateTxNum) {
+			return 0, RequiredStateError{StateTxNum: stateTxNum}
 		}
-		enc, err := hr.tx.GetOne(kv.Code, codeHash.Bytes())
-		if err != nil {
-			return 0, err
+		enc := hr.rs.Get(kv.Code, codeHash.Bytes())
+		if enc == nil {
+			enc, err = hr.tx.GetOne(kv.Code, codeHash.Bytes())
+			if err != nil {
+				return 0, err
+			}
 		}
 		size = len(enc)
 	}

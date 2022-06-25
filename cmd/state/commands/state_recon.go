@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -80,16 +79,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	var rwTx kv.RwTx
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
-	if rwTx, err = db.BeginRw(ctx); err != nil {
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
 		return err
 	}
-	agg.SetTx(rwTx)
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}()
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
@@ -138,14 +136,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	var doneBitmap roaring64.Bitmap
-	stateReader := state.NewHistoryReaderNoState(agg, &doneBitmap)
+	rs := state.NewReconState(bitmap)
+	stateReader := state.NewHistoryReaderNoState(agg, rs)
 	//stateReader.SetTrace(true)
 	noop := state.NewNoopWriter()
-	stateWriter := state.NewStateReconWriter(agg)
-	stateReader.SetTx(rwTx)
-	stateWriter.SetTx(rwTx)
-	it := bitmap.Iterator()
+	stateWriter := state.NewStateReconWriter(agg, rs)
+	stateReader.SetTx(roTx)
 	count := 0
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, nil, hash, number)
@@ -160,8 +156,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	prevBlock := uint64(0)
 	prevTime := time.Now()
 	prevCount := 0
-	for it.HasNext() {
-		txNum := uint64(it.Next())
+	for rs.HasWork() {
+		txNum := rs.Schedule()
 		agg.SetTxNum(txNum)
 		stateReader.SetTxNum(txNum)
 		stateWriter.SetTxNum(txNum)
@@ -233,32 +229,37 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if err = ibs.CommitBlock(lastRules, stateWriter); err != nil {
 			return err
 		}
-		if err = ibs.Error(); err != nil {
+		if err = ibs.Error(); err == nil {
+			rs.CommitTxNum(txNum)
+		} else if rse, ok := err.(state.RequiredStateError); ok {
+			rs.RollbackTxNum(txNum, rse.StateTxNum)
+		} else {
 			return err
 		}
-		doneBitmap.Add(txNum)
 		count++
-		commit := !it.HasNext()
+		commit := !rs.HasWork()
 		if count%1_000_000 == 0 {
-			var spaceDirty uint64
-			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-				return fmt.Errorf("retrieving spaceDirty: %w", err)
-			}
-			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-				commit = true
-			}
+			log.Info("Initiated tx commit", "block", blockNum)
+			commit = true
 		}
 		if commit {
+			roTx.Rollback()
+			rwTx, err := db.BeginRw(ctx)
+			if err != nil {
+				return err
+			}
+			if err = rs.Flush(rwTx); err != nil {
+				return err
+			}
 			if err = rwTx.Commit(); err != nil {
 				return err
 			}
-			if rwTx, err = db.BeginRw(ctx); err != nil {
-				return err
+			if rs.HasWork() {
+				if roTx, err = db.BeginRo(ctx); err != nil {
+					return err
+				}
+				stateReader.SetTx(roTx)
 			}
-			agg.SetTx(rwTx)
-			stateReader.SetTx(rwTx)
-			stateWriter.SetTx(rwTx)
 		}
 		select {
 		case <-logEvery.C:
@@ -279,6 +280,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	log.Info("Completed tx replay phase")
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 	count = 0
 	accountsIt := agg.IterateAccountsHistory(txNum)
 	for accountsIt.HasNext() {
