@@ -94,23 +94,16 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState) HasWork() bool {
-	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.queue.Len() > 0 || rs.workIterator.HasNext()
-}
-
-func (rs *ReconState) Schedule() uint64 {
+func (rs *ReconState) Schedule() (uint64, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	var txNum uint64
 	if rs.queue.Len() < 16 && rs.workIterator.HasNext() {
 		heap.Push(&rs.queue, rs.workIterator.Next())
 	}
 	if rs.queue.Len() > 0 {
-		txNum = heap.Pop(&rs.queue).(uint64)
+		return heap.Pop(&rs.queue).(uint64), true
 	}
-	return txNum
+	return 0, false
 }
 
 func (rs *ReconState) CommitTxNum(txNum uint64) {
@@ -137,6 +130,12 @@ func (rs *ReconState) Done(txNum uint64) bool {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.doneBitmap.Contains(txNum)
+}
+
+func (rs *ReconState) DoneCount() uint64 {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.doneBitmap.GetCardinality()
 }
 
 type StateReconWriter struct {
