@@ -1867,7 +1867,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
 	if err != nil {
 		return err
 	}

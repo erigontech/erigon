@@ -1,11 +1,11 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
 	"expvar"
 	"fmt"
 	"io/fs"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -293,9 +293,9 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			w := bytes.NewBuffer(nil)
-			expvar.Handler()(w, nil)
-			log.Warn("aaaaa", "and", w.String())
+			resp := &httptest.ResponseRecorder{}
+			expvar.Handler().ServeHTTP(resp, nil)
+			log.Warn("aaaaa", "and", resp.Body.String())
 			panic(rec)
 		}
 	}()
