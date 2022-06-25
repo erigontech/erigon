@@ -177,7 +177,11 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 			cfg := StageHashStateCfg(db, t.TempDir())
 			err := PromoteHashedStateCleanly("logPrefix", tx, cfg, ctx)
-			require.NoError(t, err)
+			if tc.cancelFuncExec {
+				require.ErrorIs(t, err, libcommon.ErrStopped)
+			} else {
+				require.NoError(t, err)
+			}
 
 			u := &UnwindState{UnwindPoint: 5}
 			s := &StageState{BlockNumber: 10}
