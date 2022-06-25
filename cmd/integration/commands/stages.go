@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -594,14 +594,14 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	var br *snapshotsync.BlockRetire
+	var br *snapsync.BlockRetire
 	snapshots := allSnapshots(chainConfig, db)
 	if snapshots.Cfg().Enabled {
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
 		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, db, nil, nil)
+		br = snapsync.NewBlockRetire(workers, tmpdir, snapshots, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -1070,9 +1070,9 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 }
 
 var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *snapshotsync.RoSnapshots
+var _allSnapshotsSingleton *snapsync.RoSnapshots
 
-func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots {
+func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		useSnapshots := ethconfig.UseSnapshotsByChainName(cc.ChainName)
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots && snapshotsBool, true, true)
@@ -1091,7 +1091,7 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 		}); err != nil {
 			panic(err)
 		}
-		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadirCli, "snapshots"))
+		_allSnapshotsSingleton = snapsync.NewRoSnapshots(snapCfg, filepath.Join(datadirCli, "snapshots"))
 		if useSnapshots {
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
@@ -1106,9 +1106,9 @@ var _blockReaderSingleton services.FullBlockReader
 
 func getBlockReader(cc *params.ChainConfig, db kv.RwDB) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
-		_blockReaderSingleton = snapshotsync.NewBlockReader()
+		_blockReaderSingleton = snapsync.NewBlockReader()
 		if sn := allSnapshots(cc, db); sn.Cfg().Enabled {
-			x := snapshotsync.NewBlockReaderWithSnapshots(sn)
+			x := snapsync.NewBlockReaderWithSnapshots(sn)
 			_blockReaderSingleton = x
 		}
 	})

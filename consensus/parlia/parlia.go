@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
 )
 
 const (
@@ -236,14 +236,14 @@ type Parlia struct {
 	// The fields below are for testing only
 	fakeDiff  bool     // Skip difficulty verifications
 	forks     []uint64 // Forks extracted from the chainConfig
-	snapshots *snapshotsync.RoSnapshots
+	snapshots *snapsync.RoSnapshots
 }
 
 // New creates a Parlia consensus engine.
 func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
-	snapshots *snapshotsync.RoSnapshots,
+	snapshots *snapsync.RoSnapshots,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia

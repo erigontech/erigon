@@ -39,7 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
 )
 
 const (
@@ -223,17 +223,17 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
+	var allSnapshots *snapsync.RoSnapshots
 	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
 	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+		allSnapshots = snapsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
 		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		blockReader = snapsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapsync.NewBlockReader()
 	}
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
@@ -621,7 +621,7 @@ func (ww *WriterWrapper) CreateContract(address common.Address) error {
 	return nil
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapsync.RoSnapshots) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	switch {

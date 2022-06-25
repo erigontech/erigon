@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -327,18 +327,18 @@ func NewStagedSync(
 	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
-	snapshotDownloader proto_downloader.DownloaderClient,
-	snapshots *snapshotsync.RoSnapshots,
+	snapDownloader proto_downloader.DownloaderClient,
+	snapshots *snapsync.RoSnapshots,
 	headCh chan *types.Block,
 	execPayload stagedsync.ExecutePayloadFunc,
 ) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+		blockReader = snapsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapsync.NewBlockReader()
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
+	blockRetire := snapsync.NewBlockRetire(1, tmpdir, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -358,7 +358,7 @@ func NewStagedSync(
 				p2pCfg.NoDiscovery,
 				cfg.MemoryOverlay,
 				snapshots,
-				snapshotDownloader,
+				snapDownloader,
 				blockReader,
 				tmpdir,
 				notifications.Events,
@@ -407,24 +407,12 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.RwDB,
-	p2pCfg p2p.Config,
-	cfg ethconfig.Config,
-	controlServer *sentry.MultiClient,
-	tmpdir string,
-	notifications *stagedsync.Notifications,
-	snapshotDownloader proto_downloader.DownloaderClient,
-	snapshots *snapshotsync.RoSnapshots,
-	headCh chan *types.Block,
-) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapsync.RoSnapshots) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+		blockReader = snapsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapsync.NewBlockReader()
 	}
 
 	return stagedsync.New(

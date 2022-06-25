@@ -33,7 +33,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -665,6 +665,10 @@ var (
 		Value: 3,
 		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
+	NoDownloaderFlag = cli.BoolFlag{
+		Name:  "no-downloader",
+		Usage: "to disable downloader component",
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -1029,7 +1033,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir)
 
-	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 	cfg.SentryLogPeerInfo = ctx.GlobalIsSet(SentryLogPeerInfoFlag.Name)
 }
 
@@ -1386,7 +1389,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.MemoryOverlay = ctx.GlobalBool(MemoryOverlayFlag.Name)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
-	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+	cfg.Snapshot.NoDownloader = ctx.GlobalBool(NoDownloaderFlag.Name)
+	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
+	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)
 		var downloadRate, uploadRate datasize.ByteSize
@@ -1397,17 +1402,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 
-		lvl, err := torrentcfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		lvl, err := downloadercfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent, err = torrentcfg.New(cfg.Dirs.Snap,
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap,
 			lvl,
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
 			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
+			ctx.GlobalBool(NoDownloaderFlag.Name),
 		)
 		if err != nil {
 			panic(err)

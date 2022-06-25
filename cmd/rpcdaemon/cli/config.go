@@ -42,8 +42,8 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -258,7 +258,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapsync.NewBlockReader()
 
 		// bor (consensus) specific db
 		var borKv kv.RoDB
@@ -341,7 +341,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			allSnapshots := snapsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
 			allSnapshots.OptimisticReopen()
 			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			// don't reopen it right here, because snapshots may be not ready yet
@@ -352,7 +352,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 				}
 			}
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+			blockReader = snapsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			log.Info("Use --snapshots=false")
 		}
@@ -376,7 +376,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
 	if !cfg.WithDatadir {
-		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+		blockReader = snapsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
 	remoteEth := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
 	blockReader = remoteEth

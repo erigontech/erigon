@@ -22,10 +22,10 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
@@ -114,7 +114,7 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) 
 		if !errors.Is(err, os.ErrNotExist) {
 			return false, fmt.Errorf("os.Stat: %w", err)
 		}
-		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
+		info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize}
 		if err := info.BuildFromFilePath(filepath.Join(root, originalFileName)); err != nil {
 			return false, fmt.Errorf("BuildFromFilePath: %w", err)
 		}
@@ -334,7 +334,7 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	}
 
 	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
-		ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	} else {
 		ts.ChunkSize = 0
 	}

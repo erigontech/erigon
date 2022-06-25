@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapsync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +20,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	defer db.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapsync.NewBlockReader(), false),
 		db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 

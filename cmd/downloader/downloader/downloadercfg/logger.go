@@ -1,4 +1,4 @@
-package torrentcfg
+package downloadercfg
 
 import (
 	"strings"
