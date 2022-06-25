@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -1085,7 +1086,7 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (checked bool, err error) {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(128)
@@ -1097,19 +1098,22 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			hd.nextForkState.UpdateTxn(tx)
 		}
 		hd.nextForkHash = header.Hash()
-		checked = true
+		status = remote.EngineStatus_VALID
 		// Let's assemble the side fork chain if we have others building.
-		err = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		if validationError != nil {
+			status = remote.EngineStatus_INVALID
+		}
 		return
 	}
 	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
 	if currentHeight == nil {
-		err = fmt.Errorf("could not read block number.")
+		criticalError = fmt.Errorf("could not read block number.")
 		return
 	}
 	// if the header is in the future or too much in the past we accept it.
 	if *currentHeight < header.Number.Uint64() || *currentHeight-header.Number.Uint64() > maxDepth {
-		checked = false
+		status = remote.EngineStatus_ACCEPTED
 		return
 	}
 	// if it is not canonical we validate it as a side fork.
@@ -1117,8 +1121,8 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	// Let's assemble the side fork backwards
 	var foundCanonical bool
 	currentHash := header.ParentHash
-	foundCanonical, err = rawdb.IsCanonicalHash(tx, currentHash)
-	if err != nil {
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+	if criticalError != nil {
 		return
 	}
 
@@ -1130,21 +1134,24 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		var ok bool
 		if sb, ok = hd.sideForksBlock[currentHash]; !ok {
 			// We miss some components so we did not check validity.
-			checked = false
+			status = remote.EngineStatus_ACCEPTED
 			return
 		}
 		headersChain = append(headersChain, sb.header)
 		bodiesChain = append(bodiesChain, sb.body)
 		currentHash = sb.header.ParentHash
-		foundCanonical, err = rawdb.IsCanonicalHash(tx, currentHash)
-		if err != nil {
+		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+		if criticalError != nil {
 			return
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
 	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
-	checked = true
-	err = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	status = remote.EngineStatus_VALID
+	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	if validationError != nil {
+		status = remote.EngineStatus_INVALID
+	}
 	// After the we finished executing, we clean up old forks
 	for hash, sb := range hd.sideForksBlock {
 		if *currentHeight-sb.header.Number.Uint64() > maxDepth {
