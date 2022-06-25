@@ -9,7 +9,47 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"golang.org/x/exp/constraints"
 )
+
+
+type theap[T constraints.Ordered] []T
+
+func (h theap[T]) Len() int {
+    return len(h)
+}
+
+func (h theap[T]) Less(i, j int) bool {
+    return h[i] < h[j]
+}
+
+func (h theap[T]) Swap(i, j int) {
+    h[i], h[j] = h[j], h[i]
+}
+
+func (h *theap[T]) Push(a interface{}) {
+    *h = append(*h, a.(T))
+}
+
+func (h *theap[T]) Pop() interface{} {
+    c := *h
+    *h = c[:len(c)-1]
+    return c[len(c)-1]
+}
+
+// ReconState is the accumulator of changes to the state
+type ReconState struct {
+	lock     sync.RWMutex
+	txBitmap *roaring64.Bitmap
+	triggers map[uint64][]uint64
+	queue theap[uint64]
+	changes map[string][]byte
+}
+
+func NewReconState() *ReconState {
+	rs := &ReconState{}
+	return rs
+}
 
 type StateReconWriter struct {
 	a     *libstate.Aggregator
@@ -60,7 +100,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 		return err
 	}
 	if len(code) > 0 {
-		//fmt.Printf("code [%x] => [%x] CodeHash: %x\n", address, code, codeHash)
+		fmt.Printf("code [%x] => [%x] CodeHash: %x\n", address, code, codeHash)
 		return w.rwTx.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), codeHash[:])
 	}
 	return nil
@@ -82,7 +122,7 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
 	v := value.Bytes()
 	if len(v) != 0 {
-		//fmt.Printf("storage [%x] [%x] => [%x]\n", address, *key, v)
+		fmt.Printf("storage [%x] [%x] => [%x]\n", address, *key, v)
 		if err := w.rwTx.Put(kv.PlainState, compositeKey, v); err != nil {
 			return err
 		}

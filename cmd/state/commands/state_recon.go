@@ -186,20 +186,20 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		ibs := state.New(stateReader)
 		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
 		if blockNum == 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
 			// Genesis block
 			_, ibs, err = genesis.ToBlock()
 			if err != nil {
 				return err
 			}
 		} else if daoForkTx {
-			//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 			misc.ApplyDAOHardFork(ibs)
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
 				return err
 			}
 		} else if txNum+1 == txNums[blockNum] {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			block, _, err := blockReader.BlockWithSenders(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
@@ -210,7 +210,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			}
 		} else {
 			txIndex := txNum - startTxNum - 1
-			//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+			fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 			txn, err := blockReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 			if err != nil {
 				return err
