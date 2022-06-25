@@ -96,7 +96,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 		suffixCollectors[i] = collector
 		go processSuperstring(superstrings, collector, minPatternScore, wg)
 	}
@@ -693,7 +693,7 @@ func NewCompressorSequential(logPrefix, outputFile string, tmpDir string, minPat
 		return nil, err
 	}
 	c.wordW = bufio.NewWriterSize(c.wordFile, etl.BufIOSize)
-	c.collector = etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	c.collector = etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	return c, nil
 }
 
