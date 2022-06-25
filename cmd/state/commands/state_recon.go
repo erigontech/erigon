@@ -274,7 +274,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	fmt.Printf("Bitmap length = %d\n", bitmap.GetCardinality())
 
 	rs := state.NewReconState(bitmap)
-	workerCount := 1
+	workerCount := 8
 	var lock sync.RWMutex
 	var wg sync.WaitGroup
 	reconWorkers := make([]*ReconWorker, workerCount)
