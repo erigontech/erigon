@@ -51,13 +51,21 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(hr.txNum) {
+		if !hr.bitmap.Contains(stateTxNum) {
 			return nil, RequiredStateError{stateTxNum: stateTxNum}
 		}
 		enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
 		if err != nil {
 			return nil, err
 		}
+		var a accounts.Account
+		if err = a.DecodeForStorage(enc); err != nil {
+			return nil, err
+		}
+		if hr.trace {
+			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+		}
+		return &a, nil
 	}
 	if len(enc) == 0 {
 		if hr.trace {
@@ -76,6 +84,9 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 	}
 	balanceBytes := int(enc[pos])
 	pos++
+	if pos+balanceBytes >= len(enc) {
+		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
+	}
 	if balanceBytes > 0 {
 		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
 		pos += balanceBytes
@@ -106,7 +117,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(hr.txNum) {
+		if !hr.bitmap.Contains(stateTxNum) {
 			return nil, RequiredStateError{stateTxNum: stateTxNum}
 		}
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
@@ -134,7 +145,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		return nil, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(hr.txNum) {
+		if !hr.bitmap.Contains(stateTxNum) {
 			return nil, RequiredStateError{stateTxNum: stateTxNum}
 		}
 		enc, err = hr.tx.GetOne(kv.Code, codeHash.Bytes())
@@ -154,7 +165,7 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 		return 0, err
 	}
 	if !noState {
-		if !hr.bitmap.Contains(hr.txNum) {
+		if !hr.bitmap.Contains(stateTxNum) {
 			return 0, RequiredStateError{stateTxNum: stateTxNum}
 		}
 		enc, err := hr.tx.GetOne(kv.Code, codeHash.Bytes())

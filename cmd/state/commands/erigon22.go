@@ -200,8 +200,8 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		agg.SetTx(rwTx)
 		agg.SetTxNum(txNum)
 
-		readWrapper := &ReaderWrapper22{r: agg, roTx: rwTx, blockNum: blockNum}
-		writeWrapper := &WriterWrapper22{w: agg, blockNum: blockNum}
+		readWrapper := &ReaderWrapper22{r: agg, roTx: rwTx}
+		writeWrapper := &WriterWrapper22{w: agg}
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, historyTx, hash, number)
 			if err != nil {
@@ -395,14 +395,12 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 
 // Implements StateReader and StateWriter
 type ReaderWrapper22 struct {
-	blockNum uint64
-	roTx     kv.Tx
-	r        *libstate.Aggregator
+	roTx kv.Tx
+	r    *libstate.Aggregator
 }
 
 type WriterWrapper22 struct {
-	blockNum uint64
-	w        *libstate.Aggregator
+	w *libstate.Aggregator
 }
 
 func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {

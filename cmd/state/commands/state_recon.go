@@ -8,8 +8,10 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"syscall"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -110,7 +112,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	fmt.Printf("txNums = %d\n", txNums[:20])
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
 	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
@@ -125,6 +126,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if block+1 > blockNum {
 		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
 	}
+	fmt.Printf("Max blockNum = %d\n", blockNum)
 	blockNum = block + 1
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
@@ -138,6 +140,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lastRules *params.Rules
 	var doneBitmap roaring64.Bitmap
 	stateReader := state.NewHistoryReaderNoState(agg, &doneBitmap)
+	//stateReader.SetTrace(true)
 	noop := state.NewNoopWriter()
 	stateWriter := state.NewStateReconWriter(agg)
 	stateReader.SetTx(rwTx)
@@ -152,6 +155,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return h
 	}
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	prevBlock := uint64(0)
+	prevTime := time.Now()
+	prevCount := 0
 	for it.HasNext() {
 		txNum := uint64(it.Next())
 		agg.SetTxNum(txNum)
@@ -178,20 +186,20 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		ibs := state.New(stateReader)
 		daoForkTx := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == txNums[blockNum-1]
 		if blockNum == 0 {
-			fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
 			// Genesis block
 			_, ibs, err = genesis.ToBlock()
 			if err != nil {
 				return err
 			}
 		} else if daoForkTx {
-			fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 			misc.ApplyDAOHardFork(ibs)
 			if err := ibs.FinalizeTx(lastRules, noop); err != nil {
 				return err
 			}
 		} else if txNum+1 == txNums[blockNum] {
-			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			block, _, err := blockReader.BlockWithSenders(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
@@ -202,7 +210,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			}
 		} else {
 			txIndex := txNum - startTxNum - 1
-			fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+			//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 			txn, err := blockReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 			if err != nil {
 				return err
@@ -225,14 +233,13 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if err = ibs.CommitBlock(lastRules, stateWriter); err != nil {
 			return err
 		}
-		if err := agg.FinishTx(); err != nil {
-			return fmt.Errorf("finish tx failed: %w", err)
+		if err = ibs.Error(); err != nil {
+			return err
 		}
 		doneBitmap.Add(txNum)
 		count++
 		commit := !it.HasNext()
 		if count%1_000_000 == 0 {
-			log.Info("Processed", "transactions", count)
 			var spaceDirty uint64
 			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
 				return fmt.Errorf("retrieving spaceDirty: %w", err)
@@ -252,6 +259,23 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			agg.SetTx(rwTx)
 			stateReader.SetTx(rwTx)
 			stateWriter.SetTx(rwTx)
+		}
+		select {
+		case <-logEvery.C:
+			currentTime := time.Now()
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+
+			interval := currentTime.Sub(prevTime).Seconds()
+			speed := float64(blockNum-prevBlock) / interval
+			txSpeed := float64(count-prevCount) / interval
+			prevBlock = blockNum
+			prevCount = count
+			prevTime = currentTime
+			log.Info("Progress", "block", blockNum, "txs", count, "blk/s", speed, "txs/s", txSpeed,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+		default:
 		}
 	}
 	log.Info("Completed tx replay phase")
@@ -294,7 +318,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			if err = rwTx.Put(kv.PlainState, key, value); err != nil {
 				return err
 			}
-			fmt.Printf("Account [%x]=>[%+v]\n", key, &a)
+			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 			count++
 			if count%1_000_000 == 0 {
 				log.Info("Processed", "accounts", count)
