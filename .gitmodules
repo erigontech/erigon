@@ -10,4 +10,4 @@
 	
 [submodule "libmdbx"]
 	path = libmdbx
-	url = https://github.com/torquem-ch/libmdbx.git
+	url = https://gitflic.ru/project/erthink/libmdbx.git
