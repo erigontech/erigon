@@ -196,12 +196,13 @@ func StageLoopStep(
 		}
 	}
 
-	headTd256, overflow := uint256.FromBig(headTd)
-	if overflow {
-		return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+	if headTd != nil {
+		headTd256, overflow := uint256.FromBig(headTd)
+		if overflow {
+			return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+		}
+		updateHead(ctx, head, headHash, headTd256)
 	}
-	updateHead(ctx, head, headHash, headTd256)
-
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
 		if header != nil && header.Number.Uint64() != finishProgressBefore {

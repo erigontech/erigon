@@ -1406,15 +1406,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err != nil {
 			panic(err)
 		}
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap,
-			lvl,
-			nodeConfig.P2P.NAT,
-			downloadRate, uploadRate,
-			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
-			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
-			ctx.GlobalBool(NoDownloaderFlag.Name),
-		)
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
