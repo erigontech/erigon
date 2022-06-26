@@ -133,7 +133,7 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, false)
+	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}

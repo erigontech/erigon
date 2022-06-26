@@ -26,7 +26,6 @@ const DefaultNetworkChunkSize = DefaultPieceSize
 type Cfg struct {
 	*torrent.ClientConfig
 	DownloadSlots int
-	Disabled      bool
 }
 
 func Default() *torrent.ClientConfig {
@@ -55,7 +54,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, downloadSlots int, disable bool) (*Cfg, error) {
+func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -121,18 +120,5 @@ func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, 
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
-	if disable {
-		torrentConfig.DisableIPv4 = true
-		torrentConfig.DisableIPv6 = true
-		torrentConfig.DisableTCP = true
-		torrentConfig.DisableUTP = true
-		torrentConfig.NoDHT = true
-		torrentConfig.DisablePEX = true
-		torrentConfig.DisableTrackers = true
-		torrentConfig.DisableWebseeds = true
-		torrentConfig.DisableWebtorrent = true
-
-		torrentConfig.Seed = false
-	}
-	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots, Disabled: disable}, nil
+	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
 }
