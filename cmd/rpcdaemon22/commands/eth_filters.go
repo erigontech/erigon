@@ -2,9 +2,8 @@ package commands
 
 import (
 	"context"
-	"fmt"
+	"time"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,9 +14,9 @@ import (
 )
 
 // NewPendingTransactionFilter new transaction filter
-func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (common.Hash, error) {
+func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
-		return common.Hash{}, rpc.ErrNotificationsUnsupported
+		return "", rpc.ErrNotificationsUnsupported
 	}
 	txsCh := make(chan []types.Transaction, 1)
 	id := api.filters.SubscribePendingTxs(txsCh)
@@ -30,19 +29,20 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (common.Hash,
 				}
 				api.filters.AddPendingTxs(id, txs)
 			default:
+				time.Sleep(time.Second)
 			}
 		}
 	}()
-	return common.HexToHash(string(id)), nil
+	return "0x" + string(id), nil
 }
 
 // NewBlockFilter implements eth_newBlockFilter. Creates a filter in the node, to notify when a new block arrives.
-func (api *APIImpl) NewBlockFilter(_ context.Context) (common.Hash, error) {
+func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
-		return common.Hash{}, rpc.ErrNotificationsUnsupported
+		return "", rpc.ErrNotificationsUnsupported
 	}
-	ch := make(chan *types.Block, 1)
-	id := api.filters.SubscribePendingBlock(ch)
+	ch := make(chan *types.Header, 1)
+	id := api.filters.SubscribeNewHeads(ch)
 	go func() {
 		for {
 			select {
@@ -52,16 +52,17 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (common.Hash, error) {
 				}
 				api.filters.AddPendingBlock(id, block)
 			default:
+				time.Sleep(time.Second)
 			}
 		}
 	}()
-	return common.HexToHash(string(id)), nil
+	return "0x" + string(id), nil
 }
 
 // NewFilter implements eth_newFilter. Creates an arbitrary filter object, based on filter options, to notify when the state changes (logs).
-func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (common.Hash, error) {
+func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error) {
 	if api.filters == nil {
-		return common.Hash{}, rpc.ErrNotificationsUnsupported
+		return "", rpc.ErrNotificationsUnsupported
 	}
 	logs := make(chan *types.Log, 1)
 	id := api.filters.SubscribeLogs(logs, crit)
@@ -74,10 +75,11 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (c
 				}
 				api.filters.AddLogs(id, lg)
 			default:
+				time.Sleep(time.Second)
 			}
 		}
 	}()
-	return common.HexToHash(hexutil.EncodeUint64(uint64(id))), nil
+	return hexutil.EncodeUint64(uint64(id)), nil
 }
 
 // UninstallFilter new transaction filter
@@ -85,20 +87,20 @@ func (api *APIImpl) UninstallFilter(_ context.Context, index string) (bool, erro
 	if api.filters == nil {
 		return false, rpc.ErrNotificationsUnsupported
 	}
-	if common.IsHexAddress32(index) {
-		// remove 0x
-		if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
-			index = index[2:]
-		}
-		isDeleted := api.filters.UnsubscribePendingBlock(rpchelper.PendingBlockSubID(index)) ||
-			api.filters.UnsubscribePendingTxs(rpchelper.PendingTxsSubID(index))
-		id, err := hexutil.DecodeUint64(index)
-		if err == nil {
-			return isDeleted || api.filters.UnsubscribeLogs(rpchelper.LogsSubID(id)), nil
-		}
+	var isDeleted bool
+	// remove 0x
+	cutIndex := index
+	if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
+		cutIndex = index[2:]
+	}
+	isDeleted = api.filters.UnsubscribeHeads(rpchelper.HeadsSubID(cutIndex)) ||
+		api.filters.UnsubscribePendingTxs(rpchelper.PendingTxsSubID(cutIndex))
+	id, err := hexutil.DecodeUint64(index)
+	if err == nil {
+		return isDeleted || api.filters.UnsubscribeLogs(rpchelper.LogsSubID(id)), nil
 	}
 
-	return false, nil
+	return isDeleted, nil
 }
 
 // GetFilterChanges implements eth_getFilterChanges. Polling method for a previously-created filter, which returns an array of logs which occurred since last poll.
@@ -107,35 +109,36 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]interfa
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	stub := make([]interface{}, 0)
-	if common.IsHexAddress32(index) {
-		// remove 0x
-		if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
-			index = index[2:]
+
+	// remove 0x
+	cutIndex := index
+	if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
+		cutIndex = index[2:]
+	}
+	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
+		for _, v := range blocks {
+			stub = append(stub, v.Hash())
 		}
-		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.PendingBlockSubID(index)); ok {
-			for _, v := range blocks {
-				stub = append(stub, v.Hash())
+		return stub, nil
+	}
+	if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
+		for _, v := range txs {
+			for _, tx := range v {
+				stub = append(stub, tx.Hash())
 			}
 			return stub, nil
 		}
-		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(index)); ok {
-			for _, v := range txs {
-				for _, tx := range v {
-					stub = append(stub, tx.Hash())
-				}
-			}
-			return stub, nil
+		return stub, nil
+	}
+	id, err := hexutil.DecodeUint64(index)
+	if err != nil {
+		return stub, nil
+	}
+	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(id)); ok {
+		for _, v := range logs {
+			stub = append(stub, v)
 		}
-		id, err := hexutil.DecodeUint64(index)
-		if err != nil {
-			return stub, fmt.Errorf("eth_getFilterChanges, wrong index: %w", err)
-		}
-		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(id)); ok {
-			for _, v := range logs {
-				stub = append(stub, v)
-			}
-			return stub, nil
-		}
+		return stub, nil
 	}
 	return stub, nil
 }

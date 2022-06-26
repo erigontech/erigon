@@ -302,7 +302,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
-	err = TruncateCanonicalHash(tx, number)
+	err = TruncateCanonicalHash(tx, number, false)
 	if err != nil {
 		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}

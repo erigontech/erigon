@@ -386,8 +386,8 @@ github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3P
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220621170254-6235b655ae76 h1:LmVDmhupjZIPZDZNsABg+SvbV1txhB2xMXGzVpg89vk=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220621170254-6235b655ae76/go.mod h1:oFlWC+kW4GapZ+Rvt7WpYKMxE14NwUiziV+PyeljBAg=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220626032220-347ee26bb9dc h1:C401yncq3N5Sej2Gm5e8jkxdyDlG9TF72rt5ogeCVas=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220626032220-347ee26bb9dc/go.mod h1:aFw9meb+UC9lXIf9EQ+xyzM8Fi1CxmdVN35TdsM8dJg=
 github.com/ledgerwatch/log/v3 v3.4.1 h1:/xGwlVulXnsO9Uq+tzaExc8OWmXXHU0dnLalpbnY5Bc=
 github.com/ledgerwatch/log/v3 v3.4.1/go.mod h1:VXcz6Ssn6XEeU92dCMc39/g1F0OYAjw1Mt+dGP5DjXY=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
@@ -612,8 +612,8 @@ github.com/tinylib/msgp v1.0.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDW
 github.com/tinylib/msgp v1.1.0/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=
 github.com/tinylib/msgp v1.1.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20170815181823-89b8d40f7ca8/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
-github.com/torquem-ch/mdbx-go v0.24.3-0.20220621170120-9e6f397cceab h1:Zx5DJF8hiaMDMRIM5kHfGBwfpbefkZEOGCA0EYJ01Z8=
-github.com/torquem-ch/mdbx-go v0.24.3-0.20220621170120-9e6f397cceab/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
+github.com/torquem-ch/mdbx-go v0.24.3-0.20220626032101-d63b05cf336f h1:8RGtjb66JSHxc45DG/9lPR1xNEWqzZPx9mGAQFyWDhQ=
+github.com/torquem-ch/mdbx-go v0.24.3-0.20220626032101-d63b05cf336f/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
 github.com/ugorji/go v1.1.13/go.mod h1:jxau1n+/wyTGLQoCkjok9r5zFa/FxT6eI5HiHKQszjc=
 github.com/ugorji/go/codec v1.1.13 h1:013LbFhocBoIqgHeIHKlV4JWYhqogATYWZhIcH0WHn4=
 github.com/ugorji/go/codec v1.1.13/go.mod h1:oNVt3Dq+FO91WNQ/9JnHKQP2QJxTzoN7wCBFCq1OeuU=

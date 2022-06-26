@@ -953,7 +953,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock /* deleteHeaders */); err != nil {
 		return err
 	}
 	if badBlock {
@@ -996,6 +996,11 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 				return err
 			}
 		}
+		/* TODO(yperbasis): Is it safe?
+		if err := rawdb.TruncateTd(tx, u.UnwindPoint+1); err != nil {
+			return err
+		}
+		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
 			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {

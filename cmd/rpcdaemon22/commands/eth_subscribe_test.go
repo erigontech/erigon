@@ -42,7 +42,6 @@ func TestEthSubscribe(t *testing.T) {
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)
-	defer close(newHeads)
 	id := ff.SubscribeNewHeads(newHeads)
 	defer ff.UnsubscribeHeads(id)
 
