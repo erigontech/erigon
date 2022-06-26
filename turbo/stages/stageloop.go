@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -328,17 +328,17 @@ func NewStagedSync(
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
-	snapshots *snapsync.RoSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
 	execPayload stagedsync.ExecutePayloadFunc,
 ) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
-		blockReader = snapsync.NewBlockReaderWithSnapshots(snapshots)
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockRetire := snapsync.NewBlockRetire(1, tmpdir, snapshots, db, snapDownloader, notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -407,12 +407,12 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapsync.RoSnapshots) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
-		blockReader = snapsync.NewBlockReaderWithSnapshots(snapshots)
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader()
 	}
 
 	return stagedsync.New(

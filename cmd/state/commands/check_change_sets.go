@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -110,17 +110,17 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	defer commitEvery.Stop()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapsync.RoSnapshots
+	var allSnapshots *snapshotsync.RoSnapshots
 	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
 	if useSnapshots {
-		allSnapshots = snapsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
 		}
-		blockReader = snapsync.NewBlockReaderWithSnapshots(allSnapshots)
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
-		blockReader = snapsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader()
 	}
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 

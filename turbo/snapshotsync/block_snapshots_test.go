@@ -1,4 +1,4 @@
-package snapsync
+package snapshotsync
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )

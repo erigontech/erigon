@@ -1,4 +1,4 @@
-package snapsync
+package snapshotsync
 
 /*
 import (

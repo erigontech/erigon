@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type MiningExecCfg struct {
@@ -52,7 +52,7 @@ func StageMiningExecCfg(
 		notifier:    notifier,
 		chainConfig: chainConfig,
 		engine:      engine,
-		blockReader: snapsync.NewBlockReader(),
+		blockReader: snapshotsync.NewBlockReader(),
 		vmConfig:    vmConfig,
 		tmpdir:      tmpdir,
 		interrupt:   interrupt,

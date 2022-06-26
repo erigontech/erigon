@@ -79,8 +79,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -788,13 +788,13 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
 	var err error
 
 	if isSnapshotEnabled {
-		allSnapshots := snapsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
+		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
 		allSnapshots.OptimisticReopen()
-		blockReader := snapsync.NewBlockReaderWithSnapshots(allSnapshots)
+		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if !cfg.Snapshot.NoDownloader {
 			if cfg.Snapshot.DownloaderAddr != "" {
@@ -820,7 +820,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 		}
 		return blockReader, allSnapshots, nil
 	} else {
-		blockReader := snapsync.NewBlockReader()
+		blockReader := snapshotsync.NewBlockReader()
 		return blockReader, nil, nil
 	}
 

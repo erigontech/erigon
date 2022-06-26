@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +38,7 @@ func TestEthSubscribe(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	backend := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapsync.NewBlockReader())
+	backend := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)

@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,7 +51,7 @@ func TestIssuanceStage(t *testing.T) {
 	// Execute stage issuance
 	err := SpawnStageIssuance(StageIssuanceCfg(db, &params.ChainConfig{
 		Consensus: params.EtHashConsensus,
-	}, snapsync.NewBlockReader(), true), &StageState{
+	}, snapshotsync.NewBlockReader(), true), &StageState{
 		ID: stages.Issuance,
 	}, tx, ctx)
 	assert.NoError(err)

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -109,7 +109,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{}, snapsync.NewBlockRetire(1, "", nil, db, nil, nil))
+	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil))
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 

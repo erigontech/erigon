@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -22,7 +22,7 @@ type TxLookupCfg struct {
 	db        kv.RwDB
 	prune     prune.Mode
 	tmpdir    string
-	snapshots *snapsync.RoSnapshots
+	snapshots *snapshotsync.RoSnapshots
 	isBor     bool
 }
 
@@ -30,7 +30,7 @@ func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	snapshots *snapsync.RoSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	isBor bool,
 ) TxLookupCfg {
 	return TxLookupCfg{
@@ -186,7 +186,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		blockTo = snapsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
+		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
 	}
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {

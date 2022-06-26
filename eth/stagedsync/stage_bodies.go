@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -30,7 +30,7 @@ type BodiesCfg struct {
 	timeout         int
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
-	snapshots       *snapsync.RoSnapshots
+	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
 }
 
@@ -43,7 +43,7 @@ func StageBodiesCfg(
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
-	snapshots *snapsync.RoSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 ) BodiesCfg {
 	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}

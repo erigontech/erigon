@@ -23,8 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -39,11 +39,11 @@ type SendersCfg struct {
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
-	blockRetire       *snapsync.BlockRetire
+	blockRetire       *snapshotsync.BlockRetire
 	snapshotHashesCfg *snapshothashes.Config
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, br *snapsync.BlockRetire) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -379,7 +379,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
 		if cfg.blockRetire.Snapshots().Cfg().Produce {
 			if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-				canDeleteTo := snapsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
+				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
 				if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
 					return nil
 				}

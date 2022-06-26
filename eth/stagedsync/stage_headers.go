@@ -28,8 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -52,10 +52,10 @@ type HeadersCfg struct {
 	memoryOverlay     bool
 	tmpdir            string
 
-	snapshots          *snapsync.RoSnapshots
+	snapshots          *snapshotsync.RoSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
-	dbEventNotifier    snapsync.DBEventNotifier
+	dbEventNotifier    snapshotsync.DBEventNotifier
 	execPayload        ExecutePayloadFunc
 	notifications      *Notifications
 }
@@ -71,11 +71,11 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	memoryOverlay bool,
-	snapshots *snapsync.RoSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	tmpdir string,
-	dbEventNotifier snapsync.DBEventNotifier,
+	dbEventNotifier snapshotsync.DBEventNotifier,
 	notifications *Notifications,
 	execPayload ExecutePayloadFunc) HeadersCfg {
 	return HeadersCfg{
@@ -1161,7 +1161,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-			if err := snapsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
 				return fmt.Errorf("BuildIndices: %w", err)
 			}
 		}
@@ -1185,7 +1185,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
-		if err := snapsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
+		if err := snapshotsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
 			blockNum, blockHash := header.Number.Uint64(), header.Hash()
 			td.Add(td, header.Difficulty)
 			if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
@@ -1212,7 +1212,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapsync.TxnSegment) error {
+		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
 			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
 			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
 				return err

@@ -27,8 +27,8 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapsync"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
@@ -246,13 +246,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	snapshots := snapsync.NewRoSnapshots(cfg, dirs.Snap)
+	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := snapshots.Reopen(); err != nil {
 		return err
 	}
 
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
-	br := snapsync.NewBlockRetire(workers, dirs.Tmp, snapshots, chainDB, nil, nil)
+	br := snapshotsync.NewBlockRetire(workers, dirs.Tmp, snapshots, chainDB, nil, nil)
 
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
@@ -261,7 +261,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 		if err := chainDB.Update(ctx, func(tx kv.RwTx) error {
 			progress, _ := stages.GetStageProgress(tx, stages.Headers)
-			canDeleteTo := snapsync.CanDeleteTo(progress, br.Snapshots())
+			canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
 			deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
 			if err != nil {
 				return nil
@@ -304,11 +304,11 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	allSnapshots := snapsync.NewRoSnapshots(cfg, dirs.Snap)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
-	if err := snapsync.BuildIndices(ctx, allSnapshots, *chainID, dirs.Tmp, from, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, *chainID, dirs.Tmp, from, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
@@ -352,7 +352,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	if workers < 1 {
 		workers = 1
 	}
-	if err := snapsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	return nil

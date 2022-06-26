@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snap"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )

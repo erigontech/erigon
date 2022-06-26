@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/turbo/snapsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"golang.org/x/exp/slices"
 )
 
