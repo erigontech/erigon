@@ -120,18 +120,5 @@ func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, 
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
-	//if disable {
-	//	torrentConfig.DisableIPv4 = true
-	//	torrentConfig.DisableIPv6 = true
-	//	torrentConfig.DisableTCP = true
-	//	torrentConfig.DisableUTP = true
-	//	torrentConfig.NoDHT = true
-	//	torrentConfig.DisablePEX = true
-	//	torrentConfig.DisableTrackers = true
-	//	torrentConfig.DisableWebseeds = true
-	//	torrentConfig.DisableWebtorrent = true
-	//
-	//	torrentConfig.Seed = false
-	//}
 	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
 }
