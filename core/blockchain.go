@@ -27,10 +27,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -54,41 +51,6 @@ const (
 // statsReportLimit is the time limit during import and export after which we
 // always print out progress. This avoids the user wondering what's going on.
 const statsReportLimit = 8 * time.Second
-
-// report prints statistics if some number of blocks have been processed
-// or more than a few seconds have passed since the last message.
-func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int, toCommit bool) {
-	// Fetch the timings for the batch
-	var (
-		now     = mclock.Now()
-		elapsed = time.Duration(now) - time.Duration(st.StartTime)
-	)
-	// If we're at the last block of the batch or report period reached, log
-	if index == len(chain)-1 || elapsed >= statsReportLimit || toCommit {
-		// Count the number of transactions in this segment
-		var txs int
-		for _, block := range chain[st.lastIndex : index+1] {
-			txs += len(block.Transactions())
-		}
-		end := chain[index]
-		context := []interface{}{
-			"blocks", st.Processed, "txs", txs,
-			"elapsed", common.PrettyDuration(elapsed),
-			"number", end.Number(), "hash", end.Hash(),
-		}
-		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {
-			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
-		}
-		if st.queued > 0 {
-			context = append(context, []interface{}{"queued", st.queued}...)
-		}
-		if st.ignored > 0 {
-			context = append(context, []interface{}{"ignored", st.ignored}...)
-		}
-		log.Info(fmt.Sprintf("[%s] Imported new chain segment", logPrefix), context...)
-		*st = InsertStats{StartTime: now, lastIndex: index + 1}
-	}
-}
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter

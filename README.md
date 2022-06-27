@@ -274,7 +274,7 @@ socket connection to pass data between them. To use this mode, run Erigon in one
 
 ```sh
 make erigon
-./build/bin/erigon --private.api.addr=localhost:9090
+./build/bin/erigon --private.api.addr=localhost:9090 --http=false
 make rpcdaemon
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```

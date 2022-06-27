@@ -15,7 +15,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
@@ -29,7 +29,7 @@ type Downloader struct {
 	torrentClient     *torrent.Client
 	clientLock        *sync.RWMutex
 
-	cfg *torrentcfg.Cfg
+	cfg *downloadercfg.Cfg
 
 	statsLock *sync.RWMutex
 	stats     AggStats
@@ -51,7 +51,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
+func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
