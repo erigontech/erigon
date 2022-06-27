@@ -105,7 +105,7 @@ func (h *HeimdallClient) FetchWithRetry(ctx context.Context, rawPath string, raw
 		log.Info("Retrying again in 5 seconds for next Heimdall span", "path", u.Path)
 		select {
 		case <-ctx.Done():
-		    return nil, ctx.Err()
+			return nil, ctx.Err()
 		case <-time.After(5 * time.Second):
 		}
 	}
