@@ -216,7 +216,7 @@ type Bor struct {
 
 	signer common.Address // Ethereum address of the signing key
 	signFn SignerFn       // Signer function to authorize hashes with
-	lock   sync.RWMutex   // Protects the signer fields
+	lock   *sync.RWMutex  // Protects the signer fields
 
 	execCtx context.Context // context of caller execution stage
 
@@ -267,6 +267,7 @@ func New(
 		WithoutHeimdall:        withoutHeimdall,
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
+		lock:                   &sync.RWMutex{},
 	}
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
