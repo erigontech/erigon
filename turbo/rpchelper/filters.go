@@ -49,7 +49,7 @@ type Filters struct {
 
 	storeMu            sync.Mutex
 	logsStores         map[LogsSubID][]*types.Log
-	pendingBlockStores map[PendingBlockSubID][]*types.Block
+	pendingHeadsStores map[HeadsSubID][]*types.Header
 	pendingTxsStores   map[PendingTxsSubID][][]types.Transaction
 }
 
@@ -64,7 +64,7 @@ func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient,
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
 		logsStores:         make(map[LogsSubID][]*types.Log),
-		pendingBlockStores: make(map[PendingBlockSubID][]*types.Block),
+		pendingHeadsStores: make(map[HeadsSubID][]*types.Header),
 		pendingTxsStores:   make(map[PendingTxsSubID][][]types.Transaction),
 	}
 
@@ -310,10 +310,17 @@ func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
 	return id
 }
 
-func (ff *Filters) UnsubscribeHeads(id HeadsSubID) {
+func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	delete(ff.headsSubs, id)
+	if ch, ok := ff.headsSubs[id]; ok {
+		close(ch)
+		ff.storeMu.Lock()
+		defer ff.storeMu.Unlock()
+		delete(ff.pendingHeadsStores, id)
+		return true
+	}
+	return false
 }
 
 func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
@@ -338,18 +345,10 @@ func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID 
 	return id
 }
 
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	if ch, ok := ff.pendingBlockSubs[id]; ok {
-		close(ch)
-		delete(ff.pendingBlockSubs, id)
-		ff.storeMu.Lock()
-		defer ff.storeMu.Unlock()
-		delete(ff.pendingBlockStores, id)
-		return true
-	}
-	return false
+	delete(ff.pendingBlockSubs, id)
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
@@ -576,28 +575,28 @@ func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
 	return res, true
 }
 
-func (ff *Filters) AddPendingBlock(id PendingBlockSubID, block *types.Block) {
+func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 	ff.storeMu.Lock()
 	defer ff.storeMu.Unlock()
-	st, ok := ff.pendingBlockStores[id]
+	st, ok := ff.pendingHeadsStores[id]
 	if !ok {
-		st = make([]*types.Block, 0)
+		st = make([]*types.Header, 0)
 	}
 	st = append(st, block)
-	ff.pendingBlockStores[id] = st
+	ff.pendingHeadsStores[id] = st
 }
 
-func (ff *Filters) ReadPendingBlocks(id PendingBlockSubID) ([]*types.Block, bool) {
+func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
 	ff.storeMu.Lock()
 	defer ff.storeMu.Unlock()
-	res := make([]*types.Block, 0)
-	st, ok := ff.pendingBlockStores[id]
+	res := make([]*types.Header, 0)
+	st, ok := ff.pendingHeadsStores[id]
 	if !ok {
 		return res, false
 	}
 	res = append(res, st...)
-	st = make([]*types.Block, 0)
-	ff.pendingBlockStores[id] = st
+	st = make([]*types.Header, 0)
+	ff.pendingHeadsStores[id] = st
 	return res, true
 }
 

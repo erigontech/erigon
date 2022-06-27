@@ -41,7 +41,7 @@ func TestTxsBeginEnd(t *testing.T) {
 			return err
 		}
 
-		err = rawdb.TruncateCanonicalHash(tx, 7)
+		err = rawdb.TruncateCanonicalHash(tx, 7, false)
 		for i := uint64(7); i < 10; i++ {
 			require.NoError(err)
 			hash := common.Hash{0xa, byte(i)}

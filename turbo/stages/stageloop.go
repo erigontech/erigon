@@ -31,6 +31,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			hd.PayloadStatusCh <- *pendingPayloadStatus
+		}
+	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			var status remote.EngineStatus
+			if headBlockHash == pendingPayloadHash {
+				status = remote.EngineStatus_VALID
+			} else {
+				status = remote.EngineStatus_INVALID
+			}
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: headBlockHash,
+			}
+		}
+	}
+	hd.ClearPendingPayloadHash()
+	hd.SetPendingPayloadStatus(nil)
+}
+
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
@@ -52,25 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingPayloadStatus := hd.GetPendingPayloadStatus()
-		if pendingPayloadStatus != (common.Hash{}) {
-			if err != nil {
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-			} else {
-				var status remote.EngineStatus
-				if headBlockHash == pendingPayloadStatus {
-					status = remote.EngineStatus_VALID
-				} else {
-					status = remote.EngineStatus_INVALID
-				}
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					Status:          status,
-					LatestValidHash: headBlockHash,
-				}
-			}
-
-			hd.ClearPendingPayloadStatus()
-		}
+		SendPayloadStatus(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -187,12 +196,13 @@ func StageLoopStep(
 		}
 	}
 
-	headTd256, overflow := uint256.FromBig(headTd)
-	if overflow {
-		return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+	if headTd != nil {
+		headTd256, overflow := uint256.FromBig(headTd)
+		if overflow {
+			return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+		}
+		updateHead(ctx, head, headHash, headTd256)
 	}
-	updateHead(ctx, head, headHash, headTd256)
-
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
 		if header != nil && header.Number.Uint64() != finishProgressBefore {
@@ -318,7 +328,7 @@ func NewStagedSync(
 	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
-	snapshotDownloader proto_downloader.DownloaderClient,
+	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
 	execPayload stagedsync.ExecutePayloadFunc,
@@ -329,7 +339,7 @@ func NewStagedSync(
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -349,10 +359,11 @@ func NewStagedSync(
 				p2pCfg.NoDiscovery,
 				cfg.MemoryOverlay,
 				snapshots,
-				snapshotDownloader,
+				snapDownloader,
 				blockReader,
 				tmpdir,
 				notifications.Events,
+				notifications,
 				execPayload),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
@@ -397,19 +408,7 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.RwDB,
-	p2pCfg p2p.Config,
-	cfg ethconfig.Config,
-	controlServer *sentry.MultiClient,
-	tmpdir string,
-	notifications *stagedsync.Notifications,
-	snapshotDownloader proto_downloader.DownloaderClient,
-	snapshots *snapshotsync.RoSnapshots,
-	headCh chan *types.Block,
-) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)

@@ -486,7 +486,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 		}
 		// remove all canonical markers from this point
-		if err = rawdb.TruncateCanonicalHash(tx, progress+1); err != nil {
+		if err = rawdb.TruncateCanonicalHash(tx, progress+1, false); err != nil {
 			return err
 		}
 		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
