@@ -152,7 +152,7 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
-	log.Trace("Establishing event subscription channel with the RPC daemon ...")
+	log.Debug("Establishing event subscription channel with the RPC daemon ...")
 	ch, clean := s.events.AddHeaderSubscription()
 	defer clean()
 	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
@@ -274,10 +274,10 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	log.Trace("[NewPayload] acquiring lock")
+	log.Debug("[NewPayload] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	log.Trace("[NewPayload] lock acquired")
+	log.Debug("[NewPayload] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		log.Error("[NewPayload] not a proof-of-stake chain")
@@ -322,6 +322,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, req.BlockNumber-1)
 	if err != nil {
 		return nil, err
@@ -339,11 +340,11 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
 		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
-		log.Trace("[NewPayload] stage loop is busy")
+		log.Debug("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	log.Trace("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
+	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
@@ -353,7 +354,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	})
 
 	payloadStatus := <-s.statusCh
-	log.Trace("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	log.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -372,10 +373,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	log.Trace("[GetPayload] acquiring lock")
+	log.Debug("[GetPayload] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	log.Trace("[GetPayload] lock acquired")
+	log.Debug("[GetPayload] lock acquired")
 
 	builder, ok := s.builders[req.PayloadId]
 	if !ok {
@@ -418,10 +419,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	log.Trace("[ForkChoiceUpdated] acquiring lock")
+	log.Debug("[ForkChoiceUpdated] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	log.Trace("[ForkChoiceUpdated] lock acquired")
+	log.Debug("[ForkChoiceUpdated] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -437,7 +438,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
+	defer tx1.Rollback()
 	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
+	tx1.Rollback()
 	if err != nil {
 		return nil, err
 	}
@@ -448,59 +451,65 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
-	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
-	// That is, the block referenced by forkchoiceState.headBlockHash is neither the head of the canonical chain nor a block at the tip of any other chain.
-	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1
-	tx1.Rollback()
-
 	if s.stageLoopIsBusy() {
-		log.Trace("[ForkChoiceUpdated] stage loop is busy")
+		log.Debug("[ForkChoiceUpdated] stage loop is busy")
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
 
-	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+	log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 	s.requestList.AddForkChoiceRequest(&forkChoice)
 
-	payloadStatus := <-s.statusCh
-	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+	status := <-s.statusCh
+	log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
-	if payloadStatus.CriticalError != nil {
-		return nil, payloadStatus.CriticalError
+	if status.CriticalError != nil {
+		return nil, status.CriticalError
 	}
 
 	// No need for payload building
-	if req.PayloadAttributes == nil || payloadStatus.Status != remote.EngineStatus_VALID {
-		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&payloadStatus)}, nil
+	if req.PayloadAttributes == nil || status.Status != remote.EngineStatus_VALID {
+		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&status)}, nil
 	}
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	s.evictOldBuilders()
-
-	// payload IDs start from 1 (0 signifies null)
-	s.payloadId++
-
 	tx2, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer tx2.Rollback()
 	headHash := rawdb.ReadHeadBlockHash(tx2)
 	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
 	tx2.Rollback()
 
 	if headHeader.Hash() != forkChoice.HeadBlockHash {
-		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
+		// Per https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
+		// Client software MAY skip an update of the forkchoice state and
+		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
+		// That is, the block referenced by forkchoiceState.headBlockHash is neither the head of the canonical chain nor a block at the tip of any other chain.
+		// In the case of such an event, client software MUST return
+		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
+
+		log.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
+			"forkChoice.HeadBlockHash", forkChoice.HeadBlockHash, "headHeader.Hash", headHeader.Hash())
+		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&status)}, nil
 	}
 
 	if headHeader.Time >= req.PayloadAttributes.Timestamp {
 		return nil, &InvalidPayloadAttributesErr
 	}
+
+	// Initiate payload building
+
+	s.evictOldBuilders()
+
+	// payload IDs start from 1 (0 signifies null)
+	s.payloadId++
 
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)

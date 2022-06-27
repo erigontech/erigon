@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -65,13 +69,54 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := filepath.Join(datadir, "erigon22")
-	h, err3 := libstate.NewAggregator(aggPath, AggregationStep)
-	//h, err3 := aggregator.NewHistory(aggPath, uint64(blockTo), aggregationStep)
-	if err3 != nil {
-		return fmt.Errorf("create history: %w", err3)
+	aggPath := filepath.Join(datadir, "erigon23")
+	h, err := libstate.NewAggregator(aggPath, AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
 	}
 	defer h.Close()
+	readDbPath := path.Join(datadir, "readdb")
+	if block == 0 {
+		if _, err = os.Stat(readDbPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(readDbPath); err != nil {
+			return err
+		}
+	}
+	db, err := kv2.NewMDBX(logger).Path(readDbPath).WriteMap().Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	readPath := filepath.Join(datadir, "reads")
+	if block == 0 {
+		if _, err = os.Stat(readPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(readPath); err != nil {
+			return err
+		}
+		if err = os.Mkdir(readPath, os.ModePerm); err != nil {
+			return err
+		}
+	}
+	ri, err := libstate.NewReadIndices(readPath, AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create read indices: %w", err)
+	}
+	var rwTx kv.RwTx
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	ri.SetTx(rwTx)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -125,7 +170,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
 			continue
 		}
-		readWrapper := state.NewHistoryReader22(h)
+		readWrapper := state.NewHistoryReader22(h, ri)
 		if traceBlock != 0 {
 			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}
@@ -147,6 +192,29 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		case interrupt = <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
+		}
+		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+		commit := interrupt
+		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
+			var spaceDirty uint64
+			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+				return fmt.Errorf("retrieving spaceDirty: %w", err)
+			}
+			if spaceDirty >= dirtySpaceThreshold {
+				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				commit = true
+			}
+		}
+		if commit {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+			if !interrupt {
+				if rwTx, err = db.BeginRw(ctx); err != nil {
+					return err
+				}
+			}
+			ri.SetTx(rwTx)
 		}
 	}
 	return nil
@@ -177,6 +245,9 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 			fmt.Printf("tx idx %d, num %d, gas used %d\n", i, txNum, receipt.GasUsed)
 		}
 		receipts = append(receipts, receipt)
+		if err = hw.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
 		txNum++
 		hw.SetTxNum(txNum)
 	}

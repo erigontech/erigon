@@ -35,7 +35,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 	}
 	{
-		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
@@ -61,7 +61,7 @@ func TestBodiesUnwind(t *testing.T) {
 
 	{
 		// unwind to block 5, means mark blocks >= 6 as non-canonical
-		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, ctx, "test", logEvery)
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, ctx, "test", logEvery)
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)

@@ -118,6 +118,9 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 // baseFee to the returned bigInt
 func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	if head == nil {
+		return gpo.lastPrice, nil
+	}
 	headHash := head.Hash()
 
 	// If the latest gasprice is still available, return it.

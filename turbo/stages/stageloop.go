@@ -31,6 +31,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			hd.PayloadStatusCh <- *pendingPayloadStatus
+		}
+	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
+		if err != nil {
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		} else {
+			var status remote.EngineStatus
+			if headBlockHash == pendingPayloadHash {
+				status = remote.EngineStatus_VALID
+			} else {
+				status = remote.EngineStatus_INVALID
+			}
+			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: headBlockHash,
+			}
+		}
+	}
+	hd.ClearPendingPayloadHash()
+	hd.SetPendingPayloadStatus(nil)
+}
+
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
@@ -52,25 +79,7 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingPayloadStatus := hd.GetPendingPayloadStatus()
-		if pendingPayloadStatus != (common.Hash{}) {
-			if err != nil {
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-			} else {
-				var status remote.EngineStatus
-				if headBlockHash == pendingPayloadStatus {
-					status = remote.EngineStatus_VALID
-				} else {
-					status = remote.EngineStatus_INVALID
-				}
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{
-					Status:          status,
-					LatestValidHash: headBlockHash,
-				}
-			}
-
-			hd.ClearPendingPayloadStatus()
-		}
+		SendPayloadStatus(hd, headBlockHash, err)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -187,15 +196,16 @@ func StageLoopStep(
 		}
 	}
 
-	headTd256, overflow := uint256.FromBig(headTd)
-	if overflow {
-		return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+	if headTd != nil {
+		headTd256, overflow := uint256.FromBig(headTd)
+		if overflow {
+			return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
+		}
+		updateHead(ctx, head, headHash, headTd256)
 	}
-	updateHead(ctx, head, headHash, headTd256)
-
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil {
+		if header != nil && header.Number.Uint64() != finishProgressBefore {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
@@ -235,6 +245,80 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody) (err error) {
+	// Setup
+	height := header.Number.Uint64()
+	hash := header.Hash()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
+
+	// Prepare memory state for block execution
+	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
+		return err
+	}
+
+	rawdb.WriteHeader(batch, header)
+	if err = rawdb.WriteHeaderNumber(batch, hash, height); err != nil {
+		return err
+	}
+
+	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(batch, hash); err != nil {
+		return err
+	}
+
+	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
+		return err
+	}
+
+	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
+		return err
+	}
+
+	if height == 0 {
+		return nil
+	}
+	ancestorHash := hash
+	ancestorHeight := height
+
+	var ch common.Hash
+	for ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight) {
+		if err = rawdb.WriteCanonicalHash(batch, ancestorHash, ancestorHeight); err != nil {
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
+		}
+
+		ancestor, err := headerReader.Header(context.Background(), batch, ancestorHash, ancestorHeight)
+		if err != nil {
+			return err
+		}
+		if ancestor == nil {
+			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
+		}
+
+		select {
+		default:
+		}
+		ancestorHash = ancestor.ParentHash
+		ancestorHeight--
+	}
+	if err != nil {
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
+	}
+
+	// Run state sync
+	if err = stateSync.Run(nil, batch, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func NewStagedSync(
 	ctx context.Context,
 	logger log.Logger,
@@ -244,9 +328,10 @@ func NewStagedSync(
 	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
-	snapshotDownloader proto_downloader.DownloaderClient,
+	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
+	execPayload stagedsync.ExecutePayloadFunc,
 ) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
@@ -254,7 +339,7 @@ func NewStagedSync(
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -272,11 +357,14 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
+				cfg.MemoryOverlay,
 				snapshots,
-				snapshotDownloader,
+				snapDownloader,
 				blockReader,
 				tmpdir,
-				notifications.Events),
+				notifications.Events,
+				notifications,
+				execPayload),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -303,6 +391,7 @@ func NewStagedSync(
 				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
 				notifications.Accumulator,
 				cfg.StateStream,
+				/*stateStream=*/ false,
 				tmpdir,
 				blockReader,
 			),
@@ -316,5 +405,38 @@ func NewStagedSync(
 			stagedsync.StageFinishCfg(db, tmpdir, logger, headCh), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
+	), nil
+}
+
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
+	var blockReader services.FullBlockReader
+	if cfg.Snapshot.Enabled {
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
+	return stagedsync.New(
+		stagedsync.StateStages(ctx,
+			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, nil),
+			stagedsync.StageExecuteBlocksCfg(
+				db,
+				cfg.Prune,
+				cfg.BatchSize,
+				nil,
+				controlServer.ChainConfig,
+				controlServer.Engine,
+				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				notifications.Accumulator,
+				cfg.StateStream,
+				true,
+				tmpdir,
+				blockReader,
+			),
+			stagedsync.StageHashStateCfg(db, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
+		nil,
+		nil,
 	), nil
 }

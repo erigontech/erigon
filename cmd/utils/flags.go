@@ -33,7 +33,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -306,9 +306,9 @@ var (
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
 	}
-	HTTPEnabledFlag = cli.BoolFlag{
+	HTTPEnabledFlag = cli.BoolTFlag{
 		Name:  "http",
-		Usage: "Disabled by default. Use --http to enable the HTTP-RPC server",
+		Usage: "HTTP-RPC server (enabled by default). Use --http=false to disable it",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
@@ -365,6 +365,10 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	HTTPTraceFlag = cli.BoolFlag{
+		Name:  "http.trace",
+		Usage: "Trace HTTP requests with INFO level",
+	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
@@ -394,6 +398,10 @@ var (
 	TevmFlag = cli.BoolFlag{
 		Name:  "experimental.tevm",
 		Usage: "Enables Transpiled EVM experiment",
+	}
+	MemoryOverlayFlag = cli.BoolFlag{
+		Name:  "experimental.overlay",
+		Usage: "Enables In-Memory Overlay for PoS",
 	}
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
@@ -656,6 +664,10 @@ var (
 		Name:  "torrent.download.slots",
 		Value: 3,
 		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+	}
+	NoDownloaderFlag = cli.BoolFlag{
+		Name:  "no-downloader",
+		Usage: "to disable downloader component",
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
@@ -1021,7 +1033,6 @@ func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir)
 
-	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 	cfg.SentryLogPeerInfo = ctx.GlobalIsSet(SentryLogPeerInfoFlag.Name)
 }
 
@@ -1375,9 +1386,12 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
+	cfg.MemoryOverlay = ctx.GlobalBool(MemoryOverlayFlag.Name)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
-	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+	cfg.Snapshot.NoDownloader = ctx.GlobalBool(NoDownloaderFlag.Name)
+	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
+	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)
 		var downloadRate, uploadRate datasize.ByteSize
@@ -1388,18 +1402,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 
-		lvl, err := torrentcfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		lvl, err := downloadercfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent, err = torrentcfg.New(cfg.Dirs.Snap,
-			lvl,
-			nodeConfig.P2P.NAT,
-			downloadRate, uploadRate,
-			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
-			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
-		)
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}

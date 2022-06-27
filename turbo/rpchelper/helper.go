@@ -50,7 +50,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
-		case rpc.FinalizeBlockNumber:
+		case rpc.FinalizedBlockNumber:
 			blockNumber, err = GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, common.Hash{}, false, err

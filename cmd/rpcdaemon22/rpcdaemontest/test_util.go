@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 	"net"
 	"testing"
@@ -301,7 +302,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	dialer := func() func(context.Context, string) (net.Conn, error) {
 		go func() {
 			if err := server.Serve(listener); err != nil {
-				panic(err)
+				fmt.Printf("%v\n", err)
 			}
 		}()
 		return func(context.Context, string) (net.Conn, error) {
@@ -316,6 +317,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	t.Cleanup(func() {
 		cancel()
 		conn.Close()
+		server.Stop()
 	})
 	return ctx, conn
 }

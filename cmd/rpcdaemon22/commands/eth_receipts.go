@@ -159,7 +159,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(api._agg)
+	stateReader := state.NewHistoryReader22(api._agg, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
 	for iter.HasNext() {
 		txNum := iter.Next()
@@ -195,6 +195,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, contractHasTEVM, api._blockReader)
 		stateReader.SetTxNum(txNum)
 		vmConfig := vm.Config{}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		ibs := state.New(stateReader)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 

@@ -311,7 +311,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config)
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +396,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return block, nil
 	}
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody) error {
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, *config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.sentriesClient.Hd.BeaconRequestList, backend.sentriesClient.Hd.PayloadStatusCh,
@@ -478,7 +490,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		headCh = make(chan *types.Block, 1)
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, inMemoryExecution)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +552,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// Register the backend on the node
-	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
 	return backend, nil
 }
@@ -777,7 +788,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
 	var err error
 
 	if isSnapshotEnabled {
@@ -785,25 +796,27 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 		allSnapshots.OptimisticReopen()
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
-		if len(stack.Config().DownloaderAddr) > 0 {
-			// connect to external Downloader
-			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			s.downloader, err = downloader.New(cfg.Torrent)
+		if !cfg.Snapshot.NoDownloader {
+			if cfg.Snapshot.DownloaderAddr != "" {
+				// connect to external Downloader
+				s.downloaderClient, err = downloadergrpc.NewClient(ctx, cfg.Snapshot.DownloaderAddr)
+			} else {
+				// start embedded Downloader
+				s.downloader, err = downloader.New(cfg.Downloader)
+				if err != nil {
+					return nil, nil, err
+				}
+				go downloader.MainLoop(ctx, s.downloader, true)
+				bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+				if err != nil {
+					return nil, nil, fmt.Errorf("new server: %w", err)
+				}
+
+				s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+			}
 			if err != nil {
 				return nil, nil, err
 			}
-			go downloader.MainLoop(ctx, s.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-			if err != nil {
-				return nil, nil, fmt.Errorf("new server: %w", err)
-			}
-
-			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
-		if err != nil {
-			return nil, nil, err
 		}
 		return blockReader, allSnapshots, nil
 	} else {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -26,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -894,7 +896,6 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-
 	rawdb.WriteHeader(db, header)
 
 	hi.highest = blockHeight
@@ -1084,6 +1085,42 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, execPayload func(batch kv.RwTx, header *types.Header, body *types.RawBody) error) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if hd.nextForkState == nil {
+		hd.nextForkState = memdb.NewMemoryBatch(tx)
+	} else {
+		hd.nextForkState.UpdateTxn(tx)
+	}
+	hd.nextForkHash = header.Hash()
+	return execPayload(hd.nextForkState, header, body)
+}
+
+func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if err := hd.nextForkState.Flush(tx); err != nil {
+		return err
+	}
+	hd.nextForkHash = common.Hash{}
+	hd.nextForkState = nil
+	return nil
+}
+
+func (hd *HeaderDownload) CleanNextForkState() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.nextForkHash = common.Hash{}
+	hd.nextForkState = nil
+}
+
+func (hd *HeaderDownload) GetNextForkHash() common.Hash {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	return hd.nextForkHash
+}
+
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1114,22 +1151,34 @@ func (hd *HeaderDownload) FetchingNew() bool {
 	return hd.fetchingNew
 }
 
-func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadHash() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingPayloadHash
+}
+
+func (hd *HeaderDownload) SetPendingPayloadHash(header common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadHash = header
+}
+
+func (hd *HeaderDownload) ClearPendingPayloadHash() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadHash = common.Hash{}
+}
+
+func (hd *HeaderDownload) GetPendingPayloadStatus() *privateapi.PayloadStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(response *privateapi.PayloadStatus) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = header
-}
-
-func (hd *HeaderDownload) ClearPendingPayloadStatus() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.pendingPayloadStatus = common.Hash{}
+	hd.pendingPayloadStatus = response
 }
 
 func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {

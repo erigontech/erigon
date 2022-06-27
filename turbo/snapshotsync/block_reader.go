@@ -487,7 +487,7 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	if sn.idxHeaderHash == nil {
 		return nil, buf, nil
 	}
-	headerOffset := sn.idxHeaderHash.Lookup2(blockHeight - sn.idxHeaderHash.BaseDataID())
+	headerOffset := sn.idxHeaderHash.OrdinalLookup(blockHeight - sn.idxHeaderHash.BaseDataID())
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
@@ -511,7 +511,7 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	}
 	reader := recsplit.NewIndexReader(sn.idxHeaderHash)
 	localID := reader.Lookup(hash[:])
-	headerOffset := sn.idxHeaderHash.Lookup2(localID)
+	headerOffset := sn.idxHeaderHash.OrdinalLookup(localID)
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
@@ -548,7 +548,7 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 	if sn.idxBodyNumber == nil {
 		return nil, buf, nil
 	}
-	bodyOffset := sn.idxBodyNumber.Lookup2(blockHeight - sn.idxBodyNumber.BaseDataID())
+	bodyOffset := sn.idxBodyNumber.OrdinalLookup(blockHeight - sn.idxBodyNumber.BaseDataID())
 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
@@ -582,7 +582,7 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	if txsAmount == 0 {
 		return txs, senders, nil
 	}
-	txnOffset := txsSeg.IdxTxnHash.Lookup2(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
+	txnOffset := txsSeg.IdxTxnHash.OrdinalLookup(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
 	gg := txsSeg.Seg.MakeGetter()
 	gg.Reset(txnOffset)
 	stream := rlp.NewStream(reader, 0)
@@ -606,7 +606,7 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 }
 
 func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf []byte) (txn types.Transaction, err error) {
-	offset := sn.IdxTxnHash.Lookup2(txnID - sn.IdxTxnHash.BaseDataID())
+	offset := sn.IdxTxnHash.OrdinalLookup(txnID - sn.IdxTxnHash.BaseDataID())
 	gg := sn.Seg.MakeGetter()
 	gg.Reset(offset)
 	buf, _ = gg.Next(buf[:0])
@@ -629,7 +629,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
 		txnId := reader.Lookup(txnHash[:])
-		offset := sn.IdxTxnHash.Lookup2(txnId)
+		offset := sn.IdxTxnHash.OrdinalLookup(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.

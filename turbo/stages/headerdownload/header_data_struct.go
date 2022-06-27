@@ -9,6 +9,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -308,11 +309,14 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
+	nextForkState        *memdb.MemoryMutation         // The db state of the next fork.
+	nextForkHash         common.Hash                   // Hash of the next fork
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
