@@ -1400,7 +1400,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-
+		log.Info("torrent verbosity", "level", ctx.GlobalInt(TorrentVerbosityFlag.Name))
 		lvl, err := downloadercfg.Int2LogLevel(ctx.GlobalInt(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
@@ -1442,7 +1442,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
 	}
-	log.Info("torrentVerbosityFlag1", "level", ctx.GlobalInt(TorrentVerbosityFlag.Name))
 	if cfg.RPCGasCap != 0 {
 		log.Info("Set global gas cap", "cap", cfg.RPCGasCap)
 	} else {
