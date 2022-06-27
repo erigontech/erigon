@@ -59,7 +59,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: req.BlockNums[len(req.BlockNums)-1],
 				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES,
 					Data: bytes,
 				},
 			}
@@ -109,7 +109,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: minBlock,
 				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS,
 					Data: bytes,
 				},
 			}

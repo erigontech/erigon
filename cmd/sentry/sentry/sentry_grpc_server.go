@@ -637,7 +637,7 @@ func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerI
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
 			PeerId: gointerfaces.ConvertHashToH512(peerID),
 			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS,
 				Data: b,
 			},
 		}); err != nil {
@@ -794,7 +794,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocol.Version {
 	case eth.ETH67:
-		reply.Protocol = proto_sentry.Protocol_ETH66
+		reply.Protocol = proto_sentry.Protocol_ETH67
 	}
 	return reply, nil
 }

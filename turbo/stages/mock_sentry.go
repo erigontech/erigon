@@ -117,7 +117,7 @@ func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRe
 }
 
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
-	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH67}, nil
 }
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -450,7 +450,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
@@ -464,7 +464,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
@@ -482,7 +482,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}

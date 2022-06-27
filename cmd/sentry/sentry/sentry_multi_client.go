@@ -336,7 +336,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 		outreq := proto_sentry.SendMessageByIdRequest{
 			PeerId: req.PeerId,
 			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS,
 				Data: b,
 			},
 		}
@@ -534,7 +534,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_BLOCK_HEADERS_66,
+			Id:   proto_sentry.MessageId_BLOCK_HEADERS,
 			Data: b,
 		},
 	}
@@ -571,7 +571,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_BLOCK_BODIES_66,
+			Id:   proto_sentry.MessageId_BLOCK_BODIES,
 			Data: b,
 		},
 	}
@@ -611,7 +611,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_RECEIPTS_66,
+			Id:   proto_sentry.MessageId_RECEIPTS,
 			Data: b,
 		},
 	}
@@ -651,21 +651,21 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	switch inreq.Id {
 	// ========= eth 67 ==========
 
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
+	case proto_sentry.MessageId_NEW_BLOCK_HASHES:
 		return cs.newBlockHashes66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_BLOCK_HEADERS_66:
+	case proto_sentry.MessageId_BLOCK_HEADERS:
 		return cs.blockHeaders66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_NEW_BLOCK_66:
+	case proto_sentry.MessageId_NEW_BLOCK:
 		return cs.newBlock66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_BLOCK_BODIES_66:
+	case proto_sentry.MessageId_BLOCK_BODIES:
 		return cs.blockBodies66(inreq, sentry)
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
+	case proto_sentry.MessageId_GET_BLOCK_HEADERS:
 		return cs.getBlockHeaders66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GET_BLOCK_BODIES_66:
+	case proto_sentry.MessageId_GET_BLOCK_BODIES:
 		return cs.getBlockBodies66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_RECEIPTS_66:
+	case proto_sentry.MessageId_RECEIPTS:
 		return cs.receipts66(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GET_RECEIPTS_66:
+	case proto_sentry.MessageId_GET_RECEIPTS:
 		return cs.getReceipts66(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)

@@ -57,7 +57,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 		case eth.ETH67:
 			if req67 == nil {
 				req67 = &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES,
 					Data: data,
 				}
 
@@ -100,7 +100,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block
 				req67 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
 					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+						Id:   proto_sentry.MessageId_NEW_BLOCK,
 						Data: data,
 					},
 				}
@@ -155,7 +155,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 			case eth.ETH67:
 				if req67 == nil {
 					req67 = &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
 						Data: data,
 					}
 				}
@@ -217,7 +217,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 					req67 = &proto_sentry.SendMessageToRandomPeersRequest{
 						MaxPeers: 1024,
 						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
 							Data: data,
 						},
 					}
@@ -267,7 +267,7 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 					req67 := &proto_sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
 							Data: data,
 						},
 					}
