@@ -194,6 +194,7 @@ func ExecuteBlockEphemerallyForBSC(
 	}
 
 	var newBlock *types.Block
+	var receiptSha common.Hash
 	if !vmConfig.ReadOnly {
 		// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
 		// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
@@ -218,13 +219,13 @@ func ExecuteBlockEphemerallyForBSC(
 		if !vmConfig.NoReceipts {
 			receipts = outReceipts
 		}
+		receiptSha = newBlock.ReceiptHash()
 	} else {
 		newBlock = block
+		receiptSha = types.DeriveSha(receipts)
 	}
 
 	var bloom types.Bloom
-
-	receiptSha := types.DeriveSha(receipts)
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		if !statelessExec && newBlock.ReceiptHash() != block.ReceiptHash() {
