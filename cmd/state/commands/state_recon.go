@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -178,6 +179,8 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 			panic(err)
 		}
 		txHash := txn.Hash()
+		sender, _ := txn.GetSender()
+		fmt.Printf("txHash=%x, sender=%x\n", txHash, sender)
 		msg, err := txn.AsMessage(*rw.lastSigner, rw.lastHeader.BaseFee, rw.lastRules)
 		if err != nil {
 			panic(err)
@@ -208,10 +211,15 @@ type FillWorker struct {
 	rs             *state.ReconState
 	ac             *libstate.AggregatorContext
 	fromKey, toKey []byte
+	currentKey     []byte
+	bitmap         roaring64.Bitmap
+	total          uint64
+	progress       uint64
 }
 
 func NewFillWorker(txNum uint64, doneCount *uint64, rs *state.ReconState, a *libstate.Aggregator, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
+		txNum:     txNum,
 		doneCount: doneCount,
 		rs:        rs,
 		ac:        a.MakeContext(),
@@ -221,10 +229,24 @@ func NewFillWorker(txNum uint64, doneCount *uint64, rs *state.ReconState, a *lib
 	return fw
 }
 
+func (fw *FillWorker) Total() uint64 {
+	return atomic.LoadUint64(&fw.total)
+}
+
+func (fw *FillWorker) Progress() uint64 {
+	return atomic.LoadUint64(&fw.progress)
+}
+
 func (fw *FillWorker) fillAccounts() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.currentKey = key
 		if len(val) > 0 {
 			var a accounts.Account
 			a.Reset()
@@ -258,38 +280,97 @@ func (fw *FillWorker) fillAccounts() {
 			value := make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(value)
 			fw.rs.Put(kv.PlainState, key, value)
-			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+		} else {
+			fw.rs.Delete(kv.PlainState, key)
 		}
 	}
-	atomic.AddUint64(fw.doneCount, 1)
 }
 
 func (fw *FillWorker) fillStorage() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.currentKey = key
+		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
-			compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 			fw.rs.Put(kv.PlainState, compositeKey, val)
-			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+		} else {
+			fw.rs.Delete(kv.PlainState, compositeKey)
 		}
 	}
-	atomic.AddUint64(fw.doneCount, 1)
 }
 
 func (fw *FillWorker) fillCode() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.currentKey = key
+		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 		if len(val) > 0 {
 			codeHash := crypto.Keccak256(val)
 			fw.rs.Put(kv.Code, codeHash[:], val)
-			compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 			fw.rs.Put(kv.PlainContractCode, compositeKey, codeHash[:])
-			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+		} else {
+			fw.rs.Delete(kv.PlainContractCode, compositeKey)
 		}
 	}
-	atomic.AddUint64(fw.doneCount, 1)
+}
+
+func (fw *FillWorker) ResetProgress() {
+	fw.total = 0
+	fw.progress = 0
+}
+
+func (fw *FillWorker) bitmapAccounts() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
+	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
+	for it.HasNext() {
+		txNum, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.bitmap.Add(txNum)
+	}
+}
+
+func (fw *FillWorker) bitmapStorage() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
+	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
+	for it.HasNext() {
+		txNum, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.bitmap.Add(txNum)
+	}
+}
+
+func (fw *FillWorker) bitmapCode() {
+	defer func() {
+		atomic.AddUint64(fw.doneCount, 1)
+	}()
+	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	atomic.StoreUint64(&fw.total, it.Total())
+	for it.HasNext() {
+		txNum, progress := it.Next()
+		atomic.StoreUint64(&fw.progress, progress)
+		fw.bitmap.Add(txNum)
+	}
 }
 
 func Recon(genesis *core.Genesis, logger log.Logger) error {
@@ -360,13 +441,105 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	blockNum = block + 1
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
-	bitmap := agg.ReconBitmap(txNum)
-	fmt.Printf("Bitmap length = %d\n", bitmap.GetCardinality())
-
-	rs := state.NewReconState(bitmap)
-	workerCount := 8
-	var lock sync.RWMutex
+	workerCount := runtime.NumCPU()
 	var wg sync.WaitGroup
+	rs := state.NewReconState()
+	var fromKey, toKey []byte
+	bigCount := big.NewInt(int64(workerCount))
+	bigStep := big.NewInt(0x100000000)
+	bigStep.Div(bigStep, bigCount)
+	bigCurrent := big.NewInt(0)
+	fillWorkers := make([]*FillWorker, workerCount)
+	fromKey = nil
+	toKey = nil
+	var doneCount uint64
+	for i := 0; i < workerCount; i++ {
+		fromKey = toKey
+		if i == workerCount-1 {
+			toKey = nil
+		} else {
+			bigCurrent.Add(bigCurrent, bigStep)
+			toKey = make([]byte, 4)
+			bigCurrent.FillBytes(toKey)
+		}
+		fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
+		fillWorkers[i] = NewFillWorker(txNum, &doneCount, rs, agg, fromKey, toKey)
+	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].bitmapAccounts()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+		}
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].bitmapStorage()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+		}
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].bitmapCode()
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			libcommon.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+			)
+		}
+	}
+	var bitmap roaring64.Bitmap
+	for i := 0; i < workerCount; i++ {
+		bitmap.Or(&fillWorkers[i].bitmap)
+	}
+	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
+	rs.SetWorkBitmap(&bitmap)
+	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
 	defer func() {
@@ -387,26 +560,38 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 	count := uint64(0)
+	rollbackCount := uint64(0)
 	total := bitmap.GetCardinality()
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].run()
 	}
 	commitThreshold := uint64(256 * 1024 * 1024)
+	prevCount := uint64(0)
+	prevRollbackCount := uint64(0)
+	prevTime := time.Now()
 	for count < total {
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
-
+			sizeEstimate := rs.SizeEstimate()
 			count = rs.DoneCount()
+			rollbackCount = rs.RollbackCount()
+			currentTime := time.Now()
+			interval := currentTime.Sub(prevTime)
+			speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
 			progress := 100.0 * float64(count) / float64(total)
-			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "total", total, "count", count,
+			var repeatRate float64
+			if count > prevCount {
+				repeatRate = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
+			}
+			prevTime = currentTime
+			prevCount = count
+			prevRollbackCount = rollbackCount
+			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat rate", fmt.Sprintf("%.2f%%", repeatRate), "buffer", libcommon.ByteCount(sizeEstimate),
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
-			sizeEstimate := rs.SizeEstimate()
 			if sizeEstimate >= commitThreshold {
 				err := func() error {
 					lock.Lock()
@@ -457,27 +642,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
-	log.Info("Completed tx replay phase")
-	fillWorkers := make([]*FillWorker, workerCount)
-	var fromKey, toKey []byte
-	bigCount := big.NewInt(int64(workerCount))
-	bigStep := big.NewInt(0x100000000)
-	bigStep.Div(bigStep, bigCount)
-	bigCurrent := big.NewInt(0)
-	var doneCount uint64
+	doneCount = 0
 	for i := 0; i < workerCount; i++ {
-		fromKey = toKey
-		if i == workerCount-1 {
-			toKey = nil
-		} else {
-			bigCurrent.Add(bigCurrent, bigStep)
-			toKey = make([]byte, 4)
-			bigCurrent.FillBytes(toKey)
-		}
-		fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = NewFillWorker(txNum, &doneCount, rs, agg, fromKey, toKey)
-	}
-	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].fillAccounts()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
@@ -485,12 +652,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
-
-			log.Info("Filling accounts", "workers", workerCount,
+			sizeEstimate := rs.SizeEstimate()
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p), "buffer", libcommon.ByteCount(sizeEstimate),
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
-			sizeEstimate := rs.SizeEstimate()
 			if sizeEstimate >= commitThreshold {
+				flushStart := time.Now()
 				rwTx, err := db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -501,11 +675,13 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				if err = rwTx.Commit(); err != nil {
 					return err
 				}
+				log.Info("Flush buffer", "duration", time.Since(flushStart))
 			}
 		}
 	}
 	doneCount = 0
 	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].fillStorage()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
@@ -513,12 +689,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
-
-			log.Info("Filling storage", "workers", workerCount,
+			sizeEstimate := rs.SizeEstimate()
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p), "buffer", libcommon.ByteCount(sizeEstimate),
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
-			sizeEstimate := rs.SizeEstimate()
 			if sizeEstimate >= commitThreshold {
+				flushStart := time.Now()
 				rwTx, err := db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -529,11 +712,13 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				if err = rwTx.Commit(); err != nil {
 					return err
 				}
+				log.Info("Flush buffer", "duration", time.Since(flushStart))
 			}
 		}
 	}
 	doneCount = 0
 	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].fillCode()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
@@ -541,12 +726,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
-
-			log.Info("Filling code", "workers", workerCount,
+			sizeEstimate := rs.SizeEstimate()
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
+			}
+			p *= 100.0
+			log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p), "buffer", libcommon.ByteCount(sizeEstimate),
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
-			sizeEstimate := rs.SizeEstimate()
 			if sizeEstimate >= commitThreshold {
+				flushStart := time.Now()
 				rwTx, err := db.BeginRw(ctx)
 				if err != nil {
 					return err
@@ -557,6 +749,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 				if err = rwTx.Commit(); err != nil {
 					return err
 				}
+				log.Info("Flush buffer", "duration", time.Since(flushStart))
 			}
 		}
 	}

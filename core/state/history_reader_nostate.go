@@ -169,7 +169,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		}
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
+		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d\n", address, enc, noState, stateTxNum)
 	}
 	return enc, nil
 }

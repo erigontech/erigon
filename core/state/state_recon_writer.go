@@ -1,7 +1,7 @@
 package state
 
 import (
-	"fmt"
+	//"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,15 +49,19 @@ type ReconState struct {
 	queue theap[uint64]
 	changes map[string]map[string][]byte
 	sizeEstimate uint64
+	rollbackCount uint64
 }
 
-func NewReconState(workBitmap *roaring64.Bitmap) *ReconState {
+func NewReconState() *ReconState {
 	rs := &ReconState{
-		workIterator: workBitmap.Iterator(),
 		triggers: map[uint64][]uint64{},
 		changes: map[string]map[string][]byte{},
 	}
 	return rs
+}
+
+func (rs *ReconState) SetWorkBitmap(workBitmap *roaring64.Bitmap) {
+	rs.workIterator = workBitmap.Iterator()
 }
 
 func (rs *ReconState) Put(table string,	key, val []byte) {
@@ -70,6 +74,18 @@ func (rs *ReconState) Put(table string,	key, val []byte) {
 	}
 	t[string(key)] = val
 	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
+}
+
+func (rs *ReconState) Delete(table string, key []byte) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	t, ok := rs.changes[table]
+	if !ok {
+		t = map[string][]byte{}
+		rs.changes[table] = t
+	}
+	t[string(key)] = nil
+	rs.sizeEstimate += uint64(len(key))
 }
 
 func (rs *ReconState) Get(table string, key []byte) []byte {
@@ -87,8 +103,14 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		for ks, val := range t {
-			if err := rwTx.Put(table, []byte(ks), val); err != nil {
-				return err
+			if len(val) == 0 {
+				if err := rwTx.Delete(table, []byte(ks), nil); err != nil {
+					return err
+				}
+			} else {
+				if err := rwTx.Put(table, []byte(ks), val); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -131,6 +153,7 @@ func (rs *ReconState) RollbackTxNum(txNum, dependency uint64) {
 		tt = append(tt, txNum)
 		rs.triggers[dependency] = tt
 	}
+	rs.rollbackCount++
 }
 
 func (rs *ReconState) Done(txNum uint64) bool {
@@ -143,6 +166,12 @@ func (rs *ReconState) DoneCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.doneBitmap.GetCardinality()
+}
+
+func (rs *ReconState) RollbackCount() uint64 {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.rollbackCount
 }
 
 func (rs *ReconState) SizeEstimate() uint64 {
@@ -179,7 +208,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
+	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	w.rs.Put(kv.PlainState, address[:], value)
 	return nil
 }
@@ -195,7 +224,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 	}
 	w.rs.Put(kv.Code, codeHash[:], code)
 	if len(code) > 0 {
-		fmt.Printf("code [%x] => [%x] CodeHash: %x\n", address, code, codeHash)
+		//fmt.Printf("code [%x] => [%x] CodeHash: %x\n", address, code, codeHash)
 		w.rs.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), codeHash[:])
 	}
 	return nil
@@ -208,17 +237,20 @@ func (w *StateReconWriter) DeleteAccount(address common.Address, original *accou
 func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	found, txNum := w.ac.MaxStorageTxNum(address.Bytes(), key.Bytes())
 	if !found {
+		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
 		return nil
 	}
 	if txNum != w.txNum {
-		//fmt.Printf("no change code [%x] [%x] txNum = %d\n", address, *key, txNum)
+		//fmt.Printf("no change storage [%x] [%x] txNum = %d\n", address, *key, txNum)
 		return nil
 	}
 	v := value.Bytes()
 	if len(v) != 0 {
-		fmt.Printf("storage [%x] [%x] => [%x]\n", address, *key, v)
+		//fmt.Printf("storage [%x] [%x] => [%x]\n", address, *key, v)
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
 		w.rs.Put(kv.PlainState, compositeKey, v)
+	} else {
+		//fmt.Printf("storage [%x] [%x] => [%x]\n", address, *key, v)
 	}
 	return nil
 }
