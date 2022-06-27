@@ -1097,6 +1097,12 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(16)
+
+	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
+	if currentHeight == nil {
+		criticalError = fmt.Errorf("could not read block number.")
+		return
+	}
 	if store {
 		// If it is a continuation of the canonical chain we can stack it up.
 		if hd.nextForkState == nil {
@@ -1105,19 +1111,17 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			hd.nextForkState.UpdateTxn(tx)
 		}
 		hd.nextForkHash = header.Hash()
-		status = remote.EngineStatus_VALID
 		// Let's assemble the side fork chain if we have others building.
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
-		latestValidHash = header.Hash()
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
 			latestValidHash = header.ParentHash
+			return
 		}
-		return
-	}
-	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
-	if currentHeight == nil {
-		criticalError = fmt.Errorf("could not read block number.")
+		status = remote.EngineStatus_VALID
+		latestValidHash = header.Hash()
+		hd.sideForksBlock[latestValidHash] = sideForkBlock{header, body}
+		hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 		return
 	}
 	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
@@ -1165,12 +1169,16 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		status = remote.EngineStatus_INVALID
 	}
 	// After the we finished executing, we clean up old forks
+	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
+	return
+}
+
+func (hd *HeaderDownload) cleanupOutdateSideForks(currentHeight uint64, maxDepth uint64) {
 	for hash, sb := range hd.sideForksBlock {
-		if abs64(int64(*currentHeight)-sb.header.Number.Int64()) > maxDepth {
+		if abs64(int64(currentHeight)-sb.header.Number.Int64()) > maxDepth {
 			delete(hd.sideForksBlock, hash)
 		}
 	}
-	return
 }
 
 func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
@@ -1178,6 +1186,10 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	defer hd.lock.Unlock()
 	if err := hd.nextForkState.Flush(tx); err != nil {
 		return err
+	}
+	// If the side fork hash is now becoming canonical we can clean up.
+	if _, ok := hd.sideForksBlock[hd.nextForkHash]; ok {
+		delete(hd.sideForksBlock, hd.nextForkHash)
 	}
 	hd.nextForkState.Close()
 	hd.nextForkHash = common.Hash{}
