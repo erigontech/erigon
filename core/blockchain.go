@@ -69,8 +69,6 @@ type EphemeralExecResult struct {
 	ReceiptForStorage *types.ReceiptForStorage `json:"-"`
 }
 
-// ExecuteBlockEphemerally runs a block from provided stateReader and
-// writes the result to the provided stateWriter
 func ExecuteBlockEphemerallyForBSC(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,

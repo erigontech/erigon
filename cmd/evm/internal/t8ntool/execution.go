@@ -86,7 +86,7 @@ func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAll
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(addr, 1)
+			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
 			tx.Put(kv.IncarnationMap, addr[:], b[:])
