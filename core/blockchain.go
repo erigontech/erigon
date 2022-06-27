@@ -49,10 +49,6 @@ const (
 	TriesInMemory = 128
 )
 
-// statsReportLimit is the time limit during import and export after which we
-// always print out progress. This avoids the user wondering what's going on.
-const statsReportLimit = 8 * time.Second
-
 type RejectedTx struct {
 	Index int    `json:"index"    gencodec:"required"`
 	Err   string `json:"error"    gencodec:"required"`
