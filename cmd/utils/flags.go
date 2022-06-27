@@ -29,7 +29,6 @@ import (
 	"text/tabwriter"
 	"text/template"
 
-	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -645,10 +644,10 @@ var (
 		Name:  ethconfig.FlagSnapStop,
 		Usage: "Stop producing new snapshots",
 	}
-	TorrentVerbosityFlag = cli.StringFlag{
+	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
-		Value: lg.Warning.LogString(),
-		Usage: "DBG | INF | WRN | ERR (must set --verbosity to equal or higher level)",
+		Value: 3,
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has defeault: 3)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
@@ -1402,7 +1401,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 
-		lvl, err := downloadercfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		lvl, err := downloadercfg.Int2LogLevel(ctx.GlobalInt(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
@@ -1443,6 +1442,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
 	}
+	log.Info("torrentVerbosityFlag1", "level", ctx.GlobalInt(TorrentVerbosityFlag.Name))
 	if cfg.RPCGasCap != 0 {
 		log.Info("Set global gas cap", "cap", cfg.RPCGasCap)
 	} else {
