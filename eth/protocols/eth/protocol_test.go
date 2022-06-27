@@ -167,10 +167,6 @@ func TestEth67Messages(t *testing.T) {
 		common.HexToHash("deadc0de"),
 		common.HexToHash("feedbeef"),
 	}
-	byteSlices := [][]byte{
-		common.FromHex("deadc0de"),
-		common.FromHex("feedbeef"),
-	}
 	// init the receipts
 	{
 		receipts = []*types.Receipt{
