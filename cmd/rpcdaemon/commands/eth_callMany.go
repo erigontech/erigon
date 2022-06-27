@@ -114,7 +114,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 
-	parent := rawdb.ReadHeader(tx, hash, blockNum)
+	parent := block.Header()
 
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
