@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -1085,16 +1086,86 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, execPayload func(batch kv.RwTx, header *types.Header, body *types.RawBody) error) error {
+func abs64(n int64) uint64 {
+	if n < 0 {
+		return uint64(-n)
+	}
+	return uint64(n)
+}
+
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if hd.nextForkState == nil {
-		hd.nextForkState = memdb.NewMemoryBatch(tx)
-	} else {
-		hd.nextForkState.UpdateTxn(tx)
+	maxDepth := uint64(16)
+	if store {
+		// If it is a continuation of the canonical chain we can stack it up.
+		if hd.nextForkState == nil {
+			hd.nextForkState = memdb.NewMemoryBatch(tx)
+		} else {
+			hd.nextForkState.UpdateTxn(tx)
+		}
+		hd.nextForkHash = header.Hash()
+		status = remote.EngineStatus_VALID
+		// Let's assemble the side fork chain if we have others building.
+		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		if validationError != nil {
+			status = remote.EngineStatus_INVALID
+		}
+		return
 	}
-	hd.nextForkHash = header.Hash()
-	return execPayload(hd.nextForkState, header, body)
+	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
+	if currentHeight == nil {
+		criticalError = fmt.Errorf("could not read block number.")
+		return
+	}
+	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
+	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxDepth {
+		status = remote.EngineStatus_ACCEPTED
+		return
+	}
+	// if it is not canonical we validate it as a side fork.
+	batch := memdb.NewMemoryBatch(tx)
+	// Let's assemble the side fork backwards
+	var foundCanonical bool
+	currentHash := header.ParentHash
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+	if criticalError != nil {
+		return
+	}
+
+	var bodiesChain []*types.RawBody
+	var headersChain []*types.Header
+	unwindPoint := header.Number.Uint64() - 1
+	for !foundCanonical {
+		var sb sideForkBlock
+		var ok bool
+		if sb, ok = hd.sideForksBlock[currentHash]; !ok {
+			// We miss some components so we did not check validity.
+			status = remote.EngineStatus_ACCEPTED
+			return
+		}
+		headersChain = append(headersChain, sb.header)
+		bodiesChain = append(bodiesChain, sb.body)
+		currentHash = sb.header.ParentHash
+		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+		if criticalError != nil {
+			return
+		}
+		unwindPoint = sb.header.Number.Uint64() - 1
+	}
+	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
+	status = remote.EngineStatus_VALID
+	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	if validationError != nil {
+		status = remote.EngineStatus_INVALID
+	}
+	// After the we finished executing, we clean up old forks
+	for hash, sb := range hd.sideForksBlock {
+		if abs64(int64(*currentHeight)-sb.header.Number.Int64()) > maxDepth {
+			delete(hd.sideForksBlock, hash)
+		}
+	}
+	return
 }
 
 func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {

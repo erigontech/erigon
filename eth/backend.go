@@ -396,13 +396,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return block, nil
 	}
 
-	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody) error {
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, *config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
 		if err != nil {
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+			log.Warn("Could not validate block", "err", err)
 			return err
 		}
 		return nil

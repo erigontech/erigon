@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -571,21 +570,33 @@ func verifyAndSaveNewPoSHeader(
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
-
+		if cfg.memoryOverlay {
+			status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
+			if criticalError != nil {
+				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
+			}
+			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
+			return &privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: currentHeadHash,
+				ValidationError: validationError,
+			}, success, nil
+		}
 		// No canonization, HeadHeaderHash & StageProgress are not updated
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
-			return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
+		status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
+		if criticalError != nil {
+			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
-		pendingBaseFee := misc.CalcBaseFee(cfg.notifications.Accumulator.ChainConfig(), header)
-		cfg.notifications.Accumulator.SendAndReset(context.Background(), cfg.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
+		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
-			Status:          remote.EngineStatus_VALID,
-			LatestValidHash: headerHash,
-		}, true, nil
+			Status:          status,
+			LatestValidHash: currentHeadHash,
+			ValidationError: validationError,
+		}, success, nil
 	}
 
 	// OK, we're on the canonical chain

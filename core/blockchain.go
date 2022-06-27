@@ -48,10 +48,6 @@ const (
 	TriesInMemory = 128
 )
 
-// statsReportLimit is the time limit during import and export after which we
-// always print out progress. This avoids the user wondering what's going on.
-const statsReportLimit = 8 * time.Second
-
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerallyForBSC(
