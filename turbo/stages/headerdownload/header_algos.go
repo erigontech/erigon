@@ -1093,7 +1093,7 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, validationError error, criticalError error) {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(16)
@@ -1108,8 +1108,10 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		status = remote.EngineStatus_VALID
 		// Let's assemble the side fork chain if we have others building.
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		latestValidHash = header.Hash()
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
+			latestValidHash = header.ParentHash
 		}
 		return
 	}
@@ -1123,8 +1125,6 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
-	// if it is not canonical we validate it as a side fork.
-	batch := memdb.NewMemoryBatch(tx)
 	// Let's assemble the side fork backwards
 	var foundCanonical bool
 	currentHash := header.ParentHash
@@ -1155,8 +1155,13 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	}
 	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	status = remote.EngineStatus_VALID
+	// if it is not canonical we validate it as a side fork.
+	batch := memdb.NewMemoryBatch(tx)
+	defer batch.Close()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	latestValidHash = header.Hash()
 	if validationError != nil {
+		latestValidHash = header.ParentHash
 		status = remote.EngineStatus_INVALID
 	}
 	// After the we finished executing, we clean up old forks
@@ -1174,6 +1179,7 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	if err := hd.nextForkState.Flush(tx); err != nil {
 		return err
 	}
+	hd.nextForkState.Close()
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
 	return nil

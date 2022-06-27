@@ -571,14 +571,14 @@ func verifyAndSaveNewPoSHeader(
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
 		if cfg.memoryOverlay {
-			status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
+			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
 			if criticalError != nil {
 				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 			}
 			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 			return &privateapi.PayloadStatus{
 				Status:          status,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: latestValidHash,
 				ValidationError: validationError,
 			}, success, nil
 		}
@@ -587,14 +587,14 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
 		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
 			Status:          status,
-			LatestValidHash: currentHeadHash,
+			LatestValidHash: latestValidHash,
 			ValidationError: validationError,
 		}, success, nil
 	}
