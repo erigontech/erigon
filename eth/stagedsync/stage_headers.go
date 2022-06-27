@@ -573,7 +573,7 @@ func verifyAndSaveNewPoSHeader(
 		if cfg.memoryOverlay {
 			status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
 			if criticalError != nil {
-				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, nil
+				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 			}
 			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 			return &privateapi.PayloadStatus{
@@ -589,7 +589,7 @@ func verifyAndSaveNewPoSHeader(
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
 		status, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
 		if criticalError != nil {
-			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, nil
+			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
 		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
