@@ -40,8 +40,8 @@ docker: git-submodules
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
-		--build-arg DOCKER_UID=${DOCKER_UID} \
-		--build-arg DOCKER_GID=${DOCKER_GID} \
+		--build-arg UID=${DOCKER_UID} \
+		--build-arg GID=${DOCKER_GID} \
 		${DOCKER_FLAGS} \
 		.
 
