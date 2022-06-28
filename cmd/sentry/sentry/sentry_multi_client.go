@@ -635,7 +635,6 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
-
 	}() // avoid crash because Erigon's core does many things
 
 	err = cs.handleInboundMessage(ctx, message, sentry)
