@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -76,34 +75,17 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *rpchelper.Filters) (*types.Header, error) {
-	_, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
+// headerByNumberOrHash - intent to read recent headers only
+func headerByNumberOrHash(tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
+	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
-		return nil, errors.New("header for hash not found")
-	}
-
-	if blockNrOrHash.RequireCanonical {
-		can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-		if err != nil {
-			return nil, err
-		}
-		if can != hash {
-			return nil, errors.New("hash is not currently canonical")
-		}
-	}
-
-	h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
-	if h == nil {
-		return nil, errors.New("header found, but block body is missing")
-	}
-	return h, nil
+	return block.Header(), nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -141,7 +123,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash, api.filters)
+		h, err := headerByNumberOrHash(dbtx, bNrOrHash, api)
 		if err != nil {
 			return 0, err
 		}
