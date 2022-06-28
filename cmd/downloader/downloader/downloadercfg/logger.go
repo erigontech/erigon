@@ -21,15 +21,15 @@ func Int2LogLevel(level int) (lg.Level, error) {
 	case 0:
 		lvl = lg.NotSet
 	case 1:
-		lvl = lg.Error
-	case 2:
-		lvl = lg.Warning
-	case 3:
-		lvl = lg.Info
-	case 4:
-		lvl = lg.Debug
-	case 5:
 		lvl = lg.Critical
+	case 2:
+		lvl = lg.Error
+	case 3:
+		lvl = lg.Warning
+	case 4:
+		lvl = lg.Info
+	case 5:
+		lvl = lg.Debug
 	default:
 		return lvl, fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
 	}
