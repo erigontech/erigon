@@ -437,8 +437,8 @@ func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Ac
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
-	if fmt.Sprintf("%x", address) == "5a0b54d5dc17e0aadc383d2db43b0a0d3e029c4c" {
-		fmt.Printf("block %d [%x] => {Balance: %d, Nonce: %d}\n", rw.blockNum, address, &a.Balance, a.Nonce)
+	if rw.blockNum == 10264901 {
+		fmt.Printf("block %d ReadAccount [%x] => {Balance: %d, Nonce: %d}\n", rw.blockNum, address, &a.Balance, a.Nonce)
 	}
 	return &a, nil
 }
@@ -447,6 +447,9 @@ func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnatio
 	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
+	}
+	if rw.blockNum == 10264901 {
+		fmt.Printf("block %d ReadStorage [%x] [%x] => [%x]\n", rw.blockNum, address, *key, enc)
 	}
 	if enc == nil {
 		return nil, nil
