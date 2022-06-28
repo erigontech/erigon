@@ -1,4 +1,4 @@
-GO = go
+GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
@@ -8,12 +8,15 @@ DOCKER_UID ?= 1000
 DOCKER_PID ?= 1000
 DOCKER_TAG ?= thorax/erigon:latest
 
-CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
+# Variables below for building on host OS, and are ignored for docker
+#
+# Pipe error below to /dev/null since Makefile structure kind of expects
+# Go to be available, but with docker it's not strictly necessary
+CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-GO_MINOR_VERSION = $(shell $(GO) version | cut -c 16-17)
 BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
@@ -27,7 +30,7 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 default: all
 
 go-version:
-	@if [ $(GO_MINOR_VERSION) -lt 18 ]; then \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
 		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
@@ -50,7 +53,10 @@ docker-compose:
 	@echo "USER:       $(USER)"
 	@echo "DOCKER_UID: $(DOCKER_UID)"
 	@echo "DOCKER_GID: $(DOCKER_GID)"
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
+	@echo "Validating host OS user exists with specified UID/GID..."
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep "$(USER)"
+	@echo "Validating UID/GID for docker matches a user with name prefix \"erigon\" on host OS..."
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon"
 	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
 	docker-compose up
 
@@ -160,3 +166,4 @@ git-submodules:
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
 	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
+
