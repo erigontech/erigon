@@ -19,19 +19,21 @@ package direct
 import (
 	"context"
 	"fmt"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"sync"
 
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
 	ETH65 = 65
 	ETH66 = 66
+	ETH67 = 67
 )
 
 var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
@@ -58,6 +60,20 @@ var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
 		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
 		sentry.MessageId_GET_NODE_DATA_66:                 struct{}{},
 		sentry.MessageId_NODE_DATA_66:                     struct{}{},
+		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
+		sentry.MessageId_RECEIPTS_66:                      struct{}{},
+		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
+		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
+		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
+		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
+		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
+		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+	},
+	ETH67: {
+		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
+		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
+		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
+		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
 		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
 		sentry.MessageId_RECEIPTS_66:                      struct{}{},
 		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
@@ -123,6 +139,8 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 		c.protocol = ETH65
 	case sentry.Protocol_ETH66:
 		c.protocol = ETH66
+	case sentry.Protocol_ETH67:
+		c.protocol = ETH67
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}

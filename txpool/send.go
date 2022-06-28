@@ -83,7 +83,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 					continue
 				}
 				switch sentryClient.Protocol() {
-				case direct.ETH66:
+				case direct.ETH66, direct.ETH67:
 					if txs66 == nil {
 						txs66 = &sentry.SendMessageToRandomPeersRequest{
 							Data: &sentry.OutboundMessageData{
@@ -132,7 +132,7 @@ func (f *Send) AnnouncePooledTxs(hashes types2.Hashes) (hashSentTo []int) {
 				continue
 			}
 			switch sentryClient.Protocol() {
-			case direct.ETH66:
+			case direct.ETH66, direct.ETH67:
 				if hashes66 == nil {
 					hashes66 = &sentry.OutboundMessageData{
 						Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
@@ -180,7 +180,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, txs []byte) 
 
 			for _, peer := range peers {
 				switch sentryClient.Protocol() {
-				case direct.ETH66:
+				case direct.ETH66, direct.ETH67:
 					req66 := &sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &sentry.OutboundMessageData{

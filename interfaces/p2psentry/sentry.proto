@@ -54,7 +54,7 @@ enum MessageId {
 
 
   // ======= eth 67 protocol ===========
-  // ...
+  // Version 67 removed the GetNodeData and NodeData messages.
 }
 
 message OutboundMessageData {
@@ -113,6 +113,7 @@ message StatusData {
 enum Protocol {
   ETH65 = 0;
   ETH66 = 1;
+  ETH67 = 2;
 }
 
 message SetStatusReply {}
