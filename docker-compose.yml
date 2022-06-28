@@ -4,6 +4,8 @@
 # This file is an example: how to start Erigon's services as separated processes.
 
 # Default: --datadir=/home/erigon/.local/share/erigon
+# Default UID: 1000
+# Default GID: 1000
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 # Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
 
@@ -12,7 +14,7 @@
 version: '2.2'
 
 # Basic erigon's service
-x-erigon-service: &default-erigon-servie
+x-erigon-service: &default-erigon-service
   image: thorax/erigon:${TAG:-latest}
   pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
   volumes_from: [ erigon ]
@@ -38,21 +40,21 @@ services:
     mem_swappiness: 0
 
   sentry:
-    <<: *default-erigon-servie
+    <<: *default-erigon-service
     command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091
     ports: [ "30303:30303/tcp", "30303:30303/udp" ]
 
   downloader:
-    <<: *default-erigon-servie
+    <<: *default-erigon-service
     command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
     ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 
   txpool:
-    <<: *default-erigon-servie
+    <<: *default-erigon-service
     command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094
 
   rpcdaemon:
-    <<: *default-erigon-servie
+    <<: *default-erigon-service
     command: |
       rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094
@@ -82,3 +84,4 @@ services:
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
     restart: unless-stopped
+
