@@ -41,7 +41,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 		log.Error("propagateNewBlockHashes", "err", err)
 		return
 	}
-	var req67 *proto_sentry.OutboundMessageData
+	var req66 *proto_sentry.OutboundMessageData
 	// Send the block to a subset of our peers
 	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
 	for i, sentry := range cs.sentries {
@@ -54,14 +54,14 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 		switch sentry.Protocol() {
 
-		case eth.ETH67:
-			if req67 == nil {
-				req67 = &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES,
+		case eth.ETH66:
+			if req66 == nil {
+				req66 = &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
 					Data: data,
 				}
 
-				_, err = sentry.SendMessageToAll(ctx, req67, &grpc.EmptyCallOption{})
+				_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					log.Error("propagateNewBlockHashes", "err", err)
 				}
@@ -82,7 +82,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block
 	if err != nil {
 		log.Error("broadcastNewBlock", "err", err)
 	}
-	var req67 *proto_sentry.SendMessageToRandomPeersRequest
+	var req66 *proto_sentry.SendMessageToRandomPeersRequest
 	// Send the block to a subset of our peers
 	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
 	for i, sentry := range cs.sentries {
@@ -95,17 +95,17 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block
 
 		switch sentry.Protocol() {
 
-		case eth.ETH67:
-			if req67 == nil {
-				req67 = &proto_sentry.SendMessageToRandomPeersRequest{
+		case eth.ETH66:
+			if req66 == nil {
+				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
 					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_BLOCK,
+						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
 						Data: data,
 					},
 				}
 			}
-			if _, err = sentry.SendMessageToRandomPeers(ctx, req67, &grpc.EmptyCallOption{}); err != nil {
+			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
 					log.Debug("broadcastNewBlock", "err", err)
 					continue
@@ -124,7 +124,8 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 	initialAmount := len(txs)
-	avgPeersPerSent67 := 0
+	avgPeersPerSent65 := 0
+	avgPeersPerSent66 := 0
 	initialTxs := txs
 	for len(txs) > 0 {
 
@@ -140,7 +141,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 		if err != nil {
 			log.Error("BroadcastLocalPooledTxs", "err", err)
 		}
-		var req67 *proto_sentry.OutboundMessageData
+		var req66 *proto_sentry.OutboundMessageData
 		// Send the block to a subset of our peers
 		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
 		for i, sentry := range cs.sentries {
@@ -152,14 +153,14 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 			}
 
 			switch sentry.Protocol() {
-			case eth.ETH67:
-				if req67 == nil {
-					req67 = &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+			case eth.ETH66:
+				if req66 == nil {
+					req66 = &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 						Data: data,
 					}
 				}
-				peers, err := sentry.SendMessageToAll(ctx, req67, &grpc.EmptyCallOption{})
+				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
 						log.Debug("BroadcastLocalPooledTxs", "err", err)
@@ -167,14 +168,14 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 					}
 					log.Error("BroadcastLocalPooledTxs", "err", err)
 				}
-				avgPeersPerSent67 += len(peers.GetPeers())
+				avgPeersPerSent66 += len(peers.GetPeers())
 			}
 		}
 	}
 	if initialAmount == 1 {
-		log.Info("local tx propagated", "to_peers_amount", avgPeersPerSent67, "tx_hash", initialTxs[0].String())
+		log.Info("local tx propagated", "to_peers_amount", avgPeersPerSent65+avgPeersPerSent66, "tx_hash", initialTxs[0].String())
 	} else {
-		log.Info("local txs propagated", "to_peers_amount", avgPeersPerSent67, "txs_amount", initialAmount)
+		log.Info("local txs propagated", "to_peers_amount", avgPeersPerSent65+avgPeersPerSent66, "txs_amount", initialAmount)
 	}
 }
 
@@ -199,7 +200,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 		if err != nil {
 			log.Error("BroadcastRemotePooledTxs", "err", err)
 		}
-		var req67 *proto_sentry.SendMessageToRandomPeersRequest
+		var req66 *proto_sentry.SendMessageToRandomPeersRequest
 		// Send the block to a subset of our peers
 		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
 		for i, sentry := range cs.sentries {
@@ -212,17 +213,17 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 
 			switch sentry.Protocol() {
 
-			case eth.ETH67:
-				if req67 == nil {
-					req67 = &proto_sentry.SendMessageToRandomPeersRequest{
+			case eth.ETH66:
+				if req66 == nil {
+					req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 						MaxPeers: 1024,
 						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 							Data: data,
 						},
 					}
 				}
-				if _, err = sentry.SendMessageToRandomPeers(ctx, req67, &grpc.EmptyCallOption{}); err != nil {
+				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
 						log.Debug("BroadcastRemotePooledTxs", "err", err)
 						continue
@@ -263,15 +264,15 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 			for _, peer := range peers {
 				switch sentry.Protocol() {
 
-				case eth.ETH67:
-					req67 := &proto_sentry.SendMessageByIdRequest{
+				case eth.ETH66:
+					req66 := &proto_sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 							Data: data,
 						},
 					}
-					if _, err = sentry.SendMessageById(ctx, req67, &grpc.EmptyCallOption{}); err != nil {
+					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
 							log.Debug("PropagatePooledTxsToPeersList", "err", err)
 							continue

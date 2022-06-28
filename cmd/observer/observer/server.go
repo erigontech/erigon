@@ -5,9 +5,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"net"
-	"path/filepath"
-
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -20,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"net"
+	"path/filepath"
 )
 
 type Server struct {
@@ -33,7 +32,7 @@ type Server struct {
 }
 
 func NewServer(flags CommandFlags) (*Server, error) {
-	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth67")
+	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth66")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	privateKey, err := nodeKeyConfig.LoadOrParseOrGenerateAndSave(flags.NodeKeyFile, flags.NodeKeyHex, flags.DataDir)

@@ -2,17 +2,16 @@ package sentry_candidates
 
 import (
 	"context"
-	"strings"
-	"testing"
-
 	"github.com/nxadm/tail"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"strings"
+	"testing"
 )
 
 func TestLogRead(t *testing.T) {
 	line := `
-{"capabilities":["eth/67","wit/0"],"clientID":"Nethermind/v1.13.0-0-2e8910b5b-20220520/X64-Linux/6.0.4","lvl":"dbug","msg":"Sentry peer did Connect","nodeURL":"enode://4293b17b897abed4a88d6e760e86a4bb700d62c12a9411fbf9ec0c9df3740c8670b184bd9f24d163cbd9bf05264b3047a69f079209d53d2e0dc05dd678d07cf0@1.2.3.4:45492","peer":"93b17b897abed4a88d6e760e86a4bb700d62c12a9411fbf9ec0c9df3740c8670b184bd9f24d163cbd9bf05264b3047a69f079209d53d2e0dc05dd678d07cf000","t":"2022-05-31T11:10:19.032092272Z"}
+{"capabilities":["eth/66","wit/0"],"clientID":"Nethermind/v1.13.0-0-2e8910b5b-20220520/X64-Linux/6.0.4","lvl":"dbug","msg":"Sentry peer did Connect","nodeURL":"enode://4293b17b897abed4a88d6e760e86a4bb700d62c12a9411fbf9ec0c9df3740c8670b184bd9f24d163cbd9bf05264b3047a69f079209d53d2e0dc05dd678d07cf0@1.2.3.4:45492","peer":"93b17b897abed4a88d6e760e86a4bb700d62c12a9411fbf9ec0c9df3740c8670b184bd9f24d163cbd9bf05264b3047a69f079209d53d2e0dc05dd678d07cf000","t":"2022-05-31T11:10:19.032092272Z"}
 `
 	line = strings.TrimLeft(line, "\r\n ")
 	eventLog := NewLog(NewScannerLineReader(strings.NewReader(line)))
@@ -55,7 +54,7 @@ func TestLogReadTailSkimFile(t *testing.T) {
 
 func TestLogEventEthVersion(t *testing.T) {
 	event := LogEvent{}
-	event.Capabilities = []string{"wit/0", "eth/65", "eth/66", "eth/67"}
+	event.Capabilities = []string{"wit/0", "eth/64", "eth/65", "eth/66"}
 	version := event.EthVersion()
-	assert.Equal(t, uint(67), version)
+	assert.Equal(t, uint(66), version)
 }

@@ -335,7 +335,7 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 |  Port |  Protocol |      Purpose           |  Expose |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP | eth/67 peering         |  Public |
+| 30303 | TCP & UDP | eth/66 peering         |  Public |
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
@@ -360,7 +360,7 @@ Typically, 8551 (JWT authenticated) is exposed only internally for the Engine AP
 | 30303 | TCP & UDP |      Peering     |  Public |
 |  9091 |    TCP    | gRPC Connections | Private |
 
-Typically, a sentry process will run one eth/xx protocol (e.g. eth/67) and will be exposed to the internet on 30303. Port
+Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will be exposed to the internet on 30303. Port
 9091 is for internal gRCP connections (e.g erigon -> sentry).
 
 #### Other ports

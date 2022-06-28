@@ -33,11 +33,11 @@ import (
 
 // Constants to match up protocol versions and messages
 const (
-	ETH67 = 67
+	ETH66 = 66
 )
 
 var ProtocolToString = map[uint]string{
-	ETH67: "eth67",
+	ETH66: "eth66",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -58,10 +58,10 @@ const (
 	GetBlockBodiesMsg  = 0x05
 	BlockBodiesMsg     = 0x06
 	NewBlockMsg        = 0x07
-	//	GetNodeDataMsg     = 0x0d // removed in eth/67
-	//	NodeDataMsg        = 0x0e // removed in eth/67
-	GetReceiptsMsg = 0x0f
-	ReceiptsMsg    = 0x10
+	GetNodeDataMsg     = 0x0d
+	NodeDataMsg        = 0x0e
+	GetReceiptsMsg     = 0x0f
+	ReceiptsMsg        = 0x10
 
 	// Protocol messages overloaded in eth/65
 	NewPooledTransactionHashesMsg = 0x08
@@ -70,36 +70,40 @@ const (
 )
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
-	ETH67: {
-		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS,
-		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS,
-		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES,
-		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES,
-		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS,
-		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS,
-		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES,
-		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK,
-		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
-		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS,
-		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS,
+	ETH66: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
+		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_66,
+		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
-	ETH67: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_RECEIPTS:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS:           PooledTransactionsMsg,
+	ETH66: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
 }
 
@@ -650,6 +654,24 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header) {
 	return txset, uncleset
 }
 
+// GetNodeDataPacket represents a trie node data query.
+type GetNodeDataPacket []common.Hash
+
+// GetNodeDataPacket represents a trie node data query over eth/66.
+type GetNodeDataPacket66 struct {
+	RequestId uint64
+	GetNodeDataPacket
+}
+
+// NodeDataPacket is the network packet for trie node data distribution.
+type NodeDataPacket [][]byte
+
+// NodeDataPacket is the network packet for trie node data distribution over eth/66.
+type NodeDataPacket66 struct {
+	RequestId uint64
+	NodeDataPacket
+}
+
 // GetReceiptsPacket represents a block receipts query.
 type GetReceiptsPacket []common.Hash
 
@@ -891,6 +913,12 @@ func (*BlockBodiesPacket) Kind() byte   { return BlockBodiesMsg }
 
 func (*NewBlockPacket) Name() string { return "NewBlock" }
 func (*NewBlockPacket) Kind() byte   { return NewBlockMsg }
+
+func (*GetNodeDataPacket) Name() string { return "GetNodeData" }
+func (*GetNodeDataPacket) Kind() byte   { return GetNodeDataMsg }
+
+func (*NodeDataPacket) Name() string { return "NodeData" }
+func (*NodeDataPacket) Kind() byte   { return NodeDataMsg }
 
 func (*GetReceiptsPacket) Name() string { return "GetReceipts" }
 func (*GetReceiptsPacket) Kind() byte   { return GetReceiptsMsg }

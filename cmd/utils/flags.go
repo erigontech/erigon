@@ -841,8 +841,8 @@ func NewP2PConfig(
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case eth.ETH67:
-		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
+	case eth.ETH66:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}

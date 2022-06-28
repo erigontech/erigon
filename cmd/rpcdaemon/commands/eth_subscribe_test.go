@@ -33,7 +33,7 @@ func TestEthSubscribe(t *testing.T) {
 	require.NoError(err)
 
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(err)
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed

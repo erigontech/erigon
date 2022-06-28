@@ -410,7 +410,7 @@ func runDialTest(t *testing.T, config dialConfig, rounds []dialTestRound) {
 		setupCh <- conn
 		return nil
 	}
-	dialsched = newDialScheduler(config, iterator, setup, 67)
+	dialsched = newDialScheduler(config, iterator, setup, 66)
 	defer dialsched.stop()
 
 	for i, round := range rounds {
