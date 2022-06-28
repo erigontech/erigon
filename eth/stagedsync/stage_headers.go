@@ -586,7 +586,7 @@ func verifyAndSaveNewPoSHeader(
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
-	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
+	/*if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
 		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
@@ -597,7 +597,7 @@ func verifyAndSaveNewPoSHeader(
 			LatestValidHash: latestValidHash,
 			ValidationError: validationError,
 		}, success, nil
-	}
+	}*/
 
 	// OK, we're on the canonical chain
 	if requestStatus == engineapi.New {
