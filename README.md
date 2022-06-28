@@ -335,7 +335,8 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 |  Port |  Protocol |      Purpose           |  Expose |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP | eth/66 peering         |  Public |
+| 30303 | TCP & UDP | eth/67 peering         |  Public |
+| 30304 | TCP & UDP | eth/66 peering         |  Public |
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
