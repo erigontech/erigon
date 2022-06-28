@@ -32,7 +32,7 @@ service ETHBACKEND {
   // Version returns the service version number
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
 
-  // ProtocolVersion returns the Ethereum protocol version number (e.g. 67 for ETH67).
+  // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
   rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);
 
   // ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).

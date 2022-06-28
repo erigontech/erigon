@@ -8,27 +8,53 @@ package sentry;
 option go_package = "./sentry;sentry";
 
 enum MessageId {
-  // ======= eth/67 protocol ===========
-  // Version 67 removed the GetNodeData and NodeData messages.
+  // ======= eth 65 protocol ===========
 
-  // eth/64 (or earlier) announcement messages (no request-id)
-  STATUS = 0;
-  NEW_BLOCK_HASHES = 1;
-  TRANSACTIONS = 2;
-  NEW_BLOCK = 3;
+  STATUS_65 = 0;
+  GET_BLOCK_HEADERS_65 = 1;
+  BLOCK_HEADERS_65 = 2;
+  BLOCK_HASHES_65 = 3;
+  GET_BLOCK_BODIES_65 = 4;
+  BLOCK_BODIES_65 = 5;
+  GET_NODE_DATA_65 = 6;
+  NODE_DATA_65 = 7;
+  GET_RECEIPTS_65 = 8;
+  RECEIPTS_65 = 9;
+  NEW_BLOCK_HASHES_65 = 10;
+  NEW_BLOCK_65 = 11;
+  TRANSACTIONS_65 = 12;
+  NEW_POOLED_TRANSACTION_HASHES_65 = 13;
+  GET_POOLED_TRANSACTIONS_65 = 14;
+  POOLED_TRANSACTIONS_65 = 15;
 
-  // eth/65 announcement messages (no request-id)
-  NEW_POOLED_TRANSACTION_HASHES = 4;
 
-  // eth/66 messages with request-id
-  GET_BLOCK_HEADERS = 5;
-  BLOCK_HEADERS = 6;
-  GET_BLOCK_BODIES = 7;
-  BLOCK_BODIES = 8;
-  GET_POOLED_TRANSACTIONS = 9;
-  POOLED_TRANSACTIONS = 10;
-  GET_RECEIPTS = 11;
-  RECEIPTS = 12;
+  // ======= eth 66 protocol ===========
+
+  // eth64 announcement messages (no id)
+  STATUS_66 = 17;
+  NEW_BLOCK_HASHES_66 = 18;
+  NEW_BLOCK_66 = 19;
+  TRANSACTIONS_66 = 20;
+
+  // eth65 announcement messages (no id)
+  NEW_POOLED_TRANSACTION_HASHES_66 = 21;
+
+  // eth66 messages with request-id
+  GET_BLOCK_HEADERS_66 = 22;
+  GET_BLOCK_BODIES_66 = 23;
+  GET_NODE_DATA_66 = 24;
+  GET_RECEIPTS_66 = 25;
+  GET_POOLED_TRANSACTIONS_66 = 26;
+  BLOCK_HEADERS_66 = 27;
+  BLOCK_BODIES_66 = 28;
+  NODE_DATA_66 = 29;
+  RECEIPTS_66 = 30;
+  POOLED_TRANSACTIONS_66 = 31;
+
+
+
+  // ======= eth 67 protocol ===========
+  // ...
 }
 
 message OutboundMessageData {
@@ -85,7 +111,8 @@ message StatusData {
 }
 
 enum Protocol {
-  ETH67 = 0;
+  ETH65 = 0;
+  ETH66 = 1;
 }
 
 message SetStatusReply {}

@@ -82,7 +82,7 @@ In Erigon, there are with two interfaces:
 
 ## 2. Sentry
 
-Sentry is the component, connecting the node to the p2p network of the blockchain. In case of Erigon and Ethereum, it implements [`eth/67`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md) protocol via [devp2p](https://github.com/ethereum/devp2p).
+Sentry is the component, connecting the node to the p2p network of the blockchain. In case of Erigon and Ethereum, it implements [`eth/65`, `eth/66`, etc](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#change-log) protocols via [devp2p](https://github.com/ethereum/devp2p).
 
 Sentry accepts connections from [Core] and [Transaction Pool] components.
 

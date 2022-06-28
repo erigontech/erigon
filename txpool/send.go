@@ -77,23 +77,23 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 		size += len(rlps[i])
 		if i == l-1 || size >= p2pTxPacketLimit {
 			txsData := types2.EncodeTransactions(rlps[prev:i+1], nil)
-			var txs67 *sentry.SendMessageToRandomPeersRequest
+			var txs66 *sentry.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {
 				if !sentryClient.Ready() {
 					continue
 				}
 				switch sentryClient.Protocol() {
-				case direct.ETH67:
-					if txs67 == nil {
-						txs67 = &sentry.SendMessageToRandomPeersRequest{
+				case direct.ETH66:
+					if txs66 == nil {
+						txs66 = &sentry.SendMessageToRandomPeersRequest{
 							Data: &sentry.OutboundMessageData{
-								Id:   sentry.MessageId_TRANSACTIONS,
+								Id:   sentry.MessageId_TRANSACTIONS_66,
 								Data: txsData,
 							},
 							MaxPeers: 100,
 						}
 					}
-					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs67)
+					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
 					if err != nil {
 						log.Debug("[txpool.send] BroadcastPooledTxs", "err", err)
 					}
@@ -126,20 +126,20 @@ func (f *Send) AnnouncePooledTxs(hashes types2.Hashes) (hashSentTo []int) {
 		}
 
 		hashesData := types2.EncodeHashes(pending, nil)
-		var hashes67 *sentry.OutboundMessageData
+		var hashes66 *sentry.OutboundMessageData
 		for _, sentryClient := range f.sentryClients {
 			if !sentryClient.Ready() {
 				continue
 			}
 			switch sentryClient.Protocol() {
-			case direct.ETH67:
-				if hashes67 == nil {
-					hashes67 = &sentry.OutboundMessageData{
-						Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+			case direct.ETH66:
+				if hashes66 == nil {
+					hashes66 = &sentry.OutboundMessageData{
+						Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 						Data: hashesData,
 					}
 				}
-				peers, err := sentryClient.SendMessageToAll(f.ctx, hashes67, &grpc.EmptyCallOption{})
+				peers, err := sentryClient.SendMessageToAll(f.ctx, hashes66, &grpc.EmptyCallOption{})
 				if err != nil {
 					log.Debug("[txpool.send] AnnouncePooledTxs", "err", err)
 				}
@@ -180,15 +180,15 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, txs []byte) 
 
 			for _, peer := range peers {
 				switch sentryClient.Protocol() {
-				case direct.ETH67:
-					req67 := &sentry.SendMessageByIdRequest{
+				case direct.ETH66:
+					req66 := &sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &sentry.OutboundMessageData{
-							Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+							Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 							Data: data,
 						},
 					}
-					if _, err := sentryClient.SendMessageById(f.ctx, req67, &grpc.EmptyCallOption{}); err != nil {
+					if _, err := sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						log.Debug("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
 					}
 				}

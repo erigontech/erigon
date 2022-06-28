@@ -58,7 +58,7 @@ func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.Se
 	return &sentry.SetStatusReply{}, nil
 }
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentry.HandShakeReply, error) {
-	return &sentry.HandShakeReply{Protocol: sentry.Protocol_ETH67}, nil
+	return &sentry.HandShakeReply{Protocol: sentry.Protocol_ETH66}, nil
 }
 func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
 	ms.lock.Lock()

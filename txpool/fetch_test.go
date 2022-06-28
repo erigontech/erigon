@@ -42,7 +42,7 @@ func TestFetch(t *testing.T) {
 	defer cancel()
 
 	m := NewMockSentry(ctx)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
+	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
 	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil, nil, *u256.N1)
@@ -54,13 +54,13 @@ func TestFetch(t *testing.T) {
 	// Send one transaction id
 	wg.Add(1)
 	errs := m.Send(&sentry.InboundMessage{
-		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES,
+		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool tx hashes (%d): %v", i, err)
+			t.Errorf("sending new pool tx hashes 66 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()
@@ -72,7 +72,7 @@ func TestSendTxPropagate(t *testing.T) {
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH67, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		send.BroadcastPooledTxs(testRlps(2))
 		send.AnnouncePooledTxs(toHashes(1, 42))
 
@@ -81,15 +81,15 @@ func TestSendTxPropagate(t *testing.T) {
 		calls2 := m.SendMessageToAllCalls()
 		require.Equal(t, 1, len(calls2))
 		first := calls1[0].SendMessageToRandomPeersRequest.Data
-		assert.Equal(t, sentry.MessageId_TRANSACTIONS, first.Id)
+		assert.Equal(t, sentry.MessageId_TRANSACTIONS_66, first.Id)
 		assert.Equal(t, 5, len(first.Data))
 		second := calls2[0].OutboundMessageData
-		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES, second.Id)
+		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, second.Id)
 		assert.Equal(t, 68, len(second.Data))
 	})
 	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH67, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		list := make(types3.Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -102,11 +102,11 @@ func TestSendTxPropagate(t *testing.T) {
 		calls2 := m.SendMessageToAllCalls()
 		require.Equal(t, 3, len(calls2))
 		call1 := calls1[0].SendMessageToRandomPeersRequest.Data
-		require.Equal(t, sentry.MessageId_TRANSACTIONS, call1.Id)
+		require.Equal(t, sentry.MessageId_TRANSACTIONS_66, call1.Id)
 		require.True(t, len(call1.Data) > 0)
 		for i := 0; i < 3; i++ {
 			call2 := calls2[i].OutboundMessageData
-			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES, call2.Id)
+			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, call2.Id)
 			require.True(t, len(call2.Data) > 0)
 		}
 	})
@@ -115,14 +115,14 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH67, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		send.BroadcastPooledTxs(testRlps(2))
 		send.AnnouncePooledTxs(toHashes(1, 42))
 
 		calls := m.SendMessageToAllCalls()
 		require.Equal(t, 1, len(calls))
 		first := calls[0].OutboundMessageData
-		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES, first.Id)
+		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
 		assert.Equal(t, 68, len(first.Data))
 	})
 	t.Run("sync with new peer", func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH67, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxsToPeersList(expectPeers, toHashes(1, 42))
 
@@ -140,7 +140,7 @@ func TestSendTxPropagate(t *testing.T) {
 		for i, call := range calls {
 			req := call.SendMessageByIdRequest
 			assert.Equal(t, expectPeers[i], types3.PeerID(req.PeerId))
-			assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES, req.Data.Id)
+			assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, req.Data.Id)
 			assert.True(t, len(req.Data.Data) > 0)
 		}
 	})
