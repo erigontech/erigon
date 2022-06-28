@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -506,6 +507,12 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
 func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.From, sn.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if sn.idxHeaderHash == nil {
 		return nil, nil
 	}
@@ -545,6 +552,12 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 }
 
 func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.BodyForStorage, []byte, error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.From, sn.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if sn.idxBodyNumber == nil {
 		return nil, buf, nil
 	}
@@ -569,6 +582,12 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 }
 
 func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From, txsSeg.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if txsSeg.IdxTxnHash == nil {
 		return nil, nil, nil
 	}
