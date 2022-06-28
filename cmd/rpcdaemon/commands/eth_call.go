@@ -85,6 +85,9 @@ func headerByNumberOrHash(tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *AP
 	if err != nil {
 		return nil, err
 	}
+	if block == nil {
+		return nil, fmt.Errorf("no block found with number %d", blockNum)
+	}
 	return block.Header(), nil
 }
 
