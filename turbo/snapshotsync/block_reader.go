@@ -312,6 +312,9 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, 
 		}
 		return nil
 	})
+	if err != nil {
+		return h, err
+	}
 	if ok {
 		return h, nil
 	}

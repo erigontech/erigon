@@ -68,13 +68,13 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 			return nil, err
 		}
 		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, hr.txNum)
 		}
 		return &a, nil
 	}
 	if len(enc) == 0 {
 		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => []\n", address)
+			fmt.Printf("ReadAccountData [%x] => [], txNum: %d\n", address, hr.txNum)
 		}
 		return nil, nil
 	}
@@ -89,9 +89,6 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 	}
 	balanceBytes := int(enc[pos])
 	pos++
-	if pos+balanceBytes >= len(enc) {
-		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
-	}
 	if balanceBytes > 0 {
 		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
 		pos += balanceBytes
@@ -102,16 +99,13 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
 		pos += codeHashBytes
 	}
-	if pos >= len(enc) {
-		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
-	}
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, hr.txNum)
 	}
 	return &a, nil
 }
@@ -138,9 +132,9 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	}
 	if hr.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
+			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), hr.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
+			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x], txNum: %d\n", address, key.Bytes(), enc, hr.txNum)
 		}
 	}
 	if enc == nil {
@@ -169,7 +163,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		}
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d\n", address, enc, noState, stateTxNum)
+		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
 	}
 	return enc, nil
 }
@@ -195,7 +189,7 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 		size = len(enc)
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountCodeSize [%x] => [%d]\n", address, size)
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, hr.txNum)
 	}
 	return size, nil
 }

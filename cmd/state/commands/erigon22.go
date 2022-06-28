@@ -287,6 +287,7 @@ func processBlock22(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
+	rw.blockNum = block.NumberU64()
 
 	daoFork := txNum >= startTxNum && chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
@@ -346,6 +347,16 @@ func processBlock22(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		ww.w.SetTxNum(txNum)
 	}
 
+	if txNum >= startTxNum && chainConfig.IsByzantium(block.NumberU64()) {
+		receiptSha := types.DeriveSha(receipts)
+		if receiptSha != block.ReceiptHash() {
+			fmt.Printf("mismatched receipt headers for block %d\n", block.NumberU64())
+			for j, receipt := range receipts {
+				fmt.Printf("tx %d, used gas: %d\n", j, receipt.GasUsed)
+			}
+		}
+	}
+
 	if txNum >= startTxNum {
 		ibs := state.New(rw)
 		if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
@@ -382,8 +393,9 @@ func processBlock22(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 // Implements StateReader and StateWriter
 type ReaderWrapper22 struct {
-	roTx kv.Tx
-	r    *libstate.Aggregator
+	roTx     kv.Tx
+	r        *libstate.Aggregator
+	blockNum uint64
 }
 
 type WriterWrapper22 struct {
@@ -424,6 +436,9 @@ func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Ac
 	pos++
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+	}
+	if fmt.Sprintf("%x", address) == "5a0b54d5dc17e0aadc383d2db43b0a0d3e029c4c" {
+		fmt.Printf("block %d [%x] => {Balance: %d, Nonce: %d}\n", rw.blockNum, address, &a.Balance, a.Nonce)
 	}
 	return &a, nil
 }

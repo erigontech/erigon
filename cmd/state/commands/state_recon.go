@@ -124,13 +124,14 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txNum)
 	rw.stateReader.ResetError()
+	rw.stateReader.SetTrace(txNum == 114271 || txNum == 114276 || txNum == 114291)
 	rw.stateWriter.SetTxNum(txNum)
 	noop := state.NewNoopWriter()
 	// Find block number
 	blockNum := uint64(sort.Search(len(rw.txNums), func(i int) bool {
 		return rw.txNums[i] > txNum
 	}))
-	if rw.firstBlock || blockNum > rw.lastBlockNum {
+	if rw.firstBlock || blockNum != rw.lastBlockNum {
 		var err error
 		if rw.lastHeader, err = rw.blockReader.HeaderByNumber(rw.ctx, nil, blockNum); err != nil {
 			panic(err)
@@ -173,7 +174,7 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		}
 	} else {
 		txIndex := txNum - startTxNum - 1
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, txIndex)
 		txn, err := rw.blockReader.TxnByIdxInBlock(rw.ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			panic(err)
@@ -195,12 +196,12 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txIndex, txHash, err))
 		}
 	}
-	if err = ibs.CommitBlock(rw.lastRules, rw.stateWriter); err != nil {
-		panic(err)
-	}
 	if dependency, ok := rw.stateReader.ReadError(); ok {
 		rw.rs.RollbackTxNum(txNum, dependency)
 	} else {
+		if err = ibs.CommitBlock(rw.lastRules, rw.stateWriter); err != nil {
+			panic(err)
+		}
 		rw.rs.CommitTxNum(txNum)
 	}
 }
@@ -280,9 +281,7 @@ func (fw *FillWorker) fillAccounts() {
 			value := make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(value)
 			fw.rs.Put(kv.PlainState, key, value)
-			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
-		} else {
-			fw.rs.Delete(kv.PlainState, key)
+			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 		}
 	}
 }
@@ -300,9 +299,7 @@ func (fw *FillWorker) fillStorage() {
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
 			fw.rs.Put(kv.PlainState, compositeKey, val)
-			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
-		} else {
-			fw.rs.Delete(kv.PlainState, compositeKey)
+			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
 	}
 }
@@ -322,9 +319,7 @@ func (fw *FillWorker) fillCode() {
 			codeHash := crypto.Keccak256(val)
 			fw.rs.Put(kv.Code, codeHash[:], val)
 			fw.rs.Put(kv.PlainContractCode, compositeKey, codeHash[:])
-			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
-		} else {
-			fw.rs.Delete(kv.PlainContractCode, compositeKey)
+			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 		}
 	}
 }
@@ -582,14 +577,14 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			interval := currentTime.Sub(prevTime)
 			speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
 			progress := 100.0 * float64(count) / float64(total)
-			var repeatRate float64
+			var repeatRatio float64
 			if count > prevCount {
-				repeatRate = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
+				repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
 			}
 			prevTime = currentTime
 			prevCount = count
 			prevRollbackCount = rollbackCount
-			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat rate", fmt.Sprintf("%.2f%%", repeatRate), "buffer", libcommon.ByteCount(sizeEstimate),
+			log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", libcommon.ByteCount(sizeEstimate),
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 			if sizeEstimate >= commitThreshold {
