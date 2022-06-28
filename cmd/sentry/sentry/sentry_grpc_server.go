@@ -356,6 +356,16 @@ func runPeer(
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case eth.GetNodeDataMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -481,7 +491,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 		peersStreams: NewPeersStreams(),
 	}
 
-	if protocol != eth.ETH67 {
+	if protocol != eth.ETH66 {
 		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
 	}
 
@@ -621,7 +631,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
 	switch ss.Protocol.Version {
-	case eth.ETH67:
+	case eth.ETH66:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(),
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
@@ -637,7 +647,7 @@ func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerI
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
 			PeerId: gointerfaces.ConvertHashToH512(peerID),
 			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS,
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 				Data: b,
 			},
 		}); err != nil {
@@ -793,8 +803,8 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.Ou
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
 	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocol.Version {
-	case eth.ETH67:
-		reply.Protocol = proto_sentry.Protocol_ETH67
+	case eth.ETH66:
+		reply.Protocol = proto_sentry.Protocol_ETH66
 	}
 	return reply, nil
 }

@@ -2,14 +2,13 @@ package observer
 
 import (
 	"context"
-	"testing"
-
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestHandshake(t *testing.T) {
@@ -31,6 +30,6 @@ func TestHandshake(t *testing.T) {
 	assert.Contains(t, hello.ClientID, "erigon")
 
 	require.NotNil(t, status)
-	assert.Equal(t, uint32(eth.ETH67), status.ProtocolVersion)
+	assert.Equal(t, uint32(eth.ETH66), status.ProtocolVersion)
 	assert.Equal(t, uint64(1), status.NetworkID)
 }

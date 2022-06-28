@@ -44,7 +44,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		}
 
 		switch cs.sentries[i].Protocol() {
-		case eth.ETH67:
+		case eth.ETH66:
 			//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 			var bytes []byte
 			var err error
@@ -59,7 +59,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: req.BlockNums[len(req.BlockNums)-1],
 				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES,
+					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
 					Data: bytes,
 				},
 			}
@@ -85,7 +85,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			continue
 		}
 		switch cs.sentries[i].Protocol() {
-		case eth.ETH67:
+		case eth.ETH66:
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket66{
 				RequestId: rand.Uint64(),
@@ -109,7 +109,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: minBlock,
 				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS,
+					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 					Data: bytes,
 				},
 			}

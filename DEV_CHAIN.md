@@ -70,7 +70,7 @@ Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following 
     
 To check if the nodes are connected, you can go to the log of both the nodes and look for the line
     
-  ```  [p2p] GoodPeers    eth67=1 ```
+  ```  [p2p] GoodPeers    eth66=1 ```
     
 Note: this might take a while it is not istantaneus, also if you see a 1 on either one of the two the node is fine.
     

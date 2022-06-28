@@ -71,8 +71,8 @@ func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 	}
 }
 
-// TestEth67EmptyMessages tests encoding of empty eth67 messages
-func TestEth67EmptyMessages(t *testing.T) {
+// TestEth66EmptyMessages tests encoding of empty eth66 messages
+func TestEth66EmptyMessages(t *testing.T) {
 	// All empty messages encodes to the same format
 	want := common.FromHex("c4820457c0")
 
@@ -84,6 +84,9 @@ func TestEth67EmptyMessages(t *testing.T) {
 		GetBlockBodiesPacket66{1111, nil},
 		BlockBodiesPacket66{1111, nil},
 		BlockBodiesRLPPacket66{1111, nil},
+		// Node data
+		GetNodeDataPacket66{1111, nil},
+		NodeDataPacket66{1111, nil},
 		// Receipts
 		GetReceiptsPacket66{1111, nil},
 		ReceiptsPacket66{1111, nil},
@@ -98,6 +101,9 @@ func TestEth67EmptyMessages(t *testing.T) {
 		GetBlockBodiesPacket66{1111, GetBlockBodiesPacket([]common.Hash{})},
 		BlockBodiesPacket66{1111, BlockBodiesPacket([]*BlockBody{})},
 		BlockBodiesRLPPacket66{1111, BlockBodiesRLPPacket([]rlp.RawValue{})},
+		// Node data
+		GetNodeDataPacket66{1111, GetNodeDataPacket([]common.Hash{})},
+		NodeDataPacket66{1111, NodeDataPacket([][]byte{})},
 		// Receipts
 		GetReceiptsPacket66{1111, GetReceiptsPacket([]common.Hash{})},
 		ReceiptsPacket66{1111, ReceiptsPacket([][]*types.Receipt{})},
@@ -113,8 +119,8 @@ func TestEth67EmptyMessages(t *testing.T) {
 
 }
 
-// TestEth67Messages tests the encoding of all redefined eth67 messages
-func TestEth67Messages(t *testing.T) {
+// TestEth66Messages tests the encoding of all redefined eth66 messages
+func TestEth66Messages(t *testing.T) {
 
 	// Some basic structs used during testing
 	var (
@@ -166,6 +172,10 @@ func TestEth67Messages(t *testing.T) {
 	hashes = []common.Hash{
 		common.HexToHash("deadc0de"),
 		common.HexToHash("feedbeef"),
+	}
+	byteSlices := [][]byte{
+		common.FromHex("deadc0de"),
+		common.FromHex("feedbeef"),
 	}
 	// init the receipts
 	{
@@ -219,6 +229,14 @@ func TestEth67Messages(t *testing.T) {
 		{ // Identical to non-rlp-shortcut version
 			BlockBodiesRLPPacket66{1111, BlockBodiesRLPPacket([]rlp.RawValue{blockBodyRlp})},
 			common.FromHex("f902dc820457f902d6f902d3f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afbf901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"),
+		},
+		{
+			GetNodeDataPacket66{1111, GetNodeDataPacket(hashes)},
+			common.FromHex("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef"),
+		},
+		{
+			NodeDataPacket66{1111, NodeDataPacket(byteSlices)},
+			common.FromHex("ce820457ca84deadc0de84feedbeef"),
 		},
 		{
 			GetReceiptsPacket66{1111, GetReceiptsPacket(hashes)},
