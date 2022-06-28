@@ -126,6 +126,7 @@ func StageLoopStep(
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	var prevHeadBlockHash common.Hash
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
@@ -136,6 +137,7 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
+		prevHeadBlockHash = rawdb.ReadHeadBlockHash(tx)
 		return nil
 	}); err != nil {
 		return headBlockHash, err
@@ -205,7 +207,7 @@ func StageLoopStep(
 	}
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil && header.Number.Uint64() != finishProgressBefore {
+		if header != nil && headBlockHash != prevHeadBlockHash {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
@@ -245,7 +247,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	// Setup
 	height := header.Number.Uint64()
 	hash := header.Hash()
@@ -256,6 +258,32 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	// Construct side fork if we have one
+	if unwindPoint > 0 {
+		// Run it through the unwind
+		stateSync.UnwindTo(unwindPoint, common.Hash{})
+		if err = stateSync.Run(nil, batch, false); err != nil {
+			return err
+		}
+		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+		for i := range headersChain {
+			currentHeader := headersChain[i]
+			currentBody := bodiesChain[i]
+			currentHeight := headersChain[i].Number.Uint64()
+			currentHash := headersChain[i].Hash()
+			// Prepare memory state for block execution
+			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+				return err
+			}
+			rawdb.WriteHeader(batch, currentHeader)
+			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
+				return err
+			}
+			if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+				return err
+			}
+		}
+	}
 	// Prepare memory state for block execution
 	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
 		return err
@@ -280,36 +308,6 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 
 	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 		return err
-	}
-
-	if height == 0 {
-		return nil
-	}
-	ancestorHash := hash
-	ancestorHeight := height
-
-	var ch common.Hash
-	for ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), batch, ancestorHeight) {
-		if err = rawdb.WriteCanonicalHash(batch, ancestorHash, ancestorHeight); err != nil {
-			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
-		}
-
-		ancestor, err := headerReader.Header(context.Background(), batch, ancestorHash, ancestorHeight)
-		if err != nil {
-			return err
-		}
-		if ancestor == nil {
-			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
-		}
-
-		select {
-		default:
-		}
-		ancestorHash = ancestor.ParentHash
-		ancestorHeight--
-	}
-	if err != nil {
-		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
 	// Run state sync
@@ -418,7 +416,34 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
-			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
+			stagedsync.StageHeadersCfg(
+				db,
+				controlServer.Hd,
+				controlServer.Bd,
+				*controlServer.ChainConfig,
+				controlServer.SendHeaderRequest,
+				controlServer.PropagateNewBlockHashes,
+				controlServer.Penalize,
+				cfg.BatchSize,
+				false,
+				cfg.MemoryOverlay,
+				snapshots,
+				nil,
+				blockReader,
+				tmpdir,
+				notifications.Events,
+				nil, nil), stagedsync.StageBodiesCfg(
+				db,
+				controlServer.Bd,
+				controlServer.SendBodyRequest,
+				controlServer.Penalize,
+				controlServer.BroadcastNewBlock,
+				cfg.Sync.BodyDownloadTimeoutSeconds,
+				*controlServer.ChainConfig,
+				cfg.BatchSize,
+				snapshots,
+				blockReader,
+			), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
@@ -436,7 +461,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 			),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
-		nil,
+		stagedsync.StateUnwindOrder,
 		nil,
 	), nil
 }
