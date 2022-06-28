@@ -26,8 +26,8 @@ services:
     image: thorax/erigon:${TAG:-latest}
     build:
         args:
-            PUID: ${DOCKER_UID:-1000}
-            PGID: ${DOCKER_GID:-1000}
+            UID: ${DOCKER_UID:-1000}
+            GID: ${DOCKER_GID:-1000}
         context: .
     command: |
       erigon ${ERIGON_FLAGS-} --private.api.addr=0.0.0.0:9090
