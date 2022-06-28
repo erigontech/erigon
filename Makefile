@@ -4,8 +4,8 @@ GOBIN = $(CURDIR)/build/bin
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-DOCKER_UID ?= 1000
-DOCKER_PID ?= 1000
+DOCKER_UID ?= 3473
+DOCKER_GID ?= 3473
 DOCKER_TAG ?= thorax/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
@@ -35,7 +35,17 @@ go-version:
 		exit 1 ;\
 	fi
 
-docker: git-submodules
+validate_docker_build_args:
+	@echo "USER:       $(USER)"
+	@echo "DOCKER_UID: $(DOCKER_UID)"
+	@echo "DOCKER_GID: $(DOCKER_GID)"
+	@echo "Validating host OS user exists with specified UID/GID..."
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
+	@echo "Validating UID/GID for docker matches a host OS user with name prefix \"erigon\"..."
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon"
+
+
+docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
@@ -49,14 +59,12 @@ xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
-docker-compose:
-	@echo "USER:       $(USER)"
-	@echo "DOCKER_UID: $(DOCKER_UID)"
-	@echo "DOCKER_GID: $(DOCKER_GID)"
-	@echo "Validating host OS user exists with specified UID/GID..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep "$(USER)"
-	@echo "Validating UID/GID for docker matches a user with name prefix \"erigon\" on host OS..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon"
+docker-compose: validate_docker_build_args
+	@if [ "$(xdg_data_home)" = "~/.local/share" ]; then \
+		echo "Validating XDG_DATA_HOME will be writable by docker"; \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep "$(USER)"; \
+	fi
 	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
 	docker-compose up
 
