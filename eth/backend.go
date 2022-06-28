@@ -253,6 +253,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			}
 			cfg66 := stack.Config().P2P
 			cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
+			cfg66.ListenAddr = stack.Config().P2P.ListenAddr66
 			server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 			backend.sentryServers = append(backend.sentryServers, server66)
 			sentries = append(sentries, direct.NewSentryClientDirect(eth.ETH66, server66))
