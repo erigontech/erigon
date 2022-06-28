@@ -35,7 +35,7 @@ type ETHBACKENDClient interface {
 	EngineForkChoiceUpdatedV1(ctx context.Context, in *EngineForkChoiceUpdatedRequest, opts ...grpc.CallOption) (*EngineForkChoiceUpdatedReply, error)
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
-	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+	// ProtocolVersion returns the Ethereum protocol version number (e.g. 67 for ETH67).
 	ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
 	ClientVersion(ctx context.Context, in *ClientVersionRequest, opts ...grpc.CallOption) (*ClientVersionReply, error)
@@ -258,7 +258,7 @@ type ETHBACKENDServer interface {
 	EngineForkChoiceUpdatedV1(context.Context, *EngineForkChoiceUpdatedRequest) (*EngineForkChoiceUpdatedReply, error)
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
-	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+	// ProtocolVersion returns the Ethereum protocol version number (e.g. 67 for ETH67).
 	ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
 	ClientVersion(context.Context, *ClientVersionRequest) (*ClientVersionReply, error)

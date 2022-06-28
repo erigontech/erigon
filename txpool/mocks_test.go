@@ -21,7 +21,7 @@ var _ Pool = &PoolMock{}
 //
 // 		// make and configure a mocked Pool
 // 		mockedPool := &PoolMock{
-// 			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots) ([]DiscardReason, error) {
+// 			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
 // 				panic("mock out the AddLocalTxs method")
 // 			},
 // 			AddNewGoodPeerFunc: func(peerID types2.PeerID)  {
@@ -53,7 +53,7 @@ var _ Pool = &PoolMock{}
 // 	}
 type PoolMock struct {
 	// AddLocalTxsFunc mocks the AddLocalTxs method.
-	AddLocalTxsFunc func(ctx context.Context, newTxs types2.TxSlots) ([]DiscardReason, error)
+	AddLocalTxsFunc func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error)
 
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
 	AddNewGoodPeerFunc func(peerID types2.PeerID)
@@ -84,6 +84,8 @@ type PoolMock struct {
 			Ctx context.Context
 			// NewTxs is the newTxs argument value.
 			NewTxs types2.TxSlots
+			// Tx is the tx argument value.
+			Tx kv.Tx
 		}
 		// AddNewGoodPeer holds details about calls to the AddNewGoodPeer method.
 		AddNewGoodPeer []struct {
@@ -148,9 +150,11 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx
 	callInfo := struct {
 		Ctx    context.Context
 		NewTxs types2.TxSlots
+		Tx     kv.Tx
 	}{
 		Ctx:    ctx,
 		NewTxs: newTxs,
+		Tx:     tx,
 	}
 	mock.lockAddLocalTxs.Lock()
 	mock.calls.AddLocalTxs = append(mock.calls.AddLocalTxs, callInfo)
@@ -162,7 +166,7 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx
 		)
 		return discardReasonsOut, errOut
 	}
-	return mock.AddLocalTxsFunc(ctx, newTxs)
+	return mock.AddLocalTxsFunc(ctx, newTxs, tx)
 }
 
 // AddLocalTxsCalls gets all the calls that were made to AddLocalTxs.
@@ -171,10 +175,12 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx
 func (mock *PoolMock) AddLocalTxsCalls() []struct {
 	Ctx    context.Context
 	NewTxs types2.TxSlots
+	Tx     kv.Tx
 } {
 	var calls []struct {
 		Ctx    context.Context
 		NewTxs types2.TxSlots
+		Tx     kv.Tx
 	}
 	mock.lockAddLocalTxs.RLock()
 	calls = mock.calls.AddLocalTxs

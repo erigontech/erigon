@@ -19,9 +19,10 @@ package direct
 import (
 	"context"
 	"fmt"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"sync"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -30,42 +31,23 @@ import (
 )
 
 const (
-	ETH65 = 65
-	ETH66 = 66
+	ETH67 = 67
 )
 
 var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
-	ETH65: {
-		sentry.MessageId_GET_BLOCK_HEADERS_65:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_65:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_65:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_65:                  struct{}{},
-		sentry.MessageId_GET_NODE_DATA_65:                 struct{}{},
-		sentry.MessageId_NODE_DATA_65:                     struct{}{},
-		sentry.MessageId_GET_RECEIPTS_65:                  struct{}{},
-		sentry.MessageId_RECEIPTS_65:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_65:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_65:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_65:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_65:           struct{}{},
-	},
-	ETH66: {
-		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentry.MessageId_GET_NODE_DATA_66:                 struct{}{},
-		sentry.MessageId_NODE_DATA_66:                     struct{}{},
-		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentry.MessageId_RECEIPTS_66:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+	ETH67: {
+		sentry.MessageId_GET_BLOCK_HEADERS:             struct{}{},
+		sentry.MessageId_BLOCK_HEADERS:                 struct{}{},
+		sentry.MessageId_GET_BLOCK_BODIES:              struct{}{},
+		sentry.MessageId_BLOCK_BODIES:                  struct{}{},
+		sentry.MessageId_GET_RECEIPTS:                  struct{}{},
+		sentry.MessageId_RECEIPTS:                      struct{}{},
+		sentry.MessageId_NEW_BLOCK_HASHES:              struct{}{},
+		sentry.MessageId_NEW_BLOCK:                     struct{}{},
+		sentry.MessageId_TRANSACTIONS:                  struct{}{},
+		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES: struct{}{},
+		sentry.MessageId_GET_POOLED_TRANSACTIONS:       struct{}{},
+		sentry.MessageId_POOLED_TRANSACTIONS:           struct{}{},
 	},
 }
 
@@ -119,10 +101,8 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentry.Protocol_ETH65:
-		c.protocol = ETH65
-	case sentry.Protocol_ETH66:
-		c.protocol = ETH66
+	case sentry.Protocol_ETH67:
+		c.protocol = ETH67
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
