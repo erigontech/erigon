@@ -491,6 +491,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	headerOffset := sn.idxHeaderHash.OrdinalLookup(blockHeight - sn.idxHeaderHash.BaseDataID())
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
+	if !gg.HasNext() {
+		return nil, nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, buf, nil
@@ -521,6 +524,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	headerOffset := sn.idxHeaderHash.OrdinalLookup(localID)
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) > 1 && hash[0] != buf[0] {
 		return nil, nil
@@ -565,6 +571,9 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
+	if !gg.HasNext() {
+		return nil, nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, nil, nil
@@ -606,6 +615,9 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	gg.Reset(txnOffset)
 	stream := rlp.NewStream(reader, 0)
 	for i := uint32(0); i < txsAmount; i++ {
+		if !gg.HasNext() {
+			return nil, nil, nil
+		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
 			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Seg.FilePath(), len(buf))
@@ -628,6 +640,9 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 	offset := sn.IdxTxnHash.OrdinalLookup(txnID - sn.IdxTxnHash.BaseDataID())
 	gg := sn.Seg.MakeGetter()
 	gg.Reset(offset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	sender, txnRlp := buf[1:1+20], buf[1+20:]
 
