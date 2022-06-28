@@ -296,22 +296,23 @@ User UID/GID need to be synchronized between the host OS and container so files 
 
 It is recommended to setup a dedicated user/group.
 ```sh
-USER_NAME=erigon
-UID=1000
-GID=1000
+ERIGON_USER=erigon
+ERIGON_UID=3473 # random number [1001, 10000] chosen arbitrarily for example
+ERIGON_GID=3473 # can choose any valid #. 1000 tends to be taken by first user
 
 # create user/group
-addgroup --gid $GID $USER_NAME 2> /dev/null || true
-adduser --disabled-password --gecos '' --uid $UID --gid $GID $USER_NAME 2> /dev/null || true
+addgroup --gid $ERIGON_GID $ERIGON_USER 2> /dev/null || true
+adduser --disabled-password --gecos '' --uid $ERIGON_UID --gid $ERIGON_GID $ERIGON_USER 2> /dev/null || true
 
 # user must have "go" command installed and linked in PATH
-echo 'export PATH=$PATH:/usr/local/go/bin' | sudo -u $USER_NAME tee ~$USER_NAME/.bash_aliases >/dev/null
+echo 'export PATH=$PATH:/usr/local/go/bin' | sudo -u $ERIGON_USER tee ~$ERIGON_USER/.bash_aliases >/dev/null
 
 # optional: if you want to call docker using this user
-usermod -aG docker $USER_NAME
+groupadd -f docker
+usermod -aG docker $ERIGON_USER
 
 # optional: setup data dir for user
-sudo -u ${USER_NAME} mkdir /home/${USER_NAME}/.ethereum
+sudo -u $ERIGON_USER mkdir /home/$ERIGON_USER/.ethereum
 ```
 
 #### Run
@@ -319,15 +320,15 @@ Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on
 
 ```sh
 #
-# Must be ran by user with UID=1000, GID=1000
+# Must be ran by user with uid=1000, fid=1000
 #
-# Will use default UID=1000, GID=1000 set in Dockerfile
+# Will use default uid=1000, gid=1000 set in Dockerfile
 # Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
 #
-# Note: Calling user must have UID=1000, GID=1000
+# Note: Calling user must have uid=1000, gid=1000
 #       because ~/.local/share/erigon is mounted, "~" is the home dir of the caller,
 #       so files written in the container to the docker-mounted ~/.local/share/erigon will
-#       have UID/GID set to the running user in the docker (UID=1000, GID=1000)
+#       have uid/gid set to the running user in the docker (uid=1000, gid=1000)
 #       (discouraged: technically, username can be different from "erigon" default in container)
 #
 make docker-compose
@@ -336,28 +337,30 @@ make docker-compose
 # or
 #
 # if you want to use a custom data directory
+# or, if you want to use different uid/gid for a dedicated user
 #
-# or, you want to use different UID/GID for a dedicated user,
-# the UID/GID will not be 1000,1000
+# To solve this, pass in the uid/gid parameters into the container.
 #
-# To solve this, pass in the UID/GID parameters into the container.
-#
-# UID: the user id (default: 1000)
-# GID: the group id (default: 1000)
+# DOCKER_UID: the user id (default: 1000)
+# DOCKER_GID: the group id (default: 1000)
 # XDG_DATA_HOME: the data directory (default: ~/.local/share)
 #
 # Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
 #       if you followed above instructions
 #
+# Note: uid/gid syntax below will automatically use uid/gid of running user so this syntax
+#       is intended to be ran via the dedicated user setup earlier
+#
 DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 
 #
-# or
+# if you want to run the docker, but you are not logged in as the $ERIGON_USER
+# then you'll need to adjust the syntax above to grab the correct uid/gid
 #
 # To run the command via another user, use
 #
-USER_NAME=erigon
-sudo -u ${USER_NAME} DOCKER_UID=$(id -u ${USER_NAME}) DOCKER_GID=$(id -g ${USER_NAME}) XDG_DATA_HOME=~${USER_NAME}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+ERIGON_USER=erigon
+sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
