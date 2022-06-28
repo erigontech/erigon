@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type BlockContext struct {
+type BlockOverrides struct {
 	BlockNumber *hexutil.Uint64
 	Coinbase    *common.Address
 	Timestamp   *hexutil.Uint64
@@ -36,16 +36,41 @@ type BlockContext struct {
 
 type Bundle struct {
 	Transactions  []rpcapi.CallArgs
-	BlockOverride BlockContext
+	BlockOverride BlockOverrides
 }
 
 type StateContext struct {
 	BlockNumber      rpc.BlockNumberOrHash
 	TransactionIndex *int
-	StateOverride    *rpcapi.StateOverrides
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func blockHeaderOverride(blockCtx *vm.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
+	if blockOverride.BlockNumber != nil {
+		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
+	}
+	if blockOverride.BaseFee != nil {
+		blockCtx.BaseFee = blockOverride.BaseFee
+	}
+	if blockOverride.Coinbase != nil {
+		blockCtx.Coinbase = *blockOverride.Coinbase
+	}
+	if blockOverride.Difficulty != nil {
+		blockCtx.Difficulty = big.NewInt(int64(*blockOverride.Difficulty))
+	}
+	if blockOverride.Timestamp != nil {
+		blockCtx.Time = uint64(*blockOverride.Timestamp)
+	}
+	if blockOverride.GasLimit != nil {
+		blockCtx.GasLimit = uint64(*blockOverride.GasLimit)
+	}
+	if blockOverride.BlockHash != nil {
+		for blockNum, hash := range *blockOverride.BlockHash {
+			overrideBlockHash[blockNum] = hash
+		}
+	}
+}
+
+func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *rpcapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -189,7 +214,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
-
 	for _, txn := range replayTransactions {
 		msg, err := txn.AsMessage(*signer, nil, rules)
 		if err != nil {
@@ -210,8 +234,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// after replaying the txns, we want to overload the state
 	// overload state
-	if simulateContext.StateOverride != nil {
-		err = simulateContext.StateOverride.Override((evm.IntraBlockState()).(*state.IntraBlockState))
+	if stateOverride != nil {
+		err = stateOverride.Override((evm.IntraBlockState()).(*state.IntraBlockState))
 		if err != nil {
 			return nil, err
 		}
