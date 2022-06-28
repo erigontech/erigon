@@ -16,6 +16,9 @@ FROM docker.io/library/alpine:3.15
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
+# from the perspective of the docker, 1000/1000 is a sensible choice
+# (mimicking Ubuntu Server), but if you rely on the .env included in the repo,
+# this will get overridden when the make calls docker-compose
 ARG UID=1000
 ARG GID=1000
 RUN adduser -H -u ${UID} -g ${GID} -D erigon
