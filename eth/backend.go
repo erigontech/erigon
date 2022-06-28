@@ -235,14 +235,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return res
 		}
 
-		d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
-		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
-
 		d67, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 		if err != nil {
 			return nil, err
@@ -251,8 +243,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg67.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth67")
 		server67 := sentry.NewGrpcServer(backend.sentryCtx, d67, readNodeInfo, &cfg67, eth.ETH67)
 
-		backend.sentryServers = append(backend.sentryServers, server67, server66)
-		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH67, server67), direct.NewSentryClientDirect(eth.ETH66, server66)}
+		backend.sentryServers = append(backend.sentryServers, server67)
+		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH67, server67)}
+
+		if stack.Config().P2P.Eth66Enabled {
+			d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				return nil, err
+			}
+			cfg66 := stack.Config().P2P
+			cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
+			server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
+			backend.sentryServers = append(backend.sentryServers, server66)
+			sentries = append(sentries, direct.NewSentryClientDirect(eth.ETH66, server66))
+		}
 
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
