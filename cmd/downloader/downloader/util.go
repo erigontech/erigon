@@ -355,7 +355,7 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	defer logEvery.Stop()
 
 	tmpSnapDir := filepath.Join(snapDir, "tmp") // snapshots are in sub-dir "tmp", if not fully downloaded
-	if !common.FileExist(tmpSnapDir) {
+	if common.FileExist(tmpSnapDir) {
 		snapDir = tmpSnapDir
 	}
 	files, err := AllTorrentPaths(snapDir)
