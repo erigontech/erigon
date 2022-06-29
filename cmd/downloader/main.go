@@ -114,7 +114,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context) error {
 	dirs := datadir.New(datadirCli)
-	torrentLogLevel, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
