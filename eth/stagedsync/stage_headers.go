@@ -1176,22 +1176,27 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "segments", cfg.snapshots.SegmentsMax(), "indices", cfg.snapshots.IndicesMax(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
-	if cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-		if !cfg.snapshots.SegmentsReady() {
-			return fmt.Errorf("not all snapshot segments are available")
+	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+		if !cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() == 0 {
+			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 		}
-
-		// wait for Downloader service to download all expected snapshots
-		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-				return fmt.Errorf("BuildIndices: %w", err)
+		if cfg.snapshots.Cfg().Produce {
+			if !cfg.snapshots.SegmentsReady() {
+				return fmt.Errorf("not all snapshot segments are available")
 			}
-		}
 
-		if err := cfg.snapshots.Reopen(); err != nil {
-			return fmt.Errorf("ReopenIndices: %w", err)
+			// wait for Downloader service to download all expected snapshots
+			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
+					return fmt.Errorf("BuildIndices: %w", err)
+				}
+			}
+
+			if err := cfg.snapshots.Reopen(); err != nil {
+				return fmt.Errorf("ReopenIndices: %w", err)
+			}
 		}
 
 	}
