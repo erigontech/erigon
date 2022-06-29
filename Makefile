@@ -1,5 +1,6 @@
 GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
+UNAME = $(shell uname)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -36,14 +37,20 @@ go-version:
 	fi
 
 validate_docker_build_args:
-	@echo "USER:       $(USER)"
-	@echo "DOCKER_UID: $(DOCKER_UID)"
-	@echo "DOCKER_GID: $(DOCKER_GID)"
+	@echo "Docker build args:"
+	@echo "    DOCKER_UID: $(DOCKER_UID)"
+	@echo "    DOCKER_GID: $(DOCKER_GID)\n"
 	@echo "Ensuring host OS user exists with specified UID/GID..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
-	@echo "Checking if UID/GID for docker matches a host OS user with name prefix \"erigon\"..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon:" || \
-		echo "Warning: UID/GID for docker does not match to a host OS user with name \"erigon\". Got: \"$(USER)\""
+	@if [ "$(UNAME)" = "Darwin" ]; then \
+		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
+	else \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
+	fi
+	@if [ "$(UNAME)" = "Linux" ]; then \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon:" || \
+			echo "Warning: UID/GID for docker does not match to a host OS user with name \"erigon\". Got: \"$(USER)\""; \
+	fi
+	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 
 docker: validate_docker_build_args git-submodules
