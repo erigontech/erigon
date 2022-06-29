@@ -2,7 +2,6 @@ GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
 UNAME = $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
-DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -70,7 +69,7 @@ xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana 
 
 docker-compose: validate_docker_build_args
 	mkdir -p $(xdg_data_home_subdirs)
-	$(DOCKER_COMPOSE) up
+	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
