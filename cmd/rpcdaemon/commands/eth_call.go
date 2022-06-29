@@ -129,7 +129,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 			return 0, err
 		}
 		if h == nil {
-			return 0, fmt.Errorf("no header found with number %d", *bNrOrHash.BlockNumber)
+			return 0, nil
 		}
 		hi = h.GasLimit
 	}
