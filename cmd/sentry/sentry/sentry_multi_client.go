@@ -630,8 +630,14 @@ func makeInboundMessage() *proto_sentry.InboundMessage {
 	return new(proto_sentry.InboundMessage)
 }
 
-func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	err := cs.handleInboundMessage(ctx, message, sentry)
+func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_sentry.InboundMessage, sentry direct.SentryClient) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
+
+	err = cs.handleInboundMessage(ctx, message, sentry)
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
 		log.Debug("Kick peer for invalid RLP", "err", err)

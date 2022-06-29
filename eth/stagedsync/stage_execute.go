@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -102,6 +103,7 @@ func executeBlock(
 	writeCallTraces bool,
 	contractHasTEVM func(contractHash commonold.Hash) (bool, error),
 	initialCycle bool,
+	effectiveEngine consensus.Engine,
 ) error {
 	blockNum := block.NumberU64()
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
@@ -121,11 +123,11 @@ func executeBlock(
 
 	var receipts types.Receipts
 	var stateSyncReceipt *types.ReceiptForStorage
-	_, isPoSa := cfg.engine.(consensus.PoSA)
+	_, isPoSa := effectiveEngine.(consensus.PoSA)
 	if isPoSa {
-		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHeader, effectiveEngine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	} else {
-		receipts, stateSyncReceipt, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		receipts, stateSyncReceipt, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, effectiveEngine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	}
 	if err != nil {
 		return err
@@ -250,6 +252,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		return err
 	}
 	var stoppedErr error
+
+	effectiveEngine := cfg.engine
+	if asyncEngine, ok := effectiveEngine.(consensus.AsyncEngine); ok {
+		asyncEngine = asyncEngine.WithExecutionContext(ctx)
+		effectiveEngine = asyncEngine.(consensus.Engine)
+	}
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -281,10 +289,12 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
-			log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
-			if cfg.badBlockHalt {
-				return err
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle, effectiveEngine); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
+				if cfg.badBlockHalt {
+					return err
+				}
 			}
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop

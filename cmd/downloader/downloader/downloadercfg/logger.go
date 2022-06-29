@@ -1,6 +1,7 @@
 package downloadercfg
 
 import (
+	"fmt"
 	"strings"
 
 	utp "github.com/anacrolix/go-libutp"
@@ -13,12 +14,25 @@ func init() {
 	utp.Logger.Handlers = []lg.Handler{noopHandler{}}
 }
 
-func Str2LogLevel(in string) (lg.Level, error) {
-	lvl := lg.Level{}
-	if err := lvl.UnmarshalText([]byte(in)); err != nil {
-		return lvl, err
+func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
+	switch level {
+	case 0:
+		lvl = lg.Critical
+	case 1:
+		lvl = lg.Error
+	case 2:
+		lvl = lg.Warning
+	case 3:
+		lvl = lg.Info
+	case 4:
+		lvl = lg.Debug
+	case 5:
+		lvl = lg.Debug
+		dbg = true
+	default:
+		return lvl, dbg, fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
 	}
-	return lvl, nil
+	return lvl, dbg, nil
 }
 
 type noopHandler struct{}

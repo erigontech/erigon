@@ -29,7 +29,6 @@ import (
 	"text/tabwriter"
 	"text/template"
 
-	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -645,10 +644,10 @@ var (
 		Name:  ethconfig.FlagSnapStop,
 		Usage: "Stop producing new snapshots",
 	}
-	TorrentVerbosityFlag = cli.StringFlag{
+	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
-		Value: lg.Warning.LogString(),
-		Usage: "DBG | INF | WRN | ERR (must set --verbosity to equal or higher level)",
+		Value: 2,
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has defeault: 3)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
@@ -1401,12 +1400,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-
-		lvl, err := downloadercfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		log.Info("torrent verbosity", "level", ctx.GlobalInt(TorrentVerbosityFlag.Name))
+		lvl, dbg, err := downloadercfg.Int2LogLevel(ctx.GlobalInt(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, dbg, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
