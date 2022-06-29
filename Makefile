@@ -9,8 +9,8 @@ GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
-DOCKER_UID ?= 3473
-DOCKER_GID ?= 3473
+DOCKER_UID ?= $(shell id -u)
+DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= thorax/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
