@@ -39,10 +39,10 @@ validate_docker_build_args:
 	@echo "USER:       $(USER)"
 	@echo "DOCKER_UID: $(DOCKER_UID)"
 	@echo "DOCKER_GID: $(DOCKER_GID)"
-	@echo "Validating host OS user exists with specified UID/GID..."
+	@echo "Ensuring host OS user exists with specified UID/GID..."
 	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
-	@echo "Validating UID/GID for docker matches a host OS user with name prefix \"erigon\"..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon"
+	@echo "Checking if UID/GID for docker matches a host OS user with name prefix \"erigon\"..."
+	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon:" || echo "Warning: UID/GID for docker does not match a host OS user with name \"erigon\""
 
 
 docker: validate_docker_build_args git-submodules
