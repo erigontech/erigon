@@ -426,7 +426,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, getBlockReader(chainConfig, db)), ctx); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(chainConfig, db)), ctx); err != nil {
 		return err
 	}
 	must(tx.Commit())

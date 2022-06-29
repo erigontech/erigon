@@ -36,6 +36,7 @@ type SendersCfg struct {
 	bufferSize        int
 	numOfGoroutines   int
 	readChLen         int
+	badBlockHalt      bool
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
@@ -43,7 +44,7 @@ type SendersCfg struct {
 	snapshotHashesCfg *snapshothashes.Config
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -54,6 +55,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		bufferSize:        (sendersBlockSize * 10 / 20) * 10000, // 20*4096
 		numOfGoroutines:   secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
 		readChLen:         4,
+		badBlockHalt:      badBlockHalt,
 		tmpdir:            tmpdir,
 		chainConfig:       chainCfg,
 		prune:             prune,
@@ -257,6 +259,9 @@ Loop:
 	}
 	if minBlockErr != nil {
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
+		if cfg.badBlockHalt {
+			return minBlockErr
+		}
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
