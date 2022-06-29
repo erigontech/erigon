@@ -274,6 +274,10 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
+	if s.config.TerminalTotalDifficulty == nil {
+		log.Error("[NewPayload] not a proof-of-stake chain")
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
 		// We are still syncing a commissioned payload
@@ -288,11 +292,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	log.Debug("[NewPayload] lock acquired")
-
-	if s.config.TerminalTotalDifficulty == nil {
-		log.Error("[NewPayload] not a proof-of-stake chain")
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
 
 	var baseFee *big.Int
 	eip1559 := false
@@ -418,6 +417,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
 	if s.stageLoopIsBusy() {
 		log.Debug("[ForkChoiceUpdated] stage loop is busy")
 		return &remote.EngineForkChoiceUpdatedReply{
@@ -428,10 +431,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	log.Debug("[ForkChoiceUpdated] lock acquired")
-
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
 
 	forkChoice := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
