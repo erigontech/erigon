@@ -177,8 +177,8 @@ git-submodules:
 	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
 
-# since DOCKER_UID, DOCKER_GID are initialized to the current user,
-# we need a separate envvar to facililate creation of the erigon user on the host OS.
+# since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
+# we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
 
