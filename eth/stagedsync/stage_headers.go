@@ -1198,7 +1198,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return fmt.Errorf("ReopenIndices: %w", err)
 			}
 		}
-
 	}
 	if cfg.dbEventNotifier != nil {
 		cfg.dbEventNotifier.OnNewSnapshot()
