@@ -646,7 +646,7 @@ var (
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
-		Value: 3,
+		Value: 2,
 		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has defeault: 3)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
@@ -1401,11 +1401,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 		log.Info("torrent verbosity", "level", ctx.GlobalInt(TorrentVerbosityFlag.Name))
-		lvl, err := downloadercfg.Int2LogLevel(ctx.GlobalInt(TorrentVerbosityFlag.Name))
+		lvl, dbg, err := downloadercfg.Int2LogLevel(ctx.GlobalInt(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, dbg, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.GlobalInt(TorrentPortFlag.Name), ctx.GlobalInt(TorrentConnsPerFileFlag.Name), ctx.GlobalInt(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
