@@ -43,15 +43,10 @@ validate_docker_build_args:
 	@echo "Ensuring host OS user exists with specified UID/GID..."
 	@if [ "$(UNAME)" = "Darwin" ]; then \
 		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
-	else \
+	elif [ "$(UNAME)" = "Linux" ]; then \
 		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
 	fi
-	@if [ "$(UNAME)" = "Linux" ]; then \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon:" || \
-			echo "Warning: UID/GID for docker does not match to a host OS user with name \"erigon\". Got: \"$(USER)\""; \
-	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
-
 
 docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
@@ -171,7 +166,6 @@ bindings:
 
 prometheus:
 	docker-compose up prometheus grafana
-
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
