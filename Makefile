@@ -174,13 +174,15 @@ git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule sync --quiet --recursive
+	@# these lines will also fail if ran as root in a non-root user's checked out repository
+	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
+ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
 
 # create "erigon" user
 user_linux:
@@ -194,7 +196,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)
 
 # create "erigon" user
 user_macos:
@@ -204,4 +206,4 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)

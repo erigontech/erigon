@@ -14,19 +14,19 @@ RUN --mount=type=cache,target=/root/.cache \
 FROM docker.io/library/alpine:3.15
 
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
+# copy compiled artifacts from builder
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
-# from the perspective of the docker, 1000/1000 is a sensible choice
-# (mimicking Ubuntu Server), but if you rely on the .env included in the repo,
-# this will get overridden when the make calls docker-compose
+# Setup user and group
+#
+# from the perspective of the container, uid=1000, gid=1000 is a sensible choice
+# (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
+# these defaults will get overridden when make calls docker-compose
 ARG UID=1000
 ARG GID=1000
-RUN adduser -H -u ${UID} -g ${GID} -D erigon
-RUN mkdir -p /home/erigon
-RUN mkdir -p /home/erigon/.local/share/erigon
-RUN chown -R erigon:erigon /home/erigon
-
+RUN adduser -D -u $UID -g $GID erigon
 USER erigon
+RUN mkdir -p ~/.local/share/erigon
 
 EXPOSE 8545 \
        8551 \
@@ -44,12 +44,11 @@ ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 LABEL org.label-schema.build-date=$BUILD_DATE \
-      org.label-schema.name="Erigon" \
       org.label-schema.description="Erigon Ethereum Client" \
+      org.label-schema.name="Erigon" \
+      org.label-schema.schema-version="1.0" \
       org.label-schema.url="https://torquem.ch" \
       org.label-schema.vcs-ref=$VCS_REF \
       org.label-schema.vcs-url="https://github.com/ledgerwatch/erigon.git" \
       org.label-schema.vendor="Torquem" \
-      org.label-schema.version=$VERSION \
-      org.label-schema.schema-version="1.0"
-
+      org.label-schema.version=$VERSION
