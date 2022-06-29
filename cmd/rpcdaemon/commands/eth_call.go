@@ -76,16 +76,17 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 }
 
 // headerByNumberOrHash - intent to read recent headers only
-func headerByNumberOrHash(tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
 	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	return block.Header(), nil
+	// header can be nil
+	return header, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -123,9 +124,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := headerByNumberOrHash(dbtx, bNrOrHash, api)
+		h, err := headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
 		if err != nil {
 			return 0, err
+		}
+		if h == nil {
+			return 0, nil
 		}
 		hi = h.GasLimit
 	}
