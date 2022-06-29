@@ -300,6 +300,7 @@ type HeaderDownload struct {
 	fetchingNew            bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
+	QuitPoWMining          chan struct{}
 	trace                  bool
 	stats                  Stats
 
@@ -349,6 +350,7 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
+		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
