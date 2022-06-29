@@ -70,7 +70,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
@@ -110,7 +109,6 @@ type Ethereum struct {
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
-	quitMining        chan struct{}
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
@@ -352,7 +350,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
 	backend.pendingBlocks = make(chan *types.Block, 1)
 	backend.minedBlocks = make(chan *types.Block, 1)
@@ -476,13 +473,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
 					log.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.quitMining:
+			case <-backend.sentriesClient.Hd.QuitPoWMining:
 				return
 			}
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining); err != nil {
 		return nil, err
 	}
 
@@ -693,12 +690,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var hasWork bool
 		errc := make(chan error, 1)
 
-		tx, err := s.chainDB.BeginRo(ctx)
-		if err != nil {
-			log.Warn("mining", "err", err)
-			return
-		}
-
 		for {
 			mineEvery.Reset(3 * time.Second)
 			select {
@@ -716,21 +707,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					log.Warn("mining", "err", err)
 				}
 			case <-quitCh:
-				return
-			}
-			// Check if we transitioned and if we did halt POW mining
-			headNumber, err := stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-
-			isTrans, err := rawdb.Transitioned(tx, headNumber, s.chainConfig.TerminalTotalDifficulty)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-			if isTrans {
 				return
 			}
 
@@ -880,11 +856,8 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
+	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
-	//s.miner.Stop()
 	s.engine.Close()
 	<-s.waitForStageLoopStop
 	if s.config.Miner.Enabled {
