@@ -1,11 +1,15 @@
 GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
+UNAME = $(shell uname) # Supported: Darwin, Linux
+DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-DOCKER_UID ?= 3473
-DOCKER_GID ?= 3473
+ERIGON_USER ?= erigon
+# if using volume-mounting data dir, then must exist on host OS
+DOCKER_UID ?= $(shell id -u)
+DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= thorax/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
@@ -36,17 +40,19 @@ go-version:
 	fi
 
 validate_docker_build_args:
-	@echo "USER:       $(USER)"
-	@echo "DOCKER_UID: $(DOCKER_UID)"
-	@echo "DOCKER_GID: $(DOCKER_GID)"
-	@echo "Validating host OS user exists with specified UID/GID..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"
-	@echo "Validating UID/GID for docker matches a host OS user with name prefix \"erigon\"..."
-	cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep -E "^erigon"
-
+	@echo "Docker build args:"
+	@echo "    DOCKER_UID: $(DOCKER_UID)"
+	@echo "    DOCKER_GID: $(DOCKER_GID)\n"
+	@echo "Ensuring host OS user exists with specified UID/GID..."
+	@if [ "$(UNAME)" = "Darwin" ]; then \
+		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
+	elif [ "$(UNAME)" = "Linux" ]; then \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
+	fi
+	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 docker: validate_docker_build_args git-submodules
-	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
+	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
@@ -59,13 +65,10 @@ xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
+xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
+
 docker-compose: validate_docker_build_args
-	@if [ "$(xdg_data_home)" = "~/.local/share" ]; then \
-		echo "Validating XDG_DATA_HOME will be writable by docker"; \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep "$(USER)"; \
-	fi
-	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
+	mkdir -p $(xdg_data_home_subdirs)
 	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
@@ -164,7 +167,6 @@ bindings:
 prometheus:
 	docker-compose up prometheus grafana
 
-
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
@@ -175,3 +177,26 @@ git-submodules:
 	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
 
+# create "erigon" user
+user_linux:
+ifdef DOCKER
+	sudo groupadd -f docker
+endif
+	sudo addgroup --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo adduser --disabled-password --gecos '' --uid $(DOCKER_UID) --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo mkhomedir_helper $(ERIGON_USER)
+	echo 'export PATH=$$PATH:/usr/local/go/bin' | sudo -u $(ERIGON_USER) tee /home/$(ERIGON_USER)/.bash_aliases >/dev/null
+ifdef DOCKER
+	sudo usermod -aG docker $(ERIGON_USER)
+endif
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
+
+# create "erigon" user
+user_macos:
+	sudo dscl . -create /Users/$(ERIGON_USER)
+	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
+	sudo dscl . -list /Users UniqueID | grep $(ERIGON_USER) | grep $(DOCKER_UID) || sudo dscl . -create /Users/$(ERIGON_USER) UniqueID $(DOCKER_UID)
+	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(DOCKER_GID)
+	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
+	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
