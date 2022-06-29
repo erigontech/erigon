@@ -290,46 +290,40 @@ For a details on the implementation status of each
 command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 ### Run all components by docker-compose
+Docker allows for building and running Erigon via containers. This alleviates the need for installing build dependencies onto the host OS.
 
-#### Setup user
+#### Optional: Setup dedicated user
 User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
 
-It is recommended to setup a dedicated user/group.
+You may wish to setup a dedicated user/group on the host OS, in which case the following `make` targets are available.
 ```sh
-ERIGON_USER=erigon
-ERIGON_UID=3473 # random number [1001, 10000] chosen arbitrarily for example
-ERIGON_GID=3473 # can choose any valid #. 1000 tends to be taken by first user
-
-# create user/group
-addgroup --gid $ERIGON_GID $ERIGON_USER 2> /dev/null || true
-adduser --disabled-password --gecos '' --uid $ERIGON_UID --gid $ERIGON_GID $ERIGON_USER 2> /dev/null || true
-
-# user must have "go" command installed and linked in PATH
-echo 'export PATH=$PATH:/usr/local/go/bin' | sudo -u $ERIGON_USER tee ~$ERIGON_USER/.bash_aliases >/dev/null
-
-# optional: if you want to call docker using this user
-groupadd -f docker
-usermod -aG docker $ERIGON_USER
-
-# optional: setup data dir for user
-sudo -u $ERIGON_USER mkdir /home/$ERIGON_USER/.ethereum
+# create "erigon" user
+make user_linux
+# or
+make user_macos
 ```
+
+#### Environment Variables
+There is a `.env.example` file in the root of the repo.
+* `DOCKER_UID` - The UID of the docker user
+* `DOCKER_GID` - The GID of the docker user
+* `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
+
+If not specified, the UID/GID will use the current user.
+
+A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper targets `make user_linux` or `make user_macos`.
+
+#### Check: Permissions
+In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
+
+If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
 #### Run
 Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
 
 ```sh
 #
-# Must be ran by user with uid=1000, fid=1000
-#
-# Will use default uid=1000, gid=1000 set in Dockerfile
 # Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
-#
-# Note: Calling user must have uid=1000, gid=1000
-#       because ~/.local/share/erigon is mounted, "~" is the home dir of the caller,
-#       so files written in the container to the docker-mounted ~/.local/share/erigon will
-#       have uid/gid set to the running user in the docker (uid=1000, gid=1000)
-#       (discouraged: technically, username can be different from "erigon" default in container)
 #
 make docker-compose
 
@@ -341,8 +335,8 @@ make docker-compose
 #
 # To solve this, pass in the uid/gid parameters into the container.
 #
-# DOCKER_UID: the user id (default: 1000)
-# DOCKER_GID: the group id (default: 1000)
+# DOCKER_UID: the user id
+# DOCKER_GID: the group id
 # XDG_DATA_HOME: the data directory (default: ~/.local/share)
 #
 # Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
