@@ -642,7 +642,7 @@ var (
 	}
 	SnapStopFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapStop,
-		Usage: "Stop producing new snapshots",
+		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug",
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
