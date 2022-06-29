@@ -1,13 +1,16 @@
 GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
 UNAME = $(shell uname) # Supported: Darwin, Linux
+DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_COMPOSE := $(shell command -v docker-compose 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-ERIGON_USER ?= erigon # dedicated user
-DOCKER_UID ?= 3473    # if using volume-mounting data dir, then must exist on host OS
-DOCKER_GID ?= 3473    # if using volume-mounting data dir, then must exist on host OS
+ERIGON_USER ?= erigon
+# if using volume-mounting data dir, then must exist on host OS
+DOCKER_UID ?= 3473
+DOCKER_GID ?= 3473
 DOCKER_TAG ?= thorax/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
@@ -50,7 +53,7 @@ validate_docker_build_args:
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 docker: validate_docker_build_args git-submodules
-	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
+	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
@@ -63,14 +66,15 @@ xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
+xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
+
 docker-compose: validate_docker_build_args
 	@if [ "$(xdg_data_home)" = "~/.local/share" ]; then \
-		echo "Validating XDG_DATA_HOME will be writable by docker"; \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
-		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)" | grep "$(USER)"; \
+		echo "Validating XDG_DATA_HOME will be writable by docker..."; \
+		ls -aln "$(xdg_data_home)" | grep " \./$$" | grep " $(DOCKER_UID) " | grep " $(DOCKER_GID) "; \
 	fi
-	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
-	docker-compose up
+	mkdir -p $(xdg_data_home_subdirs) 2>/dev/null || sudo -u $(ERIGON_USER) mkdir -p $(xdg_data_home_subdirs); \
+	$(DOCKER_COMPOSE) up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
@@ -180,13 +184,17 @@ git-submodules:
 
 # create "erigon" user
 user_linux:
-	command -v docker >/dev/null && sudo groupadd -f docker
+ifdef DOCKER
+	sudo groupadd -f docker
+endif
 	sudo addgroup --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
 	sudo adduser --disabled-password --gecos '' --uid $(DOCKER_UID) --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
 	sudo mkhomedir_helper $(ERIGON_USER)
-	command -v docker >/dev/null && sudo usermod -aG docker $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
 	echo 'export PATH=$$PATH:/usr/local/go/bin' | sudo -u $(ERIGON_USER) tee /home/$(ERIGON_USER)/.bash_aliases >/dev/null
+ifdef DOCKER
+	sudo usermod -aG docker $(ERIGON_USER)
+endif
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
 
 # create "erigon" user
 user_macos:
@@ -196,3 +204,4 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(DOCKER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
