@@ -20,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"golang.org/x/exp/slices"
@@ -1162,6 +1163,25 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
+func iterate(filename string) error {
+	d, err := compress.NewDecompressor(filename)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	g := d.MakeGetter()
+	var buf, bufv []byte
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		bufv, _ = g.Next(bufv[:0])
+		s := fmt.Sprintf("%x", buf)
+		if strings.HasPrefix(s, "000000000000006f6502b7f2bbac8c30a3f67e9a") {
+			fmt.Printf("%s [%x]\n", s, bufv)
+		}
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1284,6 +1304,8 @@ func main() {
 		err = findPrefix(*chaindata)
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
+	case "iterate":
+		err = iterate(*chaindata)
 	}
 
 	if err != nil {

@@ -1,7 +1,7 @@
 package state
 
 import (
-	"fmt"
+	//"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -208,7 +208,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.rs.Put(kv.PlainState, address[:], value)
 	return nil
 }
@@ -224,7 +224,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 	}
 	w.rs.Put(kv.Code, codeHash[:], code)
 	if len(code) > 0 {
-		fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
+		//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
 		w.rs.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), codeHash[:])
 	}
 	return nil
@@ -246,7 +246,7 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	}
 	v := value.Bytes()
 	if len(v) != 0 {
-		fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes())
 		w.rs.Put(kv.PlainState, compositeKey, v)
 	}

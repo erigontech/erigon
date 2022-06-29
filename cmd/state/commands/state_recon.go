@@ -67,7 +67,6 @@ type ReconWorker struct {
 	lastBlockNum  uint64
 	lastBlockHash common.Hash
 	lastHeader    *types.Header
-	lastSigner    *types.Signer
 	lastRules     *params.Rules
 	getHeader     func(hash common.Hash, number uint64) *types.Header
 	ctx           context.Context
@@ -124,7 +123,6 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txNum)
 	rw.stateReader.ResetError()
-	rw.stateReader.SetTrace(txNum == 114271 || txNum == 114276 || txNum == 114291)
 	rw.stateWriter.SetTxNum(txNum)
 	noop := state.NewNoopWriter()
 	// Find block number
@@ -138,7 +136,6 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		}
 		rw.lastBlockNum = blockNum
 		rw.lastBlockHash = rw.lastHeader.Hash()
-		rw.lastSigner = types.MakeSigner(rw.chainConfig, blockNum)
 		rw.lastRules = rw.chainConfig.Rules(blockNum)
 		rw.firstBlock = false
 	}
@@ -150,20 +147,20 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == rw.txNums[blockNum-1]
 	var err error
 	if blockNum == 0 {
-		fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
 		// Genesis block
 		_, ibs, err = rw.genesis.ToBlock()
 		if err != nil {
 			panic(err)
 		}
 	} else if daoForkTx {
-		fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 		misc.ApplyDAOHardFork(ibs)
 		if err := ibs.FinalizeTx(rw.lastRules, noop); err != nil {
 			panic(err)
 		}
 	} else if txNum+1 == rw.txNums[blockNum] {
-		fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 		// End of block transaction in a block
 		block, _, err := rw.blockReader.BlockWithSenders(rw.ctx, nil, rw.lastBlockHash, blockNum)
 		if err != nil {
@@ -174,19 +171,14 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		}
 	} else {
 		txIndex := txNum - startTxNum - 1
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, txIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := rw.blockReader.TxnByIdxInBlock(rw.ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			panic(err)
 		}
 		txHash := txn.Hash()
-		sender, _ := txn.GetSender()
-		fmt.Printf("txHash=%x, sender=%x\n", txHash, sender)
-		msg, err := txn.AsMessage(*rw.lastSigner, rw.lastHeader.BaseFee, rw.lastRules)
-		if err != nil {
-			panic(err)
-		}
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(txn.GetGas())
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		usedGas := new(uint64)
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, blockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
@@ -197,11 +189,13 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		}
 	}
 	if dependency, ok := rw.stateReader.ReadError(); ok {
+		//fmt.Printf("rollback %d\n", txNum)
 		rw.rs.RollbackTxNum(txNum, dependency)
 	} else {
 		if err = ibs.CommitBlock(rw.lastRules, rw.stateWriter); err != nil {
 			panic(err)
 		}
+		//fmt.Printf("commit %d\n", txNum)
 		rw.rs.CommitTxNum(txNum)
 	}
 }
@@ -270,9 +264,6 @@ func (fw *FillWorker) fillAccounts() {
 				copy(a.CodeHash[:], val[pos:pos+codeHashBytes])
 				pos += codeHashBytes
 			}
-			if pos >= len(val) {
-				fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", key, val)
-			}
 			incBytes := int(val[pos])
 			pos++
 			if incBytes > 0 {
@@ -281,7 +272,7 @@ func (fw *FillWorker) fillAccounts() {
 			value := make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(value)
 			fw.rs.Put(kv.PlainState, key, value)
-			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 		}
 	}
 }
@@ -298,8 +289,10 @@ func (fw *FillWorker) fillStorage() {
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
-			fw.rs.Put(kv.PlainState, compositeKey, val)
-			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+			if len(val) > 1 || val[0] != 0 {
+				fw.rs.Put(kv.PlainState, compositeKey, val)
+			}
+			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
 	}
 }
@@ -316,10 +309,12 @@ func (fw *FillWorker) fillCode() {
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 		if len(val) > 0 {
-			codeHash := crypto.Keccak256(val)
-			fw.rs.Put(kv.Code, codeHash[:], val)
-			fw.rs.Put(kv.PlainContractCode, compositeKey, codeHash[:])
-			fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+			if len(val) > 1 || val[0] != 0 {
+				codeHash := crypto.Keccak256(val)
+				fw.rs.Put(kv.Code, codeHash[:], val)
+				fw.rs.Put(kv.PlainContractCode, compositeKey, codeHash[:])
+			}
+			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 		}
 	}
 }
@@ -378,7 +373,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	ctx := context.Background()
-	aggPath := filepath.Join(datadir, "erigon22")
+	aggPath := filepath.Join(datadir, "erigon23")
 	agg, err := libstate.NewAggregator(aggPath, AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)

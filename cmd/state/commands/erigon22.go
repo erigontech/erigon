@@ -288,6 +288,7 @@ func processBlock22(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
 	rw.blockNum = block.NumberU64()
+	ww.blockNum = block.NumberU64()
 
 	daoFork := txNum >= startTxNum && chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
@@ -399,7 +400,8 @@ type ReaderWrapper22 struct {
 }
 
 type WriterWrapper22 struct {
-	w *libstate.Aggregator
+	blockNum uint64
+	w        *libstate.Aggregator
 }
 
 func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -452,6 +454,9 @@ func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnatio
 		fmt.Printf("block %d ReadStorage [%x] [%x] => [%x]\n", rw.blockNum, address, *key, enc)
 	}
 	if enc == nil {
+		return nil, nil
+	}
+	if len(enc) == 1 && enc[0] == 0 {
 		return nil, nil
 	}
 	return enc, nil
@@ -553,6 +558,10 @@ func (ww *WriterWrapper22) DeleteAccount(address common.Address, original *accou
 }
 
 func (ww *WriterWrapper22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	trace := fmt.Sprintf("%x", address) == "000000000000006f6502b7f2bbac8c30a3f67e9a"
+	if trace {
+		fmt.Printf("block %d WriteAccountStorage [%x] [%x] => [%x]\n", ww.blockNum, address, *key, value.Bytes())
+	}
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}

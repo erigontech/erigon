@@ -57,7 +57,7 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 			return nil, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		enc = hr.rs.Get(kv.PlainState, address.Bytes())
-		if enc != nil {
+		if enc == nil {
 			enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
 			if err != nil {
 				return nil, err
@@ -68,13 +68,13 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 			return nil, err
 		}
 		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, hr.txNum)
+			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], noState=%t, stateTxNum=%d, txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, noState, stateTxNum, hr.txNum)
 		}
 		return &a, nil
 	}
 	if len(enc) == 0 {
 		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => [], txNum: %d\n", address, hr.txNum)
+			fmt.Printf("ReadAccountData [%x] => [], noState=%t, stateTxNum=%d, txNum: %d\n", address, noState, stateTxNum, hr.txNum)
 		}
 		return nil, nil
 	}
@@ -105,7 +105,7 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, hr.txNum)
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], noState=%t, stateTxNum=%d, txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, noState, stateTxNum, hr.txNum)
 	}
 	return &a, nil
 }
@@ -140,6 +140,9 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	if enc == nil {
 		return nil, nil
 	}
+	if len(enc) == 1 && enc[0] == 0 {
+		return nil, nil
+	}
 	return enc, nil
 }
 
@@ -164,6 +167,10 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 	}
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
+	}
+	if len(enc) == 1 && enc[0] == 0 {
+		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
+		return nil, nil
 	}
 	return enc, nil
 }
