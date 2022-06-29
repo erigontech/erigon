@@ -1,12 +1,13 @@
 GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
-UNAME = $(shell uname)
+UNAME = $(shell uname) # Supported: Darwin, Linux
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-DOCKER_UID ?= 3473
-DOCKER_GID ?= 3473
+ERIGON_USER ?= erigon # dedicated user
+DOCKER_UID ?= 3473    # if using volume-mounting data dir, then must exist on host OS
+DOCKER_GID ?= 3473    # if using volume-mounting data dir, then must exist on host OS
 DOCKER_TAG ?= thorax/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
@@ -177,3 +178,21 @@ git-submodules:
 	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
 
+# create "erigon" user
+user_linux:
+	command -v docker >/dev/null && sudo groupadd -f docker
+	sudo addgroup --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo adduser --disabled-password --gecos '' --uid $(DOCKER_UID) --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo mkhomedir_helper $(ERIGON_USER)
+	command -v docker >/dev/null && sudo usermod -aG docker $(ERIGON_USER)
+	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
+	echo 'export PATH=$$PATH:/usr/local/go/bin' | sudo -u $(ERIGON_USER) tee /home/$(ERIGON_USER)/.bash_aliases >/dev/null
+
+# create "erigon" user
+user_macos:
+	sudo dscl . -create /Users/$(ERIGON_USER)
+	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
+	sudo dscl . -list /Users UniqueID | grep $(ERIGON_USER) | grep $(DOCKER_UID) || sudo dscl . -create /Users/$(ERIGON_USER) UniqueID $(DOCKER_UID)
+	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(DOCKER_GID)
+	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
+	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
