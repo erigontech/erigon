@@ -69,11 +69,7 @@ endif
 xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
 
 docker-compose: validate_docker_build_args
-	mkdir -p $(xdg_data_home_subdirs) || sudo -u $(shell id -un $(DOCKER_UID)) mkdir -p $(xdg_data_home_subdirs)
-	@if [ "$(xdg_data_home)" = "~/.local/share" ]; then \
-		echo "Validating XDG_DATA_HOME will be writable by docker..."; \
-		ls -aln "$(xdg_data_home)" | grep " \./$$" | grep " $(DOCKER_UID) " | grep " $(DOCKER_GID) "; \
-	fi
+	mkdir -p $(xdg_data_home_subdirs)
 	$(DOCKER_COMPOSE) up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
