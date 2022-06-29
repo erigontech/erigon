@@ -73,7 +73,7 @@ docker-compose: validate_docker_build_args
 		echo "Validating XDG_DATA_HOME will be writable by docker..."; \
 		ls -aln "$(xdg_data_home)" | grep " \./$$" | grep " $(DOCKER_UID) " | grep " $(DOCKER_GID) "; \
 	fi
-	mkdir -p $(xdg_data_home_subdirs) 2>/dev/null || sudo -u $(ERIGON_USER) mkdir -p $(xdg_data_home_subdirs); \
+	mkdir -p $(xdg_data_home_subdirs) 2>/dev/null || sudo -u $(shell id -un $(DOCKER_UID)) mkdir -p $(xdg_data_home_subdirs)
 	$(DOCKER_COMPOSE) up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
