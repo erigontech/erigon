@@ -274,6 +274,16 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
+	// If another payload is already commissioned then we just reply with syncing
+	if s.stageLoopIsBusy() {
+		// We are still syncing a commissioned payload
+		// TODO(yperbasis): not entirely correct since per the spec:
+		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
+		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
+		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
+		log.Debug("[NewPayload] stage loop is busy")
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+	}
 	log.Debug("[NewPayload] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -332,17 +342,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})}, nil
 	}
 	tx.Rollback()
-
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		// We are still syncing a commissioned payload
-		// TODO(yperbasis): not entirely correct since per the spec:
-		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
-		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
-		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
-		log.Debug("[NewPayload] stage loop is busy")
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
-	}
 
 	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
@@ -419,6 +418,12 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
+	if s.stageLoopIsBusy() {
+		log.Debug("[ForkChoiceUpdated] stage loop is busy")
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
+		}, nil
+	}
 	log.Debug("[ForkChoiceUpdated] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -448,13 +453,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})},
-		}, nil
-	}
-
-	if s.stageLoopIsBusy() {
-		log.Debug("[ForkChoiceUpdated] stage loop is busy")
-		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
 
