@@ -177,13 +177,18 @@ git-submodules:
 	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
 
+# since DOCKER_UID, DOCKER_GID are initialized to the current user,
+# we need a separate envvar to facililate creation of the erigon user on the host OS.
+ERIGON_USER_UID ?= 3473
+ERIGON_USER_GID ?= 3473
+
 # create "erigon" user
 user_linux:
 ifdef DOCKER
 	sudo groupadd -f docker
 endif
-	sudo addgroup --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
-	sudo adduser --disabled-password --gecos '' --uid $(DOCKER_UID) --gid $(DOCKER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo addgroup --gid $(ERIGON_USER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo adduser --disabled-password --gecos '' --uid $(ERIGON_USER_UID) --gid $(ERIGON_USER_GID) $(ERIGON_USER) 2> /dev/null || true
 	sudo mkhomedir_helper $(ERIGON_USER)
 	echo 'export PATH=$$PATH:/usr/local/go/bin' | sudo -u $(ERIGON_USER) tee /home/$(ERIGON_USER)/.bash_aliases >/dev/null
 ifdef DOCKER
@@ -195,8 +200,8 @@ endif
 user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER)
 	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
-	sudo dscl . -list /Users UniqueID | grep $(ERIGON_USER) | grep $(DOCKER_UID) || sudo dscl . -create /Users/$(ERIGON_USER) UniqueID $(DOCKER_UID)
-	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(DOCKER_GID)
+	sudo dscl . -list /Users UniqueID | grep $(ERIGON_USER) | grep $(ERIGON_USER_UID) || sudo dscl . -create /Users/$(ERIGON_USER) UniqueID $(ERIGON_USER_UID)
+	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER)/.ethereum
