@@ -214,7 +214,9 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil
+		if pendingBlock := api.pendingBlock(); pendingBlock != nil {
+			return pendingBlock, nil
+		}
 	}
 
 	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
