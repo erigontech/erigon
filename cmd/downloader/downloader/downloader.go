@@ -230,9 +230,9 @@ func (d *Downloader) addSegments() error {
 	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
 		return err
 	}
-	files, err := allSegmentFiles(d.cfg.DataDir)
+	files, err := seedableSegmentFiles(d.cfg.DataDir)
 	if err != nil {
-		return fmt.Errorf("allSegmentFiles: %w", err)
+		return fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
 	for _, f := range files {
 		_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
