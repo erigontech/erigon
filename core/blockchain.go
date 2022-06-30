@@ -204,37 +204,14 @@ func ExecuteBlockEphemerallyForBSC(
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	var logs []*types.Log
-	for _, receipt := range receipts {
-		logs = append(logs, receipt.Logs...)
-	}
-
-	blockLogs := ibs.Logs()
-	var stateSyncReceipt *types.ReceiptForStorage
-	if len(blockLogs) > 0 {
-		var stateSyncLogs []*types.Log
-		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
-
-		if len(blockLogs) > len(logs) {
-			stateSyncLogs = blockLogs[len(logs):]
-
-			stateSyncReceipt = &types.ReceiptForStorage{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   stateSyncLogs,
-			}
-		}
-	}
-
 	execRs := &EphemeralExecResult{
-		TxRoot:            types.DeriveSha(includedTxs),
-		ReceiptRoot:       receiptSha,
-		Bloom:             bloom,
-		LogsHash:          rlpHash(blockLogs),
-		Receipts:          receipts,
-		Difficulty:        (*math.HexOrDecimal256)(block.Header().Difficulty),
-		GasUsed:           math.HexOrDecimal64(*usedGas),
-		Rejected:          rejectedTxs,
-		ReceiptForStorage: stateSyncReceipt,
+		TxRoot:      types.DeriveSha(includedTxs),
+		ReceiptRoot: receiptSha,
+		Bloom:       bloom,
+		Receipts:    receipts,
+		Difficulty:  (*math.HexOrDecimal256)(block.Header().Difficulty),
+		GasUsed:     math.HexOrDecimal64(*usedGas),
+		Rejected:    rejectedTxs,
 	}
 
 	return execRs, nil
