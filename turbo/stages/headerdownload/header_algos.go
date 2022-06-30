@@ -1093,7 +1093,7 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, terminalTotalDifficulty *big.Int, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(16)
@@ -1101,6 +1101,11 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
 	if currentHeight == nil {
 		criticalError = fmt.Errorf("could not read block number.")
+		return
+	}
+
+	isAncestorPosBlock, criticalError := rawdb.Transitioned(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
+	if criticalError != nil {
 		return
 	}
 	if store {
@@ -1115,7 +1120,9 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
-			latestValidHash = header.ParentHash
+			if isAncestorPosBlock {
+				latestValidHash = header.ParentHash
+			}
 			return
 		}
 		status = remote.EngineStatus_VALID
@@ -1165,7 +1172,9 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
 	latestValidHash = header.Hash()
 	if validationError != nil {
-		latestValidHash = header.ParentHash
+		if isAncestorPosBlock {
+			latestValidHash = header.ParentHash
+		}
 		status = remote.EngineStatus_INVALID
 	}
 	// After the we finished executing, we clean up old forks
