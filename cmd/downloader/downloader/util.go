@@ -75,7 +75,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	return res, nil
 }
-func allSegmentFiles(dir string) ([]string, error) {
+func seedableSegmentFiles(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -93,6 +93,13 @@ func allSegmentFiles(dir string) ([]string, error) {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
+			continue
+		}
+		ff, err := snap.ParseFileName(dir, f.Name())
+		if err != nil {
+			return nil, fmt.Errorf("ParseFileName: %w", err)
+		}
+		if !ff.Seedable() {
 			continue
 		}
 		res = append(res, f.Name())
@@ -146,13 +153,13 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allSegmentFiles(snapDir)
+	files, err := seedableSegmentFiles(snapDir)
 	if err != nil {
 		return err
 	}
 	errs := make(chan error, len(files)*2)
 	wg := &sync.WaitGroup{}
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
 	var sem = semaphore.NewWeighted(int64(workers))
 	for i, f := range files {
 		wg.Add(1)
