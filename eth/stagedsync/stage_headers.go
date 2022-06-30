@@ -606,6 +606,9 @@ func verifyAndSaveNewPoSHeader(
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
 		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
+		if err := rawdb.WritePoolBaseFee(tx, header.BaseFee); err != nil {
+			return &privateapi.PayloadStatus{CriticalError: err}, false, err
+		}
 		return &privateapi.PayloadStatus{
 			Status:          status,
 			LatestValidHash: latestValidHash,

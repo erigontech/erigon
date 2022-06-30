@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -307,6 +308,16 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
 		res = append(res, header)
 	}
 	return res, nil
+}
+
+func WritePoolBaseFee(db kv.Putter, baseFee *big.Int) error {
+	if baseFee == nil {
+		return nil
+	}
+
+	baseFeeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(baseFeeBytes, baseFee.Uint64())
+	return db.Put(kv.PoolInfo, txpool.PoolPendingBaseFeeKey, baseFeeBytes)
 }
 
 // WriteHeader stores a block header into the database and also stores the hash-

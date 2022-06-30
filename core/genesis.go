@@ -463,6 +463,9 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
+	if err := rawdb.WritePoolBaseFee(tx, block.BaseFee()); err != nil {
+		return nil, nil, err
+	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
