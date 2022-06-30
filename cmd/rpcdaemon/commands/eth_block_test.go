@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -30,6 +31,37 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
 	assert.Equal(t, expected, b["hash"])
+}
+
+func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("couldn't retrieve latest block")
+	}
+	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
+	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
+		tx.Rollback()
+		t.Error("didn't find forkchoice head hash")
+	}
+	tx.Commit()
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+	if err != nil {
+		t.Errorf("error retrieving block by number: %s", err)
+	}
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	assert.Equal(t, expectedHash, block["hash"])
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
@@ -73,6 +105,37 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	}
 }
 
+func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("couldn't retrieve latest block")
+	}
+	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
+	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
+		tx.Rollback()
+		t.Error("didn't find forkchoice finalized hash")
+	}
+	tx.Commit()
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
+	if err != nil {
+		t.Errorf("error retrieving block by number: %s", err)
+	}
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	assert.Equal(t, expectedHash, block["hash"])
+}
+
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	ctx := context.Background()
@@ -82,4 +145,35 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	if _, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false); err != nil {
 		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
 	}
+}
+
+func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("couldn't retrieve latest block")
+	}
+	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
+	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
+		tx.Rollback()
+		t.Error("didn't find forkchoice safe block hash")
+	}
+	tx.Commit()
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
+	if err != nil {
+		t.Errorf("error retrieving block by number: %s", err)
+	}
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	assert.Equal(t, expectedHash, block["hash"])
 }
