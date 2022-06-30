@@ -86,7 +86,7 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 		}
 	}
 
-	return &Downloader{
+	d := &Downloader{
 		cfg:               cfg,
 		db:                db,
 		pieceCompletionDB: c,
@@ -95,13 +95,21 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 		clientLock:        &sync.RWMutex{},
 
 		statsLock: &sync.RWMutex{},
-	}, nil
+	}
+	return d, d.addSegments()
 }
 
 func (d *Downloader) SnapDir() string {
 	d.clientLock.RLock()
 	defer d.clientLock.RUnlock()
 	return d.cfg.DataDir
+}
+
+func (d *Downloader) IsInitialSync() bool {
+	d.clientLock.RLock()
+	defer d.clientLock.RUnlock()
+	_, lastPart := filepath.Split(d.cfg.DataDir)
+	return lastPart == "tmp"
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
@@ -215,6 +223,24 @@ func (d *Downloader) onComplete() {
 	d.pieceCompletionDB = c
 	d.folder = m
 	d.torrentClient = torrentClient
+	_ = d.addSegments()
+}
+
+func (d *Downloader) addSegments() error {
+	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
+		return err
+	}
+	files, err := seedableSegmentFiles(d.cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("seedableSegmentFiles: %w", err)
+	}
+	for _, f := range files {
+		_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Downloader) Stats() AggStats {
@@ -277,12 +303,6 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
-	}
-
-	if err := BuildTorrentsAndAdd(context.Background(), snapDir, torrentClient); err != nil {
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("BuildTorrentsAndAdd: %w", err)
-		}
 	}
 
 	return db, c, m, torrentClient, nil

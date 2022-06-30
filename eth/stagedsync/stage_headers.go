@@ -1155,22 +1155,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := cfg.snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
-	if cfg.snapshots.SegmentsMax() < expect {
-		k, err := rawdb.SecondKey(tx, kv.Headers) // genesis always first
-		if err != nil {
-			return err
-		}
-		var hasInDB uint64 = 1
-		if k != nil {
-			hasInDB = binary.BigEndian.Uint64(k)
-		}
-		if cfg.snapshots.SegmentsMax() < hasInDB {
-			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
-		} else {
-			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
-		}
-	}
 
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
