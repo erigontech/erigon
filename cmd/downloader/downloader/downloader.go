@@ -109,7 +109,6 @@ func (d *Downloader) IsInitialSync() bool {
 	d.clientLock.RLock()
 	defer d.clientLock.RUnlock()
 	_, lastPart := filepath.Split(d.cfg.DataDir)
-	panic(lastPart)
 	return lastPart == "tmp"
 }
 
