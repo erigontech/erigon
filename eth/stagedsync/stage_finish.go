@@ -69,10 +69,9 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		}
 	}
 
-	block := rawdb.ReadCurrentBlock(tx)
 	if cfg.headCh != nil {
 		select {
-		case cfg.headCh <- block:
+		case cfg.headCh <- rawdb.ReadCurrentBlock(tx):
 		default:
 		}
 

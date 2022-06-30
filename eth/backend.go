@@ -439,6 +439,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if currentBlock == nil {
 		currentBlock = genesis
 	}
+	// We start the transaction pool on startup, for a couple of reasons:
+	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
+	// to initialize it properly.
+	// 2) we cannot propose for block 1 regardless.
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		baseFee := uint64(0)
