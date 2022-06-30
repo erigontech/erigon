@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -133,12 +132,13 @@ func SpawnStageHeaders(
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+	transitionedToPoS, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
 	}
 
-	if isTrans {
+	if transitionedToPoS {
+		libcommon.SafeClose(cfg.hd.QuitPoWMining)
 		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
@@ -350,6 +350,28 @@ func startHandlingForkChoice(
 		}
 	}
 
+	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
+		log.Info("Flushing in-memory state")
+		if err := cfg.hd.FlushNextForkState(tx); err != nil {
+			return nil, err
+		}
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+		if err != nil {
+			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			return nil, err
+		}
+		if canonical {
+			cfg.hd.SetPendingPayloadHash(headerHash)
+			return nil, nil
+		} else {
+			return &privateapi.PayloadStatus{
+				CriticalError: &privateapi.InvalidForkchoiceStateErr,
+			}, nil
+		}
+	}
+
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
@@ -361,15 +383,6 @@ func startHandlingForkChoice(
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
-		log.Info("Flushing in-memory state")
-		if err := cfg.hd.FlushNextForkState(tx); err != nil {
-			return nil, err
-		}
-		cfg.hd.SetPendingPayloadHash(headerHash)
-		return nil, nil
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
@@ -571,21 +584,33 @@ func verifyAndSaveNewPoSHeader(
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
-
+		if cfg.memoryOverlay {
+			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
+			if criticalError != nil {
+				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
+			}
+			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
+			return &privateapi.PayloadStatus{
+				Status:          status,
+				LatestValidHash: latestValidHash,
+				ValidationError: validationError,
+			}, success, nil
+		}
 		// No canonization, HeadHeaderHash & StageProgress are not updated
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		if err = cfg.hd.ValidatePayload(tx, header, body, cfg.execPayload); err != nil {
-			return &privateapi.PayloadStatus{Status: remote.EngineStatus_INVALID}, false, nil
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
+		if criticalError != nil {
+			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
-		pendingBaseFee := misc.CalcBaseFee(cfg.notifications.Accumulator.ChainConfig(), header)
-		cfg.notifications.Accumulator.SendAndReset(context.Background(), cfg.notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
+		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
-			Status:          remote.EngineStatus_VALID,
-			LatestValidHash: headerHash,
-		}, true, nil
+			Status:          status,
+			LatestValidHash: latestValidHash,
+			ValidationError: validationError,
+		}, success, nil
 	}
 
 	// OK, we're on the canonical chain
@@ -747,17 +772,17 @@ func HeadersPOW(
 Loop:
 	for !stopped {
 
-		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
+		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
-
-		if isTrans {
+		if transitionedToPoS {
 			if err := s.Update(tx, headerProgress); err != nil {
 				return err
 			}
 			break
 		}
+
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
@@ -1152,22 +1177,27 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "segments", cfg.snapshots.SegmentsMax(), "indices", cfg.snapshots.IndicesMax(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
-	if cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-		if !cfg.snapshots.SegmentsReady() {
-			return fmt.Errorf("not all snapshot segments are available")
+	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+		if !cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() == 0 {
+			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 		}
-
-		// wait for Downloader service to download all expected snapshots
-		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-				return fmt.Errorf("BuildIndices: %w", err)
+		if cfg.snapshots.Cfg().Produce {
+			if !cfg.snapshots.SegmentsReady() {
+				return fmt.Errorf("not all snapshot segments are available")
 			}
-		}
 
-		if err := cfg.snapshots.Reopen(); err != nil {
-			return fmt.Errorf("ReopenIndices: %w", err)
+			// wait for Downloader service to download all expected snapshots
+			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
+					return fmt.Errorf("BuildIndices: %w", err)
+				}
+			}
+
+			if err := cfg.snapshots.Reopen(); err != nil {
+				return fmt.Errorf("ReopenIndices: %w", err)
+			}
 		}
 	}
 	if cfg.dbEventNotifier != nil {
@@ -1251,6 +1281,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
+	if cfg.snapshots.Cfg().NoDownloader {
+		return nil
+	}
+
 	// send all hashes to the Downloader service
 	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
