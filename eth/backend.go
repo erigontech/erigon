@@ -158,6 +158,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
+	var currentBlock *types.Block
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -168,6 +169,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if h != (common.Hash{}) {
 			config.Genesis = nil // fallback to db content
 		}
+		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
 		panic(err)
@@ -433,6 +435,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, fmt.Errorf("private api: %w", err)
 		}
 	}
+
+	if currentBlock == nil {
+		currentBlock = genesis
+	}
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		baseFee := uint64(0)
+		if currentBlock.BaseFee() != nil {
+			baseFee = currentBlock.BaseFee().Uint64()
+		}
+		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
+		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
+
+	}()
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()

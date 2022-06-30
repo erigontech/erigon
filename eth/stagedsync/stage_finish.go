@@ -70,9 +70,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	}
 
 	block := rawdb.ReadCurrentBlock(tx)
-	if err := rawdb.WritePoolBaseFee(tx, block.BaseFee()); err != nil {
-		return err
-	}
 	if cfg.headCh != nil {
 		select {
 		case cfg.headCh <- block:

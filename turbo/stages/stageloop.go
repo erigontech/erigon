@@ -126,7 +126,6 @@ func StageLoopStep(
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var prevHeadBlockHash common.Hash
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
@@ -137,7 +136,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		prevHeadBlockHash = rawdb.ReadHeadBlockHash(tx)
 		return nil
 	}); err != nil {
 		return headBlockHash, err
@@ -207,7 +205,7 @@ func StageLoopStep(
 	}
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil && headBlockHash != prevHeadBlockHash {
+		if header != nil {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
