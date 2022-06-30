@@ -3,14 +3,12 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -67,12 +65,11 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			t.DisallowDataDownload()
 			t.AllowDataUpload()
 			<-t.GotInfo()
-			if !common.FileExist(filepath.Join(s.d.SnapDir(), t.Info().Name+".torrent")) {
-				mi := t.Metainfo()
-				if err := CreateTorrentFile(s.d.SnapDir(), t.Info(), &mi); err != nil {
-					log.Warn("[downloader] create torrent file", "err", err)
-					return
-				}
+
+			mi := t.Metainfo()
+			if err := CreateTorrentFileIfNotExists(s.d.SnapDir(), t.Info(), &mi); err != nil {
+				log.Warn("[downloader] create torrent file", "err", err)
+				return
 			}
 		}(magnet.String())
 	}
