@@ -106,46 +106,23 @@ func BuildTorrentFileIfNeed(originalFileName, root string) (err error) {
 	if err != nil {
 		return fmt.Errorf("ParseFileName: %w", err)
 	}
-	if f.NeedTorrentFile() {
+	if !f.NeedTorrentFile() {
 		return nil
 	}
-	if err := CreateTorrentFileFromSegment(f, nil); err != nil {
-		return fmt.Errorf("CreateTorrentFile: %w", err)
+	if err := createTorrentFileFromSegment(f, nil); err != nil {
+		return fmt.Errorf("createTorrentFileFromInfo: %w", err)
 	}
 	return nil
 }
 
-func CreateTorrentFileFromSegment(f snap.FileInfo, mi *metainfo.MetaInfo) error {
+func createTorrentFileFromSegment(f snap.FileInfo, mi *metainfo.MetaInfo) error {
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize}
 	if err := info.BuildFromFilePath(f.Path); err != nil {
-		return fmt.Errorf("CreateTorrentFileFromSegment: %w", err)
+		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
 
-	if mi == nil {
-		infoBytes, err := bencode.Marshal(info)
-		if err != nil {
-			return err
-		}
-		mi = &metainfo.MetaInfo{
-			CreationDate: time.Now().Unix(),
-			CreatedBy:    "erigon",
-			InfoBytes:    infoBytes,
-			AnnounceList: Trackers,
-		}
-	} else {
-		mi.AnnounceList = Trackers
-	}
-
-	file, err := os.Create(f.Path + ".torrent")
-	if err != nil {
-		return err
-	}
-	defer file.Sync()
-	defer file.Close()
-	if err := mi.Write(file); err != nil {
-		return err
-	}
-	return nil
+	dir, _ := filepath.Split(f.Path)
+	return createTorrentFileFromInfo(dir, info, mi)
 }
 
 // AddSegment - add existing .seg file, create corresponding .torrent if need
@@ -211,7 +188,21 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	return nil
 }
 
-func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+	f, err := snap.ParseFileName(root, info.Name)
+	if err != nil {
+		return fmt.Errorf("ParseFileName: %w", err)
+	}
+	if !f.NeedTorrentFile() {
+		return nil
+	}
+	if err := createTorrentFileFromInfo(root, info, mi); err != nil {
+		return err
+	}
+	return nil
+}
+
+func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
 	if mi == nil {
 		infoBytes, err := bencode.Marshal(info)
 		if err != nil {
