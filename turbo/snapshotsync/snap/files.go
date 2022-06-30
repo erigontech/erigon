@@ -142,10 +142,10 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool {
-	if f.To-f.From != DEFAULT_SEGMENT_SIZE {
-		return false
-	}
 	return common.FileExist(f.Path + ".torrent")
+}
+func (f FileInfo) NeedTorrentFile() bool {
+	return f.To-f.From == DEFAULT_SEGMENT_SIZE && !f.TorrentFileExists()
 }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }

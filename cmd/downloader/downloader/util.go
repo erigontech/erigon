@@ -101,18 +101,18 @@ func allSegmentFiles(dir string) ([]string, error) {
 }
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFileIfNeed(originalFileName, root string) (ok bool, err error) {
+func BuildTorrentFileIfNeed(originalFileName, root string) (err error) {
 	f, err := snap.ParseFileName(root, originalFileName)
 	if err != nil {
-		return false, fmt.Errorf("ParseFileName: %w", err)
+		return fmt.Errorf("ParseFileName: %w", err)
 	}
-	if f.TorrentFileExists() {
-		return true, nil
+	if f.NeedTorrentFile() {
+		return nil
 	}
 	if err := CreateTorrentFileFromSegment(f, nil); err != nil {
-		return false, fmt.Errorf("CreateTorrentFile: %w", err)
+		return fmt.Errorf("CreateTorrentFile: %w", err)
 	}
-	return true, nil
+	return nil
 }
 
 func CreateTorrentFileFromSegment(f snap.FileInfo, mi *metainfo.MetaInfo) error {
@@ -185,7 +185,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 		go func(f string, i int) {
 			defer sem.Release(1)
 			defer wg.Done()
-			_, err = BuildTorrentFileIfNeed(f, snapDir)
+			err = BuildTorrentFileIfNeed(f, snapDir)
 			if err != nil {
 				errs <- err
 			}
