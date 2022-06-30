@@ -4,6 +4,9 @@ GOBIN = $(CURDIR)/build/bin
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
+DOCKER_UID ?= 1000
+DOCKER_PID ?= 1000
+DOCKER_TAG ?= thorax/erigon:latest
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
@@ -30,10 +33,12 @@ go-version:
 	fi
 
 docker: git-submodules
-	DOCKER_BUILDKIT=1 docker build -t thorax/erigon:latest \
+	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
+		--build-arg PUID=${DOCKER_UID} \
+		--build-arg PGID=${DOCKER_PID} \
 		${DOCKER_FLAGS} \
 		.
 
@@ -68,6 +73,7 @@ COMMANDS += integration
 COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
+COMMANDS += rpcdaemon22
 COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state

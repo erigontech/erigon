@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -75,6 +76,16 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 		}
 	}()
 	return p
+}
+
+func (pi *PeerInfo) Close() {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	if pi.tasks != nil {
+		close(pi.tasks)
+		// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
+		pi.tasks = nil
+	}
 }
 
 func (pi *PeerInfo) ID() [64]byte {
@@ -135,11 +146,16 @@ func (pi *PeerInfo) Remove() {
 func (pi *PeerInfo) Async(f func()) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
+	if pi.tasks == nil {
+		// Too late, the task channel has been closed
+		return
+	}
 	select {
 	case <-pi.removed: // noop if peer removed
 	case <-pi.ctx.Done():
 		if pi.tasks != nil {
 			close(pi.tasks)
+			// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 			pi.tasks = nil
 		}
 	case pi.tasks <- f:
@@ -493,6 +509,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			log.Trace(fmt.Sprintf("[%s] Start with peer", peerID))
 
 			peerInfo := NewPeerInfo(peer, rw)
+			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
 			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
@@ -532,8 +549,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(ctx context.Context, datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	dir.MustExist(datadir)
+func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
+	dir.MustExist(dirs.DataDir)
 	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
@@ -686,16 +703,22 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 
-	var lastErr error
-	for retry := 0; retry < 16 && len(reply.Peers) == 0; retry++ { // limit number of retries
-		peerInfo, found := ss.findPeer(inreq.MinBlock)
-		if !found {
-			break
-		}
+	peerInfo, found := ss.findPeer(inreq.MinBlock)
+	if found {
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+	} else {
+		// If peer with specified minBlock is not found, send to 2 random peers
+		i := 0
+		sendToAmount := 2
+		ss.rangePeers(func(peerInfo *PeerInfo) bool {
+			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 0)
+			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
+			i++
+			return i < sendToAmount
+		})
 	}
-	return reply, lastErr
+	return reply, nil
 }
 
 func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {

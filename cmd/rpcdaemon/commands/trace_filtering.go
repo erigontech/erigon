@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // Transaction implements trace_transaction
@@ -125,7 +126,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, err := getBlockNumber(blockNr, tx)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +143,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if block == nil {
 		return nil, fmt.Errorf("could not find block %d", uint64(bn))
 	}
-	hash := block.Hash()
 
 	parentNr := bn
 	if parentNr > 0 {

@@ -35,6 +35,7 @@ type ABI struct {
 	Constructor Method
 	Methods     map[string]Method
 	Events      map[string]Event
+	Errors      map[string]Error
 
 	// Additional "special" functions introduced in solidity v0.6.0.
 	// It's separated from the original default fallback. Each contract
@@ -158,6 +159,7 @@ func (abi *ABI) UnmarshalJSON(data []byte) error {
 	}
 	abi.Methods = make(map[string]Method)
 	abi.Events = make(map[string]Event)
+	abi.Errors = make(map[string]Error)
 	for _, field := range fields {
 		switch field.Type {
 		case "constructor":
@@ -185,6 +187,8 @@ func (abi *ABI) UnmarshalJSON(data []byte) error {
 		case "event":
 			name := abi.overloadedEventName(field.Name)
 			abi.Events[name] = NewEvent(name, field.Name, field.Anonymous, field.Inputs)
+		case "error":
+			abi.Errors[field.Name] = NewError(field.Name, field.Inputs)
 		default:
 			return fmt.Errorf("abi: could not recognize type %v of field %v", field.Type, field.Name)
 		}

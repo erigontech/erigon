@@ -982,7 +982,12 @@ func (p *Parlia) Close() error {
 // getCurrentValidators get current validators
 func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBlockState) ([]common.Address, error) {
 	// method
-	method := "getValidators"
+	var method string
+	if p.chainConfig.IsEuler(header.Number) {
+		method = "getMiningValidators"
+	} else {
+		method = "getValidators"
+	}
 	data, err := p.validatorSetABI.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for getValidators", "err", err)

@@ -109,6 +109,22 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 	return nil
 }
 
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
+	var buf []byte
+	g := sn.seg.MakeGetter()
+	blockNum := sn.idxBodyNumber.BaseDataID()
+	var b types.BodyForStorage
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		if err := rlp.DecodeBytes(buf, &b); err != nil {
+			return err
+		}
+		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
+		blockNum++
+	}
+	return nil
+}
+
 func (sn *TxnSegment) close() {
 	if sn.Seg != nil {
 		sn.Seg.Close()
@@ -375,6 +391,11 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 	}()
 }
 
+// OptimisticReopen - optimistically open snapshots (ignoring error), useful at App startup because:
+// - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
+// - RPC return Nil for historical blocks if snapshots are not open
+func (s *RoSnapshots) OptimisticReopen() { _ = s.Reopen() }
+
 func (s *RoSnapshots) Reopen() error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
@@ -383,7 +404,7 @@ func (s *RoSnapshots) Reopen() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments2(s.dir)
+	files, err := segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -478,7 +499,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments2(s.dir)
+	files, err := segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -825,7 +846,7 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func segments2(dir string) (res []snap.FileInfo, err error) {
+func segments(dir string) (res []snap.FileInfo, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
 		return nil, err

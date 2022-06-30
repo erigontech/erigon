@@ -36,7 +36,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -71,7 +70,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
@@ -111,7 +109,6 @@ type Ethereum struct {
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
-	quitMining        chan struct{}
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
@@ -150,7 +147,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
-	tmpdir := filepath.Join(stack.Config().DataDir, etl.TmpDirName)
+	tmpdir := stack.Config().Dirs.Tmp
 	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
@@ -176,7 +173,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		panic(err)
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlockWithOverride(chainKv, config.Genesis, config.OverrideMergeForkBlock, config.OverrideTerminalTotalDifficulty)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlockWithOverride(chainKv, config.Genesis, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -242,7 +239,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().DataDir, "nodes", "eth66")
+		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
 		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
@@ -268,11 +265,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-	if err != nil {
-		return nil, err
-	}
-
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
@@ -287,8 +279,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
-
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
@@ -311,10 +301,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-			blockReader, allSnapshots, err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-			if err != nil {
-				return err
-			}
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
@@ -322,6 +308,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}); err != nil {
 		return nil, err
 	}
+
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config)
+	if err != nil {
+		return nil, err
+	}
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -358,7 +350,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
 	backend.pendingBlocks = make(chan *types.Block, 1)
 	backend.minedBlocks = make(chan *types.Block, 1)
@@ -371,9 +362,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
@@ -381,16 +372,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
+
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockProposerParametersPOS) (*types.Block, error) {
-		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error) {
+		miningStatePos := stagedsync.NewProposingState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
@@ -401,15 +393,25 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return block, nil
 	}
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, *config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+			log.Warn("Could not validate block", "err", err)
+			return err
+		}
+		return nil
+	}
+
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.sentriesClient.Hd.BeaconRequestList, backend.sentriesClient.Hd.PayloadStatusCh,
 		assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
-	// If we enabled the proposer flag we initiates the block proposing thread
-	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
-		ethBackendRPC.StartProposer()
-	}
+
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
 		if stack.Config().TLSConnection {
@@ -471,13 +473,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
 					log.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.quitMining:
+			case <-backend.sentriesClient.Hd.QuitPoWMining:
 				return
 			}
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining); err != nil {
 		return nil, err
 	}
 
@@ -486,7 +488,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		headCh = make(chan *types.Block, 1)
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, inMemoryExecution)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +550,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// Register the backend on the node
-	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
 	return backend, nil
 }
@@ -659,6 +660,25 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		})
 	}
 
+	var borcfg *bor.Bor
+	if b, ok := s.engine.(*bor.Bor); ok {
+		borcfg = b
+	} else if br, ok := s.engine.(*serenity.Serenity); ok {
+		if b, ok := br.InnerEngine().(*bor.Bor); ok {
+			borcfg = b
+		}
+	}
+	if borcfg != nil {
+		if cfg.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %w", err)
+		}
+
+		borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+		})
+	}
+
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
@@ -669,12 +689,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
-
-		tx, err := s.chainDB.BeginRo(ctx)
-		if err != nil {
-			log.Warn("mining", "err", err)
-			return
-		}
 
 		for {
 			mineEvery.Reset(3 * time.Second)
@@ -693,21 +707,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					log.Warn("mining", "err", err)
 				}
 			case <-quitCh:
-				return
-			}
-			// Check if we transitioned and if we did halt POW mining
-			headNumber, err := stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-
-			isTrans, err := rawdb.Transitioned(tx, headNumber, s.chainConfig.TerminalTotalDifficulty)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-			if isTrans {
 				return
 			}
 
@@ -766,35 +765,35 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
 	var err error
 
 	if isSnapshotEnabled {
-		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
-		if err = allSnapshots.Reopen(); err != nil {
-			return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		}
+		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
+		allSnapshots.OptimisticReopen()
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
-		if len(stack.Config().DownloaderAddr) > 0 {
-			// connect to external Downloader
-			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			s.downloader, err = downloader.New(config.Torrent)
+		if !cfg.Snapshot.NoDownloader {
+			if cfg.Snapshot.DownloaderAddr != "" {
+				// connect to external Downloader
+				s.downloaderClient, err = downloadergrpc.NewClient(ctx, cfg.Snapshot.DownloaderAddr)
+			} else {
+				// start embedded Downloader
+				s.downloader, err = downloader.New(cfg.Downloader)
+				if err != nil {
+					return nil, nil, err
+				}
+				go downloader.MainLoop(ctx, s.downloader, true)
+				bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+				if err != nil {
+					return nil, nil, fmt.Errorf("new server: %w", err)
+				}
+
+				s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+			}
 			if err != nil {
 				return nil, nil, err
 			}
-			go downloader.MainLoop(ctx, s.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-			if err != nil {
-				return nil, nil, fmt.Errorf("new server: %w", err)
-			}
-
-			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
-		if err != nil {
-			return nil, nil, err
 		}
 		return blockReader, allSnapshots, nil
 	} else {
@@ -857,11 +856,8 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
+	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
-	//s.miner.Stop()
 	s.engine.Close()
 	<-s.waitForStageLoopStop
 	if s.config.Miner.Enabled {

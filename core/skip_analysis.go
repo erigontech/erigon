@@ -17,18 +17,11 @@
 package core
 
 import (
+	"sort"
+
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
-
-// MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 14_909_200
-
-// MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const BSCNotCheckedFrom uint64 = 17_048_970
-
-const BorMainnetNotCheckedFrom uint64 = 14_232_422
-
-const RopstenNotCheckedFrom uint64 = 12_331_664
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
 // for the historical blocks (on mainnet now but perhaps on the testsnets
@@ -36,35 +29,32 @@ const RopstenNotCheckedFrom uint64 = 12_331_664
 // where codeBitmap was useful. Invalid jumps either did not occur, or were
 // prevented simply by checking whether the jump destination has JUMPDEST opcode
 // Mainnet transactions that use jumpdest analysis are:
+// 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 // 0x88a1f2a9f048a21fd944b28ad9962f533ab5d3c40e17b1bc3f99ae999a4021b2 (block 6426432)
 // 0x86e55d1818b5355424975de9633a57c40789ca08552297b726333a9433949c92 (block 6426298)
-// 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 // 0xcdb5bf0b4b51093e1c994f471921f88623c9d3e1b6aa2782049f53a0048f2b32 (block 11079912)
 // 0x21ab7bf7245a87eae265124aaf180d91133377e47db2b1a4866493ec4b371150 (block 13119520)
 
+var analysisBlocks map[string][]uint64 = map[string][]uint64{
+	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 14_961_400},
+	networkname.BSCChainName:        {18_682_505},
+	networkname.BorMainnetChainName: {29_447_463},
+	networkname.RopstenChainName:    {2_534_105, 2_534_116, 3_028_887, 3_028_940, 3_028_956, 3_450_102, 5_294_626, 5_752_787, 10_801_303, 10_925_062, 11_440_683, 11_897_655, 11_898_288, 12_291_199, 12_331_664},
+}
+
 func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
-	if config == params.MainnetChainConfig {
-		if blockNumber >= MainnetNotCheckedFrom { // We have not checked beyond that block
-			return false
-		}
-		if blockNumber == 6426298 || blockNumber == 6426432 || blockNumber == 5800596 || blockNumber == 11079912 || blockNumber == 13119520 {
-			return false
-		}
-		return true
-	} else if config == params.BSCChainConfig {
-		return blockNumber < BSCNotCheckedFrom
-	} else if config == params.BorMainnetChainConfig {
-		return blockNumber < BorMainnetNotCheckedFrom
-	} else if config == params.RopstenChainConfig {
-		if blockNumber >= RopstenNotCheckedFrom {
-			return false
-		}
-		if blockNumber == 2534105 || blockNumber == 2534116 || blockNumber == 3028887 || blockNumber == 3028940 || blockNumber == 3028956 ||
-			blockNumber == 3450102 || blockNumber == 5294626 || blockNumber == 5752787 || blockNumber == 10801303 || blockNumber == 10925062 ||
-			blockNumber == 11440683 || blockNumber == 11897655 || blockNumber == 11898288 || blockNumber == 12291199 {
-			return false
-		}
-		return true
+	blockNums, ok := analysisBlocks[config.ChainName]
+	if !ok {
+		return false
 	}
-	return false
+	// blockNums is ordered, and the last element is the first block number which has not been checked
+	p := sort.Search(len(blockNums), func(i int) bool {
+		return blockNums[i] >= blockNumber
+	})
+	if p == len(blockNums) {
+		// blockNum is beyond the last element, no optimisation
+		return false
+	}
+	// If the blockNumber is in the list, no optimisation
+	return blockNumber != blockNums[p]
 }

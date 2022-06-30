@@ -24,17 +24,19 @@ import (
 type TrieCfg struct {
 	db                kv.RwDB
 	checkRoot         bool
+	badBlockHalt      bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       services.FullBlockReader
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
+		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
 	}
 }
@@ -91,6 +93,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	if err == nil {
 		if cfg.checkRoot && root != expectedRootHash {
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
+			if cfg.badBlockHalt {
+				return trie.EmptyRoot, fmt.Errorf("Wrong trie root")
+			}
 			if to > s.BlockNumber {
 				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
 				log.Warn("Unwinding due to incorrect root hash", "to", unwindTo)

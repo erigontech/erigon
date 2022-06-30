@@ -1,10 +1,10 @@
-# Downloader 
+# Downloader
 
 Service to seed/download historical data (snapshots, immutable .seg files) by Bittorrent protocol
 
 ## How to Start Erigon in snapshot sync mode
 
-As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process. 
+As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process.
 
 ```shell
 # 1. Downloader by default run inside Erigon, by `--syncmode=snap` flag:
@@ -54,6 +54,7 @@ downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 ```
 
 Additional info:
+
 ```shell
 # Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:  
 STOP_BEFORE_STAGE=Execution ./build/bin/erigon --syncmode=full --datadir=<your_datadir> 
@@ -90,6 +91,7 @@ Downloader does:
 Technical details:
 
 - To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
+- If you add/remove any .seg file manually, also need remove `<your_datadir>/snapshots/db` folder
 
 ## How to verify that .seg files have same checksum withch current .torrent files
 

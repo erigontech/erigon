@@ -9,6 +9,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -58,6 +59,11 @@ func BodiesForward(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	firstCycle bool,
 ) error {
+	var doUpdate bool
+	if cfg.snapshots != nil && s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+		doUpdate = true
+	}
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
@@ -71,12 +77,11 @@ func BodiesForward(
 	}
 	timeout := cfg.timeout
 
-	if cfg.snapshots != nil {
-		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-				return err
-			}
-			s.BlockNumber = cfg.snapshots.BlocksAvailable()
+	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
+	// if not done, it will cause downloading from block 1
+	if doUpdate {
+		if err := s.Update(tx, s.BlockNumber); err != nil {
+			return err
 		}
 	}
 	// This will update bd.maxProgress
@@ -89,7 +94,7 @@ func BodiesForward(
 		return err
 	}
 	bodyProgress = s.BlockNumber
-	if bodyProgress == headerProgress {
+	if bodyProgress >= headerProgress {
 		return nil
 	}
 
@@ -277,7 +282,8 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, ctx, u.LogPrefix(), logEvery); err != nil {
+	badBlock := u.BadBlock != (common.Hash{})
+	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
 		return err
 	}
 

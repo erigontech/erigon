@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -105,9 +107,9 @@ type Anchor struct {
 	fLink         *Link       // Links attached immediately to this anchor (pointer to the first one, the rest can be found by following `next` fields)
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
-	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
-	timeouts      int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
-	idx           int    // Index of the anchor in the queue to be able to modify specific items
+	nextRetryTime time.Time // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
+	timeouts      int       // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+	idx           int       // Index of the anchor in the queue to be able to modify specific items
 }
 
 // AnchorQueue is a priority queue of anchors that priorises by the time when
@@ -133,7 +135,7 @@ func (aq AnchorQueue) Less(i, j int) bool {
 		// When next retry times are the same, we prioritise low block height anchors
 		return aq[i].blockHeight < aq[j].blockHeight
 	}
-	return aq[i].nextRetryTime < aq[j].nextRetryTime
+	return aq[i].nextRetryTime.Before(aq[j].nextRetryTime)
 }
 
 func (aq AnchorQueue) Swap(i, j int) {
@@ -153,6 +155,7 @@ func (aq *AnchorQueue) Pop() interface{} {
 	n := len(old)
 	x := old[n-1]
 	*aq = old[0 : n-1]
+	x.idx = -1
 	return x
 }
 
@@ -269,10 +272,16 @@ type Stats struct {
 	RespMaxBlock        uint64
 }
 
+type sideForkBlock struct {
+	header *types.Header
+	body   *types.RawBody
+}
+
 type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
+	sideForksBlock         map[common.Hash]sideForkBlock
 	engine                 consensus.Engine
 	insertQueue            InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -291,6 +300,7 @@ type HeaderDownload struct {
 	fetchingNew            bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
+	QuitPoWMining          chan struct{}
 	trace                  bool
 	stats                  Stats
 
@@ -306,11 +316,14 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
+	nextForkState        *memdb.MemoryMutation         // The db state of the next fork.
+	nextForkHash         common.Hash                   // Hash of the next fork
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -337,10 +350,12 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
+		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
+		sideForksBlock:     make(map[common.Hash]sideForkBlock),
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)

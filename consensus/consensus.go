@@ -18,6 +18,7 @@
 package consensus
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -160,4 +161,10 @@ type PoSA interface {
 	EnoughDistance(chain ChainReader, header *types.Header) bool
 	IsLocalBlock(header *types.Header) bool
 	AllowLightProcess(chain ChainReader, currentHeader *types.Header) bool
+}
+
+type AsyncEngine interface {
+	Engine
+
+	WithExecutionContext(context.Context) AsyncEngine
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -33,7 +34,7 @@ var (
 	traceSenders   []string
 	privateApiAddr string
 	txpoolApiAddr  string
-	datadir        string // Path to td working dir
+	datadirCli     string // Path to td working dir
 
 	TLSCertfile string
 	TLSCACert   string
@@ -43,8 +44,9 @@ var (
 	baseFeePoolLimit int
 	queuedPoolLimit  int
 
-	priceLimit uint64
-	priceBump  uint64
+	priceLimit   uint64
+	accountSlots uint64
+	priceBump    uint64
 )
 
 func init() {
@@ -52,7 +54,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -64,7 +66,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&baseFeePoolLimit, "txpool.globalbasefeeeslots", txpool.DefaultConfig.BaseFeeSubPoolLimit, "Maximum number of non-executable transactions where only not enough baseFee")
 	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpool.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
-	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
+	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpool.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
@@ -95,7 +97,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 
-		log.Info("TxPool started", "db", filepath.Join(datadir, "txpool"))
+		log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
 
 		sentryClients := make([]direct.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
@@ -112,12 +114,15 @@ var rootCmd = &cobra.Command{
 		}
 
 		cfg := txpool.DefaultConfig
-		cfg.DBDir = filepath.Join(datadir, "txpool")
+		dirs := datadir.New(datadirCli)
+
+		cfg.DBDir = dirs.TxPool
 		cfg.CommitEvery = 30 * time.Second
 		cfg.PendingSubPoolLimit = pendingPoolLimit
 		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 		cfg.QueuedSubPoolLimit = queuedPoolLimit
 		cfg.MinFeeCap = priceLimit
+		cfg.AccountSlots = accountSlots
 		cfg.PriceBump = priceBump
 
 		cacheConfig := kvcache.DefaultCoherentConfig

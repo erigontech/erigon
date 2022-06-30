@@ -13,9 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
+	"go.uber.org/atomic"
 )
 
 var stateBuckets = []string{
@@ -371,6 +373,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			continue
 		}
 
+		kv.ReadAhead(ctx, src, atomic.NewBool(false), name, nil, math.MaxUint32)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
 			return err

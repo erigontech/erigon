@@ -59,8 +59,11 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 }
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
-func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
+	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, v []byte) error {
+		if deleteHeaders {
+			deleteHeader(tx, common.BytesToHash(v), blockFrom)
+		}
 		return tx.Delete(kv.HeaderCanonical, k, nil)
 	}); err != nil {
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
@@ -142,6 +145,76 @@ func ReadHeadBlockHash(db kv.Getter) common.Hash {
 func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	if err := db.Put(kv.HeadBlockKey, []byte(kv.HeadBlockKey), hash.Bytes()); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
+	}
+}
+
+// DeleteHeaderNumber removes hash->number mapping.
+func DeleteHeaderNumber(db kv.Deleter, hash common.Hash) {
+	if err := db.Delete(kv.HeaderNumber, hash[:], nil); err != nil {
+		log.Crit("Failed to delete hash mapping", "err", err)
+	}
+}
+
+// ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceHead(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceHead failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceHead stores headBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceHead(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("headBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store head block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceSafe retrieves safeBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceSafe(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("safeBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceSafe failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceSafe stores safeBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceSafe(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("safeBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store safe block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceFinalized retrieves finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceFinalize failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to safe finalized block hash", "err", err)
 	}
 }
 
@@ -698,7 +771,7 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 }
 
 // MakeBodiesNonCanonical - move all txs of canonical blocks to NonCanonicalTxs bucket
-func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	var firstMovedTxnID uint64
 	var firstMovedTxnIDIsSet bool
 	for blockNum := from; ; blockNum++ {
@@ -723,17 +796,22 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 			firstMovedTxnID = bodyForStorage.BaseTxId
 		}
 
-		// move txs to NonCanonical bucket, it has own sequence
-		newBaseId, err := tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
-		if err != nil {
-			return err
+		newBaseId := uint64(0)
+		if !deleteBodies {
+			// move txs to NonCanonical bucket, it has own sequence
+			newBaseId, err = tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
+			if err != nil {
+				return err
+			}
 		}
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
 		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-			id := newBaseId + 1 + i
-			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
-				return err
+			if !deleteBodies {
+				id := newBaseId + 1 + i
+				if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
+					return err
+				}
 			}
 			if err := tx.Delete(kv.EthTx, k, nil); err != nil {
 				return err
@@ -743,9 +821,14 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 		}); err != nil {
 			return err
 		}
-		bodyForStorage.BaseTxId = newBaseId
-		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
-			return err
+
+		if deleteBodies {
+			deleteBody(tx, h, blockNum)
+		} else {
+			bodyForStorage.BaseTxId = newBaseId
+			if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
+				return err
+			}
 		}
 
 		select {
@@ -1088,8 +1171,8 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 
 // DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // returns [deletedFrom, deletedTo)
 func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deletedFrom, deletedTo uint64, err error) {
 	c, err := tx.Cursor(kv.Headers)
@@ -1149,10 +1232,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 				}
 			}
 		}
-		if err = tx.Delete(kv.Headers, k, nil); err != nil {
+		// Copying k because otherwise the same memory will be reused
+		// for the next key and Delete below will end up deleting 1 more record than required
+		kCopy := common.CopyBytes(k)
+		if err = tx.Delete(kv.Headers, kCopy, nil); err != nil {
 			return
 		}
-		if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err = tx.Delete(kv.BlockBody, kCopy, nil); err != nil {
 			return
 		}
 	}
@@ -1210,8 +1296,8 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 }
 
 // TruncateBlocks - delete block >= blockFrom
-// does decrement sequnces of kv.EthTx and kv.NonCanonicalTxs
-// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+// does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1259,10 +1345,13 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				return err
 			}
 		}
-		if err := tx.Delete(kv.Headers, k, nil); err != nil {
+		// Copying k because otherwise the same memory will be reused
+		// for the next key and Delete below will end up deleting 1 more record than required
+		kCopy := common.CopyBytes(k)
+		if err := tx.Delete(kv.Headers, kCopy, nil); err != nil {
 			return err
 		}
-		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err := tx.Delete(kv.BlockBody, kCopy, nil); err != nil {
 			return err
 		}
 

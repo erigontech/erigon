@@ -15,10 +15,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -32,12 +33,12 @@ import (
 )
 
 var (
-	datadir                        string
+	datadirCli                     string
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
 	natSetting                     string
-	torrentVerbosity               string
+	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
 	torrentDownloadSlots           int
 	torrentPort                    int
@@ -54,9 +55,9 @@ func init() {
 
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
-	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", utils.TorrentVerbosityFlag.Value, utils.TorrentVerbosityFlag.Usage)
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
 	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", utils.TorrentUploadRateFlag.Value, utils.TorrentUploadRateFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentVerbosity, "torrent.verbosity", utils.TorrentVerbosityFlag.Value, utils.TorrentVerbosityFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
@@ -74,7 +75,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -112,11 +113,12 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapDir := filepath.Join(datadir, "snapshots")
-	torrentLogLevel, err := torrentcfg.Str2LogLevel(torrentVerbosity)
+	dirs := datadir.New(datadirCli)
+	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
+	log.Info("torrentLogLevel", torrentLogLevel)
 
 	var downloadRate, uploadRate datasize.ByteSize
 	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
@@ -126,13 +128,13 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := torrentcfg.New(snapDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
@@ -164,16 +166,16 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapDir := filepath.Join(datadir, "snapshots")
+		dirs := datadir.New(datadirCli)
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-			return downloader.VerifyDtaFiles(ctx, snapDir)
+			return downloader.VerifyDtaFiles(ctx, dirs.Snap)
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			//removePieceCompletionStorage(snapDir)
-			files, err := downloader.AllTorrentPaths(snapDir)
+			files, err := downloader.AllTorrentPaths(dirs.Snap)
 			if err != nil {
 				return err
 			}
@@ -182,13 +184,13 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapDir); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
 				return err
 			}
 		}
 
 		res := map[string]string{}
-		files, err := downloader.AllTorrentPaths(snapDir)
+		files, err := downloader.AllTorrentPaths(dirs.Snap)
 		if err != nil {
 			return err
 		}

@@ -70,9 +70,10 @@ var (
 	FermionGenesisHash    = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 	BSCGenesisHash        = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash     = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
-	RialtoGenesisHash     = common.HexToHash("0xaabe549bfa85c84f7aee9da7010b97453ad686f2c2d8ce00503d1a00c72cad54")
+	RialtoGenesisHash     = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
 	MumbaiGenesisHash     = common.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
+	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 )
 
 var (
@@ -162,6 +163,8 @@ var (
 
 	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
 
+	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
@@ -238,17 +241,19 @@ type ChainConfig struct {
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // EIP-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
 	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
 	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
+	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
 	TerminalTotalDifficulty *big.Int    `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
 	TerminalBlockNumber     *big.Int    `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TerminalBlockNumber in EIP-3675
 	TerminalBlockHash       common.Hash `json:"terminalBlockHash,omitempty"`       // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
-	MergeForkBlock          *big.Int    `json:"mergeForkBlock,omitempty"`
+	MergeNetsplitBlock      *big.Int    `json:"mergeNetsplitBlock,omitempty"`      // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -378,17 +383,18 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
 			c.MirrorSyncBlock,
 			c.BrunoBlock,
+			c.EulerBlock,
 			engine,
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -403,6 +409,7 @@ func (c *ChainConfig) String() string {
 		c.BerlinBlock,
 		c.LondonBlock,
 		c.ArrowGlacierBlock,
+		c.GrayGlacierBlock,
 		c.TerminalTotalDifficulty,
 		engine,
 	)
@@ -506,6 +513,15 @@ func (c *ChainConfig) IsOnBruno(num *big.Int) bool {
 	return configNumEqual(c.BrunoBlock, num)
 }
 
+// IsEuler returns whether num is either equal to the euler fork block or greater.
+func (c *ChainConfig) IsEuler(num *big.Int) bool {
+	return isForked(c.EulerBlock, num.Uint64())
+}
+
+func (c *ChainConfig) IsOnEuler(num *big.Int) bool {
+	return configNumEqual(c.EulerBlock, num)
+}
+
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
 func (c *ChainConfig) IsMuirGlacier(num uint64) bool {
 	return isForked(c.MuirGlacierBlock, num)
@@ -536,6 +552,11 @@ func (c *ChainConfig) IsLondon(num uint64) bool {
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
 func (c *ChainConfig) IsArrowGlacier(num uint64) bool {
 	return isForked(c.ArrowGlacierBlock, num)
+}
+
+// IsGrayGlacier returns whether num is either equal to the Gray Glacier (EIP-5133) fork block or greater.
+func (c *ChainConfig) IsGrayGlacier(num uint64) bool {
+	return isForked(c.GrayGlacierBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -578,9 +599,11 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "petersburgBlock", block: c.PetersburgBlock},
 		{name: "istanbulBlock", block: c.IstanbulBlock},
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
+		{name: "eulerBlock", block: c.EulerBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
 		{name: "londonBlock", block: c.LondonBlock},
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
+		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -649,6 +672,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock, head) {
 		return newCompatError("Arrow Glacier fork block", c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock)
+	}
+	if isForkIncompatible(c.GrayGlacierBlock, newcfg.GrayGlacierBlock, head) {
+		return newCompatError("Gray Glacier fork block", c.GrayGlacierBlock, newcfg.GrayGlacierBlock)
+	}
+	if isForkIncompatible(c.EulerBlock, newcfg.EulerBlock, head) {
+		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
 	}
 	return nil
 }
@@ -770,6 +799,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return MumbaiChainConfig
 	case networkname.BorMainnetChainName:
 		return BorMainnetChainConfig
+	case networkname.BorDevnetChainName:
+		return BorDevnetChainConfig
 	default:
 		return nil
 	}
@@ -803,6 +834,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &MumbaiGenesisHash
 	case networkname.BorMainnetChainName:
 		return &BorMainnetGenesisHash
+	case networkname.BorDevnetChainName:
+		return &BorDevnetGenesisHash
 	default:
 		return nil
 	}

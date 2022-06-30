@@ -20,9 +20,11 @@ import (
 	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -112,7 +114,7 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) 
 		if !errors.Is(err, os.ErrNotExist) {
 			return false, fmt.Errorf("os.Stat: %w", err)
 		}
-		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
+		info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize}
 		if err := info.BuildFromFilePath(filepath.Join(root, originalFileName)); err != nil {
 			return false, fmt.Errorf("BuildFromFilePath: %w", err)
 		}
@@ -181,6 +183,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 }
 
 // BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapDir
+// torrent.Client does automaticaly read all .torrent files, but we also willing to add .seg files even if corresponding .torrent doesn't exist
 func BuildTorrentsAndAdd(ctx context.Context, snapDir string, client *torrent.Client) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -190,10 +193,7 @@ func BuildTorrentsAndAdd(ctx context.Context, snapDir string, client *torrent.Cl
 	}
 	errs := make(chan error, len(files)*2)
 	wg := &sync.WaitGroup{}
-	workers := runtime.GOMAXPROCS(-1) - 1
-	if workers < 1 {
-		workers = 1
-	}
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	var sem = semaphore.NewWeighted(int64(workers))
 	for i, f := range files {
 		wg.Add(1)
@@ -223,6 +223,7 @@ func BuildTorrentsAndAdd(ctx context.Context, snapDir string, client *torrent.Cl
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -333,7 +334,7 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	}
 
 	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
-		ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	} else {
 		ts.ChunkSize = 0
 	}
@@ -347,9 +348,16 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	return t, nil
 }
 
+var ErrSkip = fmt.Errorf("skip")
+
 func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
+
+	tmpSnapDir := filepath.Join(snapDir, "tmp") // snapshots are in sub-dir "tmp", if not fully downloaded
+	if common.FileExist(tmpSnapDir) {
+		snapDir = tmpSnapDir
+	}
 	files, err := AllTorrentPaths(snapDir)
 	if err != nil {
 		return err
@@ -379,12 +387,12 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			return err
 		}
 
-		err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
+		if err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
 			j++
 			if !good {
 				failsAmount++
 				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
-				return nil
+				return ErrSkip
 			}
 			select {
 			case <-logEvery.C:
@@ -394,8 +402,10 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			default:
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
+			if errors.Is(ErrSkip, err) {
+				continue
+			}
 			return err
 		}
 	}

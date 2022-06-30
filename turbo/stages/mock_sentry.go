@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -193,7 +193,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	snapDir := filepath.Join(tmpdir, "snapshots")
+	dirs := datadir.New(tmpdir)
 	var err error
 
 	db := memdb.New()
@@ -205,7 +205,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t:           t,
 		Log:         log.New(),
 		tmpdir:      tmpdir,
-		snapDir:     snapDir,
+		snapDir:     dirs.Snap,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
@@ -309,7 +309,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, mock.Notifications, nil),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -325,7 +325,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -336,12 +336,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				&vm.Config{},
 				mock.Notifications.Accumulator,
 				cfg.StateStream,
+				/*stateStream=*/ false,
 				mock.tmpdir,
 				blockReader,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, mock.tmpdir, blockReader),
 			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
@@ -365,9 +366,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, mock.tmpdir),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir, nil),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir, blockReader),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, mock.tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,
@@ -530,4 +531,8 @@ func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage
 
 func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
+}
+
+func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
+	return ms.sentriesClient.Hd
 }

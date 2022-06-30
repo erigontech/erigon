@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
@@ -19,7 +21,7 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 21, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
@@ -38,10 +40,9 @@ func TestEthSubscribe(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	backend := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
-	ff := rpcservices.New(ctx, backend, nil, nil, func() {})
+	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)
-	defer close(newHeads)
 	id := ff.SubscribeNewHeads(newHeads)
 	defer ff.UnsubscribeHeads(id)
 
@@ -53,6 +54,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
+		fmt.Printf("Got header %d\n", header.Number.Uint64())
 		require.Equal(i, header.Number.Uint64())
 	}
 }

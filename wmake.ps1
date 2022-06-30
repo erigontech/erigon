@@ -39,7 +39,8 @@ Param(
         "txpool",
         "all"
     )]
-    [string[]]$BuildTargets=@("erigon", "rpcdaemon", "sentry", "downloader", "integration")
+    [string[]]$BuildTargets=@("erigon", "rpcdaemon", "sentry", "downloader", "integration"),
+    [switch]$WnoSubmoduleUpdate
 )
 
 # Sanity checks on $BuildTargets
@@ -96,31 +97,6 @@ $headerText = @"
   Erigon's wmake.ps1 : Selected target(s) $($BuildTargets -join " ")
  ------------------------------------------------------------------------------
  
-"@
-
-$gitErrorText = @"
-
- Requirement Error.
- You need to have Git installed
- Please visit https://git-scm.com/downloads and download the appropriate
- installer.
-
-"@
-
-$goMinMinorVersion = 18
-$goMinVersion = "1.$goMinMinorVersion"
-
-$goErrorText = @"
-
- Requirement Error.
- You need to have Go Programming Language (aka golang) installed.
- Minimum required version is $goMinVersion
- Please visit https://golang.org/dl/ and download the appropriate
- installer.
- Ensure that go.exe installation
- directory is properly inserted into your PATH
- environment variable. 
-
 "@
 
 $chocolateyErrorText = @"
@@ -210,14 +186,53 @@ function Get-Uninstall-Item {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-GO-Installed {
-	$versionStr = go.exe version
-	if (!($?)) {
-		return $false
-	}
+    param ([string]$MinVersion = "" )
 
-	$minorVersionStr = $versionStr.Substring(15, 2)
-	$minorVersion = [int]$minorVersionStr
-	return ($minorVersion -ge $goMinMinorVersion)
+    $Private:GOcmd = (Get-Command -CommandType Application -ErrorAction SilentlyContinue "go.exe")
+    if ($Private:GOcmd -eq $null) {
+        Write-Host @"
+
+  Error !
+  Could not locate GO language binary executable go.exe
+  Either you don't have GO installed or GO binary directory (usually C:\Program Files\Go\bin\) is not
+  properly listed in your PATH environment variable.
+  If the first please visit https://golang.org/dl/ and download the appropriate installer.
+  If the latter please edit your PATH environment variable ad add the Go binary directory.
+       
+"@
+        return $false
+
+    } 
+    
+    # Go version is not detected by Get-Command hence we need to query for it
+    $Private:tmpstr = [string]@(go.exe version)
+    if ($Private:tmpstr -match '\d{1,}\.\d{1,}(.\d{1,})?') {
+        $Private:GOversion = [Version]::Parse($matches[0])
+        Write-Host " Found GO version $Private:GOversion"
+        if ($MinVersion -ne "") {
+            
+            $Private:GOMinversion = [Version]::Parse($MinVersion)
+            if ($Private:GOversion -lt $Private:GOMinversion) {
+                Write-Host @"
+
+  Error !
+  Minimum GO version required is $Private:GOMinversion
+
+"@
+                return $false
+            }
+        }
+        return $true
+    }
+
+    Write-Host @"
+
+    Error !
+    Could not detect GO version installed
+  
+"@
+    return $false
+
 }
 
 # -----------------------------------------------------------------------------
@@ -227,15 +242,54 @@ function Test-GO-Installed {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-Git-Installed {
-    $Private:item   = Get-Uninstall-Item "^Git version [0-9\.]{1,}|^Git$"
-    $Private:result = $false
+    param ([string]$MinVersion = "" )
 
-    if ($Private:item) {
-        Write-Host " Found Git version $($Private:item.DisplayVersion)"
-        $Private:result = $true
+    $Private:GITcmd = (Get-Command -CommandType Application -ErrorAction SilentlyContinue "git.exe")
+    if ($Private:GITcmd -eq $null) {
+        Write-Host @"
+
+  Error !
+  Could not locate git command utility git.exe
+  Either you don't have GIT installed or GIT binary directory (usually C:\Program Files\Git\cmd\) is not
+  properly listed in your PATH environment variable.
+  If the first please visit https://git-scm.com/downloads and download the appropriate installer.
+  If the latter please edit your PATH environment variable ad add the Git binary directory.
+       
+"@
+        return $false
+
+    } 
+    
+    # Go version is not detected by Get-Command hence we need to query for it
+    $Private:tmpstr = [string]@(git.exe --version)
+    if ($Private:tmpstr -match '\d{1,}\.\d{1,}(.\d{1,})?') {
+        $Private:GITversion = [Version]::Parse($matches[0])
+        Write-Host " Found GIT version $Private:GITversion"
+        if ($MinVersion -ne "") {
+            
+            $Private:GITMinversion = [Version]::Parse($MinVersion)
+            if ($Private:GITversion -lt $Private:GITMinversion) {
+                Write-Host @"
+
+  Error !
+  Minimum GIT version required is $Private:GITMinversion
+
+"@
+                return $false
+            }
+        }
+        return $true
     }
 
-    Write-Output $Private:result
+    Write-Host @"
+
+    Error !
+    Could not detect GIT version installed
+  
+"@
+    return $false
+
+    
 }
 
 # -----------------------------------------------------------------------------
@@ -334,30 +388,26 @@ $MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
 # ====================================================================
 # ## Test requirements
 # ====================================================================
-## Test Git is installed
-if(!(Test-Git-Installed)) {
-    Write-Host $gitErrorText
-    exit 1
-}
-Get-Command git.exe | Out-Null
-if (!($?)) {
+Set-Location $MyContext.Directory
+
+## Test we're a git cloned repo
+if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType Directory) {
     Write-Host @"
-    
- Error !
- Though Git installation is found I could not get
- the Git binary executable. Ensure Git installation
- directory is properly inserted into your PATH
- environment variable.
+
+  Error !
+  Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
+  Please clone it using 
+  git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 
 "@
     exit 1
 }
 
-## GO language is installed
-if(!(Test-GO-Installed)) {
-    Write-Host $goErrorText
-    exit 1
-}
+## Test Git is installed
+if(!(Test-Git-Installed)) { exit 1 }
+    
+## Test GO language is installed AND min version
+if(!(Test-GO-Installed "1.18")) { exit 1 }
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
@@ -368,11 +418,10 @@ $Erigon.Tag        = [string]@(git.exe describe --tags)
 $Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/ledgerwatch/erigon"
 
-$Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false"
+$Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
 $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
-$Erigon.Submodules = $false
 $env:GO111MODULE = "on"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
@@ -394,6 +443,15 @@ Write-Host @"
 
 "@
 
+if (!$WnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean") {
+    Write-Host " Updating git submodules ..."
+    Invoke-Expression -Command "git.exe submodule update --init --recursive --force --quiet"
+    if (!($?)) {
+        Write-Host " ERROR : Update submodules failed"
+        exit 1
+    }
+}
+
 foreach($BuildTarget in $BuildTargets) {
 
 ## Choco components for building db-tools
@@ -412,13 +470,6 @@ if ($BuildTarget -eq "db-tools") {
         exit 1
     }
 
-    if (!Test-Path -Path [string](Join-Path $Erigon.MDBXSourcePath "\.git") -PathType Directory) {
-        git.exe submodule update --init --recursive
-        if($LASTEXITCODE) {
-            Write-Host "An error has occurred while updating libmdbx submodule"
-            exit $LASTEXITCODE
-        }
-    }
 
     # Create build directory for mdbx and enter it
     $Erigon.MDBXBuildPath = [string](Join-Path $Erigon.BinPath "\mdbx")
@@ -456,9 +507,8 @@ if ($BuildTarget -eq "db-tools") {
     Set-Location $MyContext.Directory
     # Eventually move all mdbx_*.exe to ./build/bin directory
     Move-Item -Path "$($Erigon.MDBXBuildPath)/mdbx_*.exe" -Destination $Erigon.BinPath -Force
-}
-    
-if ($BuildTarget -eq "clean") {
+
+} elseif ($BuildTarget -eq "clean") {
     Write-Host " Cleaning ..."
 
     # Remove ./build/bin directory
@@ -474,9 +524,11 @@ if ($BuildTarget -eq "clean") {
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
+        Remove-Item Env:\GODEBUG
         exit 1
     } else {
         Write-Host "`n Tests completed"
+        Remove-Item Env:\GODEBUG
     }
 
 } elseif ($BuildTarget -eq "test-integration") {
@@ -492,28 +544,23 @@ if ($BuildTarget -eq "clean") {
     }
 
 } else {
-    if (!($Erigon.Submodules)) {
-        Write-Host " Updating git submodules ..."
-        Invoke-Expression -Command "git.exe submodule update --init --recursive --force" | Out-Host
-        if (!($?)) {
-            Write-Host " ERROR : Update submodules failed"
-            exit 1
-        }
-        $Erigon.Submodules = $true
-    }
+
+    # This has a naive assumption every target has a compilation unit wih same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")
     $BuildCommand = "go build $($Erigon.BuildFlags) -o ""$($outExecutable)"" ./cmd/$BuildTarget"
-    Invoke-Expression -Command $BuildCommand | Out-Host
-    if (!($?)) {
-        Write-Host " ERROR : Could not build $BuildTarget"
+    $BuildCommand += ';$?'
+    $success = Invoke-Expression -Command $BuildCommand
+    if (-not $success) {
+        Write-Host " ERROR : Could not build target $($BuildTarget)"
         exit 1
     } else {
         Write-Host "`n Built $($BuildTarget). Run $($outExecutable) to launch"
     }
+
 }
 }
 
-# Return to source folder
-Set-Location $MyContext.Directory
+# Return to origin folder
+Set-Location $MyContext.StartDir

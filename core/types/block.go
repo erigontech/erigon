@@ -653,36 +653,10 @@ type Block struct {
 	hash atomic.Value
 	size atomic.Value
 
-	// Td is used by package core to store the total difficulty
-	// of the chain up to and including the block.
-	td *big.Int
-
 	// These fields are used by package eth to track
 	// inter-peer block relay.
 	ReceivedAt   time.Time
 	ReceivedFrom interface{}
-}
-
-// DeprecatedTd is an old relic for extracting the TD of a block. It is in the
-// code solely to facilitate upgrading the database from the old format to the
-// new, after which it should be deleted. Do not use!
-func (b *Block) DeprecatedTd() *big.Int {
-	return b.td
-}
-
-// [deprecated by eth/63]
-// StorageBlock defines the RLP encoding of a Block stored in the
-// state database. The StorageBlock encoding contains fields that
-// would otherwise need to be recomputed.
-type StorageBlock Block
-
-// [deprecated by eth/63]
-// "storage" block encoding. used for database.
-type storageblock struct {
-	Header *Header
-	Txs    []Transaction
-	Uncles []*Header
-	TD     *big.Int
 }
 
 // Copy transaction senders from body into the transactions
@@ -945,7 +919,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // are ignored and set to values derived from the given txs, uncles
 // and receipts.
 func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt) *Block {
-	b := &Block{header: CopyHeader(header), td: new(big.Int)}
+	b := &Block{header: CopyHeader(header)}
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
@@ -980,7 +954,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header) *Block {
-	b := &Block{header: header, td: new(big.Int), transactions: txs, uncles: uncles}
+	b := &Block{header: header, transactions: txs, uncles: uncles}
 	b.hash.Store(hash)
 	return b
 }
@@ -1168,16 +1142,6 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-// [deprecated by eth/63]
-func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
-	var sb storageblock
-	if err := s.Decode(&sb); err != nil {
-		return err
-	}
-	b.header, b.uncles, b.transactions, b.td = sb.Header, sb.Uncles, sb.Txs, sb.TD
-	return nil
-}
-
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
@@ -1308,8 +1272,6 @@ func (b *Block) Copy() *Block {
 		sizeValue.Store(size)
 	}
 
-	td := big.NewInt(0).Set(b.td)
-
 	if b.ReceivedFrom != nil {
 		panic("ReceivedFrom deep copy is not supported")
 	}
@@ -1320,7 +1282,6 @@ func (b *Block) Copy() *Block {
 		transactions: transactions,
 		hash:         hashValue,
 		size:         sizeValue,
-		td:           td,
 		ReceivedAt:   b.ReceivedAt,
 		ReceivedFrom: nil,
 	}

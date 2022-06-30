@@ -28,12 +28,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -120,9 +121,11 @@ func init() {
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled    bool
-	KeepBlocks bool
-	Produce    bool // produce new snapshots
+	Enabled        bool
+	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
+	Produce        bool // produce new snapshots
+	NoDownloader   bool // possible to use snapshots without calling Downloader
+	DownloaderAddr string
 }
 
 func (s Snapshot) String() string {
@@ -172,10 +175,10 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot Snapshot
-	Torrent  *torrentcfg.Cfg
+	Snapshot   Snapshot
+	Downloader *downloadercfg.Cfg
 
-	SnapDir string
+	Dirs datadir.Dirs
 
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
@@ -211,6 +214,8 @@ type Config struct {
 
 	StateStream bool
 
+	MemoryOverlay bool
+
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
 
@@ -223,7 +228,7 @@ type Config struct {
 	Ethstats string
 
 	// FORK_NEXT_VALUE (see EIP-3675) block override
-	OverrideMergeForkBlock *big.Int `toml:",omitempty"`
+	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
 
 	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 }

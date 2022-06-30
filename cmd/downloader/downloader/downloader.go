@@ -15,7 +15,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
@@ -29,7 +29,7 @@ type Downloader struct {
 	torrentClient     *torrent.Client
 	clientLock        *sync.RWMutex
 
-	cfg *torrentcfg.Cfg
+	cfg *downloadercfg.Cfg
 
 	statsLock *sync.RWMutex
 	stats     AggStats
@@ -51,7 +51,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
+func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
 		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
 	}
-	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
+	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) && !HasSegFile(cfg.DataDir) { // it's ok to remove "datadir/snapshots/db" dir or add .seg files manually
 		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
 	} else {
 		if err := copyFromTmp(cfg.DataDir); err != nil {
@@ -205,7 +205,7 @@ func (d *Downloader) onComplete() {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
-	fmt.Printf("alex1: %s\n", d.cfg.DataDir)
+	// fmt.Printf("alex1: %s\n", d.cfg.DataDir)
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
@@ -366,4 +366,20 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 			}
 		}
 	}
+}
+
+func HasSegFile(dir string) bool {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if filepath.Ext(f.Name()) == ".seg" {
+			return true
+		}
+	}
+	return false
 }

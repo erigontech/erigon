@@ -107,7 +107,6 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	if err = statedb.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
-
 	*usedGas += result.UsedGas
 
 	// Set the receipt logs and create the bloom filter.

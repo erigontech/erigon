@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/urfave/cli"
@@ -54,7 +55,7 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
 	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
-		nodeConfig.DataDir = ctx.GlobalString(utils.DataDirFlag.Name)
+		nodeConfig.Dirs = datadir.New(ctx.GlobalString(utils.DataDirFlag.Name))
 	}
 	return &nodeConfig
 }

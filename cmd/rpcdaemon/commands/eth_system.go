@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -22,14 +23,14 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	execution, err := stages.GetStageProgress(tx, stages.Finish)
+	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
-	return hexutil.Uint64(execution), nil
+	return hexutil.Uint64(blockNum), nil
 }
 
-// Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
+// Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -201,6 +202,9 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	block, err := b.baseApi.blockByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
+	}
+	if block == nil {
+		return nil, nil
 	}
 	return block.Header(), nil
 }

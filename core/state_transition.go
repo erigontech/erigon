@@ -257,12 +257,13 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
 	}
+	var subBalance bool = false
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 	} else {
-		st.state.SubBalance(st.msg.From(), mgval)
+		subBalance = true
 	}
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		if !gasBailout {
@@ -272,6 +273,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	st.gas += st.msg.Gas()
 
 	st.initialGas = st.msg.Gas()
+	if subBalance {
+		st.state.SubBalance(st.msg.From(), mgval)
+	}
 	return nil
 }
 

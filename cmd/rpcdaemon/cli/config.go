@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -30,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -63,7 +64,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
-	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
@@ -93,6 +93,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
 	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, utils.JWTSecretPath.Name, utils.JWTSecretPath.Value, "Token to ensure safe connection between CL and EL")
+	rootCmd.PersistentFlags().BoolVar(&cfg.TraceRequests, utils.HTTPTraceFlag.Name, false, "Trace HTTP requests with INFO level")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -100,22 +101,17 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	if err := rootCmd.MarkPersistentFlagDirname("datadir"); err != nil {
 		panic(err)
 	}
-	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
-		panic(err)
-	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.WithDatadir = cfg.DataDir != "" || cfg.Chaindata != ""
+		cfg.WithDatadir = cfg.DataDir != ""
 		if cfg.WithDatadir {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			if cfg.Chaindata == "" {
-				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
-			}
+			cfg.Dirs = datadir.New(cfg.DataDir)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -214,7 +210,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader services.FullBlockReader, ethBackendServer remote.ETHBACKENDServer,
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
 ) (
-	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpcservices.Filters, err error,
+	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, err error,
 ) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.New(stateCacheCfg)
@@ -231,7 +227,7 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	eth = rpcservices.NewRemoteBackend(directClient, erigonDB, blockReader)
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = rpcservices.New(ctx, eth, txPool, mining, func() {})
+	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 	return
 }
 
@@ -239,10 +235,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
-	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet *rpcservices.StarknetService,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
-	ff *rpcservices.Filters, err error) {
+	ff *rpchelper.Filters, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -251,9 +247,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
-		log.Trace("Creating chain db", "path", cfg.Chaindata)
+		log.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := make(chan struct{}, cfg.DBReadConcurrency)
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Chaindata).Readonly().Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
@@ -345,15 +341,16 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, filepath.Join(cfg.DataDir, "snapshots"))
-			if err := allSnapshots.Reopen(); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
-			}
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			allSnapshots.OptimisticReopen()
 			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
-				allSnapshots.Reopen()
-				log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+				if err := allSnapshots.Reopen(); err != nil {
+					log.Error("[Snapshots] reopen", "err", err)
+				} else {
+					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+				}
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
@@ -423,7 +420,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		starknet = rpcservices.NewStarknetService(starknetConn)
 	}
 
-	ff = rpcservices.New(ctx, eth, txPool, mining, onNewSnapshot)
+	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot)
 
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
@@ -436,7 +433,8 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency)
+	fmt.Printf("TraceRequests = %t\n", cfg.TraceRequests)
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
@@ -610,7 +608,7 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
 
-	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency)
+	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
