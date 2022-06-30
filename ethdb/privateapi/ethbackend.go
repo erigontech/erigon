@@ -274,11 +274,6 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	log.Debug("[NewPayload] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	log.Debug("[NewPayload] lock acquired")
-
 	if s.config.TerminalTotalDifficulty == nil {
 		log.Error("[NewPayload] not a proof-of-stake chain")
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -291,7 +286,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
 		eip1559 = true
 	}
-
 	header := types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
@@ -313,16 +307,13 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-	if header.Hash() != blockHash {
-		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
-	}
 
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, req.BlockNumber-1)
 	if err != nil {
 		return nil, err
@@ -332,7 +323,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})}, nil
 	}
 	tx.Rollback()
-
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
 		// We are still syncing a commissioned payload
@@ -343,6 +333,17 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		log.Debug("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
+
+	if header.Hash() != blockHash {
+		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
+	}
+
+	// Lock the thread (We modify shared resources).
+	log.Debug("[NewPayload] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[NewPayload] lock acquired")
 
 	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
@@ -419,11 +420,6 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	log.Debug("[ForkChoiceUpdated] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	log.Debug("[ForkChoiceUpdated] lock acquired")
-
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
@@ -457,6 +453,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
+
+	log.Debug("[ForkChoiceUpdated] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[ForkChoiceUpdated] lock acquired")
 
 	log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 	s.requestList.AddForkChoiceRequest(&forkChoice)

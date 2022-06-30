@@ -609,7 +609,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, br)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -724,7 +724,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader(chainConfig, db))
+	cfg := stagedsync.StageTrieCfg(db, true, true, false, tmpdir, getBlockReader(chainConfig, db))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -1209,7 +1209,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir, nil),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, tmpdir, br),
+			stagedsync.StageTrieCfg(db, false, true, false, tmpdir, br),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

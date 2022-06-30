@@ -75,3 +75,5 @@ go.work
 /goerli
 
 docker-compose.*.yml
+.env
+

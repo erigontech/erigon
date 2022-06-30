@@ -2,6 +2,7 @@ package bor
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -215,7 +216,9 @@ type Bor struct {
 
 	signer common.Address // Ethereum address of the signing key
 	signFn SignerFn       // Signer function to authorize hashes with
-	lock   sync.RWMutex   // Protects the signer fields
+	lock   *sync.RWMutex  // Protects the signer fields
+
+	execCtx context.Context // context of caller execution stage
 
 	GenesisContractsClient *GenesisContractsClient
 	validatorSetABI        abi.ABI
@@ -263,6 +266,8 @@ func New(
 		HeimdallClient:         heimdallClient,
 		WithoutHeimdall:        withoutHeimdall,
 		spanCache:              btree.New(32),
+		execCtx:                context.Background(),
+		lock:                   &sync.RWMutex{},
 	}
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
@@ -290,6 +295,12 @@ func (c *Bor) Author(header *types.Header) (common.Address, error) {
 func (c *Bor) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 
 	return c.verifyHeader(chain, header, nil)
+}
+
+func (c *Bor) WithExecutionContext(ctx context.Context) *Bor {
+	subclient := *c
+	subclient.execCtx = ctx
+	return &subclient
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -1056,7 +1067,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 		for span == nil || span.EndBlock < blockNum {
 			var heimdallSpan HeimdallSpan
 			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
 				return nil, err
 			}
@@ -1073,7 +1084,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 			var spanID uint64 = span.ID - 1
 			var heimdallSpan HeimdallSpan
 			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
 				return nil, err
 			}
@@ -1106,7 +1117,7 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 		heimdallSpan = *s
 	} else {
-		response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", newSpanID), "")
+		response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", newSpanID), "")
 		if err != nil {
 			return err
 		}
@@ -1193,7 +1204,7 @@ func (c *Bor) CommitStates(
 		"Fetching state updates from Heimdall",
 		"fromID", lastStateID+1,
 		"to", to.Format(time.RFC3339))
-	eventRecords, err := c.HeimdallClient.FetchStateSyncEvents(lastStateID+1, to.Unix())
+	eventRecords, err := c.HeimdallClient.FetchStateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
 
 	if err != nil {
 		return nil, err

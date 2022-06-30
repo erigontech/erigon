@@ -71,7 +71,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// ----------------------------------------------------------------
 
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, t.TempDir(), blockReader)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
@@ -191,7 +191,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReader()
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir(), blockReader), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -253,7 +253,7 @@ func TestStorageDeletion(t *testing.T) {
 	// ----------------------------------------------------------------
 
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, t.TempDir(), blockReader)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader)
 	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 

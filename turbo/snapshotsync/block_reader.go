@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -490,6 +491,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	headerOffset := sn.idxHeaderHash.OrdinalLookup(blockHeight - sn.idxHeaderHash.BaseDataID())
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
+	if !gg.HasNext() {
+		return nil, nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, buf, nil
@@ -506,6 +510,12 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
 func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.From, sn.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if sn.idxHeaderHash == nil {
 		return nil, nil
 	}
@@ -514,6 +524,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	headerOffset := sn.idxHeaderHash.OrdinalLookup(localID)
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) > 1 && hash[0] != buf[0] {
 		return nil, nil
@@ -545,6 +558,12 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 }
 
 func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.BodyForStorage, []byte, error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.From, sn.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if sn.idxBodyNumber == nil {
 		return nil, buf, nil
 	}
@@ -552,6 +571,9 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
+	if !gg.HasNext() {
+		return nil, nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, nil, nil
@@ -569,6 +591,12 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 }
 
 func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From, txsSeg.To, dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
 	if txsSeg.IdxTxnHash == nil {
 		return nil, nil, nil
 	}
@@ -587,6 +615,9 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	gg.Reset(txnOffset)
 	stream := rlp.NewStream(reader, 0)
 	for i := uint32(0); i < txsAmount; i++ {
+		if !gg.HasNext() {
+			return nil, nil, nil
+		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
 			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Seg.FilePath(), len(buf))
@@ -609,6 +640,9 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 	offset := sn.IdxTxnHash.OrdinalLookup(txnID - sn.IdxTxnHash.BaseDataID())
 	gg := sn.Seg.MakeGetter()
 	gg.Reset(offset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
 	buf, _ = gg.Next(buf[:0])
 	sender, txnRlp := buf[1:1+20], buf[1+20:]
 
