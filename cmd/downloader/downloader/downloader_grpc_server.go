@@ -2,12 +2,15 @@ package downloader
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -25,15 +28,27 @@ type GrpcServer struct {
 	d *Downloader
 }
 
+// Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	isInitialSync := s.d.IsInitialSync()
+
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
-		if it.TorrentHash == nil {
-			err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapDir(), torrentClient)
-			if err != nil {
+		if it.TorrentHash == nil { // seed new snapshot
+			if _, err := BuildTorrentFileIfNeed(it.Path, s.d.SnapDir()); err != nil {
 				return nil, err
 			}
+		}
+		ok, err := AddSegment(it.Path, s.d.SnapDir(), torrentClient)
+		if err != nil {
+			return nil, fmt.Errorf("AddSegment: %w", err)
+		}
+		if ok {
+			continue
+		}
+
+		if !isInitialSync {
 			continue
 		}
 
@@ -52,10 +67,12 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			t.DisallowDataDownload()
 			t.AllowDataUpload()
 			<-t.GotInfo()
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.d.SnapDir(), t.Info(), &mi); err != nil {
-				log.Warn("[downloader] create torrent file", "err", err)
-				return
+			if !common.FileExist(filepath.Join(s.d.SnapDir(), t.Info().Name+".torrent")) {
+				mi := t.Metainfo()
+				if err := CreateTorrentFile(s.d.SnapDir(), t.Info(), &mi); err != nil {
+					log.Warn("[downloader] create torrent file", "err", err)
+					return
+				}
 			}
 		}(magnet.String())
 	}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"golang.org/x/exp/slices"
 )
@@ -138,6 +139,13 @@ type FileInfo struct {
 	From, To  uint64
 	Path, Ext string
 	T         Type
+}
+
+func (f FileInfo) TorrentFileExists() bool {
+	if f.To-f.From != DEFAULT_SEGMENT_SIZE {
+		return false
+	}
+	return common.FileExist(f.Path + ".torrent")
 }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
