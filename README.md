@@ -547,3 +547,10 @@ For example: btrfs's autodefrag option - may increase write IO 100x times
 ### Gnome Tracker can kill Erigon
 
 [Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.
+
+### the --mount option requires BuildKit error
+
+For anyone else that was getting the BuildKit error when trying to start Erigon the old way you can use the below...
+```
+XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+```
