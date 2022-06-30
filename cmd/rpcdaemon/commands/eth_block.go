@@ -208,8 +208,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
 	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
