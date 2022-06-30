@@ -585,7 +585,7 @@ func verifyAndSaveNewPoSHeader(
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
 		if cfg.memoryOverlay {
-			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
+			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, false, cfg.execPayload)
 			if criticalError != nil {
 				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 			}
@@ -601,7 +601,7 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
@@ -1154,22 +1154,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 	if err := cfg.snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
-	}
-	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
-	if cfg.snapshots.SegmentsMax() < expect {
-		k, err := rawdb.SecondKey(tx, kv.Headers) // genesis always first
-		if err != nil {
-			return err
-		}
-		var hasInDB uint64 = 1
-		if k != nil {
-			hasInDB = binary.BigEndian.Uint64(k)
-		}
-		if cfg.snapshots.SegmentsMax() < hasInDB {
-			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
-		} else {
-			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
-		}
 	}
 
 	var m runtime.MemStats
