@@ -585,7 +585,7 @@ func verifyAndSaveNewPoSHeader(
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
 		if cfg.memoryOverlay {
-			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, false, cfg.execPayload)
+			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, false, cfg.execPayload)
 			if criticalError != nil {
 				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 			}
@@ -604,7 +604,7 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, true, cfg.execPayload)
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
