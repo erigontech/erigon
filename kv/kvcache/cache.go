@@ -250,7 +250,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 				k := make([]byte, 32)
 				c.hasher.Sum(k)
 				c.addCode(k, sc.Changes[i].Code, r, id)
-			case remote.Action_DELETE:
+			case remote.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remote.Action_STORAGE:
