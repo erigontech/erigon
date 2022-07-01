@@ -589,6 +589,9 @@ func verifyAndSaveNewPoSHeader(
 			if criticalError != nil {
 				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 			}
+			if validationError != nil {
+				cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+			}
 			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 			return &privateapi.PayloadStatus{
 				Status:          status,
@@ -604,6 +607,9 @@ func verifyAndSaveNewPoSHeader(
 		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
+		}
+		if validationError != nil {
+			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		}
 		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
