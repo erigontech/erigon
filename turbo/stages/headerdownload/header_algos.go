@@ -1171,13 +1171,14 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
-	latestValidHash = header.Hash()
 	if validationError != nil {
 		if isAncestorPosBlock {
 			latestValidHash = header.ParentHash
 		}
 		status = remote.EngineStatus_INVALID
+		return
 	}
+	latestValidHash = header.Hash()
 	// After the we finished executing, we clean up old forks
 	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 	return
