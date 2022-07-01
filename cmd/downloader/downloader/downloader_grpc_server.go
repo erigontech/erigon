@@ -77,6 +77,14 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	return &emptypb.Empty{}, nil
 }
 
+func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
+	err := s.d.verify()
+	if err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
 	stats := s.d.Stats()
 	return &proto_downloader.StatsReply{

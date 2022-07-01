@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -36,7 +37,11 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 		return nil, err
 	}
 
-	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	if header == nil {
 		return nil, fmt.Errorf("block header not found: %d", blockNum)
 	}
@@ -52,7 +57,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	}
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	header, err := api._blockReader.HeaderByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +81,15 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	currenttHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
-	firstHeader := rawdb.ReadHeaderByNumber(tx, 0)
+	firstHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	if firstHeader == nil {
+		return nil, errors.New("no genesis header found")
+	}
+
 	firstHeaderTime := firstHeader.Time
 
 	if currenttHeaderTime <= uintTimestamp {
@@ -98,12 +111,26 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
-		currentHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
+		currentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum))
+		if err != nil {
+			return false
+		}
+
+		if currentHeader == nil {
+			return false
+		}
 
 		return currentHeader.Time >= uintTimestamp
 	})
 
-	resultingHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
+	resultingHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum))
+	if err != nil {
+		return nil, err
+	}
+
+	if resultingHeader == nil {
+		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
+	}
 
 	if resultingHeader.Time > uintTimestamp {
 		response, err := buildBlockResponse(tx, uint64(blockNum)-1, fullTx)

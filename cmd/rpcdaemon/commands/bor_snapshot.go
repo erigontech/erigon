@@ -45,7 +45,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(*number, api, tx)
+		header, _ = getHeaderByNumber(ctx, *number, api, tx)
 	}
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -58,7 +58,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, err
 	}
 	defer borTx.Rollback()
-	return snapshot(api, tx, borTx, header)
+	return snapshot(ctx, api, tx, borTx, header)
 }
 
 // GetAuthor retrieves the author a block.
@@ -75,7 +75,7 @@ func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) 
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(*number, api, tx)
+		header, _ = getHeaderByNumber(ctx, *number, api, tx)
 	}
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -96,7 +96,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	defer tx.Rollback()
 
 	// Retreive the header
-	header, _ := getHeaderByHash(tx, hash)
+	header, _ := getHeaderByHash(ctx, api, tx, hash)
 
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -109,7 +109,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 		return nil, err
 	}
 	defer borTx.Rollback()
-	return snapshot(api, tx, borTx, header)
+	return snapshot(ctx, api, tx, borTx, header)
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
@@ -127,7 +127,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(*number, api, tx)
+		header, _ = getHeaderByNumber(ctx, *number, api, tx)
 	}
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -140,7 +140,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 		return nil, err
 	}
 	defer borTx.Rollback()
-	snap, err := snapshot(api, tx, borTx, header)
+	snap, err := snapshot(ctx, api, tx, borTx, header)
 	return snap.signers(), err
 }
 
@@ -155,7 +155,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	defer tx.Rollback()
 
 	// Retreive the header
-	header, _ := getHeaderByHash(tx, hash)
+	header, _ := getHeaderByHash(ctx, api, tx, hash)
 
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -169,7 +169,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 	defer borTx.Rollback()
 
-	snap, err := snapshot(api, tx, borTx, header)
+	snap, err := snapshot(ctx, api, tx, borTx, header)
 	return snap.signers(), err
 }
 
@@ -214,7 +214,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	}
 	blockHeaders := make([]*types.Header, end-start+1)
 	for number := start; number <= end; number++ {
-		blockHeaders[number-start], _ = getHeaderByNumber(rpc.BlockNumber(number), api, tx)
+		blockHeaders[number-start], _ = getHeaderByNumber(ctx, rpc.BlockNumber(number), api, tx)
 	}
 
 	headers := make([][32]byte, bor.NextPowerOfTwo(length))
@@ -354,7 +354,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-func snapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, header *types.Header) (*Snapshot, error) {
+func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *types.Header) (*Snapshot, error) {
 	// Search for a snapshot on disk or build it from checkpoint
 	var (
 		headers []*types.Header
@@ -376,7 +376,7 @@ func snapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, header *types.Header) (*Snaps
 
 		// No snapshot for this header, move backward and check parent snapshots
 		if header == nil {
-			header, _ = getHeaderByNumber(rpc.BlockNumber(number), api, db)
+			header, _ = getHeaderByNumber(ctx, rpc.BlockNumber(number), api, db)
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
 			}

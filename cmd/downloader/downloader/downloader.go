@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
+	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -96,7 +97,10 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 
 		statsLock: &sync.RWMutex{},
 	}
-	return d, d.addSegments()
+	if err := d.addSegments(); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 func (d *Downloader) SnapDir() string {
@@ -226,6 +230,45 @@ func (d *Downloader) onComplete() {
 	_ = d.addSegments()
 }
 
+func (d *Downloader) verify() error {
+	total := 0
+	for _, t := range d.torrentClient.Torrents() {
+		select {
+		case <-t.GotInfo():
+			total += t.NumPieces()
+		default:
+			continue
+		}
+	}
+	logInterval := 20 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	wg := &sync.WaitGroup{}
+	j := atomic.NewInt64(0)
+
+	for _, t := range d.torrentClient.Torrents() {
+		wg.Add(1)
+		go func(t *torrent.Torrent) {
+			defer wg.Done()
+			for i := 0; i < t.NumPieces(); i++ {
+				j.Inc()
+				t.Piece(i).VerifyData()
+
+				select {
+				case <-logEvery.C:
+					log.Info("[snapshots] Verifying", "progress", fmt.Sprintf("%.2f%%", 100*float64(j.Load())/float64(total)))
+				default:
+				}
+				//<-t.Complete.On()
+			}
+		}(t)
+	}
+	wg.Wait()
+
+	return nil
+}
+
 func (d *Downloader) addSegments() error {
 	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
 		return err
@@ -325,12 +368,12 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				t.AllowDataDownload()
 				t.DownloadAll()
 				go func(t *torrent.Torrent) {
+					defer sem.Release(1)
 					//r := t.NewReader()
 					//r.SetReadahead(t.Length())
 					//_, _ = io.Copy(io.Discard, r) // enable streaming - it will prioritize sequential download
 
 					<-t.Complete.On()
-					sem.Release(1)
 				}(t)
 			}
 			time.Sleep(30 * time.Second)
