@@ -1104,6 +1104,7 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		return
 	}
 
+	// If the previous block is the transition block, then the latest valid hash is the 0 hash, in case we return INVALID
 	isAncestorPosBlock, criticalError := rawdb.IsPosBlock(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
 	if criticalError != nil {
 		return
