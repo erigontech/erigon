@@ -9,6 +9,7 @@ package downloader;
 
 service Downloader {
   rpc Download (DownloadRequest) returns (google.protobuf.Empty) {}
+  rpc Verify (VerifyRequest) returns (google.protobuf.Empty) {}
   rpc Stats (StatsRequest) returns (StatsReply) {}
 }
 
@@ -18,6 +19,9 @@ message DownloadItem {
 }
 message DownloadRequest {
   repeated DownloadItem items = 1; // single hash will be resolved as magnet link
+}
+
+message VerifyRequest {
 }
 
 

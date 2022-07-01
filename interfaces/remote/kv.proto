@@ -64,7 +64,7 @@ enum Action {
   UPSERT = 1;      // Change of balance or nonce (and optionally storage)
   CODE = 2;        // Change of code (and optionally storage)
   UPSERT_CODE = 3; // Change in (balance or nonce) and code (and optinally storage)
-  DELETE = 4;      // Account is deleted
+  REMOVE = 4;      // Account is deleted
 }
 
 message StorageChange {
