@@ -670,7 +670,7 @@ var (
 	}
 	DownloaderVerifyFlag = cli.BoolFlag{
 		Name:  "downloader.verify",
-		Usage: "verify snapshots on startup",
+		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
