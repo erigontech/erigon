@@ -248,21 +248,21 @@ func (d *Downloader) verify() error {
 	j := atomic.NewInt64(0)
 
 	for _, t := range d.torrentClient.Torrents() {
-		//wg.Add(1)
-		//go func(t *torrent.Torrent) {
-		//	defer wg.Done()
-		for i := 0; i < t.NumPieces(); i++ {
-			j.Inc()
-			t.Piece(i).VerifyData()
+		wg.Add(1)
+		go func(t *torrent.Torrent) {
+			defer wg.Done()
+			for i := 0; i < t.NumPieces(); i++ {
+				j.Inc()
+				t.Piece(i).VerifyData()
 
-			select {
-			case <-logEvery.C:
-				log.Info("[snapshots] Verifying", "progress", fmt.Sprintf("%.2f%%", 100*float64(j.Load())/float64(total)))
-			default:
+				select {
+				case <-logEvery.C:
+					log.Info("[snapshots] Verifying", "progress", fmt.Sprintf("%.2f%%", 100*float64(j.Load())/float64(total)))
+				default:
+				}
+				//<-t.Complete.On()
 			}
-			//<-t.Complete.On()
-		}
-		//}(t)
+		}(t)
 	}
 	wg.Wait()
 	d.statsLock.Lock()
