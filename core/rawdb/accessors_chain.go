@@ -1603,3 +1603,25 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
+
+// IsPosBlock returns true if the block is a PoS block, aka. all transitioned blocks except terminal block.
+func IsPosBlock(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.Int) (trans bool, err error) {
+	if terminalTotalDifficulty == nil || blockNum == 0 {
+		return false, nil
+	}
+
+	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+		return true, nil
+	}
+	header := ReadHeaderByNumber(db, blockNum)
+	if header == nil {
+		return false, nil
+	}
+
+	headerTd, err := ReadTd(db, header.Hash(), blockNum)
+	if err != nil {
+		return false, err
+	}
+
+	return header.Difficulty.Cmp(common.Big0) == 0 && headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
+}

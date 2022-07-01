@@ -1104,7 +1104,7 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		return
 	}
 
-	isAncestorPosBlock, criticalError := rawdb.Transitioned(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
+	isAncestorPosBlock, criticalError := rawdb.IsPosBlock(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
 	if criticalError != nil {
 		return
 	}
