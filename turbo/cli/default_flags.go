@@ -123,6 +123,7 @@ var DefaultFlags = []cli.Flag{
 	utils.SentryLogPeerInfoFlag,
 	utils.DownloaderAddrFlag,
 	utils.NoDownloaderFlag,
+	utils.DownloaderVerifyFlag,
 	HealthCheckFlag,
 	utils.HeimdallURLFlag,
 	utils.WithoutHeimdallFlag,

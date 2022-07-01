@@ -151,7 +151,6 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	go func() {
 		defer debug.LogPanic()
 		headers := make(chan *types.Header, 1)
-		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
 
