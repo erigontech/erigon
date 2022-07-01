@@ -125,6 +125,7 @@ type Snapshot struct {
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
 	Produce        bool // produce new snapshots
 	NoDownloader   bool // possible to use snapshots without calling Downloader
+	Verify         bool // verify snapshots on startup
 	DownloaderAddr string
 }
 

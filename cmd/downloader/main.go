@@ -118,7 +118,6 @@ func Downloader(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("torrentLogLevel", torrentLogLevel)
 
 	var downloadRate, uploadRate datasize.ByteSize
 	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {

@@ -1302,13 +1302,14 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	var m runtime.MemStats
 
 	// Check once without delay, for faster erigon re-start
-	if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err == nil && stats.Completed {
-		return nil
+	stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	if err == nil && stats.Completed {
+		goto Finish
 	}
 
-	var m runtime.MemStats
 	// Print download progress until all segments are available
 Loop:
 	for {
@@ -1319,6 +1320,11 @@ Loop:
 			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
+				if !cfg.snapshots.Cfg().Verify { // will verify after loop
+					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+						return err
+					}
+				}
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
@@ -1336,6 +1342,13 @@ Loop:
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 			}
+		}
+	}
+
+Finish:
+	if cfg.snapshots.Cfg().Verify {
+		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+			return err
 		}
 	}
 	return nil
