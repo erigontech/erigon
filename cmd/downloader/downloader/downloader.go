@@ -377,11 +377,6 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 					//_, _ = io.Copy(io.Discard, r) // enable streaming - it will prioritize sequential download
 
 					<-t.Complete.On()
-					go func(t *torrent.Torrent) {
-						t.VerifyData()
-						t.DownloadAll()
-						<-t.Complete.On()
-					}(t)
 				}(t)
 			}
 			time.Sleep(30 * time.Second)
