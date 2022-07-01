@@ -176,7 +176,10 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
 	if err != nil {
-		t.Error("error getting oldest header")
+		t.Errorf("error getting the oldest header %s", err)
+	}
+	if oldestHeader == nil {
+		t.Error("couldn't find oldest header")
 	}
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
