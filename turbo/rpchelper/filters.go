@@ -315,6 +315,7 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 	defer ff.mu.Unlock()
 	if ch, ok := ff.headsSubs[id]; ok {
 		close(ch)
+		delete(ff.headsSubs, id)
 		ff.storeMu.Lock()
 		defer ff.storeMu.Unlock()
 		delete(ff.pendingHeadsStores, id)
