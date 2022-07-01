@@ -62,6 +62,9 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 			if err != nil {
 				return nil, err
 			}
+			if enc == nil {
+				return nil, nil
+			}
 		}
 		var a accounts.Account
 		if err = a.DecodeForStorage(enc); err != nil {
