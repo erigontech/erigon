@@ -668,6 +668,10 @@ var (
 		Name:  "no-downloader",
 		Usage: "to disable downloader component",
 	}
+	DownloaderVerifyFlag = cli.BoolFlag{
+		Name:  "downloader.verify",
+		Usage: "verify snapshots on startup",
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -1389,6 +1393,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.GlobalBool(NoDownloaderFlag.Name)
+	cfg.Snapshot.Verify = ctx.GlobalBool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
