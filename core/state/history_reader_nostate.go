@@ -196,7 +196,12 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 				return 0, err
 			}
 		}
-		size = len(enc)
+		if len(enc) == 1 && enc[0] == 0 {
+			fmt.Printf("ReadAccountCodeSize [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
+			size = 0
+		} else {
+			size = len(enc)
+		}
 	}
 	if hr.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, hr.txNum)
