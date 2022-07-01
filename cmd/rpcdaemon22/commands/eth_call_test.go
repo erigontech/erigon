@@ -174,7 +174,13 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false), db, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	oldestHeader := rawdb.ReadHeaderByNumber(tx, 0)
+	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
+	if err != nil {
+		t.Errorf("error getting the oldest header %s", err)
+	}
+	if oldestHeader == nil {
+		t.Error("couldn't find oldest header")
+	}
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
 	middleBlock, err := rawdb.ReadBlockByNumber(tx, middleNumber)
