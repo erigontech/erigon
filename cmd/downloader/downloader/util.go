@@ -75,7 +75,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	return res, nil
 }
-func allSegmentFiles(dir string) ([]string, error) {
+func seedableSegmentFiles(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -95,50 +95,57 @@ func allSegmentFiles(dir string) ([]string, error) {
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
 			continue
 		}
+		ff, err := snap.ParseFileName(dir, f.Name())
+		if err != nil {
+			return nil, fmt.Errorf("ParseFileName: %w", err)
+		}
+		if !ff.Seedable() {
+			continue
+		}
 		res = append(res, f.Name())
 	}
 	return res, nil
 }
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) (ok bool, err error) {
+func BuildTorrentFileIfNeed(originalFileName, root string) (err error) {
 	f, err := snap.ParseFileName(root, originalFileName)
+	if err != nil {
+		return fmt.Errorf("ParseFileName: %w", err)
+	}
+	if !f.NeedTorrentFile() {
+		return nil
+	}
+	if err := createTorrentFileFromSegment(f, nil); err != nil {
+		return fmt.Errorf("createTorrentFileFromInfo: %w", err)
+	}
+	return nil
+}
+
+func createTorrentFileFromSegment(f snap.FileInfo, mi *metainfo.MetaInfo) error {
+	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize}
+	if err := info.BuildFromFilePath(f.Path); err != nil {
+		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
+	}
+
+	dir, _ := filepath.Split(f.Path)
+	return createTorrentFileFromInfo(dir, info, mi)
+}
+
+// AddSegment - add existing .seg file, create corresponding .torrent if need
+func AddSegment(originalFileName, snapDir string, client *torrent.Client) (bool, error) {
+	f, err := snap.ParseFileName(snapDir, originalFileName)
 	if err != nil {
 		return false, fmt.Errorf("ParseFileName: %w", err)
 	}
-	if f.To-f.From != snap.DEFAULT_SEGMENT_SIZE {
+	if !f.TorrentFileExists() {
 		return false, nil
 	}
-	torrentFilePath := filepath.Join(root, originalFileName+".torrent")
-	if _, err := os.Stat(torrentFilePath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return false, fmt.Errorf("os.Stat: %w", err)
-		}
-		info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize}
-		if err := info.BuildFromFilePath(filepath.Join(root, originalFileName)); err != nil {
-			return false, fmt.Errorf("BuildFromFilePath: %w", err)
-		}
-		if err := CreateTorrentFile(root, info, nil); err != nil {
-			return false, fmt.Errorf("CreateTorrentFile: %w", err)
-		}
+	_, err = AddTorrentFile(f.Path+".torrent", client)
+	if err != nil {
+		return false, fmt.Errorf("AddTorrentFile: %w", err)
 	}
 	return true, nil
-}
-
-func BuildTorrentAndAdd(ctx context.Context, originalFileName, snapDir string, client *torrent.Client) error {
-	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapDir)
-	if err != nil {
-		return fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
-	}
-	if !ok {
-		return nil
-	}
-	torrentFilePath := filepath.Join(snapDir, originalFileName+".torrent")
-	_, err = AddTorrentFile(ctx, torrentFilePath, client)
-	if err != nil {
-		return fmt.Errorf("AddTorrentFile: %w", err)
-	}
-	return nil
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
@@ -146,17 +153,23 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allSegmentFiles(snapDir)
+	files, err := seedableSegmentFiles(snapDir)
 	if err != nil {
 		return err
 	}
 	errs := make(chan error, len(files)*2)
 	wg := &sync.WaitGroup{}
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
+	var sem = semaphore.NewWeighted(int64(workers))
 	for i, f := range files {
 		wg.Add(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return err
+		}
 		go func(f string, i int) {
+			defer sem.Release(1)
 			defer wg.Done()
-			_, err = BuildTorrentFileIfNeed(ctx, f, snapDir)
+			err = BuildTorrentFileIfNeed(f, snapDir)
 			if err != nil {
 				errs <- err
 			}
@@ -182,63 +195,21 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	return nil
 }
 
-// BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapDir
-// torrent.Client does automaticaly read all .torrent files, but we also willing to add .seg files even if corresponding .torrent doesn't exist
-func BuildTorrentsAndAdd(ctx context.Context, snapDir string, client *torrent.Client) error {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	files, err := allSegmentFiles(snapDir)
-	if err != nil {
-		return fmt.Errorf("allSegmentFiles: %w", err)
-	}
-	errs := make(chan error, len(files)*2)
-	wg := &sync.WaitGroup{}
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
-	var sem = semaphore.NewWeighted(int64(workers))
-	for i, f := range files {
-		wg.Add(1)
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return err
-		}
-		go func(f string, i int) {
-			defer sem.Release(1)
-			defer wg.Done()
-
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
-			case <-logEvery.C:
-				log.Info("[Snapshots] Verify snapshots", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
-			default:
-			}
-			errs <- BuildTorrentAndAdd(ctx, f, snapDir, client)
-		}(f, i)
-	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	for err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
-	torrentFileName := filepath.Join(root, info.Name+".torrent")
-	if _, err := os.Stat(torrentFileName); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return CreateTorrentFile(root, info, mi)
-		}
+	f, err := snap.ParseFileName(root, info.Name)
+	if err != nil {
+		return fmt.Errorf("ParseFileName: %w", err)
+	}
+	if !f.NeedTorrentFile() {
+		return nil
+	}
+	if err := createTorrentFileFromInfo(root, info, mi); err != nil {
 		return err
 	}
 	return nil
 }
 
-func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
 	if mi == nil {
 		infoBytes, err := bencode.Marshal(info)
 		if err != nil {
@@ -322,7 +293,7 @@ func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good b
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
 	mi, err := metainfo.LoadFromFile(torrentFilePath)
 	if err != nil {
 		return nil, err
@@ -355,7 +326,7 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	defer logEvery.Stop()
 
 	tmpSnapDir := filepath.Join(snapDir, "tmp") // snapshots are in sub-dir "tmp", if not fully downloaded
-	if !common.FileExist(tmpSnapDir) {
+	if common.FileExist(tmpSnapDir) {
 		snapDir = tmpSnapDir
 	}
 	files, err := AllTorrentPaths(snapDir)

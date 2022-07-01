@@ -70,7 +70,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
@@ -110,7 +109,6 @@ type Ethereum struct {
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
-	quitMining        chan struct{}
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
@@ -160,6 +158,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
+	var currentBlock *types.Block
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -170,6 +169,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if h != (common.Hash{}) {
 			config.Genesis = nil // fallback to db content
 		}
+		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
 		panic(err)
@@ -365,7 +365,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
 	backend.pendingBlocks = make(chan *types.Block, 1)
 	backend.minedBlocks = make(chan *types.Block, 1)
@@ -380,7 +379,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
@@ -398,7 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
@@ -450,6 +449,24 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
+	if currentBlock == nil {
+		currentBlock = genesis
+	}
+	// We start the transaction pool on startup, for a couple of reasons:
+	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
+	// to initialize it properly.
+	// 2) we cannot propose for block 1 regardless.
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		baseFee := uint64(0)
+		if currentBlock.BaseFee() != nil {
+			baseFee = currentBlock.BaseFee().Uint64()
+		}
+		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
+		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
+
+	}()
+
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()
 		backend.txPool2Fetch.ConnectSentries()
@@ -489,13 +506,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
 					log.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.quitMining:
+			case <-backend.sentriesClient.Hd.QuitPoWMining:
 				return
 			}
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining); err != nil {
 		return nil, err
 	}
 
@@ -706,12 +723,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var hasWork bool
 		errc := make(chan error, 1)
 
-		tx, err := s.chainDB.BeginRo(ctx)
-		if err != nil {
-			log.Warn("mining", "err", err)
-			return
-		}
-
 		for {
 			mineEvery.Reset(3 * time.Second)
 			select {
@@ -729,21 +740,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					log.Warn("mining", "err", err)
 				}
 			case <-quitCh:
-				return
-			}
-			// Check if we transitioned and if we did halt POW mining
-			headNumber, err := stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-
-			isTrans, err := rawdb.Transitioned(tx, headNumber, s.chainConfig.TerminalTotalDifficulty)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-			if isTrans {
 				return
 			}
 
@@ -893,11 +889,8 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
+	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
-	//s.miner.Stop()
 	s.engine.Close()
 	<-s.waitForStageLoopStop
 	if s.config.Miner.Enabled {

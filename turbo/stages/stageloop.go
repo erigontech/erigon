@@ -126,7 +126,6 @@ func StageLoopStep(
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var prevHeadBlockHash common.Hash
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
@@ -137,7 +136,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		prevHeadBlockHash = rawdb.ReadHeadBlockHash(tx)
 		return nil
 	}); err != nil {
 		return headBlockHash, err
@@ -207,7 +205,7 @@ func StageLoopStep(
 	}
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil && headBlockHash != prevHeadBlockHash {
+		if header != nil {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
@@ -378,7 +376,7 @@ func NewStagedSync(
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, blockRetire),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, tmpdir, cfg.Prune, blockRetire),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -395,7 +393,7 @@ func NewStagedSync(
 			),
 			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader),
+			stagedsync.StageTrieCfg(db, true, true, false, tmpdir, blockReader),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
@@ -444,7 +442,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				snapshots,
 				blockReader,
 			), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, nil),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, tmpdir, cfg.Prune, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -460,7 +458,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				blockReader,
 			),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
+			stagedsync.StageTrieCfg(db, true, true, true, tmpdir, blockReader)),
 		stagedsync.StateUnwindOrder,
 		nil,
 	), nil

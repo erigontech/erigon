@@ -1093,10 +1093,21 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, validationError error, criticalError error) {
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, terminalTotalDifficulty *big.Int, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(16)
+
+	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
+	if currentHeight == nil {
+		criticalError = fmt.Errorf("could not read block number.")
+		return
+	}
+
+	isAncestorPosBlock, criticalError := rawdb.Transitioned(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
+	if criticalError != nil {
+		return
+	}
 	if store {
 		// If it is a continuation of the canonical chain we can stack it up.
 		if hd.nextForkState == nil {
@@ -1105,17 +1116,19 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			hd.nextForkState.UpdateTxn(tx)
 		}
 		hd.nextForkHash = header.Hash()
-		status = remote.EngineStatus_VALID
 		// Let's assemble the side fork chain if we have others building.
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
+			if isAncestorPosBlock {
+				latestValidHash = header.ParentHash
+			}
+			return
 		}
-		return
-	}
-	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
-	if currentHeight == nil {
-		criticalError = fmt.Errorf("could not read block number.")
+		status = remote.EngineStatus_VALID
+		latestValidHash = header.Hash()
+		hd.sideForksBlock[latestValidHash] = sideForkBlock{header, body}
+		hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 		return
 	}
 	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
@@ -1123,8 +1136,6 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
-	// if it is not canonical we validate it as a side fork.
-	batch := memdb.NewMemoryBatch(tx)
 	// Let's assemble the side fork backwards
 	var foundCanonical bool
 	currentHash := header.ParentHash
@@ -1155,17 +1166,28 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	}
 	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	status = remote.EngineStatus_VALID
+	// if it is not canonical we validate it as a side fork.
+	batch := memdb.NewMemoryBatch(tx)
+	defer batch.Close()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	latestValidHash = header.Hash()
 	if validationError != nil {
+		if isAncestorPosBlock {
+			latestValidHash = header.ParentHash
+		}
 		status = remote.EngineStatus_INVALID
 	}
 	// After the we finished executing, we clean up old forks
+	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
+	return
+}
+
+func (hd *HeaderDownload) cleanupOutdateSideForks(currentHeight uint64, maxDepth uint64) {
 	for hash, sb := range hd.sideForksBlock {
-		if abs64(int64(*currentHeight)-sb.header.Number.Int64()) > maxDepth {
+		if abs64(int64(currentHeight)-sb.header.Number.Int64()) > maxDepth {
 			delete(hd.sideForksBlock, hash)
 		}
 	}
-	return
 }
 
 func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
@@ -1174,6 +1196,11 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	if err := hd.nextForkState.Flush(tx); err != nil {
 		return err
 	}
+	// If the side fork hash is now becoming canonical we can clean up.
+	if _, ok := hd.sideForksBlock[hd.nextForkHash]; ok {
+		delete(hd.sideForksBlock, hd.nextForkHash)
+	}
+	hd.nextForkState.Close()
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
 	return nil

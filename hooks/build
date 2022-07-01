@@ -3,6 +3,16 @@
 # This is needed to pass build ARGs to Dockerfile.
 # see https://docs.docker.com/docker-hub/builds/advanced/
 
-DOCKER_FLAGS="-t $IMAGE_NAME" \
+set -o errexit   # exit on error
+set -o nounset   # disallow unset variables
+set -o pipefail  # fail if anything in pipe fails
+
+# $(id -u) and $(id -g) will be 0
+#
+# so we need to specify the erigon user uid/gid in the image
+# choose 3473 matching defaults in .env.example
+DOCKER_FLAGS="-t ${IMAGE_NAME}" \
+DOCKER_UID=3473 \
+DOCKER_GID=3473 \
 GIT_TAG=$(git describe --tags '--match=v*' --dirty) \
     make docker
