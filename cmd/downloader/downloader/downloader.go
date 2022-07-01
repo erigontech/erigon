@@ -265,9 +265,6 @@ func (d *Downloader) verify() error {
 		}(t)
 	}
 	wg.Wait()
-	d.statsLock.Lock()
-	defer d.statsLock.Unlock()
-	d.stats.Completed = false
 
 	return nil
 }
