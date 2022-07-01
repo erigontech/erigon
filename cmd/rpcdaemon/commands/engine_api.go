@@ -76,7 +76,9 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 	json := map[string]interface{}{
 		"status": x.Status.String(),
 	}
-	json["latestValidHash"] = common.Hash{}
+	if x.Status == remote.EngineStatus_INVALID || x.Status == remote.EngineStatus_ACCEPTED {
+		json["latestValidHash"] = common.Hash{}
+	}
 	if x.LatestValidHash != nil {
 		json["latestValidHash"] = common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
 	}
