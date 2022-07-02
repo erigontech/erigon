@@ -423,7 +423,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil
 	})
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 	if ok && h != nil {
 		var b *types.Body
@@ -437,7 +437,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			return nil
 		})
 		if err != nil {
-			return
+			return nil, nil, err
 		}
 		if ok && b != nil {
 			if txsAmount == 0 {
