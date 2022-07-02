@@ -3,6 +3,8 @@ package state
 import (
 	//"fmt"
 
+	"container/heap"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -11,51 +13,48 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"golang.org/x/exp/constraints"
 	"sync"
-	"github.com/RoaringBitmap/roaring/roaring64"
-	"container/heap"
 )
-
 
 type theap[T constraints.Ordered] []T
 
 func (h theap[T]) Len() int {
-    return len(h)
+	return len(h)
 }
 
 func (h theap[T]) Less(i, j int) bool {
-    return h[i] < h[j]
+	return h[i] < h[j]
 }
 
 func (h theap[T]) Swap(i, j int) {
-    h[i], h[j] = h[j], h[i]
+	h[i], h[j] = h[j], h[i]
 }
 
 func (h *theap[T]) Push(a interface{}) {
-    *h = append(*h, a.(T))
+	*h = append(*h, a.(T))
 }
 
 func (h *theap[T]) Pop() interface{} {
-    c := *h
-    *h = c[:len(c)-1]
-    return c[len(c)-1]
+	c := *h
+	*h = c[:len(c)-1]
+	return c[len(c)-1]
 }
 
 // ReconState is the accumulator of changes to the state
 type ReconState struct {
-	lock     sync.RWMutex
-	workIterator roaring64.IntPeekable64
-	doneBitmap roaring64.Bitmap
-	triggers map[uint64][]uint64
-	queue theap[uint64]
-	changes map[string]map[string][]byte
-	sizeEstimate uint64
+	lock          sync.RWMutex
+	workIterator  roaring64.IntPeekable64
+	doneBitmap    roaring64.Bitmap
+	triggers      map[uint64][]uint64
+	queue         theap[uint64]
+	changes       map[string]map[string][]byte
+	sizeEstimate  uint64
 	rollbackCount uint64
 }
 
 func NewReconState() *ReconState {
 	rs := &ReconState{
 		triggers: map[uint64][]uint64{},
-		changes: map[string]map[string][]byte{},
+		changes:  map[string]map[string][]byte{},
 	}
 	return rs
 }
@@ -64,7 +63,7 @@ func (rs *ReconState) SetWorkBitmap(workBitmap *roaring64.Bitmap) {
 	rs.workIterator = workBitmap.Iterator()
 }
 
-func (rs *ReconState) Put(table string,	key, val []byte) {
+func (rs *ReconState) Put(table string, key, val []byte) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
@@ -181,8 +180,8 @@ func (rs *ReconState) SizeEstimate() uint64 {
 }
 
 type StateReconWriter struct {
-	ac     *libstate.AggregatorContext
-	rs *ReconState
+	ac    *libstate.AggregatorContext
+	rs    *ReconState
 	txNum uint64
 }
 

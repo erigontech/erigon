@@ -440,8 +440,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
 	fillWorkers := make([]*FillWorker, workerCount)
-	fromKey = nil
-	toKey = nil
 	var doneCount uint64
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
