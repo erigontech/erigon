@@ -30,15 +30,13 @@ func BenchEthGetBlockByNumber(erigonURL string) {
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := uint64(0); bn <= uint64(blockNumber.Number); bn++ {
 		reqGen.reqID++
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, false /* withTxs */), &b)
+		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, false /* withTxs */))
 		if res.Err != nil {
 			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 			return
 		}
-		if b.Error != nil {
-			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
-			return
+		if errVal := res.Result.Get("error"); errVal != nil {
+			fmt.Printf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
 	}
 }

@@ -33,7 +33,7 @@ func (g *RequestGenerator) blockNumber() string {
 }
 func (g *RequestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",%t],"id":%d}`
-	return fmt.Sprintf(template, blockNum, g.reqID, withTxs)
+	return fmt.Sprintf(template, blockNum, withTxs, g.reqID)
 }
 
 func (g *RequestGenerator) storageRangeAt(hash common.Hash, i int, to *common.Address, nextKey common.Hash) string {
