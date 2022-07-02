@@ -213,12 +213,12 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, n)
+	block, err := api.blockWithSenders(tx, hash, n)
 	return block, err
 }
 
