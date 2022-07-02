@@ -71,15 +71,15 @@ type BlockNumber int64
 type Timestamp uint64
 
 const (
-	FinalizeBlockNumber = BlockNumber(-4)
-	SafeBlockNumber     = BlockNumber(-3)
-	PendingBlockNumber  = BlockNumber(-2)
-	LatestBlockNumber   = BlockNumber(-1)
-	EarliestBlockNumber = BlockNumber(0)
+	FinalizedBlockNumber = BlockNumber(-4)
+	SafeBlockNumber      = BlockNumber(-3)
+	PendingBlockNumber   = BlockNumber(-2)
+	LatestBlockNumber    = BlockNumber(-1)
+	EarliestBlockNumber  = BlockNumber(0)
 )
 
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
-// - "latest", "earliest" or "pending" as string arguments
+// - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
 // - the block number
 // Returned errors:
 // - an invalid block number error when the given argument isn't a known strings
@@ -99,6 +99,12 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	case "pending":
 		*bn = PendingBlockNumber
+		return nil
+	case "safe":
+		*bn = SafeBlockNumber
+		return nil
+	case "finalized":
+		*bn = FinalizedBlockNumber
 		return nil
 	case "null":
 		*bn = LatestBlockNumber
@@ -171,6 +177,14 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		return nil
 	case "pending":
 		bn := PendingBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
+	case "safe":
+		bn := SafeBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
+	case "finalized":
+		bn := FinalizedBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
 	default:

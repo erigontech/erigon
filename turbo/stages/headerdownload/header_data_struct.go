@@ -272,10 +272,16 @@ type Stats struct {
 	RespMaxBlock        uint64
 }
 
+type sideForkBlock struct {
+	header *types.Header
+	body   *types.RawBody
+}
+
 type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
+	sideForksBlock         map[common.Hash]sideForkBlock
 	engine                 consensus.Engine
 	insertQueue            InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -294,6 +300,7 @@ type HeaderDownload struct {
 	fetchingNew            bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
+	QuitPoWMining          chan struct{}
 	trace                  bool
 	stats                  Stats
 
@@ -309,7 +316,8 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
@@ -342,10 +350,12 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
+		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
+		sideForksBlock:     make(map[common.Hash]sideForkBlock),
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)

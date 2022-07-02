@@ -28,7 +28,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -121,9 +121,12 @@ func init() {
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled    bool
-	KeepBlocks bool
-	Produce    bool // produce new snapshots
+	Enabled        bool
+	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
+	Produce        bool // produce new snapshots
+	NoDownloader   bool // possible to use snapshots without calling Downloader
+	Verify         bool // verify snapshots on startup
+	DownloaderAddr string
 }
 
 func (s Snapshot) String() string {
@@ -173,8 +176,8 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot Snapshot
-	Torrent  *torrentcfg.Cfg
+	Snapshot   Snapshot
+	Downloader *downloadercfg.Cfg
 
 	Dirs datadir.Dirs
 

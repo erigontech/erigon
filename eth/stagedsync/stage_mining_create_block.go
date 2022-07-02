@@ -115,13 +115,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
-	}
-
 	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
-		if !isTrans {
+		if cfg.blockBuilderParameters == nil {
 			return fmt.Errorf("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
@@ -199,7 +194,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	// re-written miner/worker.go:commitNewWork
 	var timestamp uint64
-	if !isTrans {
+	if cfg.blockBuilderParameters == nil {
 		timestamp = uint64(time.Now().Unix())
 		if parent.Time >= timestamp {
 			timestamp = parent.Time + 1
@@ -230,7 +225,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return err
 	}
 
-	if isTrans {
+	if cfg.blockBuilderParameters != nil {
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 
 		current.Header = header
