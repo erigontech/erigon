@@ -109,7 +109,7 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 			return false
 		})
 		if foundI == nil || foundI.startTxNum > startTxNum {
-			log.Info("Load state file", "name", name, "startTxNum", startTxNum*ii.aggregationStep, "endTxNum", endTxNum*ii.aggregationStep)
+			//log.Info("Load state file", "name", name, "startTxNum", startTxNum*ii.aggregationStep, "endTxNum", endTxNum*ii.aggregationStep)
 			ii.files.ReplaceOrInsert(item)
 		}
 	}

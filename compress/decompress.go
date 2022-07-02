@@ -288,7 +288,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 }
 
 // Getter represent "reader" or "interator" that can move accross the data of the decompressor
-// The full state of the getter can be captured by saving dataP, b, and mask values.
+// The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
 	data        []byte
 	dataP       uint64

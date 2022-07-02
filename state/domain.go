@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -100,6 +101,12 @@ func ParseFileType(s string) (FileType, bool) {
 
 type DomainStats struct {
 	HistoryQueries int
+	EfSearchTime   time.Duration
+}
+
+func (ds *DomainStats) Accumulate(other DomainStats) {
+	ds.HistoryQueries += other.HistoryQueries
+	ds.EfSearchTime += other.EfSearchTime
 }
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
@@ -213,7 +220,7 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) {
 			return false
 		})
 		if foundI == nil || foundI.startTxNum > startTxNum {
-			log.Info("Load state file", "name", name, "type", fType.String(), "startTxNum", startTxNum*d.aggregationStep, "endTxNum", endTxNum*d.aggregationStep)
+			//log.Info("Load state file", "name", name, "type", fType.String(), "startTxNum", startTxNum*d.aggregationStep, "endTxNum", endTxNum*d.aggregationStep)
 			d.files[fType].ReplaceOrInsert(item)
 		}
 	}
@@ -346,6 +353,9 @@ func (d *Domain) Put(key, val []byte) error {
 	if err != nil {
 		return err
 	}
+	if bytes.Equal(original, val) {
+		return nil
+	}
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
 	if err = d.update(key, original); err != nil {
 		return err
@@ -361,9 +371,12 @@ func (d *Domain) Put(key, val []byte) error {
 }
 
 func (d *Domain) Delete(key []byte) error {
-	original, _, err := d.get(key, d.tx)
+	original, found, err := d.get(key, d.tx)
 	if err != nil {
 		return err
+	}
+	if !found {
+		return nil
 	}
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if err = d.update(key, original); err != nil {
@@ -433,17 +446,19 @@ func (ch *CursorHeap) Pop() interface{} {
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
+	//trace := fmt.Sprintf("%x", prefix) == "000000000000006f6502b7f2bbac8c30a3f67e9a"
 	if len(prefix) != d.prefixLen {
 		return fmt.Errorf("wrong prefix length, this %s domain supports prefixLen %d, given [%x]", d.filenameBase, d.prefixLen, prefix)
 	}
 	var cp CursorHeap
 	heap.Init(&cp)
+	var k, v []byte
+	var err error
 	keysCursor, err := d.tx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return err
 	}
 	defer keysCursor.Close()
-	var k, v []byte
 	if k, v, err = keysCursor.Seek(prefix); err != nil {
 		return err
 	}
@@ -464,7 +479,8 @@ func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 			return true
 		}
 		offset := item.indexReader.Lookup(prefix)
-		g := item.getter
+		// Creating dedicated getter because the one in the item may be used to delete storage, for example
+		g := item.decompressor.MakeGetter()
 		g.Reset(offset)
 		if g.HasNext() {
 			if keyMatch, _ := g.Match(prefix); !keyMatch {
@@ -1018,7 +1034,10 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
 			eliasVal, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			if n, ok := ef.Search(txNum); ok {
+			//start := time.Now()
+			n, ok := ef.Search(txNum)
+			//d.stats.EfSearchTime += time.Since(start)
+			if ok {
 				foundTxNum = n
 				foundEndTxNum = item.endTxNum
 				foundStartTxNum = item.startTxNum
