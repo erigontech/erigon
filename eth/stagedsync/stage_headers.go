@@ -586,8 +586,11 @@ func verifyAndSaveNewPoSHeader(
 		return nil, false, err
 	}
 
-	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
-	if err != nil {
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+		return nil, false, err
+	}
+
+	if err := cfg.hd.StorePayloadFork(tx, header, body); err != nil {
 		return nil, false, err
 	}
 
@@ -596,23 +599,20 @@ func verifyAndSaveNewPoSHeader(
 		// Side chain or something weird
 		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
 		// Or it's not a problem because forkChoice is updated frequently?
-		if cfg.memoryOverlay {
-			status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, false, cfg.execPayload)
-			if criticalError != nil {
-				return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
-			}
-			if validationError != nil {
-				cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
-			}
-			success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
-			return &privateapi.PayloadStatus{
-				Status:          status,
-				LatestValidHash: latestValidHash,
-				ValidationError: validationError,
-			}, success, nil
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, false, cfg.execPayload)
+		if criticalError != nil {
+			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
-		// No canonization, HeadHeaderHash & StageProgress are not updated
-		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
+		if validationError != nil {
+			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+		}
+		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
+		return &privateapi.PayloadStatus{
+			Status:          status,
+			LatestValidHash: latestValidHash,
+			ValidationError: validationError,
+		}, success, nil
+
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
