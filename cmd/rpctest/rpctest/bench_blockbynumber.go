@@ -37,6 +37,11 @@ func BenchEthGetBlockByNumber(erigonURL string) {
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
 			fmt.Printf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+			return
+		}
+		if res.Result.Get("hash") == nil {
+			fmt.Printf("empty result\n")
+			return
 		}
 	}
 }
