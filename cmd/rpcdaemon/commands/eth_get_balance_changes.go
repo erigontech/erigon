@@ -18,11 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
-type oldNewBalance struct {
-	oldBalance *hexutil.Big
-	newBalance *hexutil.Big
-}
-
 func (api *APIImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -85,12 +80,10 @@ func (api *APIImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash 
 	return balancesMapping, nil
 }
 
-func PrintChangedBalances(mapping map[common.Address]oldNewBalance) error {
-
-	for address, balances := range mapping {
+func PrintChangedBalances(mapping map[common.Address]*hexutil.Big) error {
+	for address, newBalance := range mapping {
 		fmt.Println("address: ", address)
-		fmt.Println("old balance: ", balances.oldBalance)
-		fmt.Println("new balance: ", balances.newBalance)
+		fmt.Println("new balance: ", newBalance)
 	}
 
 	return nil

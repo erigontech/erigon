@@ -17,14 +17,14 @@ import (
 )
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
-	var myBlockNum uint64 = 5
+	myBlockNum := rpc.BlockNumberOrHashWithNumber(5)
 
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
-	balances, err := api.GetBalanceChangesInBlock(myBlockNum)
+	balances, err := api.GetBalanceChangesInBlock(context.Background(), myBlockNum)
 	if err != nil {
-		t.Errorf("calling GetChangeSet resulted in an error: %v", err)
+		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
 	PrintChangedBalances(balances)
 
