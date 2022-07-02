@@ -144,7 +144,7 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		startTxNum = rw.txNums[blockNum-1]
 	}
 	ibs := state.New(rw.stateReader)
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == rw.txNums[blockNum-1]+1
+	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == rw.txNums[blockNum-1]
 	var err error
 	if blockNum == 0 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
@@ -153,12 +153,12 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		if err != nil {
 			panic(err)
 		}
-		//	} else if daoForkTx {
+	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
-		//		misc.ApplyDAOHardFork(ibs)
-		//		if err := ibs.FinalizeTx(rw.lastRules, noop); err != nil {
-		//			panic(err)
-		//		}
+		misc.ApplyDAOHardFork(ibs)
+		if err := ibs.FinalizeTx(rw.lastRules, noop); err != nil {
+			panic(err)
+		}
 	} else if txNum+1 == rw.txNums[blockNum] {
 		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 		// End of block transaction in a block
@@ -170,13 +170,6 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 			panic(fmt.Errorf("finalize of block %d failed: %w", blockNum, err))
 		}
 	} else {
-		if daoForkTx {
-			//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
-			misc.ApplyDAOHardFork(ibs)
-			if err := ibs.FinalizeTx(rw.lastRules, noop); err != nil {
-				panic(err)
-			}
-		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := rw.blockReader.TxnByIdxInBlock(rw.ctx, nil, blockNum, int(txIndex))
