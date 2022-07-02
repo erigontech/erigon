@@ -19,8 +19,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v0.16.0
 	github.com/emirpasic/gods v1.18.1
-	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
+	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.1
@@ -93,13 +92,13 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/dlclark/regexp2 v1.4.1-0.20201116162257-a2a8dda75c91 // indirect
-	github.com/docker/docker v20.10.17+incompatible
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/garslo/gogen v0.0.0-20170306192744-1d203ffc1f61 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.0 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -162,5 +161,3 @@ require (
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect
 )
-
-require gotest.tools/v3 v3.3.0 // indirect
