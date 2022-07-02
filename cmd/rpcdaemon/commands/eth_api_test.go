@@ -16,6 +16,20 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
+func TestGetBalanceChangesInBlock(t *testing.T) {
+	var myBlockNum uint64 = 5
+
+	db := rpcdaemontest.CreateTestKV(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	balances, err := api.GetBalanceChangesInBlock(myBlockNum)
+	if err != nil {
+		t.Errorf("calling GetChangeSet resulted in an error: %v", err)
+	}
+	PrintChangedBalances(balances)
+
+}
+
 func TestGetTransactionReceipt(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
