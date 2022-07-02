@@ -143,9 +143,6 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	if enc == nil {
 		return nil, nil
 	}
-	if len(enc) == 1 && enc[0] == 0 {
-		return nil, nil
-	}
 	return enc, nil
 }
 
@@ -171,10 +168,6 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
 	}
-	if len(enc) == 1 && enc[0] == 0 {
-		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
-		return nil, nil
-	}
 	return enc, nil
 }
 
@@ -196,12 +189,7 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 				return 0, err
 			}
 		}
-		if len(enc) == 1 && enc[0] == 0 {
-			fmt.Printf("ReadAccountCodeSize [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, noState, stateTxNum, hr.txNum)
-			size = 0
-		} else {
-			size = len(enc)
-		}
+		size = len(enc)
 	}
 	if hr.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, hr.txNum)
