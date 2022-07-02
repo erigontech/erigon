@@ -500,7 +500,7 @@ func handleNewPayload(
 		}, nil
 	}
 
-	parent, err := cfg.blockReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -511,6 +511,14 @@ func handleNewPayload(
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, hashToDownload, heightToDownload, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+	}
+
+	if header.Number.Uint64() != parent.Number.Uint64()+1 {
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: header.ParentHash,
+			ValidationError: errors.New("invalid block number"),
+		}, nil
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
@@ -572,6 +580,10 @@ func verifyAndSaveNewPoSHeader(
 			LatestValidHash: header.ParentHash,
 			ValidationError: verificationErr,
 		}, false, nil
+	}
+
+	if err := rawdb.WriteHeaderNumber(tx, headerHash, headerNumber); err != nil {
+		return nil, false, err
 	}
 
 	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
