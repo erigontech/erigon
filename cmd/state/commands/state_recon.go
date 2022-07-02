@@ -190,7 +190,7 @@ func (rw *ReconWorker) runTxNum(txNum uint64) {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, blockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, rw.lastBlockHash, int(txIndex))
-		_, _, err = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, rw.lastHeader, txn, usedGas, vmConfig, contractHasTEVM)
+		_, _, err = core.ApplyTransaction(rw.chainConfig, core.GetHashFn(rw.lastHeader, rw.getHeader), rw.engine, nil, gp, ibs, noop, rw.lastHeader, txn, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txIndex, txHash, err))
 		}
@@ -765,7 +765,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	log.Info("Computing hashed state")
 	tmpDir := filepath.Join(datadir, "tmp")
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(nil, tmpDir), make(chan struct{}, 1)); err != nil {
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
@@ -774,7 +774,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(nil, false /* checkRoot */, false /* saveHashesToDB */, tmpDir, blockReader), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
