@@ -1,6 +1,9 @@
 package state
 
-import "sync"
+import (
+	"sync"
+	"github.com/ledgerwatch/erigon-lib/kv"
+)
 
 type ReconState1 struct {
 	lock sync.RWMutex

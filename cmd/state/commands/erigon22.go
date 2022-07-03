@@ -439,9 +439,6 @@ func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Ac
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
-	if rw.blockNum == 10264901 {
-		fmt.Printf("block %d ReadAccount [%x] => {Balance: %d, Nonce: %d}\n", rw.blockNum, address, &a.Balance, a.Nonce)
-	}
 	return &a, nil
 }
 
@@ -449,9 +446,6 @@ func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnatio
 	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
-	}
-	if rw.blockNum == 10264901 {
-		fmt.Printf("block %d ReadStorage [%x] [%x] => [%x]\n", rw.blockNum, address, *key, enc)
 	}
 	if enc == nil {
 		return nil, nil
@@ -558,10 +552,6 @@ func (ww *WriterWrapper22) DeleteAccount(address common.Address, original *accou
 }
 
 func (ww *WriterWrapper22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	trace := fmt.Sprintf("%x", address) == "000000000000006f6502b7f2bbac8c30a3f67e9a"
-	if trace {
-		fmt.Printf("block %d WriteAccountStorage [%x] [%x] => [%x]\n", ww.blockNum, address, *key, value.Bytes())
-	}
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}
