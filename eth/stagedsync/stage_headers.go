@@ -500,6 +500,11 @@ func handleNewPayload(
 		}, nil
 	}
 
+	isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
+	if err != nil {
+		return nil, err
+	}
+
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
 		return nil, err
@@ -514,9 +519,14 @@ func handleNewPayload(
 	}
 
 	if header.Number.Uint64() != parent.Number.Uint64()+1 {
+		latestValidHash := common.Hash{}
+		if isAncestorPos {
+			latestValidHash = header.ParentHash
+		}
+		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
-			LatestValidHash: header.ParentHash,
+			LatestValidHash: latestValidHash,
 			ValidationError: errors.New("invalid block number"),
 		}, nil
 	}
@@ -525,19 +535,19 @@ func handleNewPayload(
 
 	for _, tx := range payloadMessage.Body.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(tx) {
-			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+			latestValidHash := common.Hash{}
+			if isAncestorPos {
+				latestValidHash = header.ParentHash
+			}
+			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 			return &privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: header.ParentHash,
+				LatestValidHash: latestValidHash,
 				ValidationError: errors.New("typed txn marshalled as RLP string"),
 			}, nil
 		}
 	}
 
-	isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
-	if err != nil {
-		return nil, err
-	}
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
@@ -591,7 +601,6 @@ func verifyAndSaveNewPoSHeader(
 			latestValidHash = header.ParentHash
 		}
 		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
-		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
