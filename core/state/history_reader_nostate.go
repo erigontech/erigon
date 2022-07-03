@@ -27,6 +27,7 @@ type HistoryReaderNoState struct {
 	rs         *ReconState
 	readError  bool
 	stateTxNum uint64
+	composite  []byte
 }
 
 func NewHistoryReaderNoState(ac *libstate.AggregatorContext, rs *ReconState) *HistoryReaderNoState {
@@ -58,10 +59,14 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		}
 		enc = hr.rs.Get(kv.PlainStateR, address.Bytes(), nil, stateTxNum)
 		if enc == nil {
-			composite := make([]byte, 8+20)
-			binary.BigEndian.PutUint64(composite, stateTxNum)
-			copy(composite[8:], address.Bytes())
-			enc, err = hr.tx.GetOne(kv.PlainStateR, composite)
+			if cap(hr.composite) < 8+20 {
+				hr.composite = make([]byte, 8+20)
+			} else {
+				hr.composite = hr.composite[:8+20]
+			}
+			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
+			copy(hr.composite[8:], address.Bytes())
+			enc, err = hr.tx.GetOne(kv.PlainStateR, hr.composite)
 			if err != nil {
 				return nil, err
 			}
@@ -130,12 +135,16 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 
 		enc = hr.rs.Get(kv.PlainStateR, address.Bytes(), key.Bytes(), stateTxNum)
 		if enc == nil {
-			composite := make([]byte, 8+20+8+32)
-			binary.BigEndian.PutUint64(composite, stateTxNum)
-			copy(composite[8:], address.Bytes())
-			binary.BigEndian.PutUint64(composite[8+20:], 1)
-			copy(composite[8+20+8:], key.Bytes())
-			enc, err = hr.tx.GetOne(kv.PlainStateR, composite)
+			if cap(hr.composite) < 8+20+8+32 {
+				hr.composite = make([]byte, 8+20+8+32)
+			} else {
+				hr.composite = hr.composite[:8+20+8+32]
+			}
+			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
+			copy(hr.composite[8:], address.Bytes())
+			binary.BigEndian.PutUint64(hr.composite[8+20:], 1)
+			copy(hr.composite[8+20+8:], key.Bytes())
+			enc, err = hr.tx.GetOne(kv.PlainStateR, hr.composite)
 			if err != nil {
 				return nil, err
 			}
@@ -167,10 +176,14 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		}
 		enc = hr.rs.Get(kv.CodeR, codeHash.Bytes(), nil, stateTxNum)
 		if enc == nil {
-			composite := make([]byte, 8+32)
-			binary.BigEndian.PutUint64(composite, stateTxNum)
-			copy(composite[8:], codeHash.Bytes())
-			enc, err = hr.tx.GetOne(kv.CodeR, composite)
+			if cap(hr.composite) < 8+32 {
+				hr.composite = make([]byte, 8+32)
+			} else {
+				hr.composite = hr.composite[:8+32]
+			}
+			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
+			copy(hr.composite[8:], codeHash.Bytes())
+			enc, err = hr.tx.GetOne(kv.CodeR, hr.composite)
 			if err != nil {
 				return nil, err
 			}
@@ -195,10 +208,14 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 		}
 		enc := hr.rs.Get(kv.CodeR, codeHash.Bytes(), nil, stateTxNum)
 		if enc == nil {
-			composite := make([]byte, 8+32)
-			binary.BigEndian.PutUint64(composite, stateTxNum)
-			copy(composite[8:], codeHash.Bytes())
-			enc, err = hr.tx.GetOne(kv.CodeR, composite)
+			if cap(hr.composite) < 8+32 {
+				hr.composite = make([]byte, 8+32)
+			} else {
+				hr.composite = hr.composite[:8+32]
+			}
+			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
+			copy(hr.composite[8:], codeHash.Bytes())
+			enc, err = hr.tx.GetOne(kv.CodeR, hr.composite)
 			if err != nil {
 				return 0, err
 			}
