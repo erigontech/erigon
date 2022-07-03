@@ -526,10 +526,18 @@ func handleNewPayload(
 		}
 	}
 
+	isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
+	if err != nil {
+		return nil, err
+	}
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
-		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+		latestValidHash := common.Hash{}
+		if isAncestorPos {
+			latestValidHash = header.ParentHash
+		}
+		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -566,6 +574,15 @@ func verifyAndSaveNewPoSHeader(
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
+		isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return nil, false, err
+		}
+		latestValidHash := common.Hash{}
+		if isAncestorPos {
+			latestValidHash = header.ParentHash
+		}
+		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
