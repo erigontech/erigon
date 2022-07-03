@@ -128,13 +128,6 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	log.Trace("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
-	tx, err := e.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer tx.Rollback()
-
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
 		var overflow bool
@@ -172,6 +165,12 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 	}
 	payloadStatus := convertPayloadStatus(res)
 	if payloadStatus["latestValidHash"] != nil {
+		tx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		defer tx.Rollback()
 		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
 		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
 		if err != nil {
