@@ -112,7 +112,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	}
 
 	payloadStatus := convertPayloadStatus(reply.PayloadStatus)
-	if payloadStatus["latestValidHash"] != nil {
+	if reply.PayloadStatus.Status == remote.EngineStatus_INVALID && payloadStatus["latestValidHash"] != nil {
 		tx, err := e.db.BeginRo(ctx)
 		if err != nil {
 			return nil, err
