@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -55,8 +56,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		header := block.Header()
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), ethashFaker, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, contractHasTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethashFaker, nil, gp, ibs, noopWriter, block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
 		if err != nil {
 			return nil, err
 		}
@@ -69,6 +69,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+	start := time.Now()
 	var begin, end uint64
 	logs := []*types.Log{}
 
@@ -215,7 +216,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		logs = append(logs, filtered...)
 	}
-
+	stats := api._agg.GetAndResetStats()
+	log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
