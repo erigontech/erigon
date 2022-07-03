@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
@@ -127,6 +128,13 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	log.Trace("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer tx.Rollback()
+
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
 		var overflow bool
@@ -162,8 +170,18 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		log.Warn("NewPayload", "err", err)
 		return nil, err
 	}
-
-	return convertPayloadStatus(res), nil
+	payloadStatus := convertPayloadStatus(res)
+	if payloadStatus["latestValidHash"] != nil {
+		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
+		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
+		if err != nil {
+			return nil, err
+		}
+		if !isValidHashPos {
+			payloadStatus["latestValidHash"] = common.Hash{}
+		}
+	}
+	return payloadStatus, nil
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
