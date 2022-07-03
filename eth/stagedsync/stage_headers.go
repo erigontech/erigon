@@ -514,6 +514,8 @@ func handleNewPayload(
 	}
 
 	if header.Number.Uint64() != parent.Number.Uint64()+1 {
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
