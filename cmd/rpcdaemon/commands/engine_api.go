@@ -111,8 +111,25 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 		return nil, err
 	}
 
+	payloadStatus := convertPayloadStatus(reply.PayloadStatus)
+	if payloadStatus["latestValidHash"] != nil {
+		tx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		defer tx.Rollback()
+		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
+		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
+		if err != nil {
+			return nil, err
+		}
+		if !isValidHashPos {
+			payloadStatus["latestValidHash"] = common.Hash{}
+		}
+	}
 	json := map[string]interface{}{
-		"payloadStatus": convertPayloadStatus(reply.PayloadStatus),
+		"payloadStatus": payloadStatus,
 	}
 	if reply.PayloadId != 0 {
 		encodedPayloadId := make([]byte, 8)
