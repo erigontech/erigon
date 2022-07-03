@@ -1093,7 +1093,20 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (hd *HeaderDownload) StorePayloadFork(tx kv.RwTx, header *types.Header, body *types.RawBody) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	maxDepth := uint64(16)
+	height := rawdb.ReadCurrentBlockNumber(tx)
+	if height == nil {
+		return fmt.Errorf("could not read block number.")
+	}
+	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
+	hd.cleanupOutdateSideForks(*height, maxDepth)
+	return nil
+}
+
+func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, terminalTotalDifficulty *big.Int, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	maxDepth := uint64(16)

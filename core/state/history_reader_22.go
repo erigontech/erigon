@@ -126,8 +126,10 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if err := hr.ri.ReadAccountCode(address.Bytes()); err != nil {
-		return nil, err
+	if hr.ri != nil {
+		if err := hr.ri.ReadAccountCode(address.Bytes()); err != nil {
+			return nil, err
+		}
 	}
 	enc, err := hr.a.ReadAccountCodeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {

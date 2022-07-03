@@ -70,7 +70,7 @@ type IntraBlockState struct {
 	// unable to deal with database-level errors. Any error that occurs
 	// during a database read is memoized here and will eventually be returned
 	// by IntraBlockState.Commit.
-	dbErr error
+	savedErr error
 
 	// The refund counter, also used by state transitioning.
 	refund uint64
@@ -115,13 +115,13 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
-	if sdb.dbErr == nil {
-		sdb.dbErr = err
+	if sdb.savedErr == nil {
+		sdb.savedErr = err
 	}
 }
 
 func (sdb *IntraBlockState) Error() error {
-	return sdb.dbErr
+	return sdb.savedErr
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
