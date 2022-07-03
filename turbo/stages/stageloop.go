@@ -188,16 +188,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
-	headBlockNumber := rawdb.ReadCurrentBlockNumber(rotx)
 
-	isAncestorPosBlock, err := rawdb.IsPosBlock(rotx, headBlockHash, *headBlockNumber)
-	if err != nil {
-		return headBlockHash, err
-	}
-
-	if !isAncestorPosBlock {
-		headBlockHash = common.Hash{}
-	}
 	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
 		err = snapshotMigratorFinal(rotx)
 		if err != nil {

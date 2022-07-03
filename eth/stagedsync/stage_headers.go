@@ -500,11 +500,6 @@ func handleNewPayload(
 		}, nil
 	}
 
-	isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
-	if err != nil {
-		return nil, err
-	}
-
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
 		return nil, err
@@ -519,14 +514,9 @@ func handleNewPayload(
 	}
 
 	if header.Number.Uint64() != parent.Number.Uint64()+1 {
-		latestValidHash := common.Hash{}
-		if isAncestorPos {
-			latestValidHash = header.ParentHash
-		}
-		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
-			LatestValidHash: latestValidHash,
+			LatestValidHash: header.ParentHash,
 			ValidationError: errors.New("invalid block number"),
 		}, nil
 	}
@@ -535,14 +525,10 @@ func handleNewPayload(
 
 	for _, tx := range payloadMessage.Body.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(tx) {
-			latestValidHash := common.Hash{}
-			if isAncestorPos {
-				latestValidHash = header.ParentHash
-			}
-			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			return &privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: latestValidHash,
+				LatestValidHash: header.ParentHash,
 				ValidationError: errors.New("typed txn marshalled as RLP string"),
 			}, nil
 		}
@@ -551,11 +537,7 @@ func handleNewPayload(
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
-		latestValidHash := common.Hash{}
-		if isAncestorPos {
-			latestValidHash = header.ParentHash
-		}
-		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -592,15 +574,7 @@ func verifyAndSaveNewPoSHeader(
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
-		isAncestorPos, err := rawdb.IsPosBlock(tx, header.ParentHash, headerNumber-1)
-		if err != nil {
-			return nil, false, err
-		}
-		latestValidHash := common.Hash{}
-		if isAncestorPos {
-			latestValidHash = header.ParentHash
-		}
-		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -642,7 +616,7 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	if cfg.memoryOverlay && (cfg.hd.GetNextForkHash() == (common.Hash{}) || header.ParentHash == cfg.hd.GetNextForkHash()) {
-		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, true, cfg.execPayload)
+		status, latestValidHash, validationError, criticalError := cfg.hd.ValidatePayload(tx, header, body, cfg.chainConfig.TerminalTotalDifficulty, true, cfg.execPayload)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}

@@ -1603,17 +1603,3 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
-
-// IsPosBlock returns true if the block is a PoS block, aka. all blocks with null difficulty.
-func IsPosBlock(db kv.Getter, blockHash common.Hash, blockNum uint64) (trans bool, err error) {
-	if blockNum == 0 {
-		return false, nil
-	}
-
-	header := ReadHeader(db, blockHash, blockNum)
-	if header == nil {
-		return false, nil
-	}
-
-	return header.Difficulty.Cmp(common.Big0) == 0, nil
-}
