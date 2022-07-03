@@ -97,7 +97,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	}
 	item := ReconStateItem{key1: key1, key2: key2, val: val, txNum: txNum}
 	t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key1)) + uint64(len(key1)) + uint64(len(val))
+	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
