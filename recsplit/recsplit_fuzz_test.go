@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 /*
    Copyright 2021 Erigon contributors
@@ -15,7 +15,6 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-
 package recsplit
 
 import (
@@ -23,7 +22,7 @@ import (
 	"testing"
 )
 
-// gotip test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit
+// go test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit
 
 func FuzzRecSplit(f *testing.F) {
 	f.Add(2, []byte("1stkey2ndkey"))

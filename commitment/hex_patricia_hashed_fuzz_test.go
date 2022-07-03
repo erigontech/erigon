@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 package commitment
 
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// gotip test -trimpath -v -tags gofuzzbeta -fuzz=Fuzz_ProcessUpdate$ -fuzztime=300s ./commitment
+// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate$ -fuzztime=300s ./commitment
 
 func Fuzz_ProcessUpdate(f *testing.F) {
 	ha, _ := hex.DecodeString("13ccfe8074645cab4cb42b423625e055f0293c87")
@@ -66,7 +66,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	})
 }
 
-// gotip test -trimpath -v -tags gofuzzbeta -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount -fuzztime=300s ./commitment
+// go test -trimpath -v -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount -fuzztime=300s ./commitment
 
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 	ha, _ := hex.DecodeString("83a93c6ddd2660654f34d55f5deead039a4ac4853528b894383f646193852ddb078e00fbcb52d82bb791edddb1cffee89e599b5b45bb60f04b6c5c276635570c12e31d882f333b6beab06c11e603881b0c68788beca64fcc9185fb2823da72151d077192d321d83df17d49f2e37f2f69e43b147bc7bd8c3ae7ea161b7c9e81c5a540f37158e79f3d503813a32374abb0f94ad7d8ddca63bfd427e8570b64bb6e0b255e344f2e2849c623d6690c2d6ea66d90818e3169297acc58177cb3b8fae48852883b2850c7a48f4b0eea3ccc4c04e6cb6025e9e8f7db2589c7dae81517c514790cfd6f668903161349e")
@@ -77,7 +77,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		keyMap := make(map[string]uint64)
 		i := 0
 		for i < len(build) {
-			keyLen := int(build[i]>>16) + 1
+			keyLen := int(build[i]>>4) + 1
 			valLen := int(build[i]&15) + 1
 			i++
 			var key []byte
@@ -123,7 +123,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		rootHashAnother, branchNodeUpdates, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
+		rootHashAnother, _, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
 		if err != nil {
 			t.Fatal(err)
 		}

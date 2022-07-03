@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 /*
    Copyright 2021 Erigon contributors
@@ -15,7 +15,6 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-
 package patricia
 
 import (
@@ -25,7 +24,7 @@ import (
 	"testing"
 )
 
-// gotip test -trimpath -v -fuzz=FuzzPatricia -fuzztime=10s ./patricia
+// go test -trimpath -v -fuzz=FuzzPatricia -fuzztime=10s ./patricia
 
 func FuzzPatricia(f *testing.F) {
 	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
@@ -33,7 +32,7 @@ func FuzzPatricia(f *testing.F) {
 		keyMap := make(map[string][]byte)
 		i := 0
 		for i < len(build) {
-			keyLen := int(build[i]>>16) + 1
+			keyLen := int(build[i]>>4) + 1
 			valLen := int(build[i]&15) + 1
 			i++
 			var key []byte
@@ -54,7 +53,7 @@ func FuzzPatricia(f *testing.F) {
 		var testKeys [][]byte
 		i = 0
 		for i < len(test) {
-			keyLen := int(test[i]>>16) + 1
+			keyLen := int(test[i]>>4) + 1
 			i++
 			var key []byte
 			for keyLen > 0 && i < len(test) {
@@ -73,8 +72,6 @@ func FuzzPatricia(f *testing.F) {
 				if !bytes.Equal(vals, v.([]byte)) {
 					t.Errorf("for key %x expected value %x, got %x", key, vals, v.([]byte))
 				}
-			} else {
-				t.Errorf("expected key not found %x", key)
 			}
 		}
 		// Test for non-existent keys
@@ -93,7 +90,7 @@ func FuzzLongestMatch(f *testing.F) {
 		keyMap := make(map[string][]byte)
 		i := 0
 		for i < len(build) {
-			keyLen := int(build[i]>>16) + 1
+			keyLen := int(build[i]>>4) + 1
 			valLen := int(build[i]&15) + 1
 			i++
 			var key []byte
@@ -135,7 +132,7 @@ func FuzzLongestMatch(f *testing.F) {
 		if len(m1) == len(m2) {
 			for i, m := range m1 {
 				mm := m2[i]
-				if m.Start != mm.Start || m.End != m.End {
+				if m.Start != mm.Start || m.End != mm.End {
 					t.Errorf("mismatch, expected %+v, got %+v", m, mm)
 				}
 			}

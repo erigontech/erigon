@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 package types
 

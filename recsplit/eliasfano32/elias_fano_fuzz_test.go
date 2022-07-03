@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 /*
    Copyright 2021 Erigon contributors
@@ -15,15 +15,14 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-
 package eliasfano32
 
 import (
 	"testing"
 )
 
-// gotip test -trimpath -v -fuzz=FuzzSingleEliasFano ./recsplit/eliasfano32
-// gotip test -trimpath -v -fuzz=FuzzDoubleEliasFano ./recsplit/eliasfano32
+// go test -trimpath -v -fuzz=FuzzSingleEliasFano ./recsplit/eliasfano32
+// go test -trimpath -v -fuzz=FuzzDoubleEliasFano ./recsplit/eliasfano32
 
 func FuzzSingleEliasFano(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {

@@ -7,8 +7,8 @@ linters:
     - errorlint
 #    - unconvert
     - predeclared
-    - wastedassign
-    - thelper
+#    - wastedassign # go1.18
+#    - thelper
     - gofmt
     - deadcode
     - errcheck
@@ -16,11 +16,11 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-    - structcheck
+#    - structcheck # go1.18
     - unused
     - varcheck
 #    - gocritic
-    - bodyclose
+#    - bodyclose # go1.18
     - gosec
 #    - forcetypeassert
 #    - prealloc

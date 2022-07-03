@@ -1,4 +1,4 @@
-//go:build gofuzzbeta
+//go:build !nofuzz
 
 package txpool
 
@@ -22,14 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// https://blog.golang.org/fuzz-beta
+// https://go.dev/doc/fuzz/
 // golang.org/s/draft-fuzzing-design
-//gotip doc testing
-//gotip doc testing.F
-//gotip doc testing.F.AddRemoteTxs
-//gotip doc testing.F.Fuzz
+//go doc testing
+//go doc testing.F
+//go doc testing.F.AddRemoteTxs
+//go doc testing.F.Fuzz
 
-// gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
+// go test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
 
 func init() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
@@ -247,6 +247,7 @@ func fakeRlpTx(slot *types.TxSlot, data []byte) []byte {
 	p += rlp.EncodeU64(1, buf[p:])        //v
 	p += rlp.EncodeU64(1, buf[p:])        //r
 	p += rlp.EncodeU64(1, buf[p:])        //s
+	_ = p
 	return buf[:]
 }
 
@@ -498,6 +499,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs2, tx)
+		assert.NoError(err)
 		check(types.TxSlots{}, txs2, "fork1 mined")
 		checkNotify(types.TxSlots{}, txs2, "fork1 mined")
 
