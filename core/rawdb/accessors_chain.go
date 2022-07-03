@@ -1610,6 +1610,9 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	if header == nil {
+		return false, nil
+	}
 
 	return header.Difficulty.Cmp(common.Big0) == 0, nil
 }
