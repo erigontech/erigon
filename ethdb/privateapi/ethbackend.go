@@ -246,9 +246,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadStatus {
 	reply := remote.EnginePayloadStatus{Status: payloadStatus.Status}
-	if payloadStatus.LatestValidHash != (common.Hash{}) {
-		reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
-	}
+	reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
 	if payloadStatus.ValidationError != nil {
 		reply.ValidationError = payloadStatus.ValidationError.Error()
 	}

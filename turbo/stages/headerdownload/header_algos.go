@@ -1117,10 +1117,13 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		return
 	}
 
-	isAncestorPosBlock, criticalError := rawdb.Transitioned(tx, header.Number.Uint64()-1, terminalTotalDifficulty)
+	// If the previous block is the transition block, then the latest valid hash is the 0x0 hash, in case we return INVALID
+	isAncestorPosBlock, criticalError := rawdb.IsPosBlock(tx, header.ParentHash, header.Number.Uint64()-1)
 	if criticalError != nil {
 		return
 	}
+	_, isAncestorSideFork := hd.sideForksBlock[header.ParentHash]
+
 	if store {
 		// If it is a continuation of the canonical chain we can stack it up.
 		if hd.nextForkState == nil {
@@ -1133,7 +1136,7 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
-			if isAncestorPosBlock {
+			if isAncestorPosBlock || isAncestorSideFork {
 				latestValidHash = header.ParentHash
 			}
 			return
@@ -1183,13 +1186,14 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
-	latestValidHash = header.Hash()
 	if validationError != nil {
-		if isAncestorPosBlock {
+		if isAncestorPosBlock || isAncestorSideFork {
 			latestValidHash = header.ParentHash
 		}
 		status = remote.EngineStatus_INVALID
+		return
 	}
+	latestValidHash = header.Hash()
 	// After the we finished executing, we clean up old forks
 	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 	return
