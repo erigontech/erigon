@@ -5,11 +5,12 @@ import (
 
 	"bytes"
 	"container/heap"
+	"encoding/binary"
 	"sync"
 	"unsafe"
-	"encoding/binary"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"golang.org/x/exp/constraints"
-	"github.com/google/btree"
 )
 
 type theap[T constraints.Ordered] []T
@@ -45,9 +45,9 @@ func (h *theap[T]) Pop() interface{} {
 }
 
 type ReconStateItem struct {
-	txNum uint64 // txNum where the item has been created
+	txNum      uint64 // txNum where the item has been created
 	key1, key2 []byte
-	val []byte
+	val        []byte
 }
 
 func (i ReconStateItem) Less(than btree.Item) bool {
@@ -126,9 +126,9 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 			}
 			var composite []byte
 			if item.key2 == nil {
-				composite = make([]byte, 8 + len(item.key1))
+				composite = make([]byte, 8+len(item.key1))
 			} else {
-				composite = make([]byte, 8 + len(item.key1) + 8 + len(item.key2))
+				composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
 				binary.BigEndian.PutUint64(composite[8+len(item.key1):], 1)
 				copy(composite[8+len(item.key1)+8:], item.key2)
 			}
@@ -276,7 +276,7 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	v := value.Bytes()
 	if len(v) != 0 {
 		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(),  v, w.txNum)
+		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(), v, w.txNum)
 	}
 	return nil
 }

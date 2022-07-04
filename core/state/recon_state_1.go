@@ -1,12 +1,12 @@
 package state
 
 import (
-	"sync"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"sync"
 )
 
 type ReconState1 struct {
-	lock sync.RWMutex
+	lock          sync.RWMutex
 	queue         theap[uint64]
 	changes       map[string]map[string][]byte
 	sizeEstimate  uint64
@@ -15,7 +15,7 @@ type ReconState1 struct {
 
 func NewReconState1() *ReconState1 {
 	rs := &ReconState1{
-		changes:  map[string]map[string][]byte{},
+		changes: map[string]map[string][]byte{},
 	}
 	return rs
 }

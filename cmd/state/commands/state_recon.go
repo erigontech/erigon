@@ -289,8 +289,12 @@ func (fw *FillWorker) fillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
-			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
-				panic(err)
+			if len(val) > 1 || val[0] != 0 {
+				if err := plainStateCollector.Collect(compositeKey, val); err != nil {
+					panic(err)
+				}
+			} else {
+				fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
@@ -309,15 +313,19 @@ func (fw *FillWorker) fillCode(codeCollector, plainContractCollector *etl.Collec
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 		if len(val) > 0 {
-			codeHash, err := common.HashData(val)
-			if err != nil {
-				panic(err)
-			}
-			if err = codeCollector.Collect(codeHash[:], val); err != nil {
-				panic(err)
-			}
-			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
-				panic(err)
+			if len(val) > 1 || val[0] != 0 {
+				codeHash, err := common.HashData(val)
+				if err != nil {
+					panic(err)
+				}
+				if err = codeCollector.Collect(codeHash[:], val); err != nil {
+					panic(err)
+				}
+				if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
+					panic(err)
+				}
+			} else {
+				fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 			}
 			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 		}
