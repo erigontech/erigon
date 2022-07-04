@@ -369,6 +369,10 @@ const (
 	RStorageIdx  = "RStorageIdx"
 	RCodeKeys    = "RCodeKeys"
 	RCodeIdx     = "RCodeIdx"
+
+	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
+	CodeR          = "CodeR"          // temporary table for Code reconstitution
+	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
 )
 
 // Keys
@@ -495,6 +499,10 @@ var ChaindataTables = []string{
 	RStorageIdx,
 	RCodeKeys,
 	RCodeIdx,
+
+	PlainStateR,
+	CodeR,
+	PlainContractR,
 }
 
 const (
