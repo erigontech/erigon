@@ -1603,3 +1603,16 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
+
+// Transitioned returns true if the block number comes after POS transition or is the last POW block
+func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
+	header, err := ReadHeaderByHash(db, blockHash)
+	if err != nil {
+		return false, err
+	}
+	if header == nil {
+		return false, nil
+	}
+
+	return header.Difficulty.Cmp(common.Big0) == 0, nil
+}

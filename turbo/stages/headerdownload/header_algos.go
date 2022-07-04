@@ -898,6 +898,9 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 	rawdb.WriteHeader(db, header)
+	if err = rawdb.WriteHeaderNumber(db, hash, blockHeight); err != nil {
+		return err
+	}
 
 	hi.highest = blockHeight
 	hi.highestHash = hash
