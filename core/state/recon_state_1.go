@@ -1,6 +1,8 @@
 package state
 
 import (
+	"bytes"
+	"container/heap"
 	"encoding/binary"
 	"fmt"
 	"github.com/holiman/uint256"
@@ -9,8 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"sync"
-	"container/heap"
-	"bytes"
 )
 
 type ReconState1 struct {
@@ -29,14 +29,12 @@ type ReconState1 struct {
 func NewReconState1(txsToRun uint64) *ReconState1 {
 	rs := &ReconState1{
 		txsToRun: txsToRun,
-		changes: map[string]map[string][]byte{},
+		changes:  map[string]map[string][]byte{},
 	}
 	return rs
 }
 
-func (rs *ReconState1) Put(table string, key, val []byte) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+func (rs *ReconState1) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
 		t = map[string][]byte{}
@@ -61,6 +59,10 @@ func (rs *ReconState1) Delete(table string, key []byte) {
 func (rs *ReconState1) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
+	return rs.get(table, key)
+}
+
+func (rs *ReconState1) get(table string, key []byte) []byte {
 	t, ok := rs.changes[table]
 	if !ok {
 		return nil
@@ -134,9 +136,28 @@ func (rs *ReconState1) RollbackTxNum(txNum uint64) {
 	rs.rollbackCount++
 }
 
-func (rs ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) {
+func (rs *ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+	for table, keyList := range writeKeys {
+		valList := writeVals[table]
+		for i, key := range keyList {
+			val := valList[i]
+			rs.put(table, key, val)
+		}
+	}
+	for addr, increase := range balanceIncreaseSet {
+		enc := rs.get(kv.PlainState, addr.Bytes())
+		var a accounts.Account
+		if err := a.DecodeForStorage(enc); err != nil {
+			panic(err)
+		}
+		a.Balance.Add(&a.Balance, &increase)
+		l := a.EncodingLengthForStorage()
+		enc = make([]byte, l)
+		a.EncodeForStorage(enc)
+		rs.put(kv.PlainState, addr.Bytes(), enc)
+	}
 }
 
 func (rs *ReconState1) DoneCount() uint64 {
@@ -179,10 +200,10 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 }
 
 type StateReconWriter1 struct {
-	rs    *ReconState1
-	txNum uint64
-	writeKeys          map[string][][]byte
-	writeVals          map[string][][]byte
+	rs        *ReconState1
+	txNum     uint64
+	writeKeys map[string][][]byte
+	writeVals map[string][][]byte
 }
 
 func NewStateReconWriter1(rs *ReconState1) *StateReconWriter1 {
@@ -249,8 +270,8 @@ type StateReconReader1 struct {
 	readError  bool
 	stateTxNum uint64
 	composite  []byte
-	readKeys           map[string][][]byte
-	readVals           map[string][][]byte
+	readKeys   map[string][][]byte
+	readVals   map[string][][]byte
 }
 
 func NewStateReconReader1(rs *ReconState1) *StateReconReader1 {
@@ -347,7 +368,7 @@ func (r *StateReconReader1) ReadAccountCode(address common.Address, incarnation 
 	r.readKeys[kv.Code] = append(r.readKeys[kv.Code], address.Bytes())
 	r.readVals[kv.Code] = append(r.readVals[kv.Code], enc)
 	if r.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x], noState=%t, stateTxNum=%d, txNum: %d\n", address, enc, r.txNum)
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
 	return enc, nil
 }
