@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -298,7 +300,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
 	var wg sync.WaitGroup
-	rs := state.NewReconState1()
+	rs := state.NewReconState1(txNum)
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker1, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
@@ -325,6 +327,12 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		go reconWorkers[i].run()
 	}
 	commitThreshold := uint64(256 * 1024 * 1024)
+	count := uint64(0)
+	rollbackCount := uint64(0)
+	total := txNum
+	prevCount := uint64(0)
+	prevRollbackCount := uint64(0)
+	prevTime := time.Now()
 	reconDone := make(chan struct{})
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -363,7 +371,20 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				var m runtime.MemStats
 				libcommon.ReadMemStats(&m)
 				sizeEstimate := rs.SizeEstimate()
-				log.Info("Transaction replay", "workers", workerCount, "buffer", libcommon.ByteCount(sizeEstimate),
+				count = rs.DoneCount()
+				rollbackCount = rs.RollbackCount()
+				currentTime := time.Now()
+				interval := currentTime.Sub(prevTime)
+				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+				progress := 100.0 * float64(count) / float64(total)
+				var repeatRatio float64
+				if count > prevCount {
+					repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
+				}
+				prevTime = currentTime
+				prevCount = count
+				prevRollbackCount = rollbackCount
+				log.Info("Transaction replay", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", libcommon.ByteCount(sizeEstimate),
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 				if sizeEstimate >= commitThreshold {
@@ -413,6 +434,26 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}()
 	if err = rs.Flush(rwTx); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	log.Info("Computing hashed state")
+	tmpDir := filepath.Join(datadir, "tmp")
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {

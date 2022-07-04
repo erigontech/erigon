@@ -26,8 +26,9 @@ type ReconState1 struct {
 	txsDone       uint64
 }
 
-func NewReconState1() *ReconState1 {
+func NewReconState1(txsToRun uint64) *ReconState1 {
 	rs := &ReconState1{
+		txsToRun: txsToRun,
 		changes: map[string]map[string][]byte{},
 	}
 	return rs
