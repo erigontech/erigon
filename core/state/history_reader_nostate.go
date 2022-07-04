@@ -18,7 +18,6 @@ func (r *RequiredStateError) Error() string {
 	return fmt.Sprintf("required state at txNum %d", r.StateTxNum)
 }
 
-// Implements StateReader and StateWriter
 type HistoryReaderNoState struct {
 	ac         *libstate.AggregatorContext
 	tx         kv.Tx

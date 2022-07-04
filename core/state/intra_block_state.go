@@ -751,6 +751,20 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter St
 			sdb.getStateObject(addr)
 		}
 	}
+	return sdb.MakeWriteSet(chainRules, stateWriter)
+}
+
+func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]uint256.Int {
+	s := map[common.Address]uint256.Int{}
+	for addr, bi := range sdb.balanceInc {
+		if !bi.transferred {
+			s[addr] = bi.increase
+		}
+	}
+	return s
+}
+
+func (sdb *IntraBlockState) MakeWriteSet(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
