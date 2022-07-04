@@ -109,13 +109,6 @@ func (d *Downloader) SnapDir() string {
 	return d.cfg.DataDir
 }
 
-func (d *Downloader) IsInitialSync() bool {
-	d.clientLock.RLock()
-	defer d.clientLock.RUnlock()
-	_, lastPart := filepath.Split(d.cfg.DataDir)
-	return lastPart == "tmp"
-}
-
 func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.statsLock.Lock()
 	defer d.statsLock.Unlock()

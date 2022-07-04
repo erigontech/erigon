@@ -1616,3 +1616,30 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 
 	return header.Difficulty.Cmp(common.Big0) == 0, nil
 }
+
+func ReadSnapshots(tx kv.Tx) (map[string]string, error) {
+	res := map[string]string{}
+	if err := tx.ForEach(kv.Snapshots, nil, func(k, v []byte) error {
+		res[string(k)] = string(v)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func WriteSnapshots(tx kv.RwTx, list map[string]string) error {
+	for k, v := range list {
+		has, err := tx.Has(kv.Snapshots, []byte(k))
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if err = tx.Put(kv.Snapshots, []byte(k), []byte(v)); err != nil {
+			return err
+		}
+	}
+	return nil
+}

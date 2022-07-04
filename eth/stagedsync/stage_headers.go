@@ -1165,7 +1165,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if err := WaitForDownloader(ctx, cfg); err != nil {
+	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
 	if err := cfg.snapshots.Reopen(); err != nil {
@@ -1280,16 +1280,30 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
+func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		return nil
 	}
+
+	snInDB, err := rawdb.ReadSnapshots(tx)
+	if err != nil {
+		return err
+	}
+	dbEmpty := len(snInDB) == 0
 
 	// send all hashes to the Downloader service
 	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
+		_, has := snInDB[p.Name]
+		if !dbEmpty && !has {
+			continue
+		}
+		if dbEmpty {
+			snInDB[p.Name] = p.Hash
+		}
+
 		req.Items = append(req.Items, &proto_downloader.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
@@ -1358,6 +1372,12 @@ Loop:
 Finish:
 	if cfg.snapshots.Cfg().Verify {
 		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+			return err
+		}
+	}
+
+	if dbEmpty {
+		if err = rawdb.WriteSnapshots(tx, snInDB); err != nil {
 			return err
 		}
 	}
