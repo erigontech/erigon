@@ -584,10 +584,6 @@ func verifyAndSaveNewPoSHeader(
 		}, false, nil
 	}
 
-	if err := rawdb.WriteHeaderNumber(tx, headerHash, headerNumber); err != nil {
-		return nil, false, err
-	}
-
 	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
 	}
