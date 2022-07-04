@@ -14,6 +14,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -95,7 +96,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 		t = btree.New(32)
 		rs.changes[table] = t
 	}
-	item := ReconStateItem{key1: key1, key2: key2, val: val, txNum: txNum}
+	item := ReconStateItem{key1: libcommon.Copy(key1), key2: libcommon.Copy(key2), val: libcommon.Copy(val), txNum: txNum}
 	t.ReplaceOrInsert(item)
 	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
@@ -273,10 +274,9 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 		//fmt.Printf("no change storage [%x] [%x] txNum = %d\n", address, *key, txNum)
 		return nil
 	}
-	v := value.Bytes()
-	if len(v) != 0 {
+	if !value.IsZero() {
 		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(), v, w.txNum)
+		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(), value.Bytes(), w.txNum)
 	}
 	return nil
 }

@@ -61,7 +61,7 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		if enc == nil {
 			if cap(hr.composite) < 8+20 {
 				hr.composite = make([]byte, 8+20)
-			} else {
+			} else if len(hr.composite) != 8+20 {
 				hr.composite = hr.composite[:8+20]
 			}
 			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
@@ -137,7 +137,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 		if enc == nil {
 			if cap(hr.composite) < 8+20+8+32 {
 				hr.composite = make([]byte, 8+20+8+32)
-			} else {
+			} else if len(hr.composite) != 8+20+8+32 {
 				hr.composite = hr.composite[:8+20+8+32]
 			}
 			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
@@ -178,7 +178,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		if enc == nil {
 			if cap(hr.composite) < 8+32 {
 				hr.composite = make([]byte, 8+32)
-			} else {
+			} else if len(hr.composite) != 8+32 {
 				hr.composite = hr.composite[:8+32]
 			}
 			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
@@ -210,7 +210,7 @@ func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, inca
 		if enc == nil {
 			if cap(hr.composite) < 8+32 {
 				hr.composite = make([]byte, 8+32)
-			} else {
+			} else if len(hr.composite) != 8+32 {
 				hr.composite = hr.composite[:8+32]
 			}
 			binary.BigEndian.PutUint64(hr.composite, stateTxNum)
