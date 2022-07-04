@@ -70,6 +70,12 @@ var DefaultFlags = []cli.Flag{
 	utils.MemoryOverlayFlag,
 	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,
+	HTTPReadTimeoutFlag,
+	HTTPWriteTimeoutFlag,
+	HTTPIdleTimeoutFlag,
+	EngineReadTimeoutFlag,
+	EngineWriteTimeoutFlag,
+	EngineIdleTimeoutFlag,
 
 	utils.SnapKeepBlocksFlag,
 	utils.SnapStopFlag,
