@@ -307,7 +307,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
