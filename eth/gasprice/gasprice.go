@@ -122,7 +122,6 @@ func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 		return gpo.lastPrice, err
 	}
 	if head == nil {
-		log.Info("SuggestTipCap1", "gpo.lastPrice", gpo.lastPrice)
 		return gpo.lastPrice, nil
 	}
 	headHash := head.Hash()
@@ -132,7 +131,6 @@ func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	lastHead, lastPrice := gpo.lastHead, gpo.lastPrice
 	gpo.cacheLock.RUnlock()
 	if headHash == lastHead {
-		log.Info("SuggestTipCap2", "lastPrice", lastPrice)
 		return lastPrice, nil
 	}
 
@@ -141,7 +139,6 @@ func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	lastHead, lastPrice = gpo.lastHead, gpo.lastPrice
 	gpo.cacheLock.RUnlock()
 	if headHash == lastHead {
-		log.Info("SuggestTipCap3", "lastPrice", lastPrice)
 		return lastPrice, nil
 	}
 	number := head.Number.Uint64()

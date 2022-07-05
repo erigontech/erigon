@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -15,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -201,19 +199,13 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &number}, b.tx, nil) // DoCall cannot be executed on non-canonical blocks
-	if err != nil {
-		return nil, err
-	}
-	header, err := b.baseApi._blockReader.Header(ctx, b.tx, hash, blockNumber)
+	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		log.Info("HeaderByNumber2", "is_nil", header == nil, "type", fmt.Sprintf("%T", b.baseApi._blockReader))
 		return nil, nil
 	}
-	log.Info("HeaderByNumber", "is_nil", header == nil)
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
