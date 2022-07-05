@@ -10,12 +10,10 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -51,32 +49,27 @@ var recon1Cmd = &cobra.Command{
 }
 
 type ReconWorker1 struct {
-	lock          sync.Locker
-	wg            *sync.WaitGroup
-	rs            *state.ReconState1
-	blockReader   services.FullBlockReader
-	allSnapshots  *snapshotsync.RoSnapshots
-	stateWriter   *state.StateReconWriter1
-	stateReader   *state.StateReconReader1
-	firstBlock    bool
-	lastBlockNum  uint64
-	lastBlockHash common.Hash
-	lastHeader    *types.Header
-	lastRules     *params.Rules
-	getHeader     func(hash common.Hash, number uint64) *types.Header
-	ctx           context.Context
-	engine        consensus.Engine
-	txNums        []uint64
-	chainConfig   *params.ChainConfig
-	logger        log.Logger
-	genesis       *core.Genesis
-	resultCh      chan ReadWriteSet
+	lock         sync.Locker
+	wg           *sync.WaitGroup
+	rs           *state.ReconState1
+	blockReader  services.FullBlockReader
+	allSnapshots *snapshotsync.RoSnapshots
+	stateWriter  *state.StateReconWriter1
+	stateReader  *state.StateReconReader1
+	getHeader    func(hash common.Hash, number uint64) *types.Header
+	ctx          context.Context
+	engine       consensus.Engine
+	txNums       []uint64
+	chainConfig  *params.ChainConfig
+	logger       log.Logger
+	genesis      *core.Genesis
+	resultCh     chan state.TxTask
 }
 
 func NewReconWorker1(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState1,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
-	resultCh chan ReadWriteSet,
+	resultCh chan state.TxTask,
 ) *ReconWorker1 {
 	return &ReconWorker1{
 		lock:         lock,
@@ -101,7 +94,6 @@ func (rw *ReconWorker1) SetTx(tx kv.Tx) {
 
 func (rw *ReconWorker1) run() {
 	defer rw.wg.Done()
-	rw.firstBlock = true
 	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
 		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
 		if err != nil {
@@ -110,42 +102,24 @@ func (rw *ReconWorker1) run() {
 		return h
 	}
 	rw.engine = initConsensusEngine(rw.chainConfig, rw.logger, rw.allSnapshots)
-	for txNum, ok := rw.rs.Schedule(); ok; txNum, ok = rw.rs.Schedule() {
-		rw.runTxNum(txNum)
+	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
+		rw.runTxTask(txTask)
 	}
 }
 
-func (rw *ReconWorker1) runTxNum(txNum uint64) {
+func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.stateReader.SetTxNum(txNum)
-	rw.stateWriter.SetTxNum(txNum)
+	rw.stateReader.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 	noop := state.NewNoopWriter()
-	// Find block number
-	blockNum := uint64(sort.Search(len(rw.txNums), func(i int) bool {
-		return rw.txNums[i] > txNum
-	}))
-	if rw.firstBlock || blockNum != rw.lastBlockNum {
-		var err error
-		if rw.lastHeader, err = rw.blockReader.HeaderByNumber(rw.ctx, nil, blockNum); err != nil {
-			panic(err)
-		}
-		rw.lastBlockNum = blockNum
-		rw.lastBlockHash = rw.lastHeader.Hash()
-		rw.lastRules = rw.chainConfig.Rules(blockNum)
-		rw.firstBlock = false
-	}
-	var txSender *common.Address
-	var startTxNum uint64
-	if blockNum > 0 {
-		startTxNum = rw.txNums[blockNum-1]
-	}
+	rules := rw.chainConfig.Rules(txTask.BlockNum)
 	ibs := state.New(rw.stateReader)
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == blockNum && txNum == rw.txNums[blockNum-1]
+	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
-	if blockNum == 0 {
+	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
 		// Genesis block
 		_, ibs, err = rw.genesis.ToBlock()
@@ -155,99 +129,39 @@ func (rw *ReconWorker1) runTxNum(txNum uint64) {
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 		misc.ApplyDAOHardFork(ibs)
-		if err := ibs.FinalizeTx(rw.lastRules, noop); err != nil {
+		if err := ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)
 		}
-	} else if txNum+1 == rw.txNums[blockNum] {
+	} else if txTask.TxIndex == -1 {
+		// Block initialisation
+	} else if txTask.Final {
 		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 		// End of block transaction in a block
-		block, _, err := rw.blockReader.BlockWithSenders(rw.ctx, nil, rw.lastBlockHash, blockNum)
-		if err != nil {
-			panic(err)
-		}
-		if _, _, err := rw.engine.Finalize(rw.chainConfig, rw.lastHeader, ibs, block.Transactions(), block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
-			panic(fmt.Errorf("finalize of block %d failed: %w", blockNum, err))
+		if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+			panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 		}
 	} else {
-		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := rw.blockReader.TxnByIdxInBlock(rw.ctx, nil, blockNum, int(txIndex))
-		if err != nil {
-			panic(err)
-		}
-		sender, ok := txn.GetSender()
-		if !ok {
-			panic(fmt.Sprintf("could not find sender for txHash=%x", txn.Hash()))
-		}
-		if !rw.rs.RegisterSender(sender, txNum) {
-			return
-		}
-		txSender = &sender
-		txHash := txn.Hash()
-		gp := new(core.GasPool).AddGas(txn.GetGas())
+		txHash := txTask.Tx.Hash()
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		usedGas := new(uint64)
-		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, blockNum)}
+		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-		ibs.Prepare(txHash, rw.lastBlockHash, int(txIndex))
-		_, _, err = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, rw.lastHeader, txn, usedGas, vmConfig, contractHasTEVM)
+		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		_, _, err = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
-			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txIndex, txHash, err))
+			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
 		}
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	balanceIncreaseSet := ibs.BalanceIncreaseSet()
-	if err = ibs.MakeWriteSet(rw.lastRules, rw.stateWriter); err != nil {
+	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+	if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 		panic(err)
 	}
-	readKeys, readVals := rw.stateReader.ReadSet()
-	writeKeys, writeVals := rw.stateWriter.WriteSet()
-	rw.resultCh <- ReadWriteSet{
-		txNum:              txNum,
-		sender:             txSender,
-		balanceIncreaseSet: balanceIncreaseSet,
-		readKeys:           readKeys,
-		readVals:           readVals,
-		writeKeys:          writeKeys,
-		writeVals:          writeVals,
-	}
-}
-
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
-type ReadWriteSet struct {
-	txNum              uint64
-	sender             *common.Address
-	balanceIncreaseSet map[common.Address]uint256.Int
-	readKeys           map[string][][]byte
-	readVals           map[string][][]byte
-	writeKeys          map[string][][]byte
-	writeVals          map[string][][]byte
-}
-
-type ReadWriteSetHeap []ReadWriteSet
-
-func (h ReadWriteSetHeap) Len() int {
-	return len(h)
-}
-
-func (h ReadWriteSetHeap) Less(i, j int) bool {
-	return h[i].txNum < h[j].txNum
-}
-
-func (h ReadWriteSetHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *ReadWriteSetHeap) Push(a interface{}) {
-	*h = append(*h, a.(ReadWriteSet))
-}
-
-func (h *ReadWriteSetHeap) Pop() interface{} {
-	c := *h
-	*h = c[:len(c)-1]
-	return c[len(c)-1]
+	txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
+	txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
+	rw.resultCh <- txTask
 }
 
 func Recon1(genesis *core.Genesis, logger log.Logger) error {
@@ -299,8 +213,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
-	var wg sync.WaitGroup
-	rs := state.NewReconState1(txNum)
+	workCh := make(chan state.TxTask, 128)
+	rs := state.NewReconState1(workCh)
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker1, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
@@ -317,7 +231,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	resultCh := make(chan ReadWriteSet, 128)
+	var wg sync.WaitGroup
+	resultCh := make(chan state.TxTask, 128)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewReconWorker1(lock.RLocker(), &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
 		reconWorkers[i].SetTx(roTxs[i])
@@ -336,35 +251,67 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	reconDone := make(chan struct{})
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var rws ReadWriteSetHeap
+	var rws state.TxTaskQueue
 	heap.Init(&rws)
 	var nextTxNum uint64 // Next txNum to accept
+	// Go-routine feeding transactions into the workCh
+	go func() {
+		var txNum uint64
+		for blockNum := uint64(0); blockNum <= block; blockNum++ {
+			header, err := blockReader.HeaderByNumber(ctx, nil, blockNum)
+			if err != nil {
+				panic(err)
+			}
+			blockHash := header.Hash()
+			b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
+			if err != nil {
+				panic(err)
+			}
+			txs := b.Transactions()
+			for txIndex := -1; txIndex <= len(txs); txIndex++ {
+				txTask := state.TxTask{
+					Header:    header,
+					BlockNum:  blockNum,
+					Block:     b,
+					TxNum:     txNum,
+					TxIndex:   txIndex,
+					BlockHash: blockHash,
+					Final:     txIndex == len(txs),
+				}
+				if txIndex >= 0 && txIndex < len(txs) {
+					txTask.Tx = txs[txIndex]
+				}
+				workCh <- txTask
+			}
+			txNum++
+		}
+	}()
 	go func() {
 		for {
 			select {
 			case <-reconDone:
 				return
-			case readWriteSet := <-resultCh:
-				if readWriteSet.txNum == nextTxNum {
+			case txTask := <-resultCh:
+				if txTask.TxNum == nextTxNum {
 					// Try to apply without placing on the queue first
-					if rs.ReadsValid(readWriteSet.readKeys, readWriteSet.readVals) {
-						rs.Apply(readWriteSet.writeKeys, readWriteSet.writeVals, readWriteSet.balanceIncreaseSet)
-						rs.CommitTxNum(readWriteSet.sender, readWriteSet.txNum)
+					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
+						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
+						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						nextTxNum++
 					} else {
-						rs.RollbackTxNum(readWriteSet.txNum)
+						rs.RollbackTxNum(txTask.TxNum)
 					}
 				} else {
-					heap.Push(&rws, readWriteSet)
+					heap.Push(&rws, txTask)
 				}
-				for rws.Len() > 0 && rws[0].txNum == nextTxNum {
-					readWriteSet = heap.Pop(&rws).(ReadWriteSet)
-					if rs.ReadsValid(readWriteSet.readKeys, readWriteSet.readVals) {
-						rs.Apply(readWriteSet.writeKeys, readWriteSet.writeVals, readWriteSet.balanceIncreaseSet)
-						rs.CommitTxNum(readWriteSet.sender, readWriteSet.txNum)
+				for rws.Len() > 0 && rws[0].TxNum == nextTxNum {
+					txTask = heap.Pop(&rws).(state.TxTask)
+					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
+						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
+						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						nextTxNum++
 					} else {
-						rs.RollbackTxNum(readWriteSet.txNum)
+						rs.RollbackTxNum(txTask.TxNum)
 					}
 				}
 			case <-logEvery.C:

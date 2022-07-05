@@ -5,31 +5,76 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
+	"sync"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"sync"
 )
+
+// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
+// which is processed by a single thread that writes into the ReconState1 and
+// flushes to the database
+type TxTask struct {
+	TxNum              uint64
+	BlockNum           uint64
+	Header             *types.Header
+	Block              *types.Block
+	BlockHash          common.Hash
+	Sender             *common.Address
+	TxIndex            int // -1 for block initialisation
+	Final              bool
+	Tx                 types.Transaction
+	BalanceIncreaseSet map[common.Address]uint256.Int
+	ReadKeys           map[string][][]byte
+	ReadVals           map[string][][]byte
+	WriteKeys          map[string][][]byte
+	WriteVals          map[string][][]byte
+}
+
+type TxTaskQueue []TxTask
+
+func (h TxTaskQueue) Len() int {
+	return len(h)
+}
+
+func (h TxTaskQueue) Less(i, j int) bool {
+	return h[i].TxNum < h[j].TxNum
+}
+
+func (h TxTaskQueue) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *TxTaskQueue) Push(a interface{}) {
+	*h = append(*h, a.(TxTask))
+}
+
+func (h *TxTaskQueue) Pop() interface{} {
+	c := *h
+	*h = c[:len(c)-1]
+	return c[len(c)-1]
+}
 
 type ReconState1 struct {
 	lock          sync.RWMutex
-	triggers      map[uint64]uint64
+	triggers      map[uint64]TxTask
 	senderTxNums  map[common.Address]uint64
-	queue         theap[uint64]
+	workCh        chan TxTask
+	queue         TxTaskQueue
 	changes       map[string]map[string][]byte
 	sizeEstimate  uint64
 	rollbackCount uint64
-	txsToRun      uint64
-	txsScheduled  uint64
 	txsDone       uint64
 }
 
-func NewReconState1(txsToRun uint64) *ReconState1 {
+func NewReconState1(workCh chan TxTask) *ReconState1 {
 	rs := &ReconState1{
-		txsToRun: txsToRun,
-		changes:  map[string]map[string][]byte{},
+		workCh:  workCh,
+		changes: map[string]map[string][]byte{},
 	}
 	return rs
 }
@@ -87,29 +132,35 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState1) Schedule() (uint64, bool) {
+func (rs *ReconState1) Schedule() (TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for rs.queue.Len() < 16 && rs.txsScheduled < rs.txsToRun {
-		heap.Push(&rs.queue, rs.txsScheduled)
-		rs.txsScheduled++
+	for rs.queue.Len() < 16 {
+		txTask, ok := <-rs.workCh
+		if !ok {
+			// No more work, channel is closed
+			break
+		}
+		if txTask.Sender == nil {
+			heap.Push(&rs.queue, txTask)
+		} else if rs.registerSender(txTask) {
+			heap.Push(&rs.queue, txTask)
+		}
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(uint64), true
+		return heap.Pop(&rs.queue).(TxTask), true
 	}
-	return 0, false
+	return TxTask{}, false
 }
 
-func (rs *ReconState1) RegisterSender(sender common.Address, txNum uint64) bool {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-	lastTxNum, deferral := rs.senderTxNums[sender]
+func (rs *ReconState1) registerSender(txTask TxTask) bool {
+	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
 		// So we add this data dependency as a trigger
-		rs.triggers[lastTxNum] = txNum
+		rs.triggers[lastTxNum] = txTask
 	}
-	rs.senderTxNums[sender] = txNum
+	rs.senderTxNums[*txTask.Sender] = txTask.TxNum
 	return !deferral
 }
 
