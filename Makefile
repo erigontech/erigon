@@ -62,6 +62,7 @@ dbg:
 
 geth: erigon
 
+.PHONY: erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
@@ -82,8 +83,10 @@ COMMANDS += txpool
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
 
+.PHONY: all
 all: erigon $(COMMANDS)
 
+.PHONY: db-tools
 db-tools: git-submodules
 	@echo "Building db-tools"
 

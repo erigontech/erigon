@@ -6,6 +6,8 @@ RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc
 WORKDIR /app
 COPY . .
 
+RUN ls /app
+
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
