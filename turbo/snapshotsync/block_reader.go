@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockReader can read blocks from db and snapshots
@@ -251,7 +252,9 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	if ok {
 		return h, nil
 	}
-	return rawdb.ReadHeaderByNumber(tx, blockHeight), nil
+	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
+	log.Info("HeaderByNumber", "blockHeight", blockHeight, "is_nil", h == nil)
+	return h, nil
 }
 
 // HeaderByHash - will search header in all snapshots starting from recent

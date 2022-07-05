@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -205,7 +206,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 	if header == nil {
-		log.Info("HeaderByNumber2", "is_nil", header == nil)
+		log.Info("HeaderByNumber2", "is_nil", header == nil, "type", fmt.Sprintf("%T", b.baseApi._blockReader))
 		return nil, nil
 	}
 	log.Info("HeaderByNumber", "is_nil", header == nil)
