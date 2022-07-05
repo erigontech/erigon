@@ -17,6 +17,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -45,7 +46,10 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 		WriteTimeout: timeouts.WriteTimeout,
 		IdleTimeout:  timeouts.IdleTimeout,
 	}
-	go httpSrv.Serve(listener)
+	go func() {
+		errServe := httpSrv.Serve(listener)
+		fmt.Println("IGORM: HTTP server stopped", errServe)
+	}()
 	return httpSrv, listener.Addr(), err
 }
 
