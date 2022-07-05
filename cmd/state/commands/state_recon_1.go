@@ -248,69 +248,34 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
-	reconDone := make(chan struct{})
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var rws state.TxTaskQueue
 	heap.Init(&rws)
-	var nextTxNum uint64 // Next txNum to accept
-	// Go-routine feeding transactions to the workers
-	go func() {
-		var txNum uint64
-		for blockNum := uint64(0); blockNum <= block; blockNum++ {
-			header, err := blockReader.HeaderByNumber(ctx, nil, blockNum)
-			if err != nil {
-				panic(err)
-			}
-			blockHash := header.Hash()
-			b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
-			if err != nil {
-				panic(err)
-			}
-			txs := b.Transactions()
-			for txIndex := -1; txIndex <= len(txs); txIndex++ {
-				txTask := state.TxTask{
-					Header:    header,
-					BlockNum:  blockNum,
-					Block:     b,
-					TxNum:     txNum,
-					TxIndex:   txIndex,
-					BlockHash: blockHash,
-					Final:     txIndex == len(txs),
-				}
-				if txIndex >= 0 && txIndex < len(txs) {
-					txTask.Tx = txs[txIndex]
-				}
-				workCh <- txTask
-			}
-			txNum++
-		}
-	}()
+	var outputTxNum uint64
 	// Go-routine gathering results from the workers
 	go func() {
-		for {
+		for outputTxNum < txNum {
 			select {
-			case <-reconDone:
-				return
 			case txTask := <-resultCh:
-				if txTask.TxNum == nextTxNum {
+				if txTask.TxNum == outputTxNum {
 					// Try to apply without placing on the queue first
 					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
 						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-						nextTxNum++
+						outputTxNum++
 					} else {
 						rs.RollbackTxNum(txTask.TxNum)
 					}
 				} else {
 					heap.Push(&rws, txTask)
 				}
-				for rws.Len() > 0 && rws[0].TxNum == nextTxNum {
+				for rws.Len() > 0 && rws[0].TxNum == outputTxNum {
 					txTask = heap.Pop(&rws).(state.TxTask)
 					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
 						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-						nextTxNum++
+						outputTxNum++
 					} else {
 						rs.RollbackTxNum(txTask.TxNum)
 					}
@@ -367,8 +332,36 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			}
 		}
 	}()
+	var inputTxNum uint64
+	for blockNum := uint64(0); blockNum <= block; blockNum++ {
+		header, err := blockReader.HeaderByNumber(ctx, nil, blockNum)
+		if err != nil {
+			panic(err)
+		}
+		blockHash := header.Hash()
+		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
+		if err != nil {
+			panic(err)
+		}
+		txs := b.Transactions()
+		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			txTask := state.TxTask{
+				Header:    header,
+				BlockNum:  blockNum,
+				Block:     b,
+				TxNum:     inputTxNum,
+				TxIndex:   txIndex,
+				BlockHash: blockHash,
+				Final:     txIndex == len(txs),
+			}
+			if txIndex >= 0 && txIndex < len(txs) {
+				txTask.Tx = txs[txIndex]
+			}
+			workCh <- txTask
+		}
+		inputTxNum++
+	}
 	wg.Wait()
-	reconDone <- struct{}{} // Complete logging and committing go-routine
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
 	}

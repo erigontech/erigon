@@ -290,7 +290,7 @@ func (w *StateReconWriter1) UpdateAccountCode(address common.Address, incarnatio
 	w.writeVals[kv.Code] = append(w.writeVals[kv.Code], code)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
-		w.writeKeys[kv.PlainContractCode] = append(w.writeKeys[kv.PlainContractCode], dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation))
+		w.writeKeys[kv.PlainContractCode] = append(w.writeKeys[kv.PlainContractCode], dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeVals[kv.PlainContractCode] = append(w.writeVals[kv.PlainContractCode], codeHash.Bytes())
 	}
 	return nil
@@ -299,11 +299,20 @@ func (w *StateReconWriter1) UpdateAccountCode(address common.Address, incarnatio
 func (w *StateReconWriter1) DeleteAccount(address common.Address, original *accounts.Account) error {
 	w.writeKeys[kv.PlainState] = append(w.writeKeys[kv.PlainState], address.Bytes())
 	w.writeVals[kv.PlainState] = append(w.writeVals[kv.PlainState], nil)
+	if original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		w.writeKeys[kv.IncarnationMap] = append(w.writeKeys[kv.IncarnationMap], address.Bytes())
+		w.writeVals[kv.IncarnationMap] = append(w.writeVals[kv.IncarnationMap], b[:])
+	}
 	return nil
 }
 
 func (w *StateReconWriter1) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	w.writeKeys[kv.PlainState] = append(w.writeKeys[kv.PlainState], dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), FirstContractIncarnation, key.Bytes()))
+	if *original == *value {
+		return nil
+	}
+	w.writeKeys[kv.PlainState] = append(w.writeKeys[kv.PlainState], dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes()))
 	w.writeVals[kv.PlainState] = append(w.writeVals[kv.PlainState], value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	return nil
@@ -381,7 +390,7 @@ func (r *StateReconReader1) ReadAccountStorage(address common.Address, incarnati
 		r.composite = r.composite[:20+8+32]
 	}
 	copy(r.composite, address.Bytes())
-	binary.BigEndian.PutUint64(r.composite[20:], 1)
+	binary.BigEndian.PutUint64(r.composite[20:], incarnation)
 	copy(r.composite[20+8:], key.Bytes())
 
 	enc := r.rs.Get(kv.PlainState, r.composite)
@@ -443,5 +452,18 @@ func (r *StateReconReader1) ReadAccountCodeSize(address common.Address, incarnat
 }
 
 func (r *StateReconReader1) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
+	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
+	if enc == nil {
+		var err error
+		enc, err = r.tx.GetOne(kv.IncarnationMap, address.Bytes())
+		if err != nil {
+			return 0, err
+		}
+	}
+	r.readKeys[kv.IncarnationMap] = append(r.readKeys[kv.IncarnationMap], address.Bytes())
+	r.readVals[kv.IncarnationMap] = append(r.readVals[kv.IncarnationMap], enc)
+	if len(enc) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(enc), nil
 }
