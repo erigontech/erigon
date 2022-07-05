@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/gofrs/flock"
@@ -526,7 +527,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts.AugumentLimit(config.MdbxAugumentLimit)
+			opts.AugumentLimit(config.MdbxAugumentLimit).MapSize(8 * datasize.TB)
 		}
 		return opts.Open()
 	}
