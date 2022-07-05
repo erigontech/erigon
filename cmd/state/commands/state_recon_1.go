@@ -361,6 +361,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		}
 		inputTxNum++
 	}
+	close(workCh)
 	wg.Wait()
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
