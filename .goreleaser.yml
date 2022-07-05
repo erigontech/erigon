@@ -113,6 +113,8 @@ dockers:
       - linux-arm64
     build_flag_templates:
       - --platform=linux/arm64/v8
+    extra_files:
+    - Makefile
 
 docker_manifests:
   - name_template: 0xpolygon/{{ .ProjectName }}:{{ .Version }}
@@ -127,6 +129,6 @@ docker_manifests:
 
 announce:
   slack:
-    enabled: true
+    enabled: false
     # The name of the channel that the user selected as a destination for webhook messages.
     channel: '#code-releases'
