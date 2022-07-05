@@ -1,0 +1,8 @@
+FROM alpine:3.14
+
+RUN set -x \
+    && apk add --update --no-cache \
+       ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
