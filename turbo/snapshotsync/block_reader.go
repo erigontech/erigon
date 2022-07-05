@@ -250,7 +250,7 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if ok {
-		log.Info("HeaderByNumber", "blockHeight", blockHeight, "is_nil", h == nil)
+		log.Info("HeaderByNumber2", "blockHeight", blockHeight, "is_nil", h == nil)
 		return h, nil
 	}
 	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
