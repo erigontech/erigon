@@ -254,7 +254,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	var rws state.TxTaskQueue
 	heap.Init(&rws)
 	var nextTxNum uint64 // Next txNum to accept
-	// Go-routine feeding transactions into the workCh
+	// Go-routine feeding transactions to the workers
 	go func() {
 		var txNum uint64
 		for blockNum := uint64(0); blockNum <= block; blockNum++ {
@@ -286,6 +286,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			txNum++
 		}
 	}()
+	// Go-routine gathering results from the workers
 	go func() {
 		for {
 			select {
