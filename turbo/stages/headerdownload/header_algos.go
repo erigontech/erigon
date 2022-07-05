@@ -1129,8 +1129,10 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			hd.nextForkState.UpdateTxn(tx)
 		}
 		hd.nextForkHash = header.Hash()
+		hd.lock.Unlock()
 		// Let's assemble the side fork chain if we have others building.
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		hd.lock.Lock()
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
 			if isAncestorPosBlock {
@@ -1182,7 +1184,9 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 	// if it is not canonical we validate it as a side fork.
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
+	hd.lock.Unlock()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	hd.lock.Lock()
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		if isAncestorPosBlock {
