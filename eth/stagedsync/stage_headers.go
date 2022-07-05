@@ -560,10 +560,6 @@ func verifyAndSaveNewPoSHeader(
 		return nil, false, err
 	}
 
-	if err := cfg.hd.StorePayloadFork(tx, header, body); err != nil {
-		return nil, false, err
-	}
-
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash != header.ParentHash {
 		// Side chain or something weird

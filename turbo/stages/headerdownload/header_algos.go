@@ -645,12 +645,6 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		log.Trace("posAnchor is nil")
 		return nil, nil
 	}
-	// We may have received answer from old request so not enough evidence for penalizing.
-	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
-		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
-		log.Trace("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
-		return nil, nil
-	}
 
 	// Handle request after closing collectors
 	if hd.headersCollector == nil {
@@ -661,6 +655,10 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		header := sh.Header
 		headerHash := sh.Hash
 		if headerHash != hd.posAnchor.parentHash {
+			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
+				log.Info("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+				return nil, nil
+			}
 			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
@@ -670,12 +668,16 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			return nil, err
 		}
 
-		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
+		hh, err := hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
 		if err != nil {
 			return nil, err
 		}
 		if hh != nil {
 			log.Trace("Synced", "requestId", hd.requestId)
+			if headerNumber != hh.Number.Uint64()+1 {
+				hd.badPoSHeaders[headerHash] = header.ParentHash
+				return nil, fmt.Errorf("Invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
+			}
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
@@ -1093,19 +1095,6 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func (hd *HeaderDownload) StorePayloadFork(tx kv.RwTx, header *types.Header, body *types.RawBody) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	maxDepth := uint64(16)
-	height := rawdb.ReadCurrentBlockNumber(tx)
-	if height == nil {
-		return fmt.Errorf("could not read block number.")
-	}
-	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
-	hd.cleanupOutdateSideForks(*height, maxDepth)
-	return nil
-}
-
 func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, terminalTotalDifficulty *big.Int, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1186,7 +1175,6 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
-	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	status = remote.EngineStatus_VALID
 	// if it is not canonical we validate it as a side fork.
 	batch := memdb.NewMemoryBatch(tx)
@@ -1200,7 +1188,9 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			latestValidHash = header.ParentHash
 		}
 		status = remote.EngineStatus_INVALID
+		return
 	}
+	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	// After the we finished executing, we clean up old forks
 	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 	return
