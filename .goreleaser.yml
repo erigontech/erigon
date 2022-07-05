@@ -96,27 +96,23 @@ snapshot:
 dockers:
   - image_templates:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-amd64
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.release
     use: buildx
     goarch: amd64
     ids:
       - linux-amd64
     build_flag_templates:
       - --platform=linux/amd64
-    extra_files:
-      - Makefile
 
   - image_templates:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-arm64
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.release
     use: buildx
     goarch: arm64
     ids:
       - linux-arm64
     build_flag_templates:
       - --platform=linux/arm64/v8
-    extra_files:
-      - Makefile
 
 docker_manifests:
   - name_template: 0xpolygon/{{ .ProjectName }}:{{ .Version }}
