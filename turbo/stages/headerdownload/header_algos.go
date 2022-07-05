@@ -1146,6 +1146,13 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 		return
 	}
+	// If the block is stored within the side fork it means it was already validated.
+	if _, ok := hd.sideForksBlock[header.Hash()]; ok {
+		status = remote.EngineStatus_VALID
+		latestValidHash = header.Hash()
+		return
+	}
+
 	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
 	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxDepth {
 		status = remote.EngineStatus_ACCEPTED
@@ -1213,10 +1220,7 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	if err := hd.nextForkState.Flush(tx); err != nil {
 		return err
 	}
-	// If the side fork hash is now becoming canonical we can clean up.
-	if _, ok := hd.sideForksBlock[hd.nextForkHash]; ok {
-		delete(hd.sideForksBlock, hd.nextForkHash)
-	}
+
 	hd.nextForkState.Close()
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
