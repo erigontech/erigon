@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -60,6 +61,7 @@ type ExecuteBlockCfg struct {
 	stateStream   bool
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
+	hd            *headerdownload.HeaderDownload
 }
 
 func StageExecuteBlocksCfg(
@@ -75,6 +77,7 @@ func StageExecuteBlocksCfg(
 	badBlockHalt bool,
 	tmpdir string,
 	blockReader services.FullBlockReader,
+	hd *headerdownload.HeaderDownload,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -89,6 +92,7 @@ func StageExecuteBlocksCfg(
 		stateStream:   stateStream,
 		badBlockHalt:  badBlockHalt,
 		blockReader:   blockReader,
+		hd:            hd,
 	}
 }
 
@@ -292,6 +296,9 @@ Loop:
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle, effectiveEngine); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
+				if cfg.hd != nil {
+					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash())
+				}
 				if cfg.badBlockHalt {
 					return err
 				}
