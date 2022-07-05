@@ -33,6 +33,7 @@ type TxTask struct {
 	ReadVals           map[string][][]byte
 	WriteKeys          map[string][][]byte
 	WriteVals          map[string][][]byte
+	Error              error
 }
 
 type TxTaskQueue []TxTask
@@ -73,8 +74,10 @@ type ReconState1 struct {
 
 func NewReconState1(workCh chan TxTask) *ReconState1 {
 	rs := &ReconState1{
-		workCh:  workCh,
-		changes: map[string]map[string][]byte{},
+		workCh:       workCh,
+		triggers:     map[uint64]TxTask{},
+		senderTxNums: map[common.Address]uint64{},
+		changes:      map[string]map[string][]byte{},
 	}
 	return rs
 }
@@ -158,8 +161,10 @@ func (rs *ReconState1) registerSender(txTask TxTask) bool {
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
 		// So we add this data dependency as a trigger
+		//fmt.Printf("trigger[%d] sender [%x]<=%x\n", lastTxNum, *txTask.Sender, txTask.Tx.Hash())
 		rs.triggers[lastTxNum] = txTask
 	}
+	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
 	rs.senderTxNums[*txTask.Sender] = txTask.TxNum
 	return !deferral
 }
@@ -180,10 +185,10 @@ func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) {
 	rs.txsDone++
 }
 
-func (rs *ReconState1) RollbackTxNum(txNum uint64) {
+func (rs *ReconState1) RollbackTx(txTask TxTask) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	heap.Push(&rs.queue, txNum)
+	heap.Push(&rs.queue, txTask)
 	rs.rollbackCount++
 }
 

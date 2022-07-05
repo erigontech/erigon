@@ -137,10 +137,12 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 			panic(err)
 		}
 	} else if txTask.Final {
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
-		// End of block transaction in a block
-		if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
-			panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+		if txTask.BlockNum > 0 {
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+			// End of block transaction in a block
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation

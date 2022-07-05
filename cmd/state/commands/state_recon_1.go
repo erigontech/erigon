@@ -110,6 +110,7 @@ func (rw *ReconWorker1) run() {
 func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	txTask.Error = nil
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
@@ -120,14 +121,14 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
-		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
+		fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
 		_, ibs, err = rw.genesis.ToBlock()
 		if err != nil {
 			panic(err)
 		}
 	} else if daoForkTx {
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
+		fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		if err := ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)
@@ -135,13 +136,15 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 	} else if txTask.Final {
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
-		// End of block transaction in a block
-		if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
-			panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+		if txTask.BlockNum > 0 {
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			// End of block transaction in a block
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+			}
 		}
 	} else {
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
@@ -149,18 +152,23 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		_, _, err = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
-		if err != nil {
-			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
-		}
+		_, _, txTask.Error = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
+		//if err != nil {
+		//	panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
+		//}
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-	if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-		panic(err)
+	if txTask.Error == nil {
+		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+		for addr, bal := range txTask.BalanceIncreaseSet {
+			fmt.Printf("[%x]=>[%d]\n", addr, &bal)
+		}
+		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+			panic(err)
+		}
+		txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
+		txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
 	}
-	txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
-	txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
 	rw.resultCh <- txTask
 }
 
@@ -260,24 +268,24 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			case txTask := <-resultCh:
 				if txTask.TxNum == outputTxNum {
 					// Try to apply without placing on the queue first
-					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
+					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
 						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
 					} else {
-						rs.RollbackTxNum(txTask.TxNum)
+						rs.RollbackTx(txTask)
 					}
 				} else {
 					heap.Push(&rws, txTask)
 				}
 				for rws.Len() > 0 && rws[0].TxNum == outputTxNum {
 					txTask = heap.Pop(&rws).(state.TxTask)
-					if rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
+					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
 						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
 					} else {
-						rs.RollbackTxNum(txTask.TxNum)
+						rs.RollbackTx(txTask)
 					}
 				}
 			case <-logEvery.C:
@@ -356,6 +364,9 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
+				if sender, ok := txs[txIndex].GetSender(); ok {
+					txTask.Sender = &sender
+				}
 			}
 			workCh <- txTask
 			inputTxNum++
