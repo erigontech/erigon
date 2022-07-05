@@ -162,7 +162,7 @@ PACKAGE_NAME          := github.com/maticnetwork/erigon
 GOLANG_CROSS_VERSION  ?= v1.18.1
 
 .PHONY: release-dry-run
-release-dry-run:
+release-dry-run: git-submodules
 	@docker run \
 		--rm \
 		--privileged \
@@ -177,7 +177,7 @@ release-dry-run:
 		--rm-dist --skip-validate --skip-publish
 
 .PHONY: release
-release:
+release: git-submodules
 	@docker run \
 		--rm \
 		--privileged \

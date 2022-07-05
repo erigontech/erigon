@@ -7,8 +7,6 @@
   Restart=on-failure
   RestartSec=5s
   WorkingDirectory=$NODE_DIR
-  EnvironmentFile=/etc/matic/metadata
-  ExecStart=/usr/local/bin/erigon $VALIDATOR_ADDRESS
   Type=simple
   User=$USER
   KillSignal=SIGINT
