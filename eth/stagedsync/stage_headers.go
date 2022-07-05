@@ -321,34 +321,7 @@ func startHandlingForkChoice(
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
-	// If header is canonical, then no reorgs are required
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
-	if err != nil {
-		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading canonical hash of %d)", s.LogPrefix(), headerNumber), "err", err)
-		cfg.hd.BeaconRequestList.Remove(requestId)
-		return nil, err
-	}
-
-	if headerHash == canonicalHash {
-		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
-		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
-		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
-			return nil, err
-		}
-		if canonical {
-			return &privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
-			}, nil
-		} else {
-			return &privateapi.PayloadStatus{
-				CriticalError: &privateapi.InvalidForkchoiceStateErr,
-			}, nil
-		}
-	}
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
 		log.Info("Flushing in-memory state")
@@ -372,7 +345,6 @@ func startHandlingForkChoice(
 		}
 	}
 
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
 		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
