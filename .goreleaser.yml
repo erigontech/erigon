@@ -96,7 +96,7 @@ snapshot:
 dockers:
   - image_templates:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-amd64
-    dockerfile: Dockerfile.release
+    dockerfile: Dockerfile
     use: buildx
     goarch: amd64
     ids:
@@ -106,7 +106,7 @@ dockers:
 
   - image_templates:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-arm64
-    dockerfile: Dockerfile.release
+    dockerfile: Dockerfile
     use: buildx
     goarch: arm64
     ids:

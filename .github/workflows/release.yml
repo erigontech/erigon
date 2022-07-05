@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@master
         with:
-          go-version: 1.17.x
+          go-version: 1.18.x
 
       - name: Prepare
         id: prepare
@@ -33,10 +33,9 @@ jobs:
 
       - name: Run GoReleaser
         run: |
-            make release
+            make release-dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
