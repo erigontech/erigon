@@ -87,7 +87,6 @@ func ExecuteBlockEphemerallyForBSC(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-	var receipts types.Receipts
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
@@ -95,6 +94,7 @@ func ExecuteBlockEphemerallyForBSC(
 	var (
 		rejectedTxs []*RejectedTx
 		includedTxs types.Transactions
+		receipts    types.Receipts
 	)
 
 	if !vmConfig.ReadOnly {
@@ -123,7 +123,7 @@ func ExecuteBlockEphemerallyForBSC(
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
 			if err != nil {
-				panic(err)
+				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
 			writeTrace = true
@@ -137,10 +137,11 @@ func ExecuteBlockEphemerallyForBSC(
 
 			vmConfig.Tracer = nil
 		}
-		if err != nil && statelessExec {
+		if err != nil {
+			if !statelessExec {
+				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
-		} else if err != nil && !statelessExec {
-			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		} else {
 			includedTxs = append(includedTxs, tx)
 			if !vmConfig.NoReceipts {
@@ -181,20 +182,20 @@ func ExecuteBlockEphemerallyForBSC(
 		receiptSha = types.DeriveSha(receipts)
 	}
 
-	var bloom types.Bloom
-
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if !statelessExec && newBlock.ReceiptHash() != block.ReceiptHash() {
+		if !statelessExec && receiptSha != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
 		}
 	}
 	if !statelessExec && newBlock.GasUsed() != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
+
+	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = newBlock.Bloom()
-		if !statelessExec && newBlock.Bloom() != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
+		if !statelessExec && bloom != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 
@@ -238,7 +239,7 @@ func ExecuteBlockEphemerally(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-	var receipts = make(types.Receipts, 0)
+
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
@@ -246,6 +247,7 @@ func ExecuteBlockEphemerally(
 	var (
 		rejectedTxs []*RejectedTx
 		includedTxs types.Transactions
+		receipts    types.Receipts
 	)
 
 	if !vmConfig.ReadOnly {
@@ -265,7 +267,7 @@ func ExecuteBlockEphemerally(
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
 			if err != nil {
-				panic(err)
+				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
 			writeTrace = true
@@ -279,10 +281,11 @@ func ExecuteBlockEphemerally(
 
 			vmConfig.Tracer = nil
 		}
-		if err != nil && statelessExec {
+		if err != nil {
+			if !statelessExec {
+				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
-		} else if err != nil && !statelessExec {
-			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		} else {
 			includedTxs = append(includedTxs, tx)
 			if !vmConfig.NoReceipts {
@@ -291,7 +294,6 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	var bloom types.Bloom
 	receiptSha := types.DeriveSha(receipts)
 	if !statelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
@@ -300,6 +302,8 @@ func ExecuteBlockEphemerally(
 	if !statelessExec && *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
+
+	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
 		if !statelessExec && bloom != header.Bloom {

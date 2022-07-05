@@ -122,6 +122,10 @@ func executeBlock(
 		return h
 	}
 
+	getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
+		return vm.NewStructLogger(&vm.LogConfig{}), nil
+	}
+
 	callTracer := calltracer.NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
@@ -131,24 +135,17 @@ func executeBlock(
 	var execRs *core.EphemeralExecResult
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
+
 	if isPoSa {
-		getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
-			return vm.NewStructLogger(&vm.LogConfig{}), nil
-		}
 		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
-		receipts = execRs.Receipts
-		stateSyncReceipt = execRs.ReceiptForStorage
 	} else {
-		getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
-			return vm.NewStructLogger(&vm.LogConfig{}), nil
-		}
 		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
-		receipts = execRs.Receipts
-		stateSyncReceipt = execRs.ReceiptForStorage
 	}
 	if err != nil {
 		return err
 	}
+	receipts = execRs.Receipts
+	stateSyncReceipt = execRs.ReceiptForStorage
 
 	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
@@ -160,7 +157,6 @@ func executeBlock(
 				return err
 			}
 		}
-
 	}
 
 	if cfg.changeSetHook != nil {
