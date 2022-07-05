@@ -48,7 +48,7 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 	}
 	go func() {
 		errServe := httpSrv.Serve(listener)
-		fmt.Println("IGORM: HTTP server stopped", errServe)
+		fmt.Println("ISSUE_4543: HTTP server stopped", "endpoint", endpoint, "err", errServe)
 	}()
 	return httpSrv, listener.Addr(), err
 }
