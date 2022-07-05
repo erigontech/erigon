@@ -117,7 +117,10 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
-	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	head, err := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	if err != nil {
+		return gpo.lastPrice, err
+	}
 	if head == nil {
 		log.Info("SuggestTipCap1", "gpo.lastPrice", gpo.lastPrice)
 		return gpo.lastPrice, nil

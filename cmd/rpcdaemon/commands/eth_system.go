@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -204,8 +205,10 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 	if header == nil {
+		log.Info("HeaderByNumber2", "is_nil", header == nil)
 		return nil, nil
 	}
+	log.Info("HeaderByNumber", "is_nil", header == nil)
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
