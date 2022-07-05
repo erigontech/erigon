@@ -18,32 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"golang.org/x/exp/constraints"
 )
-
-type theap[T constraints.Ordered] []T
-
-func (h theap[T]) Len() int {
-	return len(h)
-}
-
-func (h theap[T]) Less(i, j int) bool {
-	return h[i] < h[j]
-}
-
-func (h theap[T]) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *theap[T]) Push(a interface{}) {
-	*h = append(*h, a.(T))
-}
-
-func (h *theap[T]) Pop() interface{} {
-	c := *h
-	*h = c[:len(c)-1]
-	return c[len(c)-1]
-}
 
 type ReconStateItem struct {
 	txNum      uint64 // txNum where the item has been created
@@ -67,25 +42,22 @@ func (i ReconStateItem) Less(than btree.Item) bool {
 // ReconState is the accumulator of changes to the state
 type ReconState struct {
 	lock          sync.RWMutex
-	workIterator  roaring64.IntPeekable64
 	doneBitmap    roaring64.Bitmap
-	triggers      map[uint64][]uint64
-	queue         theap[uint64]
+	triggers      map[uint64][]TxTask
+	workCh        chan TxTask
+	queue         TxTaskQueue
 	changes       map[string]*btree.BTree // table => [] (txNum; key1; key2; val)
 	sizeEstimate  uint64
 	rollbackCount uint64
 }
 
-func NewReconState() *ReconState {
+func NewReconState(workCh chan TxTask) *ReconState {
 	rs := &ReconState{
-		triggers: map[uint64][]uint64{},
+		workCh:   workCh,
+		triggers: map[uint64][]TxTask{},
 		changes:  map[string]*btree.BTree{},
 	}
 	return rs
-}
-
-func (rs *ReconState) SetWorkBitmap(workBitmap *roaring64.Bitmap) {
-	rs.workIterator = workBitmap.Iterator()
 }
 
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
@@ -149,16 +121,21 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState) Schedule() (uint64, bool) {
+func (rs *ReconState) Schedule() (TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for rs.queue.Len() < 16 && rs.workIterator.HasNext() {
-		heap.Push(&rs.queue, rs.workIterator.Next())
+	for rs.queue.Len() < 16 {
+		txTask, ok := <-rs.workCh
+		if !ok {
+			// No more work, channel is closed
+			break
+		}
+		heap.Push(&rs.queue, txTask)
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(uint64), true
+		return heap.Pop(&rs.queue).(TxTask), true
 	}
-	return 0, false
+	return TxTask{}, false
 }
 
 func (rs *ReconState) CommitTxNum(txNum uint64) {
@@ -173,14 +150,14 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 	rs.doneBitmap.Add(txNum)
 }
 
-func (rs *ReconState) RollbackTxNum(txNum, dependency uint64) {
+func (rs *ReconState) RollbackTx(txTask TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {
-		heap.Push(&rs.queue, txNum)
+		heap.Push(&rs.queue, txTask)
 	} else {
 		tt, _ := rs.triggers[dependency]
-		tt = append(tt, txNum)
+		tt = append(tt, txTask)
 		rs.triggers[dependency] = tt
 	}
 	rs.rollbackCount++

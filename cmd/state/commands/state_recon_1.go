@@ -358,8 +358,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				txTask.Tx = txs[txIndex]
 			}
 			workCh <- txTask
+			inputTxNum++
 		}
-		inputTxNum++
 	}
 	close(workCh)
 	wg.Wait()
