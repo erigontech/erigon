@@ -170,7 +170,6 @@ func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	gpo.lastHead = headHash
 	gpo.lastPrice = price
 	gpo.cacheLock.Unlock()
-	log.Info("SuggestTipCap4", "price", price)
 	return price, nil
 }
 
