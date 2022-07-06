@@ -145,7 +145,6 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
-		usedGas := new(uint64)
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
@@ -161,13 +160,11 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		// Update the evm with the new transaction context.
 		vmenv.Reset(txContext, ibs)
 
-		result, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
+		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
 		}
 		// Update the state with pending changes
 		ibs.SoftFinalise()
-		*usedGas += result.UsedGas
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {

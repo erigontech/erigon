@@ -116,7 +116,6 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
-	noop := state.NewNoopWriter()
 	rules := rw.chainConfig.Rules(txTask.BlockNum)
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -131,9 +130,7 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 		misc.ApplyDAOHardFork(ibs)
-		if err := ibs.FinalizeTx(rules, noop); err != nil {
-			panic(err)
-		}
+		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
@@ -148,13 +145,26 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
-		usedGas := new(uint64)
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
+		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, rw.chainConfig, vmConfig)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		_, _, err = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
+		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
+		if err != nil {
+			panic(err)
+		}
+		txContext := core.NewEVMTxContext(msg)
+		// Update the evm with the new transaction context.
+		vmenv.Reset(txContext, ibs)
+
+		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
+		}
+		if err == nil {
+			ibs.SoftFinalise()
 		}
 	}
 	if dependency, ok := rw.stateReader.ReadError(); ok {
@@ -258,12 +268,8 @@ func (fw *FillWorker) fillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
-			if len(val) > 1 || val[0] != 0 {
-				if err := plainStateCollector.Collect(compositeKey, val); err != nil {
-					panic(err)
-				}
-			} else {
-				fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
+				panic(err)
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
@@ -282,19 +288,15 @@ func (fw *FillWorker) fillCode(codeCollector, plainContractCollector *etl.Collec
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 		if len(val) > 0 {
-			if len(val) > 1 || val[0] != 0 {
-				codeHash, err := common.HashData(val)
-				if err != nil {
-					panic(err)
-				}
-				if err = codeCollector.Collect(codeHash[:], val); err != nil {
-					panic(err)
-				}
-				if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
-					panic(err)
-				}
-			} else {
-				fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+			codeHash, err := common.HashData(val)
+			if err != nil {
+				panic(err)
+			}
+			if err = codeCollector.Collect(codeHash[:], val); err != nil {
+				panic(err)
+			}
+			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
+				panic(err)
 			}
 			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 		}
