@@ -218,7 +218,7 @@ func HeadersPOS(
 	return nil
 }
 
-func safeAndFinalizedBlocksAreCanonical(
+func writeForkChoiceHashes(
 	forkChoice *engineapi.ForkChoiceMessage,
 	s *StageState,
 	tx kv.RwTx,
@@ -229,9 +229,7 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if safeIsCanonical {
-			rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-		} else {
+		if !safeIsCanonical {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			return false, nil
 		}
@@ -242,13 +240,15 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if finalizedIsCanonical {
-			rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
-		} else {
+		if !finalizedIsCanonical {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			return false, nil
 		}
 	}
+
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+	rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+	rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
 
 	return true, nil
 }
@@ -274,8 +274,7 @@ func startHandlingForkChoice(
 	if currentHeadHash == headerHash { // no-op
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			return nil, err
@@ -349,8 +348,7 @@ func startHandlingForkChoice(
 			return nil, err
 		}
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			return nil, err
@@ -416,9 +414,8 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
-	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
-	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+	canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 	if err != nil {
 		return err
 	}
