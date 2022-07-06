@@ -336,18 +336,15 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
 
-	var retry = 0 // MacOS seems need time to release port after previous `torrentClient.Close()`
-	for {
+	for retry := 0; retry < 5; retry++ {
 		torrentClient, err = torrent.NewClient(cfg)
 		if err != nil {
-			if retry > 5 {
-				return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
-			}
 			time.Sleep(10 * time.Millisecond)
-			retry++
 			continue
 		}
-		break
+	}
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
 
 	return db, c, m, torrentClient, nil
