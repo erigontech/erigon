@@ -120,28 +120,28 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
-		fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
 		_, ibs, err = rw.genesis.ToBlock()
 		if err != nil {
 			panic(err)
 		}
 	} else if daoForkTx {
-		fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
 	} else {
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
@@ -150,16 +150,12 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
 		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
-		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, rw.chainConfig, vmConfig)
 		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
 		if err != nil {
 			panic(err)
 		}
 		txContext := core.NewEVMTxContext(msg)
-
-		// Update the evm with the new transaction context.
-		vmenv.Reset(txContext, ibs)
-
+		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
 		}
@@ -169,9 +165,9 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("[%x]=>[%d]\n", addr, &bal)
-		}
+		//for addr, bal := range txTask.BalanceIncreaseSet {
+		//	fmt.Printf("[%x]=>[%d]\n", addr, &bal)
+		//}
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
@@ -231,8 +227,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
-	workCh := make(chan state.TxTask, 128)
-	rs := state.NewReconState1(workCh)
+	rs := state.NewReconState1()
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker1, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
@@ -273,6 +268,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	var outputTxNum uint64
 	// Go-routine gathering results from the workers
 	go func() {
+		defer rs.Finish()
 		for outputTxNum < txNum {
 			select {
 			case txTask := <-resultCh:
@@ -354,15 +350,15 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}()
 	var inputTxNum uint64
+	var header *types.Header
 	for blockNum := uint64(0); blockNum <= block; blockNum++ {
-		header, err := blockReader.HeaderByNumber(ctx, nil, blockNum)
-		if err != nil {
-			panic(err)
+		if header, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+			return err
 		}
 		blockHash := header.Hash()
 		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -381,11 +377,10 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					txTask.Sender = &sender
 				}
 			}
-			workCh <- txTask
+			rs.AddWork(txTask)
 			inputTxNum++
 		}
 	}
-	close(workCh)
 	wg.Wait()
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
@@ -420,11 +415,15 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	var rootHash common.Hash
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
+	}
+	if rootHash != header.Root {
+		log.Error("Incorrect root hash, expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }

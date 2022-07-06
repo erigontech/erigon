@@ -116,6 +116,7 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	noop := state.NewNoopWriter()
 	rules := rw.chainConfig.Rules(txTask.BlockNum)
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -149,22 +150,20 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
-		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, rw.chainConfig, vmConfig)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
 		if err != nil {
 			panic(err)
 		}
 		txContext := core.NewEVMTxContext(msg)
-		// Update the evm with the new transaction context.
-		vmenv.Reset(txContext, ibs)
+		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
 		}
-		if err == nil {
-			ibs.SoftFinalise()
+		if err = ibs.FinalizeTx(rules, noop); err != nil {
+			panic(err)
 		}
 	}
 	if dependency, ok := rw.stateReader.ReadError(); ok {
@@ -602,9 +601,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}()
 	var inputTxNum uint64
+	var header *types.Header
 	for bn := uint64(0); bn < blockNum; bn++ {
-		header, err := blockReader.HeaderByNumber(ctx, nil, bn)
-		if err != nil {
+		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
 			panic(err)
 		}
 		blockHash := header.Hash()
@@ -853,11 +852,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	var rootHash common.Hash
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
+	}
+	if rootHash != header.Root {
+		log.Error("Incorrect root hash, expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }

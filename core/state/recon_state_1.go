@@ -62,23 +62,26 @@ func (h *TxTaskQueue) Pop() interface{} {
 
 type ReconState1 struct {
 	lock          sync.RWMutex
+	receiveWork   *sync.Cond
+	sendWork      *sync.Cond
 	triggers      map[uint64]TxTask
 	senderTxNums  map[common.Address]uint64
-	workCh        chan TxTask
 	queue         TxTaskQueue
 	changes       map[string]map[string][]byte
 	sizeEstimate  uint64
 	rollbackCount uint64
 	txsDone       uint64
+	finished      bool
 }
 
-func NewReconState1(workCh chan TxTask) *ReconState1 {
+func NewReconState1() *ReconState1 {
 	rs := &ReconState1{
-		workCh:       workCh,
 		triggers:     map[uint64]TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]map[string][]byte{},
 	}
+	rs.receiveWork = sync.NewCond(&rs.lock)
+	rs.sendWork = sync.NewCond(&rs.lock)
 	return rs
 }
 
@@ -135,22 +138,27 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
+func (rs *ReconState1) AddWork(txTask TxTask) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	if txTask.Sender != nil && !rs.registerSender(txTask) {
+		return
+	}
+	for rs.queue.Len() >= 128 {
+		rs.sendWork.Wait()
+	}
+	heap.Push(&rs.queue, txTask)
+	rs.receiveWork.Signal()
+}
+
 func (rs *ReconState1) Schedule() (TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for rs.queue.Len() < 16 {
-		txTask, ok := <-rs.workCh
-		if !ok {
-			// No more work, channel is closed
-			break
-		}
-		if txTask.Sender == nil {
-			heap.Push(&rs.queue, txTask)
-		} else if rs.registerSender(txTask) {
-			heap.Push(&rs.queue, txTask)
-		}
+	for !rs.finished && rs.queue.Len() == 0 {
+		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
+		rs.sendWork.Signal()
 		return heap.Pop(&rs.queue).(TxTask), true
 	}
 	return TxTask{}, false
@@ -174,6 +182,7 @@ func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) {
 	defer rs.lock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
 		heap.Push(&rs.queue, triggered)
+		rs.receiveWork.Signal()
 		delete(rs.triggers, txNum)
 	}
 	if sender != nil {
@@ -190,6 +199,14 @@ func (rs *ReconState1) RollbackTx(txTask TxTask) {
 	defer rs.lock.Unlock()
 	heap.Push(&rs.queue, txTask)
 	rs.rollbackCount++
+	rs.receiveWork.Signal()
+}
+
+func (rs *ReconState1) Finish() {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	rs.finished = true
+	rs.receiveWork.Broadcast()
 }
 
 func (rs *ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) {
@@ -237,7 +254,9 @@ func (rs *ReconState1) SizeEstimate() uint64 {
 func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
+	//fmt.Printf("ValidReads\n")
 	for table, keyList := range readKeys {
+		//fmt.Printf("Table %s\n", table)
 		t, ok := rs.changes[table]
 		if !ok {
 			continue
@@ -246,9 +265,12 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 		for i, key := range keyList {
 			val := valList[i]
 			if rereadVal, ok := t[string(key)]; ok {
+				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
 				if !bytes.Equal(val, rereadVal) {
 					return false
 				}
+			} else {
+				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -374,7 +396,7 @@ func (r *StateReconReader1) ReadAccountData(address common.Address) (*accounts.A
 		}
 	}
 	r.readKeys[kv.PlainState] = append(r.readKeys[kv.PlainState], address.Bytes())
-	r.readVals[kv.PlainState] = append(r.readVals[kv.PlainState], enc)
+	r.readVals[kv.PlainState] = append(r.readVals[kv.PlainState], common.CopyBytes(enc))
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -406,8 +428,8 @@ func (r *StateReconReader1) ReadAccountStorage(address common.Address, incarnati
 			return nil, err
 		}
 	}
-	r.readKeys[kv.PlainState] = append(r.readKeys[kv.PlainState], r.composite)
-	r.readVals[kv.PlainState] = append(r.readVals[kv.PlainState], enc)
+	r.readKeys[kv.PlainState] = append(r.readKeys[kv.PlainState], common.CopyBytes(r.composite))
+	r.readVals[kv.PlainState] = append(r.readVals[kv.PlainState], common.CopyBytes(enc))
 	if r.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), r.txNum)
@@ -431,7 +453,7 @@ func (r *StateReconReader1) ReadAccountCode(address common.Address, incarnation 
 		}
 	}
 	r.readKeys[kv.Code] = append(r.readKeys[kv.Code], address.Bytes())
-	r.readVals[kv.Code] = append(r.readVals[kv.Code], enc)
+	r.readVals[kv.Code] = append(r.readVals[kv.Code], common.CopyBytes(enc))
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -448,7 +470,7 @@ func (r *StateReconReader1) ReadAccountCodeSize(address common.Address, incarnat
 		}
 	}
 	r.readKeys[kv.Code] = append(r.readKeys[kv.Code], address.Bytes())
-	r.readVals[kv.Code] = append(r.readVals[kv.Code], enc)
+	r.readVals[kv.Code] = append(r.readVals[kv.Code], common.CopyBytes(enc))
 	size := len(enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
@@ -466,7 +488,7 @@ func (r *StateReconReader1) ReadAccountIncarnation(address common.Address) (uint
 		}
 	}
 	r.readKeys[kv.IncarnationMap] = append(r.readKeys[kv.IncarnationMap], address.Bytes())
-	r.readVals[kv.IncarnationMap] = append(r.readVals[kv.IncarnationMap], enc)
+	r.readVals[kv.IncarnationMap] = append(r.readVals[kv.IncarnationMap], common.CopyBytes(enc))
 	if len(enc) == 0 {
 		return 0, nil
 	}
