@@ -332,22 +332,15 @@ func startHandlingForkChoice(
 	if headerHash == canonicalHash {
 		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
-		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
-			return nil, err
-		}
-		if canonical {
-			return &privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
-			}, nil
-		} else {
-			return &privateapi.PayloadStatus{
-				CriticalError: &privateapi.InvalidForkchoiceStateErr,
-			}, nil
-		}
+		// Per the Engine API spec:
+		// Client software MAY skip an update of the forkchoice state and MUST NOT begin a payload build process
+		// if forkchoiceState.headBlockHash references an ancestor of the head of canonical chain.
+		// In the case of such an event, client software MUST return
+		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: headerHash,
+		}, nil
 	}
 
 	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
@@ -514,6 +507,8 @@ func handleNewPayload(
 	}
 
 	if header.Number.Uint64() != parent.Number.Uint64()+1 {
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -582,15 +577,7 @@ func verifyAndSaveNewPoSHeader(
 		}, false, nil
 	}
 
-	if err := rawdb.WriteHeaderNumber(tx, headerHash, headerNumber); err != nil {
-		return nil, false, err
-	}
-
 	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-		return nil, false, err
-	}
-
-	if err := cfg.hd.StorePayloadFork(tx, header, body); err != nil {
 		return nil, false, err
 	}
 
@@ -996,7 +983,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock /* deleteHeaders */); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, false /* deleteHeaders */); err != nil {
 		return err
 	}
 	if badBlock {
@@ -1167,7 +1154,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if err := WaitForDownloader(ctx, cfg); err != nil {
+	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
 	if err := cfg.snapshots.Reopen(); err != nil {
@@ -1282,16 +1269,30 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
+func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		return nil
 	}
+
+	snInDB, err := rawdb.ReadSnapshots(tx)
+	if err != nil {
+		return err
+	}
+	dbEmpty := len(snInDB) == 0
 
 	// send all hashes to the Downloader service
 	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
+		_, has := snInDB[p.Name]
+		if !dbEmpty && !has {
+			continue
+		}
+		if dbEmpty {
+			snInDB[p.Name] = p.Hash
+		}
+
 		req.Items = append(req.Items, &proto_downloader.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
@@ -1360,6 +1361,12 @@ Loop:
 Finish:
 	if cfg.snapshots.Cfg().Verify {
 		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
+			return err
+		}
+	}
+
+	if dbEmpty {
+		if err = rawdb.WriteSnapshots(tx, snInDB); err != nil {
 			return err
 		}
 	}

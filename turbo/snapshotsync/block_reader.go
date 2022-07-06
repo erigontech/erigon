@@ -251,7 +251,8 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	if ok {
 		return h, nil
 	}
-	return rawdb.ReadHeaderByNumber(tx, blockHeight), nil
+	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
+	return h, nil
 }
 
 // HeaderByHash - will search header in all snapshots starting from recent
