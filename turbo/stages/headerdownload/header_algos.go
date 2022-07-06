@@ -1217,9 +1217,17 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	return nil
 }
 
-func (hd *HeaderDownload) CleanNextForkState() {
+func (hd *HeaderDownload) CleanNextForkState(tx kv.RwTx, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	sb, ok := hd.sideForksBlock[hd.nextForkHash]
+	// If we did not flush the fork state, then we need to notify the txpool.
+	if hd.nextForkState != nil && hd.nextForkHash != (common.Hash{}) && ok {
+		hd.nextForkState.UpdateTxn(tx)
+		if err := execPayload(hd.nextForkState, nil, nil, sb.header.Number.Uint64()-1, nil, nil); err != nil {
+			log.Warn("Could not clean payload", "err", err)
+		}
+	}
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
 }

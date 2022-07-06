@@ -272,7 +272,7 @@ func startHandlingForkChoice(
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 	if cfg.memoryOverlay {
-		defer cfg.hd.CleanNextForkState()
+		defer cfg.hd.CleanNextForkState(tx, cfg.execPayload)
 	}
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op

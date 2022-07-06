@@ -246,9 +246,6 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 }
 
 func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
-	// Setup
-	height := header.Number.Uint64()
-	hash := header.Hash()
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -282,6 +279,13 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			}
 		}
 	}
+	// If we did not specify header or body we stop here
+	if header == nil || body == nil {
+		return nil
+	}
+	// Setup
+	height := header.Number.Uint64()
+	hash := header.Hash()
 	// Prepare memory state for block execution
 	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
 		return err
