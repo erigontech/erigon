@@ -342,11 +342,12 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	for {
 		torrentClient, err = torrent.NewClient(cfg)
 		if err != nil {
-			time.Sleep(10 * time.Millisecond)
-			retry++
 			if retry > 5 {
 				return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 			}
+			time.Sleep(10 * time.Millisecond)
+			retry++
+			continue
 		}
 		break
 	}
