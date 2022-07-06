@@ -360,6 +360,19 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash()))
 	}
 
+	if chainConfig.Bor != nil {
+		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if borTx != nil {
+			borReceipt := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum)
+			if borReceipt != nil {
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, block.Hash()))
+			}
+		}
+	}
+
 	return result, nil
 }
 

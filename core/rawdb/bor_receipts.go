@@ -126,6 +126,18 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
 
+// ReadBorTransactionWithBlockNumberAndHash retrieves a specific bor (fake) transaction by block number and block hash, along with
+// its added positional metadata.
+func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+	bodyForStorage, err := ReadStorageBody(db, blockHash, blockNumber)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, nil
+	}
+
+	var tx types.Transaction = types.NewBorTransaction()
+	return tx, blockHash, blockNumber, uint64(bodyForStorage.TxAmount), nil
+}
+
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
 // its added positional metadata.
 func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {

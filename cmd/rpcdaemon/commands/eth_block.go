@@ -211,6 +211,23 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if td != nil {
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.Bor != nil {
+		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, b.NumberU64(), b.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if borTx != nil {
+			borReceipt := rawdb.ReadBorReceipt(tx, b.Hash(), b.NumberU64())
+			if borReceipt != nil {
+			}
+		}
+	}
+
 	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {

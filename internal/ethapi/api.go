@@ -283,26 +283,39 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
+	return RPCMarshalBlockEx(block, inclTx, fullTx, nil, nil)
+}
+
+func RPCMarshalBlockEx(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxReceipt *types.Receipt) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 
 	if inclTx {
-		formatTx := func(tx types.Transaction) (interface{}, error) {
+		formatTx := func(tx types.Transaction, index int) (interface{}, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx types.Transaction) (interface{}, error) {
-				return newRPCTransactionFromBlockHash(block, tx.Hash()), nil
+			formatTx = func(tx types.Transaction, index int) (interface{}, error) {
+				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]interface{}, len(txs))
+		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
 		for i, tx := range txs {
-			if transactions[i], err = formatTx(tx); err != nil {
+			if transactions[i], err = formatTx(tx, i); err != nil {
 				return nil, err
 			}
 		}
+
+		if borTx != nil && borTxReceipt != nil {
+			if fullTx {
+				transactions = append(transactions, newRPCTransactionFromBlockAndTxGivenIndex(block, borTx, uint64(len(txs))))
+			} else {
+				transactions = append(transactions, borTxReceipt.TxHash)
+			}
+		}
+
 		fields["transactions"] = transactions
 	}
 	uncles := block.Uncles()
@@ -438,6 +451,7 @@ func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
 }
 */
 
+/*
 // newRPCTransactionFromBlockIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransaction {
 	txs := b.Transactions()
@@ -445,6 +459,12 @@ func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransacti
 		return nil
 	}
 	return newRPCTransaction(txs[index], b.Hash(), b.NumberU64(), index, b.BaseFee())
+}
+*/
+
+// newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
+func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, tx types.Transaction, index uint64) *RPCTransaction {
+	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee())
 }
 
 /*
@@ -467,6 +487,7 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 }
 */
 
+/*
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransaction {
 	for idx, tx := range b.Transactions() {
@@ -476,6 +497,7 @@ func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransa
 	}
 	return nil
 }
+*/
 
 /*
 // PublicTransactionPoolAPI exposes methods for the RPC interface
