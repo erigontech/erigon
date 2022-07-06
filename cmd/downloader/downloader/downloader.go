@@ -211,8 +211,6 @@ func (d *Downloader) onComplete() {
 	}
 	d.cfg.DataDir = snapDir
 
-	time.Sleep(100 * time.Millisecond) // some OS need time to release port after `torrentClient.Close()`
-
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
 		panic(err)
@@ -338,7 +336,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
 
-	var retry = 0
+	var retry = 0 // MacOS seems need time to release port after previous `torrentClient.Close()`
 	for {
 		torrentClient, err = torrent.NewClient(cfg)
 		if err != nil {
