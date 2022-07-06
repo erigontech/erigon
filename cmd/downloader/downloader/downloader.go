@@ -210,7 +210,6 @@ func (d *Downloader) onComplete() {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
-	// fmt.Printf("alex1: %s\n", d.cfg.DataDir)
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
@@ -336,7 +335,14 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	}
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
-	torrentClient, err = torrent.NewClient(cfg)
+
+	for retry := 0; retry < 5; retry++ {
+		torrentClient, err = torrent.NewClient(cfg)
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
