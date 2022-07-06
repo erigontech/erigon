@@ -20,6 +20,15 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"io"
+	"math/big"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"text/template"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -30,14 +39,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
-	"io"
-	"math/big"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"strings"
-	"text/tabwriter"
-	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -362,6 +363,10 @@ var (
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
+	}
+	RpcStreamingDisableFlag = cli.BoolFlag{
+		Name:  "rpc.streaming.disable",
+		Usage: "Erigon has enalbed json streamin for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",

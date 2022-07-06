@@ -118,16 +118,20 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	if !ok {
+		stream.WriteNil()
 		return nil
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	if block == nil {
+		stream.WriteNil()
 		return nil
 	}
 	blockHash := block.Hash()
