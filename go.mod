@@ -35,7 +35,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220707042037-fcddfca502a1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220706165832-653fe0398795
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
@@ -111,6 +111,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lispad/go-generics-tools v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
+	github.com/matryer/moq v0.2.7 // indirect
 	github.com/mattn/go-colorable v0.1.11 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
