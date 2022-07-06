@@ -337,9 +337,18 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	}
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
-	torrentClient, err = torrent.NewClient(cfg)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
+
+	var retry = 0
+	for {
+		torrentClient, err = torrent.NewClient(cfg)
+		if err != nil {
+			time.Sleep(10 * time.Millisecond)
+			retry++
+			if retry > 5 {
+				return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
+			}
+		}
+		break
 	}
 
 	return db, c, m, torrentClient, nil
