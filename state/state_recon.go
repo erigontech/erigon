@@ -58,21 +58,17 @@ func (d *Domain) MakeContext() *DomainContext {
 }
 
 func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	var search filesItem
-	search.startTxNum = txNum
-	search.endTxNum = txNum
 	var foundTxNum uint64
 	var foundEndTxNum uint64
 	var foundStartTxNum uint64
 	var found bool
 	var anyItem bool
 	var maxTxNum uint64
-	dc.files[EfHistory].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
+	dc.files[EfHistory].Ascend(func(i btree.Item) bool {
 		item := i.(*filesItem)
 		if item.index.Empty() {
 			return true
 		}
-		anyItem = true
 		offset := item.indexReader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
@@ -88,6 +84,7 @@ func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uin
 			} else {
 				maxTxNum = ef.Max()
 			}
+			anyItem = true
 		}
 		return true
 	})
@@ -95,6 +92,7 @@ func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uin
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		var historyItem *filesItem
+		var search filesItem
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
 		if i := dc.files[History].Get(&search); i != nil {

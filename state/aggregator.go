@@ -681,6 +681,10 @@ func (a *Aggregator) FinishTx() error {
 	}
 	closeAll := true
 	step := a.txNum / a.aggregationStep
+	if step == 0 {
+		return nil
+	}
+	step-- // Leave one step worth in the DB
 	collation, err := a.collate(step, step*a.aggregationStep, (step+1)*a.aggregationStep, a.rwTx)
 	if err != nil {
 		return err
