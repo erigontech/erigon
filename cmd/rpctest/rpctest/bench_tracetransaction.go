@@ -46,7 +46,7 @@ func BenchTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blockFro
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
 			fmt.Printf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
 			return
@@ -103,7 +103,7 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
 			fmt.Printf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
 			return
