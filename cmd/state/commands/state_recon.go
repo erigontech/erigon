@@ -66,7 +66,6 @@ type ReconWorker struct {
 	getHeader    func(hash common.Hash, number uint64) *types.Header
 	ctx          context.Context
 	engine       consensus.Engine
-	txNums       []uint64
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
@@ -74,7 +73,7 @@ type ReconWorker struct {
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 	a *libstate.Aggregator, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
-	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
+	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 ) *ReconWorker {
 	ac := a.MakeContext()
 	return &ReconWorker{
@@ -86,7 +85,6 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		ctx:          context.Background(),
 		stateWriter:  state.NewStateReconWriter(ac, rs),
 		stateReader:  state.NewHistoryReaderNoState(ac, rs),
-		txNums:       txNums,
 		chainConfig:  chainConfig,
 		logger:       logger,
 		genesis:      genesis,
@@ -371,6 +369,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	} else if err = os.RemoveAll(reconDbPath); err != nil {
 		return err
 	}
+	startTime := time.Now()
 	db, err := kv2.NewMDBX(logger).Path(reconDbPath).WriteMap().Open()
 	if err != nil {
 		return err
@@ -528,7 +527,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, txNums, chainConfig, logger, genesis)
+		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis)
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
@@ -840,6 +839,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
+	log.Info("Reconstitution complete", "duration", time.Since(startTime))
 	log.Info("Computing hashed state")
 	tmpDir := filepath.Join(datadir, "tmp")
 	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
