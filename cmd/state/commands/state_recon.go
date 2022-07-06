@@ -151,8 +151,8 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 		usedGas := new(uint64)
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-		ibs.Prepare(txHash, rw.lastBlockHash, int(txIndex))
-		getHashFn := core.GetHashFn(rw.lastHeader, rw.getHeader)
+		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
 		_, _, err = core.ApplyTransaction(rw.chainConfig, getHashFn, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
