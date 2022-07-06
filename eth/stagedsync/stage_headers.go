@@ -247,8 +247,12 @@ func writeForkChoiceHashes(
 	}
 
 	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-	rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-	rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+	if forkChoice.SafeBlockHash != (common.Hash{}) {
+		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+	}
+	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+	}
 
 	return true, nil
 }
