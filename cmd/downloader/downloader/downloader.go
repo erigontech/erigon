@@ -75,10 +75,6 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
-	torrentClient.Close()
-	m.Close()
-	c.Close()
-	db.Close()
 	db, c, m, torrentClient, err = openClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
