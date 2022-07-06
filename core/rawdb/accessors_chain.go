@@ -430,7 +430,7 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
