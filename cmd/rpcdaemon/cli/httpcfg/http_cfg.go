@@ -30,6 +30,7 @@ type HttpCfg struct {
 	WebsocketCompression    bool
 	RpcAllowListFilePath    string
 	RpcBatchConcurrency     uint
+	RpcStreamingDisable     bool
 	DBReadConcurrency       int
 	TraceCompatibility      bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr           string

@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -344,6 +345,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 
 		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:  ctx.GlobalBool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:    ctx.GlobalInt(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
 		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),

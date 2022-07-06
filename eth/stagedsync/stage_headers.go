@@ -218,7 +218,7 @@ func HeadersPOS(
 	return nil
 }
 
-func safeAndFinalizedBlocksAreCanonical(
+func writeForkChoiceHashes(
 	forkChoice *engineapi.ForkChoiceMessage,
 	s *StageState,
 	tx kv.RwTx,
@@ -229,9 +229,7 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if safeIsCanonical {
-			rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-		} else {
+		if !safeIsCanonical {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			return false, nil
 		}
@@ -242,12 +240,18 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if finalizedIsCanonical {
-			rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
-		} else {
+		if !finalizedIsCanonical {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			return false, nil
 		}
+	}
+
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+	if forkChoice.SafeBlockHash != (common.Hash{}) {
+		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+	}
+	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
 	}
 
 	return true, nil
@@ -268,14 +272,13 @@ func startHandlingForkChoice(
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 	if cfg.memoryOverlay {
-		defer cfg.hd.CleanNextForkState()
+		defer cfg.hd.CleanNextForkState(tx, cfg.execPayload)
 	}
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			return nil, err
@@ -321,7 +324,27 @@ func startHandlingForkChoice(
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+	// If header is canonical, then no reorgs are required
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (reading canonical hash of %d)", s.LogPrefix(), headerNumber), "err", err)
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		return nil, err
+	}
+
+	if headerHash == canonicalHash {
+		log.Info(fmt.Sprintf("[%s] Fork choice on previously known block", s.LogPrefix()))
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		// Per the Engine API spec:
+		// Client software MAY skip an update of the forkchoice state and MUST NOT begin a payload build process
+		// if forkchoiceState.headBlockHash references an ancestor of the head of canonical chain.
+		// In the case of such an event, client software MUST return
+		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
+		return &privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: headerHash,
+		}, nil
+	}
 
 	if cfg.memoryOverlay && headerHash == cfg.hd.GetNextForkHash() {
 		log.Info("Flushing in-memory state")
@@ -329,8 +352,7 @@ func startHandlingForkChoice(
 			return nil, err
 		}
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			return nil, err
@@ -345,6 +367,7 @@ func startHandlingForkChoice(
 		}
 	}
 
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
 		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
@@ -395,9 +418,8 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
-	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
-	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg)
+	canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 	if err != nil {
 		return err
 	}
@@ -557,10 +579,6 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-		return nil, false, err
-	}
-
-	if err := cfg.hd.StorePayloadFork(tx, header, body); err != nil {
 		return nil, false, err
 	}
 
