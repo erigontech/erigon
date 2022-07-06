@@ -115,7 +115,6 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
-	noop := state.NewNoopWriter()
 	rules := rw.chainConfig.Rules(txTask.BlockNum)
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -130,9 +129,7 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 	} else if daoForkTx {
 		fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
-		if err := ibs.FinalizeTx(rules, noop); err != nil {
-			panic(err)
-		}
+		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 	} else if txTask.Final {
@@ -152,10 +149,25 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		_, _, txTask.Error = core.ApplyTransaction(rw.chainConfig, rw.getHeader, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
-		//if err != nil {
-		//	panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
-		//}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
+		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
+		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, rw.chainConfig, vmConfig)
+		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
+		if err != nil {
+			panic(err)
+		}
+		txContext := core.NewEVMTxContext(msg)
+
+		// Update the evm with the new transaction context.
+		vmenv.Reset(txContext, ibs)
+
+		result, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			txTask.Error = err
+		}
+		// Update the state with pending changes
+		ibs.SoftFinalise()
+		*usedGas += result.UsedGas
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
@@ -195,6 +207,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	startTime := time.Now()
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
@@ -309,6 +322,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 				if sizeEstimate >= commitThreshold {
+					commitStart := time.Now()
+					log.Info("Committing...")
 					err := func() error {
 						lock.Lock()
 						defer lock.Unlock()
@@ -336,6 +351,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					if err != nil {
 						panic(err)
 					}
+					log.Info("Committed", "time", time.Since(commitStart))
 				}
 			}
 		}
@@ -395,6 +411,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
+	log.Info("Transaction replay complete", "duration", time.Since(startTime))
 	log.Info("Computing hashed state")
 	tmpDir := filepath.Join(datadir, "tmp")
 	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
