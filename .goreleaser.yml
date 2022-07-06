@@ -68,28 +68,6 @@ builds:
       # We need to build a static binary because we are building in a glibc based system and running in a musl container
       -s -w -extldflags "-static"
 
-nfpms:
-  - vendor: 0xPolygon
-    homepage: https://polygon.technology
-    maintainer: Polygon Team <team@polygon.technology>
-    description: Polygon Blockchain
-    license: GPLv3 LGPLv3
-
-    formats:
-      - apk
-      - deb
-      - rpm
-
-    contents:
-      - src: builder/files/erigon.service
-        dst: /lib/systemd/system/erigon.service
-        type: config
-
-    overrides:
-      rpm:
-        replacements:
-          amd64: x86_64
-
 snapshot:
   name_template: "{{ .Tag }}.next"
 

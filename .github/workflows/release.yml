@@ -33,7 +33,7 @@ jobs:
 
       - name: Run GoReleaser
         run: |
-            make release
+            make release-dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
