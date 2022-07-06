@@ -210,7 +210,8 @@ func (d *Downloader) onComplete() {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
-	// fmt.Printf("alex1: %s\n", d.cfg.DataDir)
+
+	time.Sleep(100 * time.Millisecond) // some OS need time to release port after `torrentClient.Close()`
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
