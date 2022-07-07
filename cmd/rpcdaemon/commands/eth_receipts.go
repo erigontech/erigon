@@ -191,7 +191,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-		if body == nil {
+		if err != nil || body == nil {
 			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
 		for _, log := range blockLogs {
