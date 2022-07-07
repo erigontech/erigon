@@ -149,17 +149,18 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	var trieVariant commitment.TrieVariant
 	switch commitmentTrie {
 	case "bin":
-		logger.Info("using Binary Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantBinPatriciaTrie
 		blockRootMismatchExpected = true
 	case "hex":
 		fallthrough
 	default:
-		logger.Info("using Hex Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantHexPatriciaTrie
 	}
 
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, commitment.InitializeTrie(trieVariant), rwTx)
+	trie := commitment.InitializeTrie(trieVariant)
+	logger.Info("commitment trie initialized", "variant", trie.Variant())
+
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, trie, rwTx)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
