@@ -225,6 +225,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 		if borTx != nil {
 			borReceipt = rawdb.ReadBorReceipt(tx, b.Hash(), b.NumberU64())
+			if borReceipt != nil {
+				borTx, err = borTx.WithHash(borReceipt.TxHash)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 
