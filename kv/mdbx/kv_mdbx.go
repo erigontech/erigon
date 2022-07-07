@@ -402,6 +402,11 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		if err == nil {
 			db.wg.Add(1)
 		}
+		if txn == nil {
+			// on error, or if there is whatever reason that we don't return a tx,
+			// we need to free up the limiter slot, otherwise it could lead to deadlocks
+			<-db.roTxsLimiter
+		}
 	}()
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
