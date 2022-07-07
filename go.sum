@@ -390,6 +390,8 @@ github.com/ledgerwatch/erigon-lib v0.0.0-20220704045547-cdbb792be709 h1:vYR135oq
 github.com/ledgerwatch/erigon-lib v0.0.0-20220704045547-cdbb792be709/go.mod h1:7sQ5B5m54zoo7RVRVukH3YZCYVrCC+BmwDBD+9KyTrE=
 github.com/ledgerwatch/erigon-lib v0.0.0-20220706165832-653fe0398795 h1:FOOvqXa8JAMvEP/BQWLOD58KvnRliw7kHSrEeEB1wGU=
 github.com/ledgerwatch/erigon-lib v0.0.0-20220706165832-653fe0398795/go.mod h1:7sQ5B5m54zoo7RVRVukH3YZCYVrCC+BmwDBD+9KyTrE=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220707065230-95e361fa1ed7 h1:ytnJHsVttH1NleI45f6FbP7HaratpDx4IPCK/D/aZwI=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220707065230-95e361fa1ed7/go.mod h1:bttvdtZXjh803u/CeMerKYnWvVvXTICWSfpcMeQNtmc=
 github.com/ledgerwatch/log/v3 v3.4.1 h1:/xGwlVulXnsO9Uq+tzaExc8OWmXXHU0dnLalpbnY5Bc=
 github.com/ledgerwatch/log/v3 v3.4.1/go.mod h1:VXcz6Ssn6XEeU92dCMc39/g1F0OYAjw1Mt+dGP5DjXY=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
