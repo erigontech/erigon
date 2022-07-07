@@ -73,7 +73,6 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
-	var begin, end uint64
 	logs := []*types.Log{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
@@ -82,39 +81,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 	defer tx.Rollback()
 
-	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
-		if number == nil {
-			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-		begin = *number
-		end = *number
-	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return nil, err
-		}
-
-		begin = latest
-		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
-			}
-		}
-	}
-	if end < begin {
-		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+	begin, end, err := blockRangeFromFilter(tx, crit)
+	if err != nil {
+		return nil, err
 	}
 
 	blockNumbers := roaring.New()
@@ -186,18 +155,19 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			continue
 		}
 
-		b, err := api.blockByNumberWithSenders(tx, block)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, block)
 		if err != nil {
 			return nil, err
 		}
+		b := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, block)
 		if b == nil {
 			return nil, fmt.Errorf("block not found %d", block)
 		}
-		blockHash := b.Hash()
+
 		for _, log := range blockLogs {
 			log.BlockNumber = block
 			log.BlockHash = blockHash
-			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			log.TxHash = b.Transactions[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
 	}
@@ -454,4 +424,44 @@ Logs:
 		result = append(result, log)
 	}
 	return result
+}
+
+// blockRangeFromFilter returns beginning and ending numbers of a block range matching the given criteria
+func blockRangeFromFilter(db kv.Tx, crit filters.FilterCriteria) (uint64, uint64, error) {
+	if crit.BlockHash != nil {
+		number := rawdb.ReadHeaderNumber(db, *crit.BlockHash)
+		if number == nil {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+		return *number, *number, nil
+	}
+
+	// Convert the RPC block numbers into internal representations
+	latest, err := rpchelper.GetLatestBlockNumber(db)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	begin, end := latest, latest
+	if crit.FromBlock != nil {
+		if crit.FromBlock.Sign() >= 0 {
+			begin = crit.FromBlock.Uint64()
+		} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			return 0, 0, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+		}
+	}
+
+	if crit.ToBlock != nil {
+		if crit.ToBlock.Sign() >= 0 {
+			end = crit.ToBlock.Uint64()
+		} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			return 0, 0, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+		}
+	}
+
+	if end < begin {
+		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+	}
+
+	return begin, end, nil
 }
