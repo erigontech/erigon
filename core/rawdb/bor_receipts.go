@@ -108,13 +108,16 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	}
 }
 
+/*
 // ReadBorTransactionWithBlockHash retrieves a specific bor (fake) transaction by tx hash and block hash, along with
 // its added positional metadata.
-func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
-	blockNumber := ReadHeaderNumber(db, txHash)
-
+func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	if blockNumber == nil {
-		return nil, common.Hash{}, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
 	}
 
 	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
@@ -125,6 +128,7 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 	var tx types.Transaction = types.NewBorTransaction()
 	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
+*/
 
 // ReadBorTransactionWithBlockNumberAndHash retrieves a specific bor (fake) transaction by block number and block hash, along with
 // its added positional metadata.
@@ -140,21 +144,25 @@ func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, bloc
 
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
 // its added positional metadata.
-func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
-	blockNumber := ReadHeaderNumber(db, hash)
-
+func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
 	}
-
-	blockHash, _ := ReadCanonicalHash(db, *blockNumber)
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
-	bodyForStorage, err := ReadStorageBody(db, hash, *blockNumber)
+	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, err
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
