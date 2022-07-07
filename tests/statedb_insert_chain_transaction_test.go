@@ -705,7 +705,11 @@ func getGenesis(funds ...*big.Int) initialData {
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
-		transactOpts = append(transactOpts, bind.NewKeyedTransactorWithChainID(key))
+		to, err := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1))
+		if err != nil {
+			panic(err)
+		}
+		transactOpts = append(transactOpts, to)
 
 		allocs[addr] = core.GenesisAccount{Balance: accountFunds}
 	}

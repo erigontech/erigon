@@ -72,12 +72,12 @@ func TestCreate2Revive(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var revive *contracts.Revive
-	var err error
 	// Change this address whenever you make any changes in the code of the revive contract in
 	// contracts/revive.sol
 	var create2address = common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4")
@@ -263,12 +263,13 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var poly *contracts.Poly
-	var err error
+
 	// Change this address whenever you make any changes in the code of the poly contract in
 	// contracts/poly.sol
 	var create2address = common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8")
@@ -509,12 +510,12 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
-	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
@@ -549,7 +550,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackendLonger.Close()
-	transactOptsLonger := bind.NewKeyedTransactorWithChainID(key)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
@@ -658,12 +660,12 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
-	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
@@ -692,7 +694,8 @@ func TestReorgOverStateChange(t *testing.T) {
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackendLonger.Close()
-	transactOptsLonger := bind.NewKeyedTransactorWithChainID(key)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
@@ -813,10 +816,8 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, gspec.Config.ChainID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
@@ -943,12 +944,12 @@ func TestEip2200Gas(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
-	var err error
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
@@ -1035,12 +1036,12 @@ func TestWrongIncarnation(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
 	var changer *contracts.Changer
-	var err error
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
@@ -1151,9 +1152,9 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
-	var err error
 
 	var contractAddress common.Address
 
@@ -1190,7 +1191,8 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOptsLonger := bind.NewKeyedTransactorWithChainID(key)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
@@ -1402,13 +1404,13 @@ func TestRecreateAndRewind(t *testing.T) {
 	m := stages.MockWithGenesis(t, gspec, key)
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 	var revive *contracts.Revive2
 	var phoenix *contracts.Phoenix
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
-	var err error
 
 	chain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
@@ -1470,7 +1472,8 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackendLonger.Close()
-	transactOptsLonger := bind.NewKeyedTransactorWithChainID(key)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
