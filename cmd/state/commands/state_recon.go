@@ -147,7 +147,6 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
-		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)

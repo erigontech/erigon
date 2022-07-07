@@ -103,7 +103,7 @@ func (rs *ReconState1) Delete(table string, key []byte) {
 		t = map[string][]byte{}
 		rs.changes[table] = t
 	}
-	t[string(key)] = nil
+	t[string(key)] = []byte{}
 	rs.sizeEstimate += uint64(len(key))
 }
 
@@ -126,10 +126,16 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		for ks, val := range t {
-			if len(val) > 0 {
+			if len(val) == 0 {
+				if err := rwTx.Delete(table, []byte(ks), nil); err != nil {
+					return err
+				}
+				fmt.Printf("Flush [%x]=>\n", ks)
+			} else {
 				if err := rwTx.Put(table, []byte(ks), val); err != nil {
 					return err
 				}
+				fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
 			}
 		}
 	}
@@ -209,7 +215,7 @@ func (rs *ReconState1) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) {
+func (rs *ReconState1) Apply(roTx kv.Tx, writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, keyList := range writeKeys {
@@ -220,10 +226,20 @@ func (rs *ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIn
 		}
 	}
 	for addr, increase := range balanceIncreaseSet {
+		if increase.IsZero() {
+			continue
+		}
 		enc := rs.get(kv.PlainState, addr.Bytes())
+		if enc == nil {
+			var err error
+			enc, err = roTx.GetOne(kv.PlainState, addr.Bytes())
+			if err != nil {
+				return err
+			}
+		}
 		var a accounts.Account
 		if err := a.DecodeForStorage(enc); err != nil {
-			panic(err)
+			return err
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		l := a.EncodingLengthForStorage()
@@ -231,6 +247,7 @@ func (rs *ReconState1) Apply(writeKeys, writeVals map[string][][]byte, balanceIn
 		a.EncodeForStorage(enc)
 		rs.put(kv.PlainState, addr.Bytes(), enc)
 	}
+	return nil
 }
 
 func (rs *ReconState1) DoneCount() uint64 {
@@ -325,7 +342,7 @@ func (w *StateReconWriter1) UpdateAccountCode(address common.Address, incarnatio
 
 func (w *StateReconWriter1) DeleteAccount(address common.Address, original *accounts.Account) error {
 	w.writeKeys[kv.PlainState] = append(w.writeKeys[kv.PlainState], address.Bytes())
-	w.writeVals[kv.PlainState] = append(w.writeVals[kv.PlainState], nil)
+	w.writeVals[kv.PlainState] = append(w.writeVals[kv.PlainState], []byte{})
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)

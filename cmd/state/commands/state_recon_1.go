@@ -141,14 +141,12 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 			}
 		}
 	} else {
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
 		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
 		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
 		if err != nil {
@@ -158,6 +156,7 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
+			fmt.Printf("error=%v\n", err)
 		}
 		// Update the state with pending changes
 		ibs.SoftFinalise()
@@ -196,7 +195,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	} else if err = os.RemoveAll(reconDbPath); err != nil {
 		return err
 	}
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).WriteMap().Open()
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(make(chan struct{}, runtime.NumCPU()+1)).Open()
 	if err != nil {
 		return err
 	}
@@ -230,6 +229,15 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	rs := state.NewReconState1()
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker1, workerCount)
+	var applyTx kv.Tx
+	defer func() {
+		if applyTx != nil {
+			applyTx.Rollback()
+		}
+	}()
+	if applyTx, err = db.BeginRo(ctx); err != nil {
+		return err
+	}
 	roTxs := make([]kv.Tx, workerCount)
 	defer func() {
 		for i := 0; i < workerCount; i++ {
@@ -266,6 +274,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	var rws state.TxTaskQueue
 	heap.Init(&rws)
 	var outputTxNum uint64
+	var lastBlockNum uint64
 	// Go-routine gathering results from the workers
 	go func() {
 		defer rs.Finish()
@@ -275,9 +284,12 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				if txTask.TxNum == outputTxNum {
 					// Try to apply without placing on the queue first
 					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
-						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
+						if err = rs.Apply(applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
+							panic(err)
+						}
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
+						lastBlockNum = txTask.BlockNum
 					} else {
 						rs.RollbackTx(txTask)
 					}
@@ -287,8 +299,11 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				for rws.Len() > 0 && rws[0].TxNum == outputTxNum {
 					txTask = heap.Pop(&rws).(state.TxTask)
 					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
-						rs.Apply(txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet)
+						if err = rs.Apply(applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
+							panic(err)
+						}
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+						lastBlockNum = txTask.BlockNum
 						outputTxNum++
 					} else {
 						rs.RollbackTx(txTask)
@@ -311,7 +326,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				log.Info("Transaction replay", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", libcommon.ByteCount(sizeEstimate),
+				log.Info("Transaction replay", "workers", workerCount, "at block", lastBlockNum, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", libcommon.ByteCount(sizeEstimate),
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 				if sizeEstimate >= commitThreshold {
@@ -320,6 +335,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					err := func() error {
 						lock.Lock()
 						defer lock.Unlock()
+						applyTx.Rollback()
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
@@ -331,6 +347,9 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 							return err
 						}
 						if err = rwTx.Commit(); err != nil {
+							return err
+						}
+						if applyTx, err = db.BeginRo(ctx); err != nil {
 							return err
 						}
 						for i := 0; i < workerCount; i++ {
@@ -382,6 +401,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	wg.Wait()
+	applyTx.Rollback()
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
 	}
