@@ -150,7 +150,8 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		vmConfig.SkipAnalysis = core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)
-		blockContext := core.NewEVMBlockContext(txTask.Header, rw.getHeader, rw.engine, nil /* author */, contractHasTEVM)
+		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
+		blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */, contractHasTEVM)
 		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, rw.chainConfig, vmConfig)
 		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
 		if err != nil {

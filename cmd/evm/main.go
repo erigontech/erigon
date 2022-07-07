@@ -148,7 +148,6 @@ var stateTransitionCommand = cli.Command{
 		t8ntool.InputTxsFlag,
 		t8ntool.ForknameFlag,
 		t8ntool.ChainIDFlag,
-		t8ntool.RewardFlag,
 		t8ntool.VerbosityFlag,
 	},
 }
@@ -192,7 +191,7 @@ func main() {
 	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
-			code = ec.Code()
+			code = ec.ExitCode()
 		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(code)

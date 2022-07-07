@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -219,7 +218,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
-		for _, l := range core.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs()) {
+		for _, l := range vm.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {
 				panic(err2)
 			}
