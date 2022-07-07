@@ -70,7 +70,7 @@ type IntraBlockState struct {
 	// unable to deal with database-level errors. Any error that occurs
 	// during a database read is memoized here and will eventually be returned
 	// by IntraBlockState.Commit.
-	dbErr error
+	savedErr error
 
 	// The refund counter, also used by state transitioning.
 	refund uint64
@@ -115,13 +115,13 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
-	if sdb.dbErr == nil {
-		sdb.dbErr = err
+	if sdb.savedErr == nil {
+		sdb.savedErr = err
 	}
 }
 
 func (sdb *IntraBlockState) Error() error {
-	return sdb.dbErr
+	return sdb.savedErr
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
@@ -743,6 +743,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *params.Rules, stateWriter Sta
 	return nil
 }
 
+func (sdb *IntraBlockState) SoftFinalise() {
+	for addr := range sdb.journal.dirties {
+		_, exist := sdb.stateObjects[addr]
+		if !exist {
+			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+			// it will persist in the journal even though the journal is reverted. In this special circumstance,
+			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
+			// Thus, we can safely ignore it here
+			continue
+		}
+		sdb.stateObjectsDirty[addr] = struct{}{}
+	}
+	// Invalidate journal because reverting across transactions is not allowed.
+	sdb.clearJournalAndRefund()
+}
+
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter StateWriter) error {
@@ -751,6 +769,20 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter St
 			sdb.getStateObject(addr)
 		}
 	}
+	return sdb.MakeWriteSet(chainRules, stateWriter)
+}
+
+func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]uint256.Int {
+	s := map[common.Address]uint256.Int{}
+	for addr, bi := range sdb.balanceInc {
+		if !bi.transferred {
+			s[addr] = bi.increase
+		}
+	}
+	return s
+}
+
+func (sdb *IntraBlockState) MakeWriteSet(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}

@@ -430,7 +430,7 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
@@ -1602,4 +1602,44 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	}
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
+}
+
+// Transitioned returns true if the block number comes after POS transition or is the last POW block
+func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
+	header, err := ReadHeaderByHash(db, blockHash)
+	if err != nil {
+		return false, err
+	}
+	if header == nil {
+		return false, nil
+	}
+
+	return header.Difficulty.Cmp(common.Big0) == 0, nil
+}
+
+func ReadSnapshots(tx kv.Tx) (map[string]string, error) {
+	res := map[string]string{}
+	if err := tx.ForEach(kv.Snapshots, nil, func(k, v []byte) error {
+		res[string(k)] = string(v)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func WriteSnapshots(tx kv.RwTx, list map[string]string) error {
+	for k, v := range list {
+		has, err := tx.Has(kv.Snapshots, []byte(k))
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if err = tx.Put(kv.Snapshots, []byte(k), []byte(v)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

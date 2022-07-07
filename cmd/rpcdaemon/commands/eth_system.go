@@ -199,7 +199,7 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi._blockReader.HeaderByNumber(ctx, b.tx, uint64(number.Int64()))
+	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}

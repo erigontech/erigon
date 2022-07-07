@@ -178,19 +178,26 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+		needWriteStream := false
+		if stream == nil {
+			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+			needWriteStream = true
+		}
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			h.conn.writeJSON(cp.ctx, answer)
-		} else {
-			_ = stream.Flush()
+			buffer, _ := json.Marshal(answer)
+			stream.Write(json.RawMessage(buffer))
+		}
+		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+		} else {
+			stream.Write([]byte("\n"))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()

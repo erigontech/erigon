@@ -251,7 +251,8 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	if ok {
 		return h, nil
 	}
-	return rawdb.ReadHeaderByNumber(tx, blockHeight), nil
+	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
+	return h, nil
 }
 
 // HeaderByHash - will search header in all snapshots starting from recent
@@ -313,6 +314,9 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, 
 		}
 		return nil
 	})
+	if err != nil {
+		return h, err
+	}
 	if ok {
 		return h, nil
 	}
@@ -423,7 +427,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil
 	})
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 	if ok && h != nil {
 		var b *types.Body
@@ -437,7 +441,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			return nil
 		})
 		if err != nil {
-			return
+			return nil, nil, err
 		}
 		if ok && b != nil {
 			if txsAmount == 0 {

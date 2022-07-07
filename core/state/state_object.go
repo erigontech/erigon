@@ -69,13 +69,6 @@ type stateObject struct {
 	original accounts.Account
 	db       *IntraBlockState
 
-	// DB error.
-	// State objects are used by the consensus core and VM which are
-	// unable to deal with database-level errors. Any error that occurs
-	// during a database read is memoized here and will eventually be returned
-	// by IntraBlockState.Commit.
-	dbErr error
-
 	// Write caches.
 	//trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
@@ -134,8 +127,8 @@ func (so *stateObject) EncodeRLP(w io.Writer) error {
 
 // setError remembers the first non-nil error it is called with.
 func (so *stateObject) setError(err error) {
-	if so.dbErr == nil {
-		so.dbErr = err
+	if so.db.savedErr == nil {
+		so.db.savedErr = err
 	}
 }
 

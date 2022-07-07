@@ -72,7 +72,10 @@ it may scale well for some workloads that are heavy on the current state queries
 
 ### Healthcheck
 
-Running the daemon also opens an endpoint `/health` that provides a basic health check.
+There are 2 options for running healtchecks, POST request, or GET request with custom headers.  Both options are available
+at the `/health` endpoint.
+
+#### POST request
 
 If the health check is successful it returns 200 OK.
 
@@ -104,6 +107,40 @@ Example response
     "check_block": "HEALTHY",
     "healthcheck_query": "HEALTHY",
     "min_peer_count": "HEALTHY"
+}
+```
+
+#### GET with headers
+
+If the healthcheck is successful it will return a 200 status code.
+
+If the healthcheck fails for any reason a status 500 will be returned.  This is true if one of the criteria requested
+fails its check.
+
+You can set any number of values on the `X-ERIGON-HEALTHCHECK` header.  Ones that are not included are skipped in the 
+checks.
+
+Available Options:
+- `synced` - will check if the node has completed syncing
+- `min_peer_count<count>` - will check that the node has at least `<count>` many peers
+- `check_block<block>` - will check that the node is at least ahead of the `<block>` specified
+- `max_seconds_behind<seconds>` - will check that the node is no more than `<seconds>` behind from its latest block
+
+Example Request
+```
+curl --location --request GET 'http://localhost:8545/health' \
+--header 'X-ERIGON-HEALTHCHECK: min_peer_count1' \
+--header 'X-ERIGON-HEALTHCHECK: synced' \
+--header 'X-ERIGON-HEALTHCHECK: max_seconds_behind600'
+```
+
+Example Response
+```
+{
+    "check_block":"DISABLED",
+    "max_seconds_behind":"HEALTHY",
+    "min_peer_count":"HEALTHY",
+    "synced":"HEALTHY"
 }
 ```
 

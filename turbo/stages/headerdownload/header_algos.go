@@ -645,12 +645,6 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		log.Trace("posAnchor is nil")
 		return nil, nil
 	}
-	// We may have received answer from old request so not enough evidence for penalizing.
-	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
-		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
-		log.Trace("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
-		return nil, nil
-	}
 
 	// Handle request after closing collectors
 	if hd.headersCollector == nil {
@@ -661,6 +655,10 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		header := sh.Header
 		headerHash := sh.Hash
 		if headerHash != hd.posAnchor.parentHash {
+			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
+				log.Info("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+				return nil, nil
+			}
 			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
@@ -670,12 +668,16 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			return nil, err
 		}
 
-		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
+		hh, err := hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
 		if err != nil {
 			return nil, err
 		}
 		if hh != nil {
 			log.Trace("Synced", "requestId", hd.requestId)
+			if headerNumber != hh.Number.Uint64()+1 {
+				hd.badPoSHeaders[headerHash] = header.ParentHash
+				return nil, fmt.Errorf("Invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
+			}
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
@@ -1116,8 +1118,10 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 			hd.nextForkState.UpdateTxn(tx)
 		}
 		hd.nextForkHash = header.Hash()
+		hd.lock.Unlock()
 		// Let's assemble the side fork chain if we have others building.
 		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
+		hd.lock.Lock()
 		if validationError != nil {
 			status = remote.EngineStatus_INVALID
 			if isAncestorPosBlock {
@@ -1131,6 +1135,13 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 		return
 	}
+	// If the block is stored within the side fork it means it was already validated.
+	if _, ok := hd.sideForksBlock[header.Hash()]; ok {
+		status = remote.EngineStatus_VALID
+		latestValidHash = header.Hash()
+		return
+	}
+
 	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
 	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxDepth {
 		status = remote.EngineStatus_ACCEPTED
@@ -1164,19 +1175,22 @@ func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
-	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	status = remote.EngineStatus_VALID
 	// if it is not canonical we validate it as a side fork.
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
+	hd.lock.Unlock()
 	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	hd.lock.Lock()
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		if isAncestorPosBlock {
 			latestValidHash = header.ParentHash
 		}
 		status = remote.EngineStatus_INVALID
+		return
 	}
+	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
 	// After the we finished executing, we clean up old forks
 	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
 	return
@@ -1196,19 +1210,24 @@ func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
 	if err := hd.nextForkState.Flush(tx); err != nil {
 		return err
 	}
-	// If the side fork hash is now becoming canonical we can clean up.
-	if _, ok := hd.sideForksBlock[hd.nextForkHash]; ok {
-		delete(hd.sideForksBlock, hd.nextForkHash)
-	}
+
 	hd.nextForkState.Close()
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
 	return nil
 }
 
-func (hd *HeaderDownload) CleanNextForkState() {
+func (hd *HeaderDownload) CleanNextForkState(tx kv.RwTx, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	sb, ok := hd.sideForksBlock[hd.nextForkHash]
+	// If we did not flush the fork state, then we need to notify the txpool.
+	if hd.nextForkState != nil && hd.nextForkHash != (common.Hash{}) && ok {
+		hd.nextForkState.UpdateTxn(tx)
+		if err := execPayload(hd.nextForkState, nil, nil, sb.header.Number.Uint64()-1, nil, nil); err != nil {
+			log.Warn("Could not clean payload", "err", err)
+		}
+	}
 	hd.nextForkHash = common.Hash{}
 	hd.nextForkState = nil
 }

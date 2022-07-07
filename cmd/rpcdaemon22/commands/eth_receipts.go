@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -68,6 +69,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+	start := time.Now()
 	var begin, end uint64
 	logs := []*types.Log{}
 
@@ -214,7 +216,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		logs = append(logs, filtered...)
 	}
-
+	stats := api._agg.GetAndResetStats()
+	log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
@@ -260,39 +263,17 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	var borTx *types.Transaction
-	var blockHash common.Hash
 	var blockNum uint64
 	var ok bool
 
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-
 	blockNum, ok, err = api.txnLookup(ctx, tx, hash)
-	if blockNum == 0 {
+	if !ok || blockNum == 0 {
 		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
 		// but 0 block number is used here to mean that the transaction is not found
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		if chainConfig.Bor != nil {
-			var blocN uint64
-			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
-			if err != nil {
-				return nil, err
-			}
-			if borTx == nil {
-				return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-			}
-			blockNum = blocN
-		} else {
-			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-		}
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -307,10 +288,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	if borTx != nil {
-		receipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
-		return marshalReceipt(receipt, *borTx, cc, block, hash), nil
-	}
+
 	var txnIndex uint64
 	var txn types.Transaction
 	for idx, transaction := range block.Transactions() {
@@ -322,7 +300,19 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 
 	if txn == nil {
-		return nil, nil
+		if cc.Bor == nil {
+			return nil, nil
+		}
+
+		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionWithBlockNumber(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if borTx == nil {
+			return nil, nil
+		}
+		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		return marshalReceipt(borReceipt, borTx, cc, block, hash), nil
 	}
 
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
