@@ -111,7 +111,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lispad/go-generics-tools v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
-	github.com/matryer/moq v0.2.7 // indirect
 	github.com/mattn/go-colorable v0.1.11 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
