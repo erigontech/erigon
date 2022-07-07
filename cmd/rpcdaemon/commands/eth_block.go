@@ -216,19 +216,19 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
+	var borTx types.Transaction
+	var borReceipt *types.Receipt
 	if chainConfig.Bor != nil {
-		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, b.NumberU64(), b.Hash())
+		borTx, _, _, _, err = rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, b.NumberU64(), b.Hash())
 		if err != nil {
 			return nil, err
 		}
 		if borTx != nil {
-			borReceipt := rawdb.ReadBorReceipt(tx, b.Hash(), b.NumberU64())
-			if borReceipt != nil {
-			}
+			borReceipt = rawdb.ReadBorReceipt(tx, b.Hash(), b.NumberU64())
 		}
 	}
 
-	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borReceipt, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

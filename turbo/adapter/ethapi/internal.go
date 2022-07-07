@@ -45,6 +45,20 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 }
 
 //nolint
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borReceipt *types.Receipt, additional map[string]interface{}) (map[string]interface{}, error) {
+	fields, err := ethapi.RPCMarshalBlockEx(b, inclTx, fullTx, borTx, borReceipt)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range additional {
+		fields[k] = v
+	}
+
+	return fields, err
+}
+
+//nolint
 type RPCTransaction struct {
 	*ethapi.RPCTransaction
 }
