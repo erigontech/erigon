@@ -130,21 +130,9 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash 
 }
 */
 
-// ReadBorTransactionWithBlockNumberAndHash retrieves a specific bor (fake) transaction by block number and block hash, along with
-// its added positional metadata.
-func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
-	bodyForStorage, err := ReadStorageBody(db, blockHash, blockNumber)
-	if err != nil {
-		return nil, common.Hash{}, 0, 0, nil
-	}
-
-	var tx types.Transaction = types.NewBorTransaction()
-	return tx, blockHash, blockNumber, uint64(bodyForStorage.TxAmount), nil
-}
-
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
 // its added positional metadata.
-func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
@@ -152,7 +140,14 @@ func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (*types.Transaction, co
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
 	}
-	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+
+	return ReadBorTransactionWithBlockNumber(db, *blockNumber)
+}
+
+// ReadBorTransaction retrieves a specific bor (fake) transaction by block number, along with
+// its added positional metadata.
+func ReadBorTransactionWithBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+	blockHash, err := ReadCanonicalHash(db, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
@@ -160,13 +155,19 @@ func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (*types.Transaction, co
 		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
-	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
+	return ReadBorTransactionWithBlockNumberAndHash(db, blockNumber, blockHash)
+}
+
+// ReadBorTransactionWithBlockNumberAndHash retrieves a specific bor (fake) transaction by block number and block hash, along with
+// its added positional metadata.
+func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+	bodyForStorage, err := ReadStorageBody(db, blockHash, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
-	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
+	return tx, blockHash, blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer
