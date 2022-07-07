@@ -70,17 +70,27 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 		receipts = make(types.Receipts, 0)
 	}
 
-	data := ReadStorageBodyRLP(db, hash, number)
-	if len(data) == 0 {
-		log.Error("Missing body but have bor receipt", "hash", hash, "number", number)
-		return nil
-	}
-
 	if err := types.DeriveFieldsForBorReceipt(borReceipt, hash, number, receipts); err != nil {
 		log.Error("Failed to derive bor receipt fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return borReceipt
+}
+
+// ReadBorReceiptLogs retrieves all the bor block receipt logs belonging to a block.
+// If it is unable to populate these metadata fields then nil is returned.
+func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) []*types.Log {
+	// We're deriving many fields from the block body, retrieve beside the receipt
+	borReceipt := ReadRawBorReceipt(db, blockHash, blockNumber)
+	if borReceipt == nil {
+		return nil
+	}
+
+	borLogs := borReceipt.Logs
+
+	types.DeriveFieldsForBorLogs(borLogs, blockHash, blockNumber, txIndex, logIndex)
+
+	return borLogs
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block.

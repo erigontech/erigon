@@ -157,6 +157,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 		block := uint64(iter.Next())
 		var logIndex uint
+		var txIndex uint
 		var blockLogs []*types.Log
 		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
 			var logs types.Logs
@@ -171,7 +172,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			if len(filtered) == 0 {
 				return nil
 			}
-			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for _, log := range filtered {
 				log.TxIndex = txIndex
 			}
@@ -200,6 +201,14 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			log.TxHash = b.Transactions()[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
+
+		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, block, txIndex+1, logIndex)
+		if borLogs != nil {
+			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
+			if len(borLogs) > 0 {
+				logs = append(logs, borLogs...)
+			}
+		}
 	}
 
 	return logs, nil
