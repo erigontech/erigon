@@ -190,7 +190,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
+		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 		if body == nil {
 			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
