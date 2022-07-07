@@ -290,11 +290,14 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
 						lastBlockNum = txTask.BlockNum
+						fmt.Printf("Applied %d block %d txIndex\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					} else {
 						rs.RollbackTx(txTask)
+						fmt.Printf("Rolled back %d block %d txIndex\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					}
 				} else {
 					heap.Push(&rws, txTask)
+					fmt.Printf("Saved %d block %d txIndex\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				}
 				for rws.Len() > 0 && rws[0].TxNum == outputTxNum {
 					txTask = heap.Pop(&rws).(state.TxTask)
@@ -304,9 +307,11 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 						}
 						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						lastBlockNum = txTask.BlockNum
+						fmt.Printf("Applied %d block %d txIndex\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 						outputTxNum++
 					} else {
 						rs.RollbackTx(txTask)
+						fmt.Printf("Rolled back %d block %d txIndex\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					}
 				}
 			case <-logEvery.C:
