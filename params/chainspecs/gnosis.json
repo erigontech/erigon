@@ -1,0 +1,21 @@
+{
+  "ChainName": "gnosis",
+  "chainId": 100,
+  "consensus": "aura",
+  "homesteadBlock": 0,
+  "eip150Block": 0,
+  "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "eip155Block": 0,
+  "byzantiumBlock": 0,
+  "constantinopleBlock": 1604400,
+  "petersburgBlock": 2508800,
+  "istanbulBlock": 7298030,
+  "berlinBlock": 16101500,
+  "londonBlock": 19040000,
+  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "aura": {
+    "DBPath": "",
+    "InMemory": false,
+    "Etherbase": "0x0000000000000000000000000000000000000000"
+  }
+}
