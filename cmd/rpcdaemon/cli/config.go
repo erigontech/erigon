@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"net"
 	"net/http"
 	"os"
@@ -13,8 +14,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -593,24 +592,19 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 
 func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("IGORM: r.URL.Path: ", r.URL.Path)
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
-			fmt.Println("IGORM: healthcheck, exiting")
 			return
 		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
-			fmt.Println("IGORM: websocket, exiting")
 			return
 		}
 
 		if jwtSecret != nil && !rpc.CheckJwtSecret(w, r, jwtSecret) {
-			fmt.Println("IGORM: JWT failure, exiting")
 			return
 		}
 
-		fmt.Println("IGORM: to httpHandler")
 		httpHandler.ServeHTTP(w, r)
 	})
 
