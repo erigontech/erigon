@@ -482,12 +482,6 @@ func (tx *LegacyTx) FakeSign(address common.Address) (Transaction, error) {
 	return cpy, nil
 }
 
-func (tx *LegacyTx) WithHash(hash common.Hash) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.hash.Store(&hash)
-	return cpy, nil
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {

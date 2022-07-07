@@ -339,6 +339,30 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	return result
 }
 
+// newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+	tx := opaqueTx.(*types.LegacyTx)
+	result := &RPCTransaction{
+		Type:     hexutil.Uint64(tx.Type()),
+		ChainID:  (*hexutil.Big)(new(big.Int)),
+		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
+		Gas:      hexutil.Uint64(tx.GetGas()),
+		Hash:     txHash,
+		Input:    hexutil.Bytes(tx.GetData()),
+		Nonce:    hexutil.Uint64(tx.GetNonce()),
+		From:     common.Address{},
+		To:       tx.GetTo(),
+		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
+	}
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(tx types.Transaction, current *types.Header, config *params.ChainConfig) *RPCTransaction {
 	var baseFee *big.Int
