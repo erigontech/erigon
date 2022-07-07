@@ -99,8 +99,8 @@ type Coherent struct {
 }
 
 type CoherentRoot struct {
-	cache           *btree.BTree
-	codeCache       *btree.BTree
+	cache           *btree.BTreeG[*Element]
+	codeCache       *btree.BTreeG[*Element]
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
 
@@ -178,8 +178,8 @@ func (c *Coherent) selectOrCreateRoot(viewID ViewID) *CoherentRoot {
 
 	r = &CoherentRoot{
 		ready:     make(chan struct{}),
-		cache:     btree.New(DEGREE),
-		codeCache: btree.New(DEGREE),
+		cache:     btree.NewG[*Element](DEGREE, Less),
+		codeCache: btree.NewG[*Element](DEGREE, Less),
 	}
 	c.roots[viewID] = r
 	return r
@@ -202,15 +202,15 @@ func (c *Coherent) advanceRoot(viewID ViewID) (r *CoherentRoot) {
 		c.codeEvict.Init()
 		if r.cache == nil {
 			//log.Info("advance: new", "to", viewID)
-			r.cache = btree.New(DEGREE)
-			r.codeCache = btree.New(DEGREE)
+			r.cache = btree.NewG[*Element](DEGREE, Less)
+			r.codeCache = btree.NewG[*Element](DEGREE, Less)
 		} else {
-			r.cache.Ascend(func(i btree.Item) bool {
-				c.stateEvict.PushFront(i.(*Element))
+			r.cache.Ascend(func(i *Element) bool {
+				c.stateEvict.PushFront(i)
 				return true
 			})
-			r.codeCache.Ascend(func(i btree.Item) bool {
-				c.codeEvict.PushFront(i.(*Element))
+			r.codeCache.Ascend(func(i *Element) bool {
+				c.codeEvict.PushFront(i)
 				return true
 			})
 		}
@@ -309,7 +309,7 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	return &CoherentView{viewID: ViewID(tx.ViewID()), tx: tx, cache: c}, nil
 }
 
-func (c *Coherent) getFromCache(k []byte, id ViewID, code bool) (btree.Item, *CoherentRoot, error) {
+func (c *Coherent) getFromCache(k []byte, id ViewID, code bool) (*Element, *CoherentRoot, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	r, ok := c.roots[id]
@@ -318,14 +318,14 @@ func (c *Coherent) getFromCache(k []byte, id ViewID, code bool) (btree.Item, *Co
 	}
 	isLatest := c.latestViewID == id
 
-	var it btree.Item
+	var it *Element
 	if code {
-		it = r.codeCache.Get(&Element{K: k})
+		it, _ = r.codeCache.Get(&Element{K: k})
 	} else {
-		it = r.cache.Get(&Element{K: k})
+		it, _ = r.cache.Get(&Element{K: k})
 	}
 	if it != nil && isLatest {
-		c.stateEvict.MoveToFront(it.(*Element))
+		c.stateEvict.MoveToFront(it)
 	}
 
 	return it, r, nil
@@ -339,7 +339,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	if it != nil {
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.hits.Inc()
-		return it.(*Element).V, nil
+		return it.V, nil
 	}
 	c.miss.Inc()
 
@@ -364,7 +364,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	if it != nil {
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.codeHits.Inc()
-		return it.(*Element).V, nil
+		return it.V, nil
 	}
 	c.codeMiss.Inc()
 
@@ -395,13 +395,13 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 }
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id ViewID) *Element {
 	it := &Element{K: k, V: v}
-	replaced := r.cache.ReplaceOrInsert(it)
+	replaced, _ := r.cache.ReplaceOrInsert(it)
 	if c.latestViewID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
 	if replaced != nil {
-		c.stateEvict.Remove(replaced.(*Element))
+		c.stateEvict.Remove(replaced)
 	}
 	c.stateEvict.PushFront(it)
 	evict := c.stateEvict.Len() > c.cfg.KeysLimit
@@ -413,13 +413,13 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id ViewID) *Element {
 }
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id ViewID) *Element {
 	it := &Element{K: k, V: v}
-	replaced := r.codeCache.ReplaceOrInsert(it)
+	replaced, _ := r.codeCache.ReplaceOrInsert(it)
 	if c.latestViewID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
 	if replaced != nil {
-		c.codeEvict.Remove(replaced.(*Element))
+		c.codeEvict.Remove(replaced)
 	}
 	c.codeEvict.PushFront(it)
 	evict := c.codeEvict.Len() > c.cfg.CodeKeysLimit
@@ -475,8 +475,8 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 	if !ok {
 		return 0, nil
 	}
-	root.cache.Ascend(func(i btree.Item) bool {
-		k, v := i.(*Element).K, i.(*Element).V
+	root.cache.Ascend(func(i *Element) bool {
+		k, v := i.K, i.V
 		var dbV []byte
 		dbV, err = tx.GetOne(kv.PlainState, k)
 		if err != nil {
@@ -536,9 +536,7 @@ type Element struct {
 	K, V []byte
 }
 
-func (e *Element) Less(than btree.Item) bool {
-	return bytes.Compare(e.K, than.(*Element).K) < 0
-}
+func Less(a, b *Element) bool { return bytes.Compare(a.K, b.K) < 0 }
 
 type ThreadSafeEvictionList struct {
 	l    *List

@@ -266,13 +266,11 @@ func newSender(nonce uint64, balance uint256.Int) *sender {
 
 var emptySender = newSender(0, *uint256.NewInt(0))
 
-type sortByNonce struct{ *metaTx }
-
-func (i sortByNonce) Less(than btree.Item) bool {
-	if i.metaTx.Tx.SenderID != than.(sortByNonce).metaTx.Tx.SenderID {
-		return i.metaTx.Tx.SenderID < than.(sortByNonce).metaTx.Tx.SenderID
+func SortByNonceLess(a, b *metaTx) bool {
+	if a.Tx.SenderID != b.Tx.SenderID {
+		return a.Tx.SenderID < b.Tx.SenderID
 	}
-	return i.metaTx.Tx.Nonce < than.(sortByNonce).metaTx.Tx.Nonce
+	return a.Tx.Nonce < b.Tx.Nonce
 }
 
 func calcProtocolBaseFee(baseFee uint64) uint64 {
@@ -333,8 +331,8 @@ func New(newTxs chan types.Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cac
 	}
 
 	byNonce := &BySenderAndNonce{
-		tree:             btree.New(32),
-		search:           sortByNonce{&metaTx{Tx: &types.TxSlot{}}},
+		tree:             btree.NewG[*metaTx](32, SortByNonceLess),
+		search:           &metaTx{Tx: &types.TxSlot{}},
 		senderIDTxnCount: map[uint64]int{},
 	}
 	tracedSenders := make(map[string]struct{})
@@ -1898,18 +1896,17 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 //  - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
 //  - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
 type BySenderAndNonce struct {
-	tree             *btree.BTree
-	search           sortByNonce
+	tree             *btree.BTreeG[*metaTx]
+	search           *metaTx
 	senderIDTxnCount map[uint64]int // count of sender's txns in the pool - may differ from nonce
 }
 
 func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	s := b.search
-	s.metaTx.Tx.SenderID = senderID
-	s.metaTx.Tx.Nonce = math.MaxUint64
+	s.Tx.SenderID = senderID
+	s.Tx.Nonce = math.MaxUint64
 
-	b.tree.DescendLessOrEqual(s, func(i btree.Item) bool {
-		mt := i.(sortByNonce).metaTx
+	b.tree.DescendLessOrEqual(s, func(mt *metaTx) bool {
 		if mt.Tx.SenderID == senderID {
 			nonce = mt.Tx.Nonce
 			ok = true
@@ -1919,17 +1916,15 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	return nonce, ok
 }
 func (b *BySenderAndNonce) ascendAll(f func(*metaTx) bool) {
-	b.tree.Ascend(func(i btree.Item) bool {
-		mt := i.(sortByNonce).metaTx
+	b.tree.Ascend(func(mt *metaTx) bool {
 		return f(mt)
 	})
 }
 func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTx) bool) {
 	s := b.search
-	s.metaTx.Tx.SenderID = senderID
-	s.metaTx.Tx.Nonce = 0
-	b.tree.AscendGreaterOrEqual(s, func(i btree.Item) bool {
-		mt := i.(sortByNonce).metaTx
+	s.Tx.SenderID = senderID
+	s.Tx.Nonce = 0
+	b.tree.AscendGreaterOrEqual(s, func(mt *metaTx) bool {
 		if mt.Tx.SenderID != senderID {
 			return false
 		}
@@ -1938,10 +1933,9 @@ func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTx) bool) {
 }
 func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTx) bool) {
 	s := b.search
-	s.metaTx.Tx.SenderID = senderID
-	s.metaTx.Tx.Nonce = math.MaxUint64
-	b.tree.DescendLessOrEqual(s, func(i btree.Item) bool {
-		mt := i.(sortByNonce).metaTx
+	s.Tx.SenderID = senderID
+	s.Tx.Nonce = math.MaxUint64
+	b.tree.DescendLessOrEqual(s, func(mt *metaTx) bool {
 		if mt.Tx.SenderID != senderID {
 			return false
 		}
@@ -1961,21 +1955,20 @@ func (b *BySenderAndNonce) hasTxs(senderID uint64) bool {
 }
 func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTx {
 	s := b.search
-	s.metaTx.Tx.SenderID = senderID
-	s.metaTx.Tx.Nonce = txNonce
-	if found := b.tree.Get(s); found != nil {
-		return found.(sortByNonce).metaTx
+	s.Tx.SenderID = senderID
+	s.Tx.Nonce = txNonce
+	if found, ok := b.tree.Get(s); ok {
+		return found
 	}
 	return nil
 }
 
 //nolint
 func (b *BySenderAndNonce) has(mt *metaTx) bool {
-	found := b.tree.Get(sortByNonce{mt})
-	return found != nil
+	return b.tree.Has(mt)
 }
 func (b *BySenderAndNonce) delete(mt *metaTx) {
-	if b.tree.Delete(sortByNonce{mt}) != nil {
+	if _, ok := b.tree.Delete(mt); ok {
 		senderID := mt.Tx.SenderID
 		count := b.senderIDTxnCount[senderID]
 		if count > 1 {
@@ -1986,9 +1979,9 @@ func (b *BySenderAndNonce) delete(mt *metaTx) {
 	}
 }
 func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx) *metaTx {
-	it := b.tree.ReplaceOrInsert(sortByNonce{mt})
-	if it != nil {
-		return it.(sortByNonce).metaTx
+	it, ok := b.tree.ReplaceOrInsert(mt)
+	if ok {
+		return it
 	}
 	b.senderIDTxnCount[mt.Tx.SenderID]++
 	return nil
