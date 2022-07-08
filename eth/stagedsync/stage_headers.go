@@ -461,7 +461,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
-	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	log.Debug(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -541,9 +541,9 @@ func handleNewPayload(
 		}, nil
 	}
 
-	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
+	log.Debug(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 	response, success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, payloadMessage.Body, headerInserter)
-	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
+	log.Debug(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return response, err
 	}
@@ -656,7 +656,7 @@ func schedulePoSDownload(
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
-		log.Trace(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
+		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 		return
 	}
 

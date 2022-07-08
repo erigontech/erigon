@@ -420,7 +420,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	anchor := hd.posAnchor
 	if anchor == nil {
-		log.Trace("No PoS anchor")
+		log.Debug("No PoS anchor")
 		return
 	}
 
@@ -626,7 +626,7 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
-	log.Trace("Set posAnchor", "blockHeight", height+1)
+	log.Debug("Set posAnchor", "blockHeight", height+1)
 	hd.posAnchor = &Anchor{
 		parentHash:  hash,
 		blockHeight: height + 1,
@@ -637,12 +637,12 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
-	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	log.Debug("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {
 		// May happen if peers are sending unrequested header packets after we've synced
-		log.Trace("posAnchor is nil")
+		log.Debug("posAnchor is nil")
 		return nil, nil
 	}
 
@@ -673,10 +673,10 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			return nil, err
 		}
 		if hh != nil {
-			log.Trace("Synced", "requestId", hd.requestId)
+			log.Debug("Synced", "requestId", hd.requestId)
 			if headerNumber != hh.Number.Uint64()+1 {
 				hd.badPoSHeaders[headerHash] = header.ParentHash
-				return nil, fmt.Errorf("Invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
+				return nil, fmt.Errorf("invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
 			}
 			hd.posAnchor = nil
 			hd.posStatus = Synced
@@ -1429,7 +1429,7 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
-					log.Trace("Sent request", "height", req.Number)
+					log.Debug("Sent request", "height", req.Number)
 				}
 			}
 			if len(penalties) > 0 {
