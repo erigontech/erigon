@@ -504,6 +504,11 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	P2pProtocolVersionFlag = cli.IntFlag{
+		Name:  "p2p.protocol",
+		Usage: "Version of eth p2p protocol",
+		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -850,6 +855,8 @@ func NewP2PConfig(
 	switch protocol {
 	case eth.ETH66:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
+	case eth.ETH67:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
@@ -909,6 +916,9 @@ func nodeKey(datadir string) (*ecdsa.PrivateKey, error) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(P2pProtocolVersionFlag.Name) {
+		cfg.ProtocolVersion = uint(ctx.GlobalInt(P2pProtocolVersionFlag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
