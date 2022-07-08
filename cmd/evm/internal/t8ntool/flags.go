@@ -83,11 +83,6 @@ var (
 		Usage: "`stdin` or file name of where to find the transactions to apply.",
 		Value: "txs.json",
 	}
-	RewardFlag = cli.Int64Flag{
-		Name:  "state.reward",
-		Usage: "Mining reward. Set to -1 to disable",
-		Value: 0,
-	}
 	ChainIDFlag = cli.Int64Flag{
 		Name:  "state.chainid",
 		Usage: "ChainID to use",
@@ -103,7 +98,7 @@ var (
 			"\n\tSyntax <forkname>(+ExtraEip)",
 			strings.Join(tests.AvailableForks(), "\n\t    "),
 			strings.Join(vm.ActivateableEips(), ", ")),
-		Value: "Istanbul",
+		Value: "ArrowGlacier",
 	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",

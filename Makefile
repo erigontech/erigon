@@ -67,8 +67,13 @@ ifdef XDG_DATA_HOME
 endif
 xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
 
-docker-compose: validate_docker_build_args
+setup_xdg_data_home:
 	mkdir -p $(xdg_data_home_subdirs)
+	ls -aln $(xdg_data_home) | grep -E "472*0*erigon-grafana" || sudo chown -R 472:0 $(xdg_data_home)/erigon-grafana
+	@echo "✔️ xdg_data_home setup"
+	@ls -al $(xdg_data_home)
+
+docker-compose: validate_docker_build_args setup_xdg_data_home
 	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
@@ -196,7 +201,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
 # create "erigon" user
 user_macos:
@@ -206,4 +211,4 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
