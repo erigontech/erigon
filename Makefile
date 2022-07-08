@@ -196,7 +196,7 @@ endif
 ifdef DOCKER
 	sudo usermod -aG docker $(ERIGON_USER)
 endif
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
 # create "erigon" user
 user_macos:
@@ -206,4 +206,4 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
-	sudo -u $(ERIGON_USER) mkdir -p ~$(ERIGON_USER_XDG_DATA_HOME)
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
