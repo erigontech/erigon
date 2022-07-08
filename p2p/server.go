@@ -137,10 +137,12 @@ type Config struct {
 	// If the port is zero, the operating system will pick a port. The
 	// ListenAddr field will be updated with the actual address when
 	// the server is started.
-	ListenAddr   string
-	ListenAddr66 string
-	Eth66Enabled bool
-	SentryAddr   []string
+	ListenAddr string
+
+	// eth/66, eth/67, etc
+	ProtocolVersion uint
+
+	SentryAddr []string
 
 	// If set to a non-nil value, the given NAT port mapper
 	// is used to make the listening port available to the

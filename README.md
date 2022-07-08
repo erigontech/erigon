@@ -393,13 +393,12 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 |  Port |  Protocol |      Purpose           |  Expose |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP | eth/67 peering         |  Public |
-| 30304 | TCP & UDP | eth/66 peering         |  Public |
+| 30303 | TCP & UDP | eth/66 or 67 peering   |  Public |
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
 
-Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 
 #### `RPC` ports

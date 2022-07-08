@@ -504,10 +504,10 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	ListenPort66Flag = cli.IntFlag{
-		Name:  "p2p.66.port",
-		Usage: "ETH66 Network listening port",
-		Value: 30304,
+	P2pProtocolVersionFlag = cli.IntFlag{
+		Name:  "p2p.protocol",
+		Usage: "Version of eth p2p protocol (66 by default)",
+		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -917,9 +917,8 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
 	}
-	if ctx.GlobalIsSet(ListenPort66Flag.Name) {
-		cfg.ListenAddr66 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort66Flag.Name))
-		cfg.Eth66Enabled = true
+	if ctx.GlobalIsSet(P2pProtocolVersionFlag.Name) {
+		cfg.ProtocolVersion = uint(ctx.GlobalInt(P2pProtocolVersionFlag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
