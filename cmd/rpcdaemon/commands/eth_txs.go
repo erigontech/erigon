@@ -64,10 +64,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if chainConfig.Bor == nil {
 				return nil, nil
 			}
-			borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
-			if err != nil {
-				return nil, err
-			}
+			borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 			if borTx == nil {
 				return nil, nil
 			}
@@ -182,10 +179,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, block.NumberU64(), block.Hash())
-		if err != nil {
-			return nil, err
-		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -249,10 +243,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
-		if err != nil {
-			return nil, err
-		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx == nil {
 			return nil, nil
 		}

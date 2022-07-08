@@ -305,7 +305,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 			return nil, nil
 		}
 
-		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionWithBlockNumber(tx, blockNum)
+		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
