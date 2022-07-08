@@ -65,7 +65,7 @@ xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
-xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
+xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-prometheus
 
 docker-compose: validate_docker_build_args
 	mkdir -p $(xdg_data_home_subdirs)
