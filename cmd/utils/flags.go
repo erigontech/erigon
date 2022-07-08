@@ -402,7 +402,7 @@ var (
 		Name:  "experimental.tevm",
 		Usage: "Enables Transpiled EVM experiment",
 	}
-	MemoryOverlayFlag = cli.BoolFlag{
+	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",
 	}
