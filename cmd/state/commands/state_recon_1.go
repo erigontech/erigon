@@ -340,6 +340,16 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					err := func() error {
 						lock.Lock()
 						defer lock.Unlock()
+						// Drain results channel because read sets do not carry over
+						var drained bool
+						for !drained {
+							select {
+							case txTask := <-resultCh:
+								rs.RollbackTx(txTask)
+							default:
+								drained = true
+							}
+						}
 						applyTx.Rollback()
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
