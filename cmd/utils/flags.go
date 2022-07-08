@@ -506,7 +506,7 @@ var (
 	}
 	P2pProtocolVersionFlag = cli.IntFlag{
 		Name:  "p2p.protocol",
-		Usage: "Version of eth p2p protocol (66 by default)",
+		Usage: "Version of eth p2p protocol",
 		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
 	}
 	SentryAddrFlag = cli.StringFlag{
