@@ -59,7 +59,8 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethashFaker, nil, gp, ibs, noopWriter, block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
+		header := block.Header()
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), ethashFaker, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, contractHasTEVM)
 		if err != nil {
 			return nil, err
 		}
@@ -251,39 +252,17 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	var borTx *types.Transaction
-	var blockHash common.Hash
 	var blockNum uint64
 	var ok bool
 
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-
 	blockNum, ok, err = api.txnLookup(ctx, tx, hash)
-	if blockNum == 0 {
+	if !ok || blockNum == 0 {
 		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
 		// but 0 block number is used here to mean that the transaction is not found
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		if chainConfig.Bor != nil {
-			var blocN uint64
-			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
-			if err != nil {
-				return nil, err
-			}
-			if borTx == nil {
-				return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-			}
-			blockNum = blocN
-		} else {
-			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-		}
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -298,10 +277,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	if borTx != nil {
-		receipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
-		return marshalReceipt(receipt, *borTx, cc, block, hash), nil
-	}
 	var txnIndex uint64
 	var txn types.Transaction
 	for idx, transaction := range block.Transactions() {
@@ -313,7 +288,19 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 
 	if txn == nil {
-		return nil, nil
+		if cc.Bor == nil {
+			return nil, nil
+		}
+
+		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionWithBlockNumber(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if borTx == nil {
+			return nil, nil
+		}
+		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		return marshalReceipt(borReceipt, borTx, cc, block, hash), nil
 	}
 
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
@@ -358,6 +345,23 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash()))
+	}
+
+	if chainConfig.Bor != nil {
+		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if borTx != nil {
+			borReceipt := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum)
+			borTx, err = borTx.WithHash(borReceipt.TxHash)
+			if err != nil {
+				return nil, err
+			}
+			if borReceipt != nil {
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash))
+			}
+		}
 	}
 
 	return result, nil

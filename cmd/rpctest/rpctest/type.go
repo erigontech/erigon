@@ -2,6 +2,7 @@ package rpctest
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -61,7 +62,7 @@ type EthBlockByNumberResult struct {
 
 type EthBlockByNumber struct {
 	CommonResponse
-	Result EthBlockByNumberResult `json:"result"`
+	Result *EthBlockByNumberResult `json:"result"`
 }
 
 type StructLog struct {
