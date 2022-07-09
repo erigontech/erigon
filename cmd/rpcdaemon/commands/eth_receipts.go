@@ -206,7 +206,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		logs = append(logs, blockLogs...)
 
-		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, block, txIndex+1, logIndex)
+		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
 		if borLogs != nil {
 			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
 			if len(borLogs) > 0 {
