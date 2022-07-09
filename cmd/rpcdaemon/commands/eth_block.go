@@ -217,24 +217,15 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borReceipt *types.Receipt
+	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx, _, _, _, err = rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, b.NumberU64(), b.Hash())
-		if err != nil {
-			return nil, err
-		}
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
 		if borTx != nil {
-			borReceipt = rawdb.ReadBorReceipt(tx, b.Hash(), b.NumberU64())
-			if borReceipt != nil {
-				borTx, err = borTx.WithHash(borReceipt.TxHash)
-				if err != nil {
-					return nil, err
-				}
-			}
+			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
 		}
 	}
 
-	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borReceipt, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -280,7 +271,21 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	var borTx types.Transaction
+	var borTxHash common.Hash
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx != nil {
+			borTxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		}
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields

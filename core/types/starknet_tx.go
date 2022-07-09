@@ -170,10 +170,6 @@ func (tx StarknetTransaction) FakeSign(address common.Address) (Transaction, err
 	panic("implement me")
 }
 
-func (tx *StarknetTransaction) WithHash(newHash common.Hash) (Transaction, error) {
-	return nil, errors.New("hash is immutable for StarknetTransaction")
-}
-
 func (tx StarknetTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)

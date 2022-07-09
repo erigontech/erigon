@@ -566,10 +566,6 @@ func (tx *AccessListTx) FakeSign(address common.Address) (Transaction, error) {
 	return cpy, nil
 }
 
-func (tx *AccessListTx) WithHash(newHash common.Hash) (Transaction, error) {
-	return nil, errors.New("hash is immutable for AccessListTx")
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
