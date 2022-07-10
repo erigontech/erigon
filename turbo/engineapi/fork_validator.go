@@ -44,6 +44,12 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
+func NewForkValidatorMock() *ForkValidator {
+	return &ForkValidator{
+		sideForksBlock: make(map[common.Hash]forkSegment),
+	}
+}
+
 func NewForkValidator(validatePayload validatePayloadFunc) *ForkValidator {
 	return &ForkValidator{
 		sideForksBlock:  make(map[common.Hash]forkSegment),
@@ -76,6 +82,10 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx) error {
 // if the payload is a fork then we unwind to the point where the fork meet the canonical chain and we check if it is valid or not from there.
 // if for any reasons none of the action above can be performed due to lack of information, we accept the payload and avoid validation.
 func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+	if fv.validatePayload == nil {
+		status = remote.EngineStatus_ACCEPTED
+		return
+	}
 	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
 	if currentHeight == nil {
 		criticalError = fmt.Errorf("could not read block number.")

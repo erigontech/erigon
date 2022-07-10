@@ -271,7 +271,9 @@ func startHandlingForkChoice(
 ) (*privateapi.PayloadStatus, error) {
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
-	defer cfg.forkValidator.Clear(tx)
+	if cfg.memoryOverlay {
+		defer cfg.forkValidator.Clear(tx)
+	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
@@ -599,7 +601,6 @@ func verifyAndSaveNewPoSHeader(
 			LatestValidHash: latestValidHash,
 			ValidationError: validationError,
 		}, success, nil
-
 	}
 
 	if cfg.memoryOverlay && (cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()) {
