@@ -39,6 +39,7 @@ const (
 
 type bitstring []uint8
 
+// converts slice of nibbles (lowest 4 bits of each byte) to bitstring
 func hexToBin(hex []byte) bitstring {
 	bin := make([]byte, 4*len(hex))
 	for i := range bin {
@@ -49,6 +50,7 @@ func hexToBin(hex []byte) bitstring {
 	return bin
 }
 
+// encodes bitstring to its compact representation
 func binToCompact(bin []byte) []byte {
 	compact := make([]byte, 2+(len(bin)+7)/8)
 	binary.BigEndian.PutUint16(compact, uint16(len(bin)))
@@ -60,6 +62,7 @@ func binToCompact(bin []byte) []byte {
 	return compact
 }
 
+// decodes compact bitstring representation into actual bitstring
 func compactToBin(compact []byte) []byte {
 	bin := make([]byte, binary.BigEndian.Uint16(compact))
 	for i := 0; i < len(bin); i++ {
@@ -105,6 +108,7 @@ type BinHashed struct {
 	keccak2         keccakState
 	accountKeyLen   int
 	trace           bool
+	auxBuf          [1 + length.Hash]byte
 	byteArrayWriter ByteArrayWriter
 }
 
@@ -211,7 +215,7 @@ func (hph *BinHashed) Variant() TrieVariant {
 }
 
 func (hph *BinHashed) RootHash() ([]byte, error) {
-	hash, err := hph.computeCellHash(&hph.root, 0, nil)
+	hash, err := hph.computeCellHash(&hph.root, 0, hph.auxBuf[:0])
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +245,7 @@ func (hph *BinHashed) Reset() {
 func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *BinCell) error {
 	return func(pk []byte, bc *BinCell) error {
 		cl := bc.unwrapToHexCell()
+
 		if err := fn(pk, cl); err != nil {
 			return err
 		}
@@ -255,7 +260,9 @@ func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *BinC
 		copy(bc.spk[:], cl.spk[:])
 		copy(bc.h[:], cl.h[:])
 		copy(bc.extension[:], cl.extension[:])
+		bc.extLen = cl.extLen
 		copy(bc.downHashedKey[:], cl.downHashedKey[:])
+		bc.downHashedLen = cl.downHashedLen
 		copy(bc.CodeHash[:], cl.CodeHash[:])
 		copy(bc.Storage[:], cl.Storage[:])
 		return nil
@@ -612,7 +619,7 @@ func (hph *BinHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
 		log.Warn("got empty branch data during unfold", "row", row, "depth", depth, "deleted", deleted)
 	}
 	hph.branchBefore[row] = true
-	//fmt.Printf("unfoldBranchNode [%x]=>[%x]\n", hph.currentKey[:hph.currentKeyLen], branchData)
+	// fmt.Printf("unfoldBranchNode [%x]=>[%x]\n", hph.currentKey[:hph.currentKeyLen], branchData)
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
 	pos := 2
 	if deleted {
@@ -787,7 +794,6 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 	if hph.trace {
 		fmt.Printf("touchMap[%d]=%016b, afterMap[%d]=%016b (%d part(s))\n", row, hph.touchMap[row], row, hph.afterMap[row], partsCount)
 	}
-	var bitmapBuf [4]byte
 	switch partsCount {
 	case 0:
 		// Everything deleted
@@ -812,9 +818,10 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 		upCell.extLen = 0
 		upCell.downHashedLen = 0
 		if hph.branchBefore[row] {
-			binary.BigEndian.PutUint16(bitmapBuf[0:], hph.touchMap[row]) // touchMap
-			binary.BigEndian.PutUint16(bitmapBuf[2:], 0)                 // afterMap
-			branchData = append(branchData, bitmapBuf[:]...)
+			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			if err != nil {
+				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+			}
 		}
 		hph.activeRows--
 		if upDepth > 0 {
@@ -839,9 +846,10 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			binary.BigEndian.PutUint16(bitmapBuf[0:], hph.touchMap[row]) // touchMap
-			binary.BigEndian.PutUint16(bitmapBuf[2:], 0)                 // afterMap
-			branchData = append(branchData, bitmapBuf[:]...)
+			branchData, _, err = EncodeBranch(0, hph.touchMap[row], 0, func(nibble int, skip bool) (*Cell, error) { return nil, nil })
+			if err != nil {
+				return nil, updateKey, fmt.Errorf("failed to encode leaf node update: %w", err)
+			}
 		}
 		hph.activeRows--
 		if upDepth > 0 {
@@ -867,6 +875,7 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 			bitmap |= hph.afterMap[row]
 		}
 		// Calculate total length of all hashes
+		// totalBranchLen := maxChild + 1 - partsCount // For every empty cell, one byte
 		totalBranchLen := 17 - partsCount // For every empty cell, one byte
 		for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
 			bit := bitset & -bitset
@@ -877,13 +886,12 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 		}
 
 		hph.keccak2.Reset()
-		pt := rlp.GenerateStructLen(bitmapBuf[:], totalBranchLen)
-		if _, err := hph.keccak2.Write(bitmapBuf[:pt]); err != nil {
+		pt := rlp.GenerateStructLen(hph.auxBuf[:], totalBranchLen)
+		if _, err := hph.keccak2.Write(hph.auxBuf[:pt]); err != nil {
 			return nil, nil, err
 		}
 
 		b := [...]byte{0x80}
-		var cellHashBuf [33]byte
 		cellGetter := func(nibble int, skip bool) (*Cell, error) {
 			if skip {
 				if _, err := hph.keccak2.Write(b[:]); err != nil {
@@ -895,8 +903,7 @@ func (hph *BinHashed) fold() (branchData BranchData, updateKey []byte, err error
 				return nil, nil
 			}
 			cell := &hph.grid[row][nibble]
-			var err error
-			cellHash, err := hph.computeCellHash(cell, depth, cellHashBuf[:0])
+			cellHash, err := hph.computeCellHash(cell, depth, hph.auxBuf[:0])
 			if err != nil {
 				return nil, err
 			}
@@ -973,10 +980,6 @@ func (hph *BinHashed) foldRoot() (BranchData, error) {
 		if err != nil {
 			return nil, fmt.Errorf("folding root failed: %w", err)
 		}
-
-		// hph.root.hl = 32
-		// hph.root.h = *(*[length.Hash]byte)(rh)
-
 		return hph.root.unwrapToHexCell(), nil
 	}
 
@@ -1081,7 +1084,9 @@ func (cell *BinCell) unwrapToHexCell() (cl *Cell) {
 	copy(cl.apk[:], cell.apk[:])
 	copy(cl.spk[:], cell.spk[:])
 	copy(cl.h[:], cell.h[:])
+	cl.extLen = cell.extLen
 	copy(cl.extension[:], cell.extension[:])
+	cl.downHashedLen = cell.downHashedLen
 	copy(cl.downHashedKey[:], cell.downHashedKey[:])
 	copy(cl.CodeHash[:], cell.CodeHash[:])
 	copy(cl.Storage[:], cell.Storage[:])

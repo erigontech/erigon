@@ -43,8 +43,8 @@ const (
 
 func InitializeTrie(tv TrieVariant) Trie {
 	switch tv {
-	// case VariantBinPatriciaTrie:
-	// 	return NewBinPatriciaHashed(length.Addr, nil, nil, nil)
+	case VariantBinPatriciaTrie:
+		return NewBinPatriciaHashed(length.Addr, nil, nil, nil)
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -109,7 +109,6 @@ func (branchData BranchData) String() string {
 }
 
 func EncodeBranch(bitmap, touchMap, afterMap uint16, retriveCell func(nibble int, skip bool) (*Cell, error)) (branchData BranchData, lastNibble int, err error) {
-	// bitmapBuf := make([]byte, 4)
 	branchData = make(BranchData, 0, 32)
 	var bitmapBuf [binary.MaxVarintLen64]byte
 

@@ -2200,7 +2200,7 @@ func (w *Writer) branchFn(prefix []byte) ([]byte, error) {
 	var startBlock = w.blockNum + 1
 	for mergedVal == nil || !commitment.BranchData(mergedVal).IsComplete() {
 		if startBlock == 0 {
-			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.KeyToHex(prefix), mergedVal, startBlock))
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactedKeyToHex(prefix), mergedVal, startBlock))
 		}
 		var val commitment.BranchData
 		val, startBlock = w.a.readFromFiles(Commitment, false /* lock */, startBlock-1, prefix, false /* trace */)
@@ -2208,7 +2208,7 @@ func (w *Writer) branchFn(prefix []byte) ([]byte, error) {
 			if mergedVal == nil {
 				return nil, nil
 			}
-			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.KeyToHex(prefix), mergedVal, startBlock))
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactedKeyToHex(prefix), mergedVal, startBlock))
 		}
 		var err error
 		//fmt.Printf("Pre-merge prefix [%x] [%x]+[%x], startBlock %d\n", commitment.CompactToHex(prefix), val, mergedVal, startBlock)
@@ -2425,7 +2425,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 				return nil, err
 			}
 			if w.a.trace {
-				fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", commitment.KeyToHex(prefix), original, branchNodeUpdate, mergedVal)
+				fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", commitment.CompactedKeyToHex(prefix), original, branchNodeUpdate, mergedVal)
 			}
 			branchNodeUpdate = mergedVal
 		}

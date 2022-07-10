@@ -5,7 +5,11 @@ package commitment
 import (
 	"bytes"
 	"encoding/hex"
+	"math/rand"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/stretchr/testify/require"
 )
 
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdate$ -fuzztime=300s ./commitment
@@ -134,5 +138,49 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		if !bytes.Equal(rootHash, rootHashAnother) {
 			t.Fatalf("invalid second root hash with same updates: [%v] != [%v]", hex.EncodeToString(rootHash), hex.EncodeToString(rootHashAnother))
 		}
+	})
+}
+
+func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
+	var (
+		keysCount uint64 = 100
+		seed      int64  = 1234123415
+	)
+
+	f.Add(keysCount, seed)
+
+	f.Fuzz(func(t *testing.T, keysCount uint64, seed int64) {
+		if keysCount > 10e9 {
+			return
+		}
+
+		rnd := rand.New(rand.NewSource(seed))
+		builder := NewUpdateBuilder()
+
+		// generate updates
+		for i := 0; i < int(keysCount); i++ {
+			key := make([]byte, length.Addr)
+
+			for j := 0; j < len(key); j++ {
+				key[j] = byte(rnd.Intn(256))
+			}
+			builder.Balance(hex.EncodeToString(key), rnd.Uint64())
+		}
+
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
+
+		hph.SetTrace(false)
+
+		plainKeys, hashedKeys, updates := builder.Build()
+		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+			t.Fatal(err)
+		}
+
+		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		require.NoError(t, err)
+
+		ms.applyBranchNodeUpdates(branchNodeUpdates)
+		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})
 }

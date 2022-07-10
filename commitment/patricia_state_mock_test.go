@@ -276,6 +276,7 @@ func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
 		copy(cell.Storage[:], ex.CodeHashOrStorage[:])
 		cell.StorageLen = len(ex.CodeHashOrStorage)
 	} else {
+		cell.StorageLen = 0
 		cell.Storage = [length.Hash]byte{}
 	}
 	return nil
@@ -427,6 +428,22 @@ func (ub *UpdateBuilder) Storage(addr string, loc string, value string) *UpdateB
 		ub.storages[sk1] = make(map[string][]byte)
 		ub.storages[sk1][sk2] = v
 	}
+	return ub
+}
+
+func (ub *UpdateBuilder) IncrementBalance(addr string, balance []byte) *UpdateBuilder {
+	sk := string(decodeHex(addr))
+	delete(ub.deletes, sk)
+	increment := uint256.NewInt(0)
+	increment.SetBytes(balance)
+	if old, ok := ub.balances[sk]; ok {
+		balance := uint256.NewInt(0)
+		balance.Add(old, increment)
+		ub.balances[sk] = balance
+	} else {
+		ub.balances[sk] = increment
+	}
+	ub.keyset[sk] = struct{}{}
 	return ub
 }
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 )
 
@@ -197,4 +198,70 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
 	require.EqualValues(t, batchRoot, roots[len(roots)-1],
 		"expected equal roots, got sequential [%v] != batch [%v]", hex.EncodeToString(roots[len(roots)-1]), hex.EncodeToString(batchRoot))
 	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
+}
+
+func Test_Sepolia(t *testing.T) {
+	ms := NewMockState(t)
+
+	type TestData struct {
+		expectedRoot string
+		balances     map[string][]byte
+	}
+
+	tests := []TestData{
+		{
+			"5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
+			map[string][]byte{
+				"a2a6d93439144ffe4d27c9e088dcd8b783946263": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"bc11295936aa79d594139de1b2e12629414f3bdb": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"7cf5b79bfe291a67ab02b393e456ccc4c266f753": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"aaec86394441f915bce3e6ab399977e9906f3b69": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"f47cae1cf79ca6758bfc787dbd21e6bdbe7112b8": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"d7eddb78ed295b3c9629240e8924fb8d8874ddd8": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"8b7f0977bb4f0fbe7076fa22bc24aca043583f5e": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"e2e2659028143784d557bcec6ff3a0721048880a": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"d9a5179f091d85051d3c982785efd1455cec8699": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"beef32ca5b9a198d27b4e02f4c70439fe60356cf": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
+				"0000006916a87b82333f4245046623b23794c65c": {0x08, 0x45, 0x95, 0x16, 0x14, 0x01, 0x48, 0x4a, 0x00, 0x00, 0x00},
+				"b21c33de1fab3fa15499c62b59fe0cc3250020d1": {0x52, 0xb7, 0xd2, 0xdc, 0xc8, 0x0c, 0xd2, 0xe4, 0x00, 0x00, 0x00},
+				"10f5d45854e038071485ac9e402308cf80d2d2fe": {0x52, 0xb7, 0xd2, 0xdc, 0xc8, 0x0c, 0xd2, 0xe4, 0x00, 0x00, 0x00},
+				"d7d76c58b3a519e9fa6cc4d22dc017259bc49f1e": {0x52, 0xb7, 0xd2, 0xdc, 0xc8, 0x0c, 0xd2, 0xe4, 0x00, 0x00, 0x00},
+				"799d329e5f583419167cd722962485926e338f4a": {0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},
+			},
+		},
+		{
+			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			map[string][]byte{
+				"2f14582947e292a2ecd20c430b46f2d27cfe213c": {0x1B, 0xC1, 0x6D, 0x67, 0x4E, 0xC8, 0x00, 0x00},
+			},
+		},
+		{
+			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			map[string][]byte{},
+		},
+	}
+
+	hph := NewHexPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
+	hph.SetTrace(true)
+
+	for _, testData := range tests {
+		builder := NewUpdateBuilder()
+
+		for address, balance := range testData.balances {
+			builder.IncrementBalance(address, balance)
+		}
+		plainKeys, hashedKeys, updates := builder.Build()
+
+		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+			t.Fatal(err)
+		}
+
+		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms.applyBranchNodeUpdates(branchNodeUpdates)
+
+		require.EqualValues(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
+	}
 }

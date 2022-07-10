@@ -148,7 +148,7 @@ func renderUpdates(branchNodeUpdates map[string]BranchData) {
 	slices.Sort(keys)
 	for _, key := range keys {
 		branchNodeUpdate := branchNodeUpdates[key]
-		fmt.Printf("%x => %s\n", KeyToHex([]byte(key)), branchNodeUpdate.String())
+		fmt.Printf("%x => %s\n", CompactedKeyToHex([]byte(key)), branchNodeUpdate.String())
 	}
 }
 func Test_BinPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {

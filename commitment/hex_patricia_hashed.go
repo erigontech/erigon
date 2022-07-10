@@ -1103,7 +1103,6 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 				return nil, nil
 			}
 			cell := &hph.grid[row][nibble]
-			var err error
 			cellHash, err := hph.computeCellHash(cell, depth, hph.auxBuffer[:0])
 			if err != nil {
 				return nil, err
@@ -1157,7 +1156,7 @@ func (hph *HexPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 	}
 	if branchData != nil {
 		if hph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", KeyToHex(updateKey), branchData)
+			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactedKeyToHex(updateKey), branchData)
 		}
 	}
 	return branchData, updateKey, nil
@@ -1425,7 +1424,7 @@ func decodeKey(key, buf []byte) []byte {
 	return buf
 }
 
-func KeyToHex(compact []byte) []byte {
+func CompactedKeyToHex(compact []byte) []byte {
 	if len(compact) == 0 {
 		return compact
 	}
