@@ -82,16 +82,14 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx) error {
 		return err
 	}
 	// Clean extending fork data
-	if fv.extendingFork != nil {
-		fv.extendingFork.Rollback()
-	}
+	fv.extendingFork.Rollback()
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingFork = nil
 	return nil
 }
 
-// ValidatePayload returns whether a payload is valid or invalid, or it cannot be determined, it will be accepted.
-// if the payload extend the canonical chain, then we stack in extendingFork without any unwind.
+// ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
+// if the payload extend the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meet the canonical chain and we check if it is valid or not from there.
 // if for any reasons none of the action above can be performed due to lack of information, we accept the payload and avoid validation.
 func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
@@ -194,9 +192,7 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 		if err := fv.validatePayload(fv.extendingFork, nil, nil, sb.header.Number.Uint64()-1, nil, nil); err != nil {
 			log.Warn("Could not clean payload", "err", err)
 		}
-		if fv.extendingFork != nil {
-			fv.extendingFork.Rollback()
-		}
+		fv.extendingFork.Rollback()
 	}
 	// Clean all data relative to txpool
 	fv.extendingForkHeadHash = common.Hash{}
