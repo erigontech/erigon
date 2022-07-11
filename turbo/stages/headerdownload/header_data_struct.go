@@ -9,7 +9,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -272,16 +271,10 @@ type Stats struct {
 	RespMaxBlock        uint64
 }
 
-type sideForkBlock struct {
-	header *types.Header
-	body   *types.RawBody
-}
-
 type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
-	sideForksBlock         map[common.Hash]sideForkBlock
 	engine                 consensus.Engine
 	insertQueue            InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -322,8 +315,6 @@ type HeaderDownload struct {
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
-	nextForkState        *memdb.MemoryMutation         // The db state of the next fork.
-	nextForkHash         common.Hash                   // Hash of the next fork
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -355,7 +346,6 @@ func NewHeaderDownload(
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
-		sideForksBlock:     make(map[common.Hash]sideForkBlock),
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)

@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -88,7 +89,7 @@ func StageLoop(
 
 			log.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "err", recoveryErr)
+				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
@@ -331,7 +332,7 @@ func NewStagedSync(
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
-	execPayload stagedsync.ExecutePayloadFunc,
+	execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error,
 ) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
@@ -364,7 +365,7 @@ func NewStagedSync(
 				tmpdir,
 				notifications.Events,
 				notifications,
-				execPayload),
+				engineapi.NewForkValidator(execPayload)),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageBodiesCfg(
