@@ -579,10 +579,6 @@ func verifyAndSaveNewPoSHeader(
 		}, false, nil
 	}
 
-	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-		return nil, false, err
-	}
-
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	canExtendCanonical := header.ParentHash == currentHeadHash
 	canExtendInMemory := cfg.memoryOverlay && (cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash())
@@ -592,10 +588,12 @@ func verifyAndSaveNewPoSHeader(
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
-		if validationError != nil {
+		success = validationError == nil
+		if !success {
 			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+		} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+			return nil, false, err
 		}
-		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
 		return &privateapi.PayloadStatus{
 			Status:          status,
 			LatestValidHash: latestValidHash,
@@ -604,6 +602,10 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	// OK, we're on the canonical chain
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+		return nil, false, err
+	}
+
 	if requestStatus == engineapi.New {
 		cfg.hd.SetPendingPayloadHash(headerHash)
 	}
