@@ -584,27 +584,11 @@ func verifyAndSaveNewPoSHeader(
 	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash != header.ParentHash {
-		// Side chain or something weird
-		// TODO(yperbasis): considered non-canonical because some missing headers were downloaded but not canonized
-		// Or it's not a problem because forkChoice is updated frequently?
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, false)
-		if criticalError != nil {
-			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
-		}
-		if validationError != nil {
-			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
-		}
-		success = status == remote.EngineStatus_VALID || status == remote.EngineStatus_ACCEPTED
-		return &privateapi.PayloadStatus{
-			Status:          status,
-			LatestValidHash: latestValidHash,
-			ValidationError: validationError,
-		}, success, nil
-	}
+	canExtendCanonical := header.ParentHash == currentHeadHash
+	canExtendInMemory := cfg.memoryOverlay && (cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash())
 
-	if cfg.memoryOverlay && (cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()) {
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, true)
+	if canExtendInMemory || !canExtendCanonical {
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical /*extendCanonical*/)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
