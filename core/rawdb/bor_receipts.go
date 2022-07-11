@@ -18,7 +18,7 @@ var (
 
 // HasBorReceipt verifies the existence of all block receipt belonging
 // to a block.
-func HasBorReceipts(db kv.Has, hash common.Hash, number uint64) bool {
+func HasBorReceipts(db kv.Has, number uint64) bool {
 	if has, err := db.Has(kv.BorReceipts, borReceiptKey(number)); !has || err != nil {
 		return false
 	}
@@ -70,17 +70,27 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 		receipts = make(types.Receipts, 0)
 	}
 
-	data := ReadStorageBodyRLP(db, hash, number)
-	if len(data) == 0 {
-		log.Error("Missing body but have bor receipt", "hash", hash, "number", number)
-		return nil
-	}
-
 	if err := types.DeriveFieldsForBorReceipt(borReceipt, hash, number, receipts); err != nil {
 		log.Error("Failed to derive bor receipt fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return borReceipt
+}
+
+// ReadBorReceiptLogs retrieves all the bor block receipt logs belonging to a block.
+// If it is unable to populate these metadata fields then nil is returned.
+func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) []*types.Log {
+	// We're deriving many fields from the block body, retrieve beside the receipt
+	borReceipt := ReadRawBorReceipt(db, blockHash, blockNumber)
+	if borReceipt == nil {
+		return nil
+	}
+
+	borLogs := borReceipt.Logs
+
+	types.DeriveFieldsForBorLogs(borLogs, blockHash, blockNumber, txIndex, logIndex)
+
+	return borLogs
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block.
@@ -130,7 +140,7 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash 
 }
 */
 
-// ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
+// ReadBorTransaction returns a specific bor (fake) transaction by txn hash, along with
 // its added positional metadata.
 func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
@@ -141,12 +151,19 @@ func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, com
 		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
 	}
 
-	return ReadBorTransactionWithBlockNumber(db, *blockNumber)
+	return computeBorTransactionForBlockNumber(db, *blockNumber)
 }
 
-// ReadBorTransaction retrieves a specific bor (fake) transaction by block number, along with
+// ReadBorTransactionForBlockNumber returns a bor (fake) transaction by block number, along with
 // its added positional metadata.
-func ReadBorTransactionWithBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+	if !HasBorReceipts(db, blockNumber) {
+		return nil, common.Hash{}, 0, 0, nil
+	}
+	return computeBorTransactionForBlockNumber(db, blockNumber)
+}
+
+func computeBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
 	blockHash, err := ReadCanonicalHash(db, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
@@ -155,12 +172,19 @@ func ReadBorTransactionWithBlockNumber(db kv.Tx, blockNumber uint64) (types.Tran
 		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
-	return ReadBorTransactionWithBlockNumberAndHash(db, blockNumber, blockHash)
+	return computeBorTransactionForBlockNumberAndHash(db, blockNumber, blockHash)
 }
 
-// ReadBorTransactionWithBlockNumberAndHash retrieves a specific bor (fake) transaction by block number and block hash, along with
+// ReadBorTransactionForBlockNumberAndHash returns a bor (fake) transaction by block number and block hash, along with
 // its added positional metadata.
-func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+	if !HasBorReceipts(db, blockNumber) {
+		return nil, common.Hash{}, 0, 0, nil
+	}
+	return computeBorTransactionForBlockNumberAndHash(db, blockNumber, blockHash)
+}
+
+func computeBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	bodyForStorage, err := ReadStorageBody(db, blockHash, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
@@ -168,6 +192,20 @@ func ReadBorTransactionWithBlockNumberAndHash(db kv.Tx, blockNumber uint64, bloc
 
 	var tx types.Transaction = types.NewBorTransaction()
 	return tx, blockHash, blockNumber, uint64(bodyForStorage.TxAmount), nil
+}
+
+// ReadBorTransactionForBlock retrieves a specific bor (fake) transaction associated with a block, along with
+// its added positional metadata.
+func ReadBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, common.Hash, uint64, uint64) {
+	if !HasBorReceipts(db, block.NumberU64()) {
+		return nil, common.Hash{}, 0, 0
+	}
+	return computeBorTransactionForBlock(db, block)
+}
+
+func computeBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, common.Hash, uint64, uint64) {
+	var tx types.Transaction = types.NewBorTransaction()
+	return tx, block.Hash(), block.NumberU64(), uint64(len(block.Transactions()))
 }
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer

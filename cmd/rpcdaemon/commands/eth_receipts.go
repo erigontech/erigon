@@ -155,10 +155,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		block := uint64(iter.Next())
+		blockNumber := uint64(iter.Next())
 		var logIndex uint
+		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
+		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -171,7 +172,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			if len(filtered) == 0 {
 				return nil
 			}
-			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for _, log := range filtered {
 				log.TxIndex = txIndex
 			}
@@ -186,20 +187,32 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			continue
 		}
 
-		b, err := api.blockByNumberWithSenders(tx, block)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", block)
+
+		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+		if err != nil {
+			return nil, err
 		}
-		blockHash := b.Hash()
+		if body == nil {
+			return nil, fmt.Errorf("block not found %d", blockNumber)
+		}
 		for _, log := range blockLogs {
-			log.BlockNumber = block
+			log.BlockNumber = blockNumber
 			log.BlockHash = blockHash
-			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			log.TxHash = body.Transactions[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
+
+		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
+		if borLogs != nil {
+			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
+			if len(borLogs) > 0 {
+				logs = append(logs, borLogs...)
+			}
+		}
 	}
 
 	return logs, nil
@@ -245,7 +258,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -255,7 +268,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	var blockNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(ctx, tx, hash)
+	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
 	if !ok || blockNum == 0 {
 		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
 		// but 0 block number is used here to mean that the transaction is not found
@@ -280,7 +293,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	var txnIndex uint64
 	var txn types.Transaction
 	for idx, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
+		if transaction.Hash() == txnHash {
 			txn = transaction
 			txnIndex = uint64(idx)
 			break
@@ -292,7 +305,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 			return nil, nil
 		}
 
-		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionWithBlockNumber(tx, blockNum)
+		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -300,7 +313,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 			return nil, nil
 		}
 		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
-		return marshalReceipt(borReceipt, borTx, cc, block, hash), nil
+		if borReceipt == nil {
+			return nil, nil
+		}
+		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
 	}
 
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
@@ -310,7 +326,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, hash), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -344,22 +360,15 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash()))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
-		borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
-		if err != nil {
-			return nil, err
-		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
 			borReceipt := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum)
-			borTx, err = borTx.WithHash(borReceipt.TxHash)
-			if err != nil {
-				return nil, err
-			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
 			}
 		}
 	}
@@ -367,7 +376,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block, hash common.Hash) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block, txnHash common.Hash, signed bool) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -379,13 +388,17 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	case *types.DynamicFeeTransaction:
 		chainId = t.ChainID.ToBig()
 	}
-	signer := types.LatestSignerForChainID(chainId)
-	from, _ := txn.Sender(*signer)
+
+	var from common.Address
+	if signed {
+		signer := types.LatestSignerForChainID(chainId)
+		from, _ = txn.Sender(*signer)
+	}
 
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		"transactionHash":   hash,
+		"transactionHash":   txnHash,
 		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
 		"to":                txn.GetTo(),
