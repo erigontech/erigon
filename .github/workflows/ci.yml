@@ -104,8 +104,11 @@ jobs:
           fetch-depth: 0 # fetch git tags for "git describe"
 
       - name: make docker
-        run: DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
       # check with root permissions, should be cached from previous build
       - name: sudo make docker
-        run: sudo DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      - name: run hive
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock gatewayfm/hive:latest --sim ethereum/sync --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
