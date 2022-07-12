@@ -18,22 +18,25 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type FinishCfg struct {
-	db     kv.RwDB
-	tmpDir string
-	log    log.Logger
-	headCh chan *types.Block
+	db            kv.RwDB
+	tmpDir        string
+	log           log.Logger
+	headCh        chan *types.Block
+	forkValidator *engineapi.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block, forkValidator *engineapi.ForkValidator) FinishCfg {
 	return FinishCfg{
-		db:     db,
-		log:    logger,
-		tmpDir: tmpDir,
-		headCh: headCh,
+		db:            db,
+		log:           logger,
+		tmpDir:        tmpDir,
+		headCh:        headCh,
+		forkValidator: forkValidator,
 	}
 }
 
@@ -56,11 +59,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	if executionAt <= s.BlockNumber {
 		return nil
 	}
-
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.Update(tx, executionAt)
 	if err != nil {
 		return err
+	}
+	if cfg.forkValidator != nil {
+		cfg.forkValidator.NotifyCurrentHeight(executionAt)
 	}
 
 	if initialCycle {

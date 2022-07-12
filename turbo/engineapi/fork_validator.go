@@ -14,8 +14,6 @@
 package engineapi
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -47,6 +45,8 @@ type ForkValidator struct {
 	extendingForkHeadHash common.Hash
 	// this is the function we use to perform payload validation.
 	validatePayload validatePayloadFunc
+	// this is the current point where we processed the chain so far.
+	currentHeight uint64
 }
 
 // abs64 is a utility method that given an int64, it returns its absolute value in uint64.
@@ -57,22 +57,29 @@ func abs64(n int64) uint64 {
 	return uint64(n)
 }
 
-func NewForkValidatorMock() *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
 		sideForksBlock: make(map[common.Hash]forkSegment),
+		currentHeight:  currentHeight,
 	}
 }
 
-func NewForkValidator(validatePayload validatePayloadFunc) *ForkValidator {
+func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc) *ForkValidator {
 	return &ForkValidator{
 		sideForksBlock:  make(map[common.Hash]forkSegment),
 		validatePayload: validatePayload,
+		currentHeight:   currentHeight,
 	}
 }
 
 // ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
 func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	return fv.extendingForkHeadHash
+}
+
+// NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
+func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
+	fv.currentHeight = currentHeight
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
@@ -97,12 +104,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
-	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
-	if currentHeight == nil {
-		criticalError = fmt.Errorf("could not read block number.")
-		return
-	}
-	defer fv.clean(*currentHeight)
+	defer fv.clean()
 
 	if extendCanonical {
 		// If the new block extends the canonical chain we update extendingFork.
@@ -133,7 +135,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
-	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxForkDepth {
+	if abs64(int64(fv.currentHeight)-header.Number.Int64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
@@ -200,9 +202,9 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 }
 
 // clean wipes out all outdated sideforks whose distance exceed the height of the head.
-func (fv *ForkValidator) clean(currentHeight uint64) {
+func (fv *ForkValidator) clean() {
 	for hash, sb := range fv.sideForksBlock {
-		if abs64(int64(currentHeight)-sb.header.Number.Int64()) > maxForkDepth {
+		if abs64(int64(fv.currentHeight)-sb.header.Number.Int64()) > maxForkDepth {
 			delete(fv.sideForksBlock, hash)
 		}
 	}
