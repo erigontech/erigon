@@ -364,6 +364,10 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	RpcStreamingDisableFlag = cli.BoolFlag{
+		Name:  "rpc.streaming.disable",
+		Usage: "Erigon has enalbed json streamin for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
 		Usage: "Trace HTTP requests with INFO level",
@@ -398,7 +402,7 @@ var (
 		Name:  "experimental.tevm",
 		Usage: "Enables Transpiled EVM experiment",
 	}
-	MemoryOverlayFlag = cli.BoolFlag{
+	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",
 	}
@@ -499,6 +503,11 @@ var (
 		Name:  "port",
 		Usage: "Network listening port",
 		Value: 30303,
+	}
+	P2pProtocolVersionFlag = cli.IntFlag{
+		Name:  "p2p.protocol",
+		Usage: "Version of eth p2p protocol",
+		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -846,6 +855,8 @@ func NewP2PConfig(
 	switch protocol {
 	case eth.ETH66:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
+	case eth.ETH67:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
@@ -905,6 +916,9 @@ func nodeKey(datadir string) (*ecdsa.PrivateKey, error) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(P2pProtocolVersionFlag.Name) {
+		cfg.ProtocolVersion = uint(ctx.GlobalInt(P2pProtocolVersionFlag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))

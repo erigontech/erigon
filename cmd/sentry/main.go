@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
@@ -27,7 +26,7 @@ var (
 	trustedPeers []string // trusted peers
 	discoveryDNS []string
 	nodiscover   bool // disable sentry's discovery mechanism
-	protocol     string
+	protocol     int
 	netRestrict  string // CIDR to restrict peering to
 	maxPeers     int
 	maxPendPeers int
@@ -45,7 +44,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&trustedPeers, utils.TrustedPeersFlag.Name, []string{}, utils.TrustedPeersFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
-	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth66")
+	rootCmd.Flags().IntVar(&protocol, utils.P2pProtocolVersionFlag.Name, utils.P2pProtocolVersionFlag.Value, utils.P2pProtocolVersionFlag.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, utils.NetrestrictFlag.Name, utils.NetrestrictFlag.Value, utils.NetrestrictFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
@@ -68,8 +67,6 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		p := eth.ETH66
-
 		dirs := datadir.New(datadirCli)
 		nodeConfig := node2.NewNodeConfig()
 		p2pConfig, err := utils.NewP2PConfig(
@@ -83,13 +80,13 @@ var rootCmd = &cobra.Command{
 			staticPeers,
 			trustedPeers,
 			uint(port),
-			uint(p),
+			uint(protocol),
 		)
 		if err != nil {
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(protocol), healthCheck)
 	},
 }
 

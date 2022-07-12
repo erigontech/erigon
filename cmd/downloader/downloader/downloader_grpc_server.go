@@ -28,8 +28,6 @@ type GrpcServer struct {
 
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
-	isInitialSync := s.d.IsInitialSync()
-
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
@@ -38,15 +36,12 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return nil, err
 			}
 		}
+
 		ok, err := AddSegment(it.Path, s.d.SnapDir(), torrentClient)
 		if err != nil {
 			return nil, fmt.Errorf("AddSegment: %w", err)
 		}
 		if ok {
-			continue
-		}
-
-		if !isInitialSync {
 			continue
 		}
 

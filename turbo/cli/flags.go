@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -149,6 +151,38 @@ var (
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
 		Usage: "Enable grpc health check",
+	}
+
+	HTTPReadTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.read",
+		Usage: "Maximum duration for reading the entire request, including the body.",
+		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+	}
+	HTTPWriteTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.write",
+		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+	}
+	HTTPIdleTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
+		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+	}
+
+	EngineReadTimeoutFlag = cli.DurationFlag{
+		Name:  "engine.timeouts.read",
+		Usage: "Maximum duration for reading the entire request, including the body.",
+		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+	}
+	EngineWriteTimeoutFlag = cli.DurationFlag{
+		Name:  "engine.timeouts.write",
+		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+	}
+	EngineIdleTimeoutFlag = cli.DurationFlag{
+		Name:  "engine.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If engine.timeouts.idle is zero, the value of engine.timeouts.read is used.",
+		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 )
 
@@ -298,9 +332,20 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
 		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
+		HTTPTimeouts: rpccfg.HTTPTimeouts{
+			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),
+			WriteTimeout: ctx.GlobalDuration(HTTPWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
+		},
+		EngineTimeouts: rpccfg.HTTPTimeouts{
+			ReadTimeout:  ctx.GlobalDuration(EngineReadTimeoutFlag.Name),
+			WriteTimeout: ctx.GlobalDuration(EngineWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
+		},
 
 		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:  ctx.GlobalBool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:    ctx.GlobalInt(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
 		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),

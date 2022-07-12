@@ -24,12 +24,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/semaphore"
 	"net"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -136,9 +137,12 @@ type Config struct {
 	// If the port is zero, the operating system will pick a port. The
 	// ListenAddr field will be updated with the actual address when
 	// the server is started.
-	ListenAddr   string
-	ListenAddr65 string
-	SentryAddr   []string
+	ListenAddr string
+
+	// eth/66, eth/67, etc
+	ProtocolVersion uint
+
+	SentryAddr []string
 
 	// If set to a non-nil value, the given NAT port mapper
 	// is used to make the listening port available to the

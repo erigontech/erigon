@@ -34,10 +34,12 @@ import (
 // Constants to match up protocol versions and messages
 const (
 	ETH66 = 66
+	ETH67 = 67
 )
 
 var ProtocolToString = map[uint]string{
 	ETH66: "eth66",
+	ETH67: "eth67",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -86,6 +88,20 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
+	ETH67: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+	},
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
@@ -96,6 +112,20 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
 		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
 		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
+	ETH67: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
 		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
 		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
 		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,

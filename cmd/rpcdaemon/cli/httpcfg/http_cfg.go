@@ -4,6 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 type HttpCfg struct {
@@ -29,6 +30,7 @@ type HttpCfg struct {
 	WebsocketCompression    bool
 	RpcAllowListFilePath    string
 	RpcBatchConcurrency     uint
+	RpcStreamingDisable     bool
 	DBReadConcurrency       int
 	TraceCompatibility      bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr           string
@@ -43,4 +45,6 @@ type HttpCfg struct {
 	StarknetGRPCAddress     string
 	JWTSecretPath           string // Engine API Authentication
 	TraceRequests           bool   // Always trace requests in INFO level
+	HTTPTimeouts            rpccfg.HTTPTimeouts
+	EngineTimeouts          rpccfg.HTTPTimeouts
 }

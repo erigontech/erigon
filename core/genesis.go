@@ -210,6 +210,16 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
+
+	applyOverrides := func(config *params.ChainConfig) {
+		if overrideMergeNetsplitBlock != nil {
+			config.MergeNetsplitBlock = overrideMergeNetsplitBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		}
+	}
+
 	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
@@ -217,12 +227,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 			genesis = DefaultGenesisBlock()
 			custom = false
 		}
-		if overrideMergeNetsplitBlock != nil {
-			genesis.Config.MergeNetsplitBlock = overrideMergeNetsplitBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			genesis.Config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-		}
+		applyOverrides(genesis.Config)
 		block, _, err1 := genesis.Write(db)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -250,12 +255,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	}
 	// Get the existing chain configuration.
 	newCfg := genesis.configOrDefault(storedHash)
-	if overrideMergeNetsplitBlock != nil {
-		newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
-	}
-	if overrideTerminalTotalDifficulty != nil {
-		newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-	}
+	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
@@ -276,12 +276,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	// In that case, only apply the overrides.
 	if genesis == nil && params.ChainConfigByGenesisHash(storedHash) == nil {
 		newCfg = storedCfg
-		if overrideMergeNetsplitBlock != nil {
-			newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-		}
+		applyOverrides(newCfg)
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.

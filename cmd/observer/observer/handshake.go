@@ -4,6 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
+	"net"
+	"strings"
+	"time"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -12,10 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"math/big"
-	"net"
-	"strings"
-	"time"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability
@@ -240,6 +241,7 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 		{Name: eth.ProtocolName, Version: 64},
 		{Name: eth.ProtocolName, Version: 65},
 		{Name: eth.ProtocolName, Version: eth.ETH66},
+		{Name: eth.ProtocolName, Version: eth.ETH67},
 	}
 
 	return HelloMessage{
