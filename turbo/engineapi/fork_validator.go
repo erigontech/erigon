@@ -115,17 +115,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// Update fork head hash.
 		fv.extendingForkHeadHash = header.Hash()
-		// Let's assemble the side fork chain if we have others building.
-		validationError = fv.validatePayload(fv.extendingFork, header, body, 0, nil, nil)
-		if validationError != nil {
-			status = remote.EngineStatus_INVALID
-			latestValidHash = header.ParentHash
-			return
-		}
-		status = remote.EngineStatus_VALID
-		latestValidHash = header.Hash()
-		fv.sideForksBlock[latestValidHash] = forkSegment{header, body}
-		return
+		return fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
 	}
 	// If the block is stored within the side fork it means it was already validated.
 	if _, ok := fv.sideForksBlock[header.Hash()]; ok {
@@ -167,19 +157,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
-	status = remote.EngineStatus_VALID
-	// if it is not canonical we validate it as a side fork.
+	// if it is not canonical we validate it in memory and discard it aferwards.
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
-	validationError = fv.validatePayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
-	latestValidHash = header.Hash()
-	if validationError != nil {
-		latestValidHash = header.ParentHash
-		status = remote.EngineStatus_INVALID
-		return
-	}
-	fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
-	return
+	return fv.validateAndStorePayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
@@ -199,6 +180,20 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 	// Clean all data relative to txpool
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingFork = nil
+}
+
+// validateAndStorePayload validate and store a payload fork chain if such chain results valid.
+func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
+	latestValidHash = header.Hash()
+	if validationError != nil {
+		latestValidHash = header.ParentHash
+		status = remote.EngineStatus_INVALID
+		return
+	}
+	status = remote.EngineStatus_VALID
+	fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
+	return
 }
 
 // clean wipes out all outdated sideforks whose distance exceed the height of the head.
