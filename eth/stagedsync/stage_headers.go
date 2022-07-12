@@ -584,7 +584,7 @@ func verifyAndSaveNewPoSHeader(
 	canExtendInMemory := cfg.memoryOverlay && (cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash())
 
 	if canExtendInMemory || !canExtendCanonical {
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical /*extendCanonical*/)
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
 		}
