@@ -1086,6 +1086,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "bor-devnet")
 	case networkname.SepoliaChainName:
 		return filepath.Join(datadir, "sepolia")
+	case networkname.GnosisChainName:
+		return filepath.Join(datadir, "gnosis")
 	default:
 		return datadir
 	}
