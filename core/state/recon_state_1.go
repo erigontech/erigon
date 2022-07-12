@@ -61,27 +61,27 @@ func (h *TxTaskQueue) Pop() interface{} {
 }
 
 type ReconState1 struct {
-	lock          sync.RWMutex
-	receiveWork   *sync.Cond
-	sendWork      *sync.Cond
-	triggers      map[uint64]TxTask
-	senderTxNums  map[common.Address]uint64
-	queue         TxTaskQueue
-	changes       map[string]map[string][]byte
-	sizeEstimate  uint64
-	rollbackCount uint64
-	txsDone       uint64
-	finished      bool
+	lock         sync.RWMutex
+	receiveWork  *sync.Cond
+	triggers     map[uint64]TxTask
+	senderTxNums map[common.Address]uint64
+	triggerLock  sync.RWMutex
+	workCh       chan TxTask
+	queue        TxTaskQueue
+	changes      map[string]map[string][]byte
+	sizeEstimate uint64
+	txsDone      uint64
+	finished     bool
 }
 
-func NewReconState1() *ReconState1 {
+func NewReconState1(workCh chan TxTask) *ReconState1 {
 	rs := &ReconState1{
 		triggers:     map[uint64]TxTask{},
 		senderTxNums: map[common.Address]uint64{},
+		workCh:       workCh,
 		changes:      map[string]map[string][]byte{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.lock)
-	rs.sendWork = sync.NewCond(&rs.lock)
 	return rs
 }
 
@@ -93,18 +93,6 @@ func (rs *ReconState1) put(table string, key, val []byte) {
 	}
 	t[string(key)] = val
 	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
-}
-
-func (rs *ReconState1) Delete(table string, key []byte) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-	t, ok := rs.changes[table]
-	if !ok {
-		t = map[string][]byte{}
-		rs.changes[table] = t
-	}
-	t[string(key)] = []byte{}
-	rs.sizeEstimate += uint64(len(key))
 }
 
 func (rs *ReconState1) Get(table string, key []byte) []byte {
@@ -130,12 +118,12 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 				if err := rwTx.Delete(table, []byte(ks), nil); err != nil {
 					return err
 				}
-				fmt.Printf("Flush [%x]=>\n", ks)
+				//fmt.Printf("Flush [%x]=>\n", ks)
 			} else {
 				if err := rwTx.Put(table, []byte(ks), val); err != nil {
 					return err
 				}
-				fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
+				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
 			}
 		}
 	}
@@ -144,33 +132,29 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState1) AddWork(txTask TxTask) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-	if txTask.Sender != nil && !rs.registerSender(txTask) {
-		return
-	}
-	for rs.queue.Len() >= 128 {
-		rs.sendWork.Wait()
-	}
-	heap.Push(&rs.queue, txTask)
-	rs.receiveWork.Signal()
-}
-
 func (rs *ReconState1) Schedule() (TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+	if rs.queue.Len() > 0 {
+		return heap.Pop(&rs.queue).(TxTask), true
+	}
+	txTask, ok := <-rs.workCh
+	if ok {
+		return txTask, true
+	}
+	// no more work coming from the channel, we monitor the queue until Finish is called
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
-		rs.sendWork.Signal()
 		return heap.Pop(&rs.queue).(TxTask), true
 	}
 	return TxTask{}, false
 }
 
-func (rs *ReconState1) registerSender(txTask TxTask) bool {
+func (rs *ReconState1) RegisterSender(txTask TxTask) bool {
+	rs.triggerLock.Lock()
+	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
@@ -183,12 +167,16 @@ func (rs *ReconState1) registerSender(txTask TxTask) bool {
 	return !deferral
 }
 
-func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) {
+func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+	rs.triggerLock.Lock()
+	defer rs.triggerLock.Unlock()
+	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
 		heap.Push(&rs.queue, triggered)
 		rs.receiveWork.Signal()
+		count++
 		delete(rs.triggers, txNum)
 	}
 	if sender != nil {
@@ -198,13 +186,18 @@ func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) {
 		}
 	}
 	rs.txsDone++
+	return count
 }
 
 func (rs *ReconState1) RollbackTx(txTask TxTask) {
+	txTask.BalanceIncreaseSet = nil
+	txTask.ReadKeys = nil
+	txTask.ReadVals = nil
+	txTask.WriteKeys = nil
+	txTask.WriteVals = nil
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	heap.Push(&rs.queue, txTask)
-	rs.rollbackCount++
 	rs.receiveWork.Signal()
 }
 
@@ -215,7 +208,7 @@ func (rs *ReconState1) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *ReconState1) Apply(roTx kv.Tx, writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) error {
+func (rs *ReconState1) Apply(emptyRemoval bool, roTx kv.Tx, writeKeys, writeVals map[string][][]byte, balanceIncreaseSet map[common.Address]uint256.Int) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, keyList := range writeKeys {
@@ -226,9 +219,9 @@ func (rs *ReconState1) Apply(roTx kv.Tx, writeKeys, writeVals map[string][][]byt
 		}
 	}
 	for addr, increase := range balanceIncreaseSet {
-		if increase.IsZero() {
-			continue
-		}
+		//if increase.IsZero() {
+		//	continue
+		//}
 		enc := rs.get(kv.PlainState, addr.Bytes())
 		if enc == nil {
 			var err error
@@ -242,9 +235,13 @@ func (rs *ReconState1) Apply(roTx kv.Tx, writeKeys, writeVals map[string][][]byt
 			return err
 		}
 		a.Balance.Add(&a.Balance, &increase)
-		l := a.EncodingLengthForStorage()
-		enc = make([]byte, l)
-		a.EncodeForStorage(enc)
+		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
+			enc = []byte{}
+		} else {
+			l := a.EncodingLengthForStorage()
+			enc = make([]byte, l)
+			a.EncodeForStorage(enc)
+		}
 		rs.put(kv.PlainState, addr.Bytes(), enc)
 	}
 	return nil
@@ -254,12 +251,6 @@ func (rs *ReconState1) DoneCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.txsDone
-}
-
-func (rs *ReconState1) RollbackCount() uint64 {
-	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.rollbackCount
 }
 
 func (rs *ReconState1) SizeEstimate() uint64 {

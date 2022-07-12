@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -103,11 +104,12 @@ func (rw *ReconWorker1) run() {
 	}
 	rw.engine = initConsensusEngine(rw.chainConfig, rw.logger, rw.allSnapshots)
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
-		rw.runTxTask(txTask)
+		rw.runTxTask(&txTask)
+		rw.resultCh <- txTask // Needs to have outside of the lock
 	}
 }
 
-func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
+func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	txTask.Error = nil
@@ -141,7 +143,7 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 			}
 		}
 	} else {
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
@@ -157,7 +159,7 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
-			fmt.Printf("error=%v\n", err)
+			//fmt.Printf("error=%v\n", err)
 		}
 		// Update the state with pending changes
 		ibs.SoftFinalise()
@@ -174,7 +176,6 @@ func (rw *ReconWorker1) runTxTask(txTask state.TxTask) {
 		txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
 		txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
 	}
-	rw.resultCh <- txTask
 }
 
 func Recon1(genesis *core.Genesis, logger log.Logger) error {
@@ -227,7 +228,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
-	rs := state.NewReconState1()
+	workCh := make(chan state.TxTask, 128)
+	rs := state.NewReconState1(workCh)
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker1, workerCount)
 	var applyTx kv.Tx
@@ -266,16 +268,18 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	commitThreshold := uint64(256 * 1024 * 1024)
 	count := uint64(0)
 	rollbackCount := uint64(0)
+	triggerCount := uint64(0)
 	total := txNum
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
+	prevTriggerCount := uint64(0)
 	prevTime := time.Now()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var rws state.TxTaskQueue
 	heap.Init(&rws)
 	var outputTxNum uint64
-	var lastBlockNum uint64
+	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	go func() {
 		defer rs.Finish()
@@ -285,34 +289,38 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				if txTask.TxNum == outputTxNum {
 					// Try to apply without placing on the queue first
 					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
-						if err = rs.Apply(applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
+						rules := chainConfig.Rules(txTask.BlockNum)
+						if err = rs.Apply(rules.IsSpuriousDragon, applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
 							panic(err)
 						}
-						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+						triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
-						lastBlockNum = txTask.BlockNum
-						fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+						outputBlockNum = txTask.BlockNum
+						//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					} else {
 						rs.RollbackTx(txTask)
-						fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+						rollbackCount++
+						//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					}
 				} else {
 					heap.Push(&rws, txTask)
-					fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				}
 				for rws.Len() > 0 && rws[0].TxNum == outputTxNum {
 					txTask = heap.Pop(&rws).(state.TxTask)
 					if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
-						if err = rs.Apply(applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
+						rules := chainConfig.Rules(txTask.BlockNum)
+						if err = rs.Apply(rules.IsSpuriousDragon, applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
 							panic(err)
 						}
-						rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-						lastBlockNum = txTask.BlockNum
-						fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+						triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 						outputTxNum++
+						outputBlockNum = txTask.BlockNum
+						//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					} else {
 						rs.RollbackTx(txTask)
-						fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+						rollbackCount++
+						//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					}
 				}
 			case <-logEvery.C:
@@ -320,7 +328,6 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				libcommon.ReadMemStats(&m)
 				sizeEstimate := rs.SizeEstimate()
 				count = rs.DoneCount()
-				rollbackCount = rs.RollbackCount()
 				currentTime := time.Now()
 				interval := currentTime.Sub(prevTime)
 				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
@@ -329,12 +336,22 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				if count > prevCount {
 					repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
 				}
+				log.Info("Transaction replay", "workers", workerCount,
+					"at block", outputBlockNum,
+					"input block", atomic.LoadUint64(&inputBlockNum),
+					"progress", fmt.Sprintf("%.2f%%", progress),
+					"tx/s", fmt.Sprintf("%.1f", speedTx),
+					"repeats", rollbackCount-prevRollbackCount,
+					"triggered", triggerCount-prevTriggerCount,
+					"result queue", rws.Len(),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+					"buffer", libcommon.ByteCount(sizeEstimate),
+					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+				)
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				log.Info("Transaction replay", "workers", workerCount, "at block", lastBlockNum, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", libcommon.ByteCount(sizeEstimate),
-					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-				)
+				prevTriggerCount = triggerCount
 				if sizeEstimate >= commitThreshold {
 					commitStart := time.Now()
 					log.Info("Committing...")
@@ -350,6 +367,11 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 							default:
 								drained = true
 							}
+						}
+						// Drain results queue as well
+						for rws.Len() > 0 {
+							txTask := heap.Pop(&rws).(state.TxTask)
+							rs.RollbackTx(txTask)
 						}
 						applyTx.Rollback()
 						for i := 0; i < workerCount; i++ {
@@ -387,6 +409,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	var inputTxNum uint64
 	var header *types.Header
 	for blockNum := uint64(0); blockNum <= block; blockNum++ {
+		atomic.StoreUint64(&inputBlockNum, blockNum)
 		if header, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 			return err
 		}
@@ -411,11 +434,17 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
+				if ok := rs.RegisterSender(txTask); ok {
+					workCh <- txTask
+				}
+			} else {
+				workCh <- txTask
 			}
-			rs.AddWork(txTask)
+
 			inputTxNum++
 		}
 	}
+	close(workCh)
 	wg.Wait()
 	applyTx.Rollback()
 	for i := 0; i < workerCount; i++ {
@@ -459,7 +488,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	if rootHash != header.Root {
-		log.Error("Incorrect root hash, expected", fmt.Sprintf("%x", header.Root))
+		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }

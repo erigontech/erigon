@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -196,6 +197,9 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 
 	var original uint256.Int
 	evm.IntraBlockState().GetCommittedState(contract.Address(), &key, &original)
+	if evm.context.BlockNumber == 9069176 {
+		fmt.Printf("gasSStoreEIP2200 original=%d, current=%d, value=%d\n", &original, &current, &value)
+	}
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreSetGasEIP2200, nil

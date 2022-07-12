@@ -145,7 +145,9 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	} else {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
+		if txTask.BlockNum == 9069176 {
+			fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		}
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
@@ -860,7 +862,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	if rootHash != header.Root {
-		log.Error("Incorrect root hash, expected", fmt.Sprintf("%x", header.Root))
+		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }
