@@ -612,7 +612,7 @@ func verifyAndSaveNewPoSHeader(
 		return nil, false, err
 	}
 
-	if !cfg.memoryOverlay && !canExtendCanonical {
+	if !canExtendCanonical {
 		log.Info("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
