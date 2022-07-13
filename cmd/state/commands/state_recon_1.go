@@ -175,17 +175,25 @@ func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
 		txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
 		txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
 		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
-		for _, b := range txTask.ReadKeys {
-			size += len(b)
+		for _, bb := range txTask.ReadKeys {
+			for _, b := range bb {
+				size += len(b)
+			}
 		}
-		for _, b := range txTask.ReadVals {
-			size += len(b)
+		for _, bb := range txTask.ReadVals {
+			for _, b := range bb {
+				size += len(b)
+			}
 		}
-		for _, b := range txTask.WriteKeys {
-			size += len(b)
+		for _, bb := range txTask.WriteKeys {
+			for _, b := range bb {
+				size += len(b)
+			}
 		}
-		for _, b := range txTask.WriteVals {
-			size += len(b)
+		for _, bb := range txTask.WriteVals {
+			for _, b := range bb {
+				size += len(b)
+			}
 		}
 		txTask.ResultsSize = int64(size)
 	}
