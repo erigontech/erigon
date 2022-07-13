@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -21,6 +22,7 @@ import (
 type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
+	Rules              *params.Rules
 	Header             *types.Header
 	Block              *types.Block
 	BlockHash          common.Hash
@@ -60,28 +62,29 @@ func (h *TxTaskQueue) Pop() interface{} {
 	return c[len(c)-1]
 }
 
+const CodeSizeTable = "CodeSize"
+
 type ReconState1 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
 	triggers     map[uint64]TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.RWMutex
-	workCh       chan TxTask
 	queue        TxTaskQueue
+	queueLock    sync.Mutex
 	changes      map[string]map[string][]byte
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
 }
 
-func NewReconState1(workCh chan TxTask) *ReconState1 {
+func NewReconState1() *ReconState1 {
 	rs := &ReconState1{
 		triggers:     map[uint64]TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		workCh:       workCh,
 		changes:      map[string]map[string][]byte{},
 	}
-	rs.receiveWork = sync.NewCond(&rs.lock)
+	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
@@ -133,16 +136,8 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 }
 
 func (rs *ReconState1) Schedule() (TxTask, bool) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(TxTask), true
-	}
-	txTask, ok := <-rs.workCh
-	if ok {
-		return txTask, true
-	}
-	// no more work coming from the channel, we monitor the queue until Finish is called
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
@@ -168,8 +163,8 @@ func (rs *ReconState1) RegisterSender(txTask TxTask) bool {
 }
 
 func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	count := uint64(0)
@@ -189,21 +184,21 @@ func (rs *ReconState1) CommitTxNum(sender *common.Address, txNum uint64) uint64 
 	return count
 }
 
-func (rs *ReconState1) RollbackTx(txTask TxTask) {
+func (rs *ReconState1) AddWork(txTask TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	txTask.ReadKeys = nil
 	txTask.ReadVals = nil
 	txTask.WriteKeys = nil
 	txTask.WriteVals = nil
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
 	rs.receiveWork.Signal()
 }
 
 func (rs *ReconState1) Finish() {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
 	rs.finished = true
 	rs.receiveWork.Broadcast()
 }
@@ -265,7 +260,13 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 	//fmt.Printf("ValidReads\n")
 	for table, keyList := range readKeys {
 		//fmt.Printf("Table %s\n", table)
-		t, ok := rs.changes[table]
+		var t map[string][]byte
+		var ok bool
+		if table == CodeSizeTable {
+			t, ok = rs.changes[kv.Code]
+		} else {
+			t, ok = rs.changes[table]
+		}
 		if !ok {
 			continue
 		}
@@ -274,7 +275,11 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 			val := valList[i]
 			if rereadVal, ok := t[string(key)]; ok {
 				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
-				if !bytes.Equal(val, rereadVal) {
+				if table == CodeSizeTable {
+					if binary.BigEndian.Uint64(val) != uint64(len(rereadVal)) {
+						return false
+					}
+				} else if !bytes.Equal(val, rereadVal) {
 					return false
 				}
 			} else {
@@ -477,8 +482,10 @@ func (r *StateReconReader1) ReadAccountCodeSize(address common.Address, incarnat
 			return 0, err
 		}
 	}
-	r.readKeys[kv.Code] = append(r.readKeys[kv.Code], address.Bytes())
-	r.readVals[kv.Code] = append(r.readVals[kv.Code], common.CopyBytes(enc))
+	var sizebuf [8]byte
+	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
+	r.readKeys[CodeSizeTable] = append(r.readKeys[CodeSizeTable], address.Bytes())
+	r.readVals[CodeSizeTable] = append(r.readVals[CodeSizeTable], sizebuf[:])
 	size := len(enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
