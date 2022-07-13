@@ -332,14 +332,14 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	return nil
 }
 
-func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pruneTo uint64, logPrefix string, ctx context.Context) error {
+func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, logPrefix string, ctx context.Context) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	// how to get key set from inMem collector here?
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	slices.Sort(keys)
 	c, err := tx.RwCursor(bucket)
 	if err != nil {
 		return err
@@ -405,8 +405,11 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	topics := map[string]struct{}{}
-	addrs := map[string]struct{}{}
+	bufferSize := etl.BufferOptimalSize
+	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(bufferSize))
+	defer topics.Close()
+	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(bufferSize))
+	defer addrs.Close()
 
 	reader := bytes.NewReader(nil)
 	{
@@ -440,9 +443,13 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 
 			for _, l := range logs {
 				for _, topic := range l.Topics {
-					topics[string(topic.Bytes())] = struct{}{}
+					if err := topics.Collect(topic.Bytes(), []byte{}); err != nil {
+						return err
+					}
 				}
-				addrs[string(l.Address.Bytes())] = struct{}{}
+				if err := addrs.Collect(l.Address.Bytes(), []byte{}); err != nil {
+					return err
+				}
 			}
 		}
 	}
