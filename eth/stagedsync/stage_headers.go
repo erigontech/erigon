@@ -587,14 +587,14 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	canExtendCanonical := header.ParentHash == currentHeadHash
-	canExtendInMemory := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
+	canExtendFork := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
 	if !cfg.memoryOverlay && !canExtendCanonical {
 		log.Info("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
-	if cfg.memoryOverlay && (canExtendInMemory || !canExtendCanonical) {
+	if cfg.memoryOverlay && (canExtendFork || !canExtendCanonical) {
 		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical)
 		if criticalError != nil {
 			return &privateapi.PayloadStatus{CriticalError: criticalError}, false, criticalError
