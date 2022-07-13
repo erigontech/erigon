@@ -1293,6 +1293,8 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
+		fmt.Printf("alex0\n")
+
 		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
 			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
