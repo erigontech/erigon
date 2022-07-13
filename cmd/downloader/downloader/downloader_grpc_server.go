@@ -28,9 +28,12 @@ type GrpcServer struct {
 
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	for _, it := range request.Items {
+	for i, it := range request.Items {
 		if it.TorrentHash == nil { // seed new snapshot
 			if err := BuildTorrentFileIfNeed(it.Path, s.d.SnapDir()); err != nil {
 				return nil, err
@@ -45,6 +48,11 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		ok, err := AddSegment(it.Path, s.d.SnapDir(), torrentClient)
 		if err != nil {
 			return nil, fmt.Errorf("AddSegment: %w", err)
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("[snpshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
+		default:
 		}
 		if ok {
 			continue
