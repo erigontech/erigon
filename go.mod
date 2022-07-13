@@ -2,8 +2,6 @@ module github.com/ledgerwatch/erigon
 
 go 1.18
 
-replace github.com/anacrolix/torrent => ./../torrent
-
 require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.10.0
