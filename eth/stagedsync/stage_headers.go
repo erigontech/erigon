@@ -590,7 +590,7 @@ func verifyAndSaveNewPoSHeader(
 	canExtendInMemory := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
 	if !cfg.memoryOverlay && !canExtendCanonical {
-		log.Debug("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
+		log.Info("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
 	}
 
