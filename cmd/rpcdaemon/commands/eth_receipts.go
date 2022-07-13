@@ -155,11 +155,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		block := uint64(iter.Next())
+		blockNumber := uint64(iter.Next())
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
+		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -187,22 +187,26 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			continue
 		}
 
-		b, err := api.blockByNumberWithSenders(tx, block)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", block)
+
+		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+		if err != nil {
+			return nil, err
 		}
-		blockHash := b.Hash()
+		if body == nil {
+			return nil, fmt.Errorf("block not found %d", blockNumber)
+		}
 		for _, log := range blockLogs {
-			log.BlockNumber = block
+			log.BlockNumber = blockNumber
 			log.BlockHash = blockHash
-			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			log.TxHash = body.Transactions[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
 
-		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, block, txIndex+1, logIndex)
+		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
 		if borLogs != nil {
 			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
 			if len(borLogs) > 0 {

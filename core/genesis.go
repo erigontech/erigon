@@ -718,6 +718,26 @@ func DefaultBorDevnetGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultGnosisGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.GnosisChainConfig,
+		Timestamp:  0x0, //1558348305,
+		SealRlp:    sealRlp,
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(0x20000),
+		//Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		//Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc: readPrealloc("allocs/gnosis.json"),
+	}
+}
+
 // Pre-calculated version of:
 //    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
@@ -798,6 +818,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultBorDevnetGenesisBlock()
 	case networkname.KilnDevnetChainName:
 		return DefaultKilnDevnetGenesisBlock()
+	case networkname.GnosisChainName:
+		return DefaultGnosisGenesisBlock()
 	default:
 		return nil
 	}
