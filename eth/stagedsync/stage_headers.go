@@ -589,11 +589,6 @@ func verifyAndSaveNewPoSHeader(
 	canExtendCanonical := header.ParentHash == currentHeadHash
 	canExtendFork := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
-	if !cfg.memoryOverlay && !canExtendCanonical {
-		log.Info("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
-		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
-	}
-
 	if cfg.memoryOverlay && (canExtendFork || !canExtendCanonical) {
 		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical)
 		if criticalError != nil {
@@ -613,11 +608,16 @@ func verifyAndSaveNewPoSHeader(
 		}, success, nil
 	}
 
-	// OK, we're on the canonical chain
 	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
 	}
 
+	if !cfg.memoryOverlay && !canExtendCanonical {
+		log.Info("Side chain or something weird", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
+		return &privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
+	}
+
+	// OK, we're on the canonical chain
 	if requestStatus == engineapi.New {
 		cfg.hd.SetPendingPayloadHash(headerHash)
 	}
