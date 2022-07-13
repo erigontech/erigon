@@ -482,11 +482,15 @@ func handleNewPayload(
 	}
 
 	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
-	if !bad {
+	if bad {
+		log.Warn(fmt.Sprintf("[%s] Previously known bad block", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	} else {
 		bad, lastValidHash = cfg.hd.IsBadHeaderPoS(header.ParentHash)
+		if bad {
+			log.Warn(fmt.Sprintf("[%s] Previously known bad parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		}
 	}
 	if bad {
-		log.Info(fmt.Sprintf("[%s] Previously known bad block", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 		return &privateapi.PayloadStatus{
@@ -508,7 +512,8 @@ func handleNewPayload(
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	if header.Number.Uint64() != parent.Number.Uint64()+1 {
+	if headerNumber != parent.Number.Uint64()+1 {
+		log.Warn(fmt.Sprintf("[%s] Invalid block number", s.LogPrefix()), "headerNumber", headerNumber, "parentNumber", parent.Number.Uint64())
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
@@ -522,6 +527,7 @@ func handleNewPayload(
 
 	for _, tx := range payloadMessage.Body.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(tx) {
+			log.Warn(fmt.Sprintf("[%s] typed txn marshalled as RLP string", s.LogPrefix()), "tx", common.Bytes2Hex(tx))
 			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			return &privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
@@ -533,7 +539,7 @@ func handleNewPayload(
 
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
-		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
+		log.Warn(fmt.Sprintf("[%s] Error during Beacon transaction decoding", s.LogPrefix()), "err", err.Error())
 		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		return &privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
@@ -590,6 +596,7 @@ func verifyAndSaveNewPoSHeader(
 		}
 		success = validationError == nil
 		if !success {
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
 			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return nil, false, err

@@ -47,6 +47,7 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 			if headBlockHash == pendingPayloadHash {
 				status = remote.EngineStatus_VALID
 			} else {
+				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
 				status = remote.EngineStatus_INVALID
 			}
 			hd.PayloadStatusCh <- privateapi.PayloadStatus{
