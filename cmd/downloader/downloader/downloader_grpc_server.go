@@ -28,7 +28,6 @@ type GrpcServer struct {
 
 // Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
-	defer func(t time.Time) { fmt.Printf("downloader_grpc_server.go:31: %s\n", time.Since(t)) }(time.Now())
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
