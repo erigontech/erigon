@@ -31,10 +31,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	stack2 "github.com/go-stack/stack"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -57,7 +59,7 @@ type MdbxOpts struct {
 	syncPeriod    time.Duration
 	augumentLimit uint64
 	pageSize      uint64
-	roTxsLimiter  chan struct{}
+	roTxsLimiter  *semaphore.Weighted
 }
 
 func testKVPath() string {
@@ -86,7 +88,7 @@ func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) RoTxsLimiter(l chan struct{}) MdbxOpts {
+func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts {
 	opts.roTxsLimiter = l
 	return opts
 }
@@ -254,7 +256,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-		opts.roTxsLimiter = make(chan struct{}, runtime.GOMAXPROCS(-1))
+		opts.roTxsLimiter = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1)))
 	}
 	db := &MdbxKV{
 		opts:         opts,
@@ -328,7 +330,7 @@ type MdbxKV struct {
 	buckets      kv.TableCfg
 	opts         MdbxOpts
 	txSize       uint64
-	roTxsLimiter chan struct{} // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
+	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 	closed       atomic.Bool
 }
 
@@ -392,10 +394,16 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if db.closed.Load() {
 		return nil, fmt.Errorf("db closed")
 	}
-	select {
-	case <-ctx.Done():
+
+	// will return nil err if context is cancelled (may appear to acquire the semaphore)
+	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+		return nil, semErr
+	}
+
+	// if context cancelled as we acquire the sempahore, it may succeed without blocking
+	// in this case we should return
+	if ctx.Err() != nil {
 		return nil, ctx.Err()
-	case db.roTxsLimiter <- struct{}{}:
 	}
 
 	defer func() {
@@ -405,7 +413,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			<-db.roTxsLimiter
+			db.roTxsLimiter.Release(1)
 		}
 	}()
 
@@ -770,10 +778,7 @@ func (tx *MdbxTx) Commit() error {
 		tx.tx = nil
 		tx.db.wg.Done()
 		if tx.readOnly {
-			select {
-			case <-tx.db.roTxsLimiter:
-			default:
-			}
+			tx.db.roTxsLimiter.Release(1)
 		} else {
 			runtime.UnlockOSThread()
 		}
@@ -828,10 +833,7 @@ func (tx *MdbxTx) Rollback() {
 		tx.tx = nil
 		tx.db.wg.Done()
 		if tx.readOnly {
-			select {
-			case <-tx.db.roTxsLimiter:
-			default:
-			}
+			tx.db.roTxsLimiter.Release(1)
 		} else {
 			runtime.UnlockOSThread()
 		}
