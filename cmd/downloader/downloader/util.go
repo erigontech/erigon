@@ -310,6 +310,7 @@ func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*tor
 		ts.ChunkSize = 0
 	}
 
+	ts.DisallowDataDownload = true
 	t, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return nil, err
