@@ -6,8 +6,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"unsafe"
 
+	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -35,6 +38,7 @@ type TxTask struct {
 	ReadVals           map[string][][]byte
 	WriteKeys          map[string][][]byte
 	WriteVals          map[string][][]byte
+	ResultsSize        int64
 	Error              error
 }
 
@@ -72,17 +76,27 @@ type ReconState1 struct {
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]map[string][]byte
+	changes      map[string]*btree.BTree
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
+}
+
+type ReconStateItem1 struct {
+	key []byte
+	val []byte
+}
+
+func (i ReconStateItem1) Less(than btree.Item) bool {
+	thanItem := than.(ReconStateItem1)
+	return bytes.Compare(i.key, thanItem.key) < 0
 }
 
 func NewReconState1() *ReconState1 {
 	rs := &ReconState1{
 		triggers:     map[uint64]TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]map[string][]byte{},
+		changes:      map[string]*btree.BTree{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -91,11 +105,12 @@ func NewReconState1() *ReconState1 {
 func (rs *ReconState1) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = map[string][]byte{}
+		t = btree.New(32)
 		rs.changes[table] = t
 	}
-	t[string(key)] = val
-	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
+	item := ReconStateItem1{key: libcommon.Copy(key), val: libcommon.Copy(val)}
+	t.ReplaceOrInsert(item)
+	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key)) + uint64(len(val))
 }
 
 func (rs *ReconState1) Get(table string, key []byte) []byte {
@@ -109,28 +124,38 @@ func (rs *ReconState1) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	return t[string(key)]
+	i := t.Get(ReconStateItem1{key: key})
+	if i == nil {
+		return nil
+	}
+	return i.(ReconStateItem1).val
 }
 
 func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
-		for ks, val := range t {
-			if len(val) == 0 {
-				if err := rwTx.Delete(table, []byte(ks), nil); err != nil {
-					return err
+		var err error
+		t.Ascend(func(i btree.Item) bool {
+			item := i.(ReconStateItem1)
+			if len(item.val) == 0 {
+				if err = rwTx.Delete(table, item.key, nil); err != nil {
+					return false
 				}
 				//fmt.Printf("Flush [%x]=>\n", ks)
 			} else {
-				if err := rwTx.Put(table, []byte(ks), val); err != nil {
-					return err
+				if err = rwTx.Put(table, item.key, item.val); err != nil {
+					return false
 				}
 				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
 			}
+			return true
+		})
+		if err != nil {
+			return err
 		}
+		t.Clear(true)
 	}
-	rs.changes = map[string]map[string][]byte{}
 	rs.sizeEstimate = 0
 	return nil
 }
@@ -190,6 +215,7 @@ func (rs *ReconState1) AddWork(txTask TxTask) {
 	txTask.ReadVals = nil
 	txTask.WriteKeys = nil
 	txTask.WriteVals = nil
+	txTask.ResultsSize = 0
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
@@ -260,7 +286,7 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 	//fmt.Printf("ValidReads\n")
 	for table, keyList := range readKeys {
 		//fmt.Printf("Table %s\n", table)
-		var t map[string][]byte
+		var t *btree.BTree
 		var ok bool
 		if table == CodeSizeTable {
 			t, ok = rs.changes[kv.Code]
@@ -273,13 +299,14 @@ func (rs *ReconState1) ReadsValid(readKeys, readVals map[string][][]byte) bool {
 		valList := readVals[table]
 		for i, key := range keyList {
 			val := valList[i]
-			if rereadVal, ok := t[string(key)]; ok {
+			if rereadVal := t.Get(ReconStateItem1{key: key}); rereadVal != nil {
+				item := rereadVal.(ReconStateItem1)
 				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
 				if table == CodeSizeTable {
-					if binary.BigEndian.Uint64(val) != uint64(len(rereadVal)) {
+					if binary.BigEndian.Uint64(val) != uint64(len(item.val)) {
 						return false
 					}
-				} else if !bytes.Equal(val, rereadVal) {
+				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
 			} else {

@@ -174,12 +174,28 @@ func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
 		}
 		txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
 		txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
+		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
+		for _, b := range txTask.ReadKeys {
+			size += len(b)
+		}
+		for _, b := range txTask.ReadVals {
+			size += len(b)
+		}
+		for _, b := range txTask.WriteKeys {
+			size += len(b)
+		}
+		for _, b := range txTask.WriteVals {
+			size += len(b)
+		}
+		txTask.ResultsSize = int64(size)
 	}
 }
 
-func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.ReconState1, applyTx kv.Tx, triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64) {
+func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.ReconState1, applyTx kv.Tx,
+	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
 		txTask := heap.Pop(rws).(state.TxTask)
+		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
 			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
 				panic(err)
@@ -283,7 +299,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].run()
 	}
-	commitThreshold := uint64(256 * 1024 * 1024)
+	commitThreshold := uint64(1024 * 1024 * 1024)
+	resultsThreshold := int64(1024 * 1024 * 1024)
 	count := uint64(0)
 	repeatCount := uint64(0)
 	triggerCount := uint64(0)
@@ -291,6 +308,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	prevCount := uint64(0)
 	prevRepeatCount := uint64(0)
 	prevTriggerCount := uint64(0)
+	resultsSize := int64(0)
 	prevTime := time.Now()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -310,8 +328,9 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				func() {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
+					atomic.AddInt64(&resultsSize, txTask.ResultsSize)
 					heap.Push(&rws, txTask)
-					processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount)
+					processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 					rwsReceiveCond.Signal()
 				}()
 			case <-logEvery.C:
@@ -335,6 +354,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 					"repeats", repeatCount-prevRepeatCount,
 					"triggered", triggerCount-prevTriggerCount,
 					"result queue", rws.Len(),
+					"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
 					"buffer", libcommon.ByteCount(sizeEstimate),
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
@@ -355,12 +375,13 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 							for !drained {
 								select {
 								case txTask := <-resultCh:
+									atomic.AddInt64(&resultsSize, txTask.ResultsSize)
 									heap.Push(&rws, txTask)
 								default:
 									drained = true
 								}
 							}
-							processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount)
+							processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 							if rws.Len() == 0 {
 								break
 							}
@@ -381,6 +402,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 						// Drain results queue as well
 						for rws.Len() > 0 {
 							txTask := heap.Pop(&rws).(state.TxTask)
+							atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
 						applyTx.Rollback()
@@ -435,7 +457,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > 128 || rs.SizeEstimate() >= commitThreshold {
+				for rws.Len() > 128 || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
 			}()
