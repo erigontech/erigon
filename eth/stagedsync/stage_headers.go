@@ -164,9 +164,7 @@ func HeadersPOS(
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
-	var err error
-	var interrupted bool
-	interrupted, err = handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
+	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
 	if err != nil {
 		return err
 	}
