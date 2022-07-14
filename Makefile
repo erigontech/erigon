@@ -127,7 +127,7 @@ db-tools: git-submodules
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test:
-	$(GOTEST) --timeout 30s
+	$(GOTEST) --timeout 50s
 
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
