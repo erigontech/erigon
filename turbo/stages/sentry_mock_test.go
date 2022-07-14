@@ -618,6 +618,8 @@ func TestPoSDownloader(t *testing.T) {
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
+	payloadStatus = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 }
 
