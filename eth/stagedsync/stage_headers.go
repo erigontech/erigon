@@ -589,14 +589,14 @@ func verifyAndSaveNewPoSHeader(
 	canExtendCanonical := forkingHash == currentHeadHash
 	canExtendFork := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
-	if cfg.memoryOverlay && canExtendFork {
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, canExtendCanonical)
+	if cfg.memoryOverlay && (canExtendFork || header.ParentHash != currentHeadHash) {
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, header.ParentHash == currentHeadHash /* extendCanonical */)
 		if criticalError != nil {
 			return nil, false, criticalError
 		}
 		success = validationError == nil
 		if !success {
-			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
+			log.Warn("Validation failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
 			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
 		} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return nil, false, err
