@@ -107,3 +107,70 @@ func TestLastDup(t *testing.T) {
 	require.Equal(t, []string{"key1", "key3"}, keys)
 	require.Equal(t, []string{"value1.3", "value3.3"}, vals)
 }
+
+func TestPutGet(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table: kv.TableCfgItem{Flags: kv.DupSort},
+		}
+	}).MustOpen()
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+
+	// Insert some dupsorted records
+	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
+	require.Error(t, c.Put([]byte(""), []byte("value1.1")))
+
+	var v []byte
+	v, err = tx.GetOne(table, []byte("key1"))
+	require.Nil(t, err)
+	require.Equal(t, v, []byte("value1.1"))
+
+	v, err = tx.GetOne("RANDOM", []byte("key1"))
+	require.Error(t, err) // Error from non-existent bucket returns error
+	require.Nil(t, v)
+}
+
+func TestIncrementSequence(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
+	}).MustOpen()
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+
+	// Insert some dupsorted records
+	require.NoError(t, tx.Put(table, []byte("key1"), []byte("value1.1")))
+	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value2.1")))
+	require.NoError(t, tx.Put(table, []byte("key3"), []byte("value3.1")))
+	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
+	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
+
+	tx.IncrementSequence(table, uint64(12))
+	chaV, err := tx.ReadSequence(table)
+	require.Nil(t, err)
+	require.Equal(t, chaV, uint64(0xc))
+}
