@@ -164,16 +164,12 @@ func HeadersPOS(
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
-	if interrupt != engineapi.None {
-		if interrupt == engineapi.Stopping {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
-		}
-		if interrupt == engineapi.Synced {
-			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
-		}
-		if !useExternalTx {
-			return tx.Commit()
-		}
+	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
+	if err != nil {
+		return err
+	}
+
+	if interrupted {
 		return nil
 	}
 
@@ -181,20 +177,15 @@ func HeadersPOS(
 	requestStatus := requestWithStatus.Status
 
 	// Decide what kind of action we need to take place
-	var payloadMessage *engineapi.PayloadMessage
 	forkChoiceMessage, forkChoiceInsteadOfNewPayload := request.(*engineapi.ForkChoiceMessage)
-	if !forkChoiceInsteadOfNewPayload {
-		payloadMessage = request.(*engineapi.PayloadMessage)
-	}
-
 	cfg.hd.ClearPendingPayloadHash()
 	cfg.hd.SetPendingPayloadStatus(nil)
 
 	var payloadStatus *privateapi.PayloadStatus
-	var err error
 	if forkChoiceInsteadOfNewPayload {
 		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
 	} else {
+		payloadMessage := request.(*engineapi.PayloadMessage)
 		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
@@ -724,6 +715,22 @@ func forkingPoint(
 		return 0, err
 	}
 	return headerInserter.ForkingPoint(tx, header, parent)
+}
+
+func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, headerInserter *headerdownload.HeaderInserter, useExternalTx bool) (bool, error) {
+	if interrupt != engineapi.None {
+		if interrupt == engineapi.Stopping {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		}
+		if interrupt == engineapi.Synced {
+			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+		}
+		if !useExternalTx {
+			return true, tx.Commit()
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
