@@ -164,16 +164,14 @@ func HeadersPOS(
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
-	if interrupt != engineapi.None {
-		if interrupt == engineapi.Stopping {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
-		}
-		if interrupt == engineapi.Synced {
-			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
-		}
-		if !useExternalTx {
-			return tx.Commit()
-		}
+	var err error
+	var interrupted bool
+	interrupted, err = handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
+	if err != nil {
+		return err
+	}
+
+	if interrupted {
 		return nil
 	}
 
@@ -191,7 +189,6 @@ func HeadersPOS(
 	cfg.hd.SetPendingPayloadStatus(nil)
 
 	var payloadStatus *privateapi.PayloadStatus
-	var err error
 	if forkChoiceInsteadOfNewPayload {
 		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
 	} else {
@@ -724,6 +721,23 @@ func forkingPoint(
 		return 0, err
 	}
 	return headerInserter.ForkingPoint(tx, header, parent)
+}
+
+//
+func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, headerInserter *headerdownload.HeaderInserter, useExternalTx bool) (bool, error) {
+	if interrupt != engineapi.None {
+		if interrupt == engineapi.Stopping {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		}
+		if interrupt == engineapi.Synced {
+			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+		}
+		if !useExternalTx {
+			return true, tx.Commit()
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
