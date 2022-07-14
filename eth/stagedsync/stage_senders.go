@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -42,9 +43,10 @@ type SendersCfg struct {
 	chainConfig       *params.ChainConfig
 	blockRetire       *snapshotsync.BlockRetire
 	snapshotHashesCfg *snapshothashes.Config
+	hd                *headerdownload.HeaderDownload
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -61,6 +63,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool
 		prune:             prune,
 		blockRetire:       br,
 		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
+		hd:                hd,
 	}
 }
 
@@ -261,6 +264,10 @@ Loop:
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if cfg.badBlockHalt {
 			return minBlockErr
+		}
+		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
+		if cfg.hd != nil {
+			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)

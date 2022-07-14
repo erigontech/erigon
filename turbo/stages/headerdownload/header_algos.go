@@ -15,9 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -420,7 +418,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	anchor := hd.posAnchor
 	if anchor == nil {
-		log.Trace("No PoS anchor")
+		log.Debug("No PoS anchor")
 		return
 	}
 
@@ -626,7 +624,7 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
-	log.Trace("Set posAnchor", "blockHeight", height+1)
+	log.Debug("Set posAnchor", "blockHeight", height+1)
 	hd.posAnchor = &Anchor{
 		parentHash:  hash,
 		blockHeight: height + 1,
@@ -637,18 +635,12 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
-	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	log.Debug("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {
 		// May happen if peers are sending unrequested header packets after we've synced
-		log.Trace("posAnchor is nil")
-		return nil, nil
-	}
-	// We may have received answer from old request so not enough evidence for penalizing.
-	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
-		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
-		log.Trace("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+		log.Debug("posAnchor is nil")
 		return nil, nil
 	}
 
@@ -661,6 +653,10 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		header := sh.Header
 		headerHash := sh.Hash
 		if headerHash != hd.posAnchor.parentHash {
+			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
+				log.Info("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+				return nil, nil
+			}
 			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
@@ -670,12 +666,16 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			return nil, err
 		}
 
-		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
+		hh, err := hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
 		if err != nil {
 			return nil, err
 		}
 		if hh != nil {
-			log.Trace("Synced", "requestId", hd.requestId)
+			log.Debug("Synced", "requestId", hd.requestId)
+			if headerNumber != hh.Number.Uint64()+1 {
+				hd.badPoSHeaders[headerHash] = header.ParentHash
+				return nil, fmt.Errorf("invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
+			}
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
@@ -1086,130 +1086,6 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func abs64(n int64) uint64 {
-	if n < 0 {
-		return uint64(-n)
-	}
-	return uint64(n)
-}
-
-func (hd *HeaderDownload) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, store bool, execPayload func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	maxDepth := uint64(16)
-
-	currentHeight := rawdb.ReadCurrentBlockNumber(tx)
-	if currentHeight == nil {
-		criticalError = fmt.Errorf("could not read block number.")
-		return
-	}
-	if store {
-		// If it is a continuation of the canonical chain we can stack it up.
-		if hd.nextForkState == nil {
-			hd.nextForkState = memdb.NewMemoryBatch(tx)
-		} else {
-			hd.nextForkState.UpdateTxn(tx)
-		}
-		hd.nextForkHash = header.Hash()
-		// Let's assemble the side fork chain if we have others building.
-		validationError = execPayload(hd.nextForkState, header, body, 0, nil, nil)
-		if validationError != nil {
-			status = remote.EngineStatus_INVALID
-			latestValidHash = header.ParentHash
-			return
-		}
-		status = remote.EngineStatus_VALID
-		latestValidHash = header.Hash()
-		hd.sideForksBlock[latestValidHash] = sideForkBlock{header, body}
-		hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
-		return
-	}
-	// if the block is not in range of MAX_DEPTH from head then we do not validate it.
-	if abs64(int64(*currentHeight)-header.Number.Int64()) > maxDepth {
-		status = remote.EngineStatus_ACCEPTED
-		return
-	}
-	// Let's assemble the side fork backwards
-	var foundCanonical bool
-	currentHash := header.ParentHash
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
-	if criticalError != nil {
-		return
-	}
-
-	var bodiesChain []*types.RawBody
-	var headersChain []*types.Header
-	unwindPoint := header.Number.Uint64() - 1
-	for !foundCanonical {
-		var sb sideForkBlock
-		var ok bool
-		if sb, ok = hd.sideForksBlock[currentHash]; !ok {
-			// We miss some components so we did not check validity.
-			status = remote.EngineStatus_ACCEPTED
-			return
-		}
-		headersChain = append(headersChain, sb.header)
-		bodiesChain = append(bodiesChain, sb.body)
-		currentHash = sb.header.ParentHash
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
-		if criticalError != nil {
-			return
-		}
-		unwindPoint = sb.header.Number.Uint64() - 1
-	}
-	hd.sideForksBlock[header.Hash()] = sideForkBlock{header, body}
-	status = remote.EngineStatus_VALID
-	// if it is not canonical we validate it as a side fork.
-	batch := memdb.NewMemoryBatch(tx)
-	defer batch.Close()
-	validationError = execPayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
-	latestValidHash = header.Hash()
-	if validationError != nil {
-		latestValidHash = header.ParentHash
-		status = remote.EngineStatus_INVALID
-	}
-	// After the we finished executing, we clean up old forks
-	hd.cleanupOutdateSideForks(*currentHeight, maxDepth)
-	return
-}
-
-func (hd *HeaderDownload) cleanupOutdateSideForks(currentHeight uint64, maxDepth uint64) {
-	for hash, sb := range hd.sideForksBlock {
-		if abs64(int64(currentHeight)-sb.header.Number.Int64()) > maxDepth {
-			delete(hd.sideForksBlock, hash)
-		}
-	}
-}
-
-func (hd *HeaderDownload) FlushNextForkState(tx kv.RwTx) error {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	if err := hd.nextForkState.Flush(tx); err != nil {
-		return err
-	}
-	// If the side fork hash is now becoming canonical we can clean up.
-	if _, ok := hd.sideForksBlock[hd.nextForkHash]; ok {
-		delete(hd.sideForksBlock, hd.nextForkHash)
-	}
-	hd.nextForkState.Close()
-	hd.nextForkHash = common.Hash{}
-	hd.nextForkState = nil
-	return nil
-}
-
-func (hd *HeaderDownload) CleanNextForkState() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.nextForkHash = common.Hash{}
-	hd.nextForkState = nil
-}
-
-func (hd *HeaderDownload) GetNextForkHash() common.Hash {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	return hd.nextForkHash
-}
-
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1401,7 +1277,7 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
-					log.Trace("Sent request", "height", req.Number)
+					log.Debug("Sent request", "height", req.Number)
 				}
 			}
 			if len(penalties) > 0 {

@@ -199,14 +199,14 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	block, err := b.baseApi.blockByRPCNumber(number, b.tx)
+	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, nil
 	}
-	return block.Header(), nil
+	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(number, b.tx)

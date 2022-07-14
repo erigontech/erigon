@@ -309,7 +309,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, mock.Notifications, nil),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -325,7 +325,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -339,15 +339,16 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				/*stateStream=*/ false,
 				mock.tmpdir,
 				blockReader,
+				mock.sentriesClient.Hd,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, mock.tmpdir, blockReader),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, mock.tmpdir, blockReader, nil),
 			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil), true),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -368,7 +369,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, mock.tmpdir),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir, nil),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, mock.tmpdir, blockReader),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, mock.tmpdir, blockReader, nil),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

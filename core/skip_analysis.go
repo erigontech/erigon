@@ -36,8 +36,8 @@ import (
 // 0x21ab7bf7245a87eae265124aaf180d91133377e47db2b1a4866493ec4b371150 (block 13119520)
 
 var analysisBlocks map[string][]uint64 = map[string][]uint64{
-	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 14_961_400},
-	networkname.BSCChainName:        {18_682_505},
+	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 15_081_051},
+	networkname.BSCChainName:        {19_278_044},
 	networkname.BorMainnetChainName: {29_447_463},
 	networkname.RopstenChainName:    {2_534_105, 2_534_116, 3_028_887, 3_028_940, 3_028_956, 3_450_102, 5_294_626, 5_752_787, 10_801_303, 10_925_062, 11_440_683, 11_897_655, 11_898_288, 12_291_199, 12_331_664},
 }

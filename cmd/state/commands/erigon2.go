@@ -149,17 +149,18 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	var trieVariant commitment.TrieVariant
 	switch commitmentTrie {
 	case "bin":
-		logger.Info("using Binary Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantBinPatriciaTrie
 		blockRootMismatchExpected = true
 	case "hex":
 		fallthrough
 	default:
-		logger.Info("using Hex Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantHexPatriciaTrie
 	}
 
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, commitment.InitializeTrie(trieVariant), rwTx)
+	trie := commitment.InitializeTrie(trieVariant)
+	logger.Info("commitment trie initialized", "variant", trie.Variant())
+
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, trie, rwTx)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -412,7 +413,7 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

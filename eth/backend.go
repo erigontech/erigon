@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -135,8 +136,8 @@ type Ethereum struct {
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
-
-	downloader *downloader.Downloader
+	forkValidator           *engineapi.ForkValidator
+	downloader              *downloader.Downloader
 }
 
 // New creates a new Ethereum object (including the
@@ -158,6 +159,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
+	var currentBlock *types.Block
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -168,6 +170,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if h != (common.Hash{}) {
 			config.Genesis = nil // fallback to db content
 		}
+		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
 		panic(err)
@@ -233,16 +236,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return res
 		}
 
-		d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+		discovery, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 		if err != nil {
 			return nil, err
 		}
+		cfg := stack.Config().P2P
+		cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[cfg.ProtocolVersion])
+		server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, cfg.ProtocolVersion)
 
-		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
-		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
-		backend.sentryServers = append(backend.sentryServers, server66)
-		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
+		backend.sentryServers = append(backend.sentryServers, server)
+		sentries = []direct.SentryClient{direct.NewSentryClientDirect(cfg.ProtocolVersion, server)}
 
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
@@ -364,7 +367,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
+			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
@@ -382,7 +385,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
@@ -433,6 +436,24 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, fmt.Errorf("private api: %w", err)
 		}
 	}
+
+	if currentBlock == nil {
+		currentBlock = genesis
+	}
+	// We start the transaction pool on startup, for a couple of reasons:
+	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
+	// to initialize it properly.
+	// 2) we cannot propose for block 1 regardless.
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		baseFee := uint64(0)
+		if currentBlock.BaseFee() != nil {
+			baseFee = currentBlock.BaseFee().Uint64()
+		}
+		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
+		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
+
+	}()
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()
@@ -487,8 +508,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.Ethstats != "" {
 		headCh = make(chan *types.Block, 1)
 	}
-
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, inMemoryExecution)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
 	if err != nil {
 		return nil, err
 	}

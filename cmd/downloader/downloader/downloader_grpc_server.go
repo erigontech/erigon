@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -25,20 +26,35 @@ type GrpcServer struct {
 	d *Downloader
 }
 
+// Download - create new .torrent ONLY if initialSync, everything else Erigon can generate by itself
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	for _, it := range request.Items {
-		if it.TorrentHash == nil {
-			err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapDir(), torrentClient)
-			if err != nil {
+	for i, it := range request.Items {
+		if it.TorrentHash == nil { // seed new snapshot
+			if err := BuildTorrentFileIfNeed(it.Path, s.d.SnapDir()); err != nil {
 				return nil, err
 			}
-			continue
 		}
 
 		hash := Proto2InfoHash(it.TorrentHash)
 		if _, ok := torrentClient.Torrent(hash); ok {
+			continue
+		}
+
+		ok, err := AddSegment(it.Path, s.d.SnapDir(), torrentClient)
+		if err != nil {
+			return nil, fmt.Errorf("AddSegment: %w", err)
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("[snpshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
+		default:
+		}
+		if ok {
 			continue
 		}
 
@@ -52,6 +68,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			t.DisallowDataDownload()
 			t.AllowDataUpload()
 			<-t.GotInfo()
+
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(s.d.SnapDir(), t.Info(), &mi); err != nil {
 				log.Warn("[downloader] create torrent file", "err", err)
@@ -60,6 +77,14 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		}(magnet.String())
 	}
 	s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+	return &emptypb.Empty{}, nil
+}
+
+func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
+	err := s.d.verify()
+	if err != nil {
+		return nil, err
+	}
 	return &emptypb.Empty{}, nil
 }
 

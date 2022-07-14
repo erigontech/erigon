@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -46,6 +47,7 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 			if headBlockHash == pendingPayloadHash {
 				status = remote.EngineStatus_VALID
 			} else {
+				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
 				status = remote.EngineStatus_INVALID
 			}
 			hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -126,7 +128,6 @@ func StageLoopStep(
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var prevHeadBlockHash common.Hash
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
@@ -137,7 +138,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		prevHeadBlockHash = rawdb.ReadHeadBlockHash(tx)
 		return nil
 	}); err != nil {
 		return headBlockHash, err
@@ -207,7 +207,7 @@ func StageLoopStep(
 	}
 	if notifications != nil && notifications.Accumulator != nil {
 		header := rawdb.ReadCurrentHeader(rotx)
-		if header != nil && headBlockHash != prevHeadBlockHash {
+		if header != nil {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
@@ -248,9 +248,6 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 }
 
 func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
-	// Setup
-	height := header.Number.Uint64()
-	hash := header.Hash()
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -284,6 +281,13 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			}
 		}
 	}
+	// If we did not specify header or body we stop here
+	if header == nil || body == nil {
+		return nil
+	}
+	// Setup
+	height := header.Number.Uint64()
+	hash := header.Hash()
 	// Prepare memory state for block execution
 	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
 		return err
@@ -329,7 +333,7 @@ func NewStagedSync(
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
-	execPayload stagedsync.ExecutePayloadFunc,
+	forkValidator *engineapi.ForkValidator,
 ) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
@@ -362,7 +366,7 @@ func NewStagedSync(
 				tmpdir,
 				notifications.Events,
 				notifications,
-				execPayload),
+				forkValidator),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -378,7 +382,7 @@ func NewStagedSync(
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, tmpdir, cfg.Prune, blockRetire),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, tmpdir, cfg.Prune, blockRetire, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -392,15 +396,16 @@ func NewStagedSync(
 				/*stateStream=*/ false,
 				tmpdir,
 				blockReader,
+				controlServer.Hd,
 			),
 			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, false, tmpdir, blockReader),
+			stagedsync.StageTrieCfg(db, true, true, false, tmpdir, blockReader, controlServer.Hd),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, snapshots, isBor),
-			stagedsync.StageFinishCfg(db, tmpdir, logger, headCh), runInTestMode),
+			stagedsync.StageFinishCfg(db, tmpdir, logger, headCh, forkValidator), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil
@@ -444,7 +449,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				snapshots,
 				blockReader,
 			), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, tmpdir, cfg.Prune, nil),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, tmpdir, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -458,9 +463,10 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				true,
 				tmpdir,
 				blockReader,
+				controlServer.Hd,
 			),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, true, tmpdir, blockReader)),
+			stagedsync.StageTrieCfg(db, true, true, true, tmpdir, blockReader, controlServer.Hd)),
 		stagedsync.StateUnwindOrder,
 		nil,
 	), nil

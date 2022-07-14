@@ -13,9 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -28,9 +30,10 @@ type TrieCfg struct {
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       services.FullBlockReader
+	hd                *headerdownload.HeaderDownload
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -38,6 +41,7 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 		saveNewHashesToDB: saveNewHashesToDB,
 		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
+		hd:                hd,
 	}
 }
 
@@ -95,6 +99,10 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if cfg.badBlockHalt {
 				return trie.EmptyRoot, fmt.Errorf("Wrong trie root")
+			}
+			if cfg.hd != nil {
+				header := rawdb.ReadHeader(tx, headerHash, to)
+				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			}
 			if to > s.BlockNumber {
 				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
