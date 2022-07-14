@@ -56,10 +56,7 @@ type memoryMutationCursor struct {
 
 // First move cursor to first position and return key and value accordingly.
 func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
-	memKey, memValue, err := m.memCursor.First()
-	if err != nil {
-		return nil, nil, err
-	}
+	memKey, memValue, _ := m.memCursor.First()
 
 	dbKey, dbValue, err := m.cursor.First()
 	if err != nil {
@@ -210,10 +207,7 @@ func (m *memoryMutationCursor) Next() ([]byte, []byte, error) {
 		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v, false)
 	}
 
-	memK, memV, err := m.memCursor.Next()
-	if err != nil {
-		return nil, nil, err
-	}
+	memK, memV, _ := m.memCursor.Next()
 
 	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, false)
 }
@@ -229,10 +223,7 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v, true)
 	}
 
-	memK, memV, err := m.memDupCursor.NextDup()
-	if err != nil {
-		return nil, nil, err
-	}
+	memK, memV, _ := m.memDupCursor.NextDup()
 
 	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, true)
 }
@@ -252,20 +243,15 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		}
 	}
 
-	memKey, memValue, err := m.memCursor.Seek(seek)
-	if err != nil {
-		return nil, nil, err
-	}
+	memKey, memValue, _ := m.memCursor.Seek(seek)
+
 	return m.goForward(memKey, memValue, dbKey, dbValue, false)
 }
 
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	memKey, memValue, err := m.memCursor.SeekExact(seek)
-	if err != nil {
-		return nil, nil, err
-	}
-
+	memKey, memValue, _ := m.memCursor.SeekExact(seek)
+	var err error
 	if memKey != nil {
 		m.currentMemEntry.key = memKey
 		m.currentMemEntry.value = memValue
@@ -283,7 +269,7 @@ func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 	if dbKey != nil && !m.mutation.isEntryDeleted(m.table, seek) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
-		m.currentMemEntry.key, m.currentMemEntry.value, err = m.memCursor.Seek(seek)
+		m.currentMemEntry.key, m.currentMemEntry.value, _ = m.memCursor.Seek(seek)
 		m.isPrevFromDb = true
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, err
@@ -355,25 +341,15 @@ func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) 
 		}
 	}
 
-	memValue, err := m.memDupCursor.SeekBothRange(key, value)
-	if err != nil {
-		return nil, err
-	}
+	memValue, _ := m.memDupCursor.SeekBothRange(key, value)
 	_, retValue, err := m.goForward(key, memValue, key, dbValue, true)
 	return retValue, err
 }
 
 func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
-	// TODO(Giulio2002): make fixes.
-	memKey, memValue, err := m.memCursor.Last()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	dbKey, dbValue, err := m.cursor.Last()
-	if err != nil {
-		return nil, nil, err
-	}
+	memKey, memValue, _ := m.memCursor.Last()
+	dbKey, dbValue, _ := m.cursor.Last()
+	var err error
 
 	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, false)
 	if err != nil {
@@ -453,10 +429,7 @@ func (m *memoryMutationCursor) NextNoDup() ([]byte, []byte, error) {
 		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v, false)
 	}
 
-	memK, memV, err := m.memCursor.Next()
-	if err != nil {
-		return nil, nil, err
-	}
+	memK, memV, _ := m.memCursor.Next()
 
 	return m.goForward(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, false)
 }
