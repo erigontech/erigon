@@ -723,7 +723,6 @@ func forkingPoint(
 	return headerInserter.ForkingPoint(tx, header, parent)
 }
 
-//
 func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, headerInserter *headerdownload.HeaderInserter, useExternalTx bool) (bool, error) {
 	if interrupt != engineapi.None {
 		if interrupt == engineapi.Stopping {
