@@ -39,13 +39,11 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return nil, err
 			}
 		}
-
-		if it.TorrentHash == nil {
-			log.Info("Discarding torrent file with no hash")
-			continue
+		var hash metainfo.Hash
+		if it.TorrentHash != nil {
+			hash = Proto2InfoHash(it.TorrentHash)
 		}
 
-		hash := Proto2InfoHash(it.TorrentHash)
 		if _, ok := torrentClient.Torrent(hash); ok {
 			continue
 		}
