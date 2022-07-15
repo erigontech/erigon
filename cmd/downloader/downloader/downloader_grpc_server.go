@@ -98,21 +98,27 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
 
+// decides what we do depending on wether we have the .seg file or the .torrent file
+// have .torrent no .seg => get .seg file from .torrent
+// have .seg no .torrent => get .torrent from .seg
 func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.Client, snapDir string) (bool, error) {
-	// if we dont have the torrent file we build it
+	// if we dont have the torrent file we build it if we have the .seg file
 	if err := BuildTorrentFileIfNeed(it.Path, snapDir); err != nil {
 		return false, err
 	}
 
+	// we add the .seg file we have and create the .torrent file if we dont have it
 	ok, err := AddSegment(it.Path, snapDir, torrentClient)
 	if err != nil {
 		return false, fmt.Errorf("AddSegment: %w", err)
 	}
 
+	// torrent file already exists so we only add segment and to magnet
 	if !ok {
-		return createMagnetLinkWithInfoHash(nil, torrentClient, snapDir)
+		return false, nil
 	}
 
+	// we skip the item in for loop we already have everything
 	return true, nil
 }
 
