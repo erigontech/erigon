@@ -224,6 +224,7 @@ var Forks = map[string]*params.ChainConfig{
 		LondonBlock:             big.NewInt(0),
 		ArrowGlacierBlock:       big.NewInt(0),
 		GrayGlacierBlock:        big.NewInt(0),
+		MergeNetsplitBlock:      big.NewInt(0),
 		TerminalTotalDifficulty: big.NewInt(0),
 	},
 	"ArrowGlacierToMergeAtDiffC0000": {
