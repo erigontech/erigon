@@ -427,7 +427,7 @@ func initialState1() error {
 
 	// BLOCKS
 
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}

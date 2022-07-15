@@ -603,7 +603,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCKS 2 + 3
-	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -746,7 +746,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1230,7 +1230,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	// BLOCKS 2
-	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1255,7 +1255,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if err = m.InsertChain(longerChain.Slice(1, longerChain.Length)); err != nil {
+	if err = m.InsertChain(longerChain.Slice(1, longerChain.Length())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1551,7 +1551,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	require.NoError(t, err)
 
 	// Block 3 and 4
-	if err = m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
+	if err = m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {

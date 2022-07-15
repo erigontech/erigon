@@ -271,7 +271,7 @@ func testBrokenChain(t *testing.T) {
 
 	// Create a forked chain, and try to insert with a missing link
 	chain := makeBlockChain(current(m.DB), 5, m, forkSeed)
-	brokenChain := chain.Slice(1, chain.Length)
+	brokenChain := chain.Slice(1, chain.Length())
 
 	if err := m.InsertChain(brokenChain); err == nil {
 		t.Errorf("broken block chain not reported")
@@ -1035,7 +1035,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	}
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
-	forks := make([]*core.ChainPack, chain.Length)
+	forks := make([]*core.ChainPack, chain.Length())
 	for i := 0; i < len(forks); i++ {
 		fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *core.BlockGen) {
 			//nolint:scopelint
@@ -1053,7 +1053,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err := m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
@@ -1121,12 +1121,12 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 	// Import the competitor chain without exceeding the canonical's TD and ensure
 	// we have not processed any of the blocks (protection against malicious blocks)
-	if err := m2.InsertChain(competitor.Slice(0, competitor.Length-2)); err != nil {
+	if err := m2.InsertChain(competitor.Slice(0, competitor.Length()-2)); err != nil {
 		t.Fatalf("failed to insert competitor chain: %v", err)
 	}
 	// Import the head of the competitor chain, triggering the reorg and ensure we
 	// successfully reprocess all the stashed away blocks.
-	if err := m2.InsertChain(competitor.Slice(competitor.Length-2, competitor.Length)); err != nil {
+	if err := m2.InsertChain(competitor.Slice(competitor.Length()-2, competitor.Length())); err != nil {
 		t.Fatalf("failed to finalize competitor chain: %v", err)
 	}
 }

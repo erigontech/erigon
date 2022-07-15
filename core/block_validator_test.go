@@ -42,7 +42,7 @@ func TestHeaderVerification(t *testing.T) {
 	}
 
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
@@ -79,7 +79,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	}
 
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()

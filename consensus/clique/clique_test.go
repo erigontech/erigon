@@ -122,7 +122,7 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if err := m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
+	if err := m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {

@@ -137,7 +137,6 @@ func (b *SimulatedBackend) Commit() {
 	if err := b.m.InsertChain(&core.ChainPack{
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
-		Length:   1,
 		TopBlock: b.pendingBlock,
 	}); err != nil {
 		panic(err)
