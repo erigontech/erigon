@@ -332,7 +332,7 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	return nil
 }
 
-func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, logPrefix string, ctx context.Context) error {
+func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, ctx context.Context) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -351,19 +351,15 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
-			select {
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
-			case <-ctx.Done():
-				return libcommon.ErrStopped
-			default:
-			}
+
 			if err = c.DeleteCurrent(); err != nil {
 				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
 			}
 		}
 		return nil
-	}, etl.TransformArgs{}); err != nil {
+	}, etl.TransformArgs{
+		Quit: ctx.Done(),
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -405,9 +401,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 	defer logEvery.Stop()
 
 	bufferSize := etl.BufferOptimalSize
-	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(bufferSize))
+	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewAppendBuffer(bufferSize))
 	defer topics.Close()
-	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(bufferSize))
+	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewAppendBuffer(bufferSize))
 	defer addrs.Close()
 
 	reader := bytes.NewReader(nil)
@@ -453,10 +449,10 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 		}
 	}
 
-	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, ctx); err != nil {
 		return err
 	}
-	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, ctx); err != nil {
 		return err
 	}
 	return nil
