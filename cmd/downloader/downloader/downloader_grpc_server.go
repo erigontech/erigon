@@ -125,14 +125,14 @@ func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.C
 // we dont have .seg or .torrent so we get them through the torrent hash
 func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.Client, snapDir string) (bool, error) {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	var infoHash *metainfo.Hash
+	var infoHash metainfo.Hash
 	if hash != nil {
-		*infoHash = Proto2InfoHash(hash)
-		if _, ok := torrentClient.Torrent(*infoHash); ok {
+		infoHash = Proto2InfoHash(hash)
+		if _, ok := torrentClient.Torrent(infoHash); ok {
 			return true, nil
 		}
 	}
-	magnet := mi.Magnet(infoHash, nil)
+	magnet := mi.Magnet(&infoHash, nil)
 	go func(magnetUrl string) {
 		t, err := torrentClient.AddMagnet(magnetUrl)
 		if err != nil {
