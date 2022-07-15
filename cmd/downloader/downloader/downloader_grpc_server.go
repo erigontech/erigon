@@ -35,32 +35,26 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	torrentClient := s.d.Torrent()
 	snapDir := s.d.SnapDir()
 	for i, it := range request.Items {
-		var ok bool
-		var err error
-		if it.TorrentHash == nil {
-			// if we dont have the torrent hash then we seed a new snapshot
-			ok, err = seedNewSnapshot(it, torrentClient, snapDir)
-			if err != nil {
-				return nil, err
-			}
-		}
-
 		select {
 		case <-logEvery.C:
 			log.Info("[snapshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
 		default:
 		}
-		if ok {
-			continue
+
+		if it.TorrentHash == nil {
+			// if we dont have the torrent hash then we seed a new snapshot
+			ok, err := seedNewSnapshot(it, torrentClient, snapDir)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				continue
+			}
 		}
 
-		ok, err = createMagnetLinkWithInfoHash(it.TorrentHash, torrentClient, snapDir)
+		_, err := createMagnetLinkWithInfoHash(it.TorrentHash, torrentClient, snapDir)
 		if err != nil {
 			return nil, err
-		}
-
-		if ok {
-			continue
 		}
 	}
 	s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
@@ -134,7 +128,6 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 	} else {
 		magnet = mi.Magnet(nil, nil)
 	}
-	magnet := mi.Magnet(&infoHash, nil)
 	go func(magnetUrl string) {
 		t, err := torrentClient.AddMagnet(magnetUrl)
 		if err != nil {
