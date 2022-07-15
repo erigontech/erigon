@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -253,7 +254,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		log.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
-		limiter := make(chan struct{}, cfg.DBReadConcurrency)
+		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
