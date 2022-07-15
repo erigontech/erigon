@@ -170,10 +170,8 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
-	fmt.Printf("SubRefund\n")
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		panic("")
 		sdb.setErrorUnsafe(fmt.Errorf("Refund counter below zero"))
 	}
 	sdb.refund -= gas

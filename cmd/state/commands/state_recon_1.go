@@ -315,7 +315,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	total := txNum
 	prevCount := uint64(0)
 	prevRepeatCount := uint64(0)
-	prevTriggerCount := uint64(0)
+	//prevTriggerCount := uint64(0)
 	resultsSize := int64(0)
 	prevTime := time.Now()
 	logEvery := time.NewTicker(logInterval)
@@ -326,6 +326,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	heap.Init(&rws)
 	var outputTxNum uint64
 	var inputBlockNum, outputBlockNum uint64
+	var prevOutputBlockNum uint64
 	// Go-routine gathering results from the workers
 	go func() {
 		defer rs.Finish()
@@ -349,18 +350,21 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				currentTime := time.Now()
 				interval := currentTime.Sub(prevTime)
 				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+				speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
 				progress := 100.0 * float64(count) / float64(total)
 				var repeatRatio float64
 				if count > prevCount {
 					repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
 				}
-				log.Info("Transaction replay", "workers", workerCount,
+				log.Info("Transaction replay",
+					//"workers", workerCount,
 					"at block", outputBlockNum,
 					"input block", atomic.LoadUint64(&inputBlockNum),
 					"progress", fmt.Sprintf("%.2f%%", progress),
+					"blk/s", fmt.Sprintf("%.1f", speedBlock),
 					"tx/s", fmt.Sprintf("%.1f", speedTx),
-					"repeats", repeatCount-prevRepeatCount,
-					"triggered", triggerCount-prevTriggerCount,
+					//"repeats", repeatCount-prevRepeatCount,
+					//"triggered", triggerCount-prevTriggerCount,
 					"result queue", rws.Len(),
 					"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
@@ -369,8 +373,9 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 				)
 				prevTime = currentTime
 				prevCount = count
+				prevOutputBlockNum = outputBlockNum
 				prevRepeatCount = repeatCount
-				prevTriggerCount = triggerCount
+				//prevTriggerCount = triggerCount
 				if sizeEstimate >= commitThreshold {
 					commitStart := time.Now()
 					log.Info("Committing...")
