@@ -125,6 +125,7 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 		if _, ok := torrentClient.Torrent(infoHash); ok {
 			return true, nil
 		}
+		magnet = mi.Magnet(&infoHash, nil)
 	} else {
 		magnet = mi.Magnet(nil, nil)
 	}
