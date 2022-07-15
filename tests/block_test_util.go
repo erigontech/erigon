@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -110,6 +111,9 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 		engine = ethash.NewFaker()
 	} else {
 		engine = ethash.NewShared()
+	}
+	if config.TerminalTotalDifficulty != nil {
+		engine = serenity.New(engine) // the Merge
 	}
 	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
 
