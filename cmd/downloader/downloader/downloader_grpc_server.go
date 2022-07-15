@@ -43,11 +43,13 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 
 		if it.TorrentHash == nil {
 			// if we dont have the torrent hash then we seed a new snapshot
+			log.Info("[snapshots] seeding a new snapshot")
 			ok, err := seedNewSnapshot(it, torrentClient, snapDir)
 			if err != nil {
 				return nil, err
 			}
 			if ok {
+				log.Warn("[snapshots] already have both seg and torrent file")
 				continue
 			}
 		}
@@ -107,28 +109,28 @@ func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.C
 		return false, fmt.Errorf("AddSegment: %w", err)
 	}
 
-	// torrent file already exists so we only add segment and to magnet
+	// torrent file does exist and seg
 	if !ok {
 		return false, nil
 	}
 
-	// we skip the item in for loop we already have everything
+	// we skip the item in for loop since we build the seg and torrent file here
 	return true, nil
 }
 
 // we dont have .seg or .torrent so we get them through the torrent hash
 func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.Client, snapDir string) (bool, error) {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	var magnet metainfo.Magnet
-	if hash != nil {
-		infoHash := Proto2InfoHash(hash)
-		if _, ok := torrentClient.Torrent(infoHash); ok {
-			return true, nil
-		}
-		magnet = mi.Magnet(&infoHash, nil)
-	} else {
-		magnet = mi.Magnet(nil, nil)
+	if hash == nil {
+		return false, nil
 	}
+	log.Info("[downloader] downloading torrent and seg file")
+	infoHash := Proto2InfoHash(hash)
+	if _, ok := torrentClient.Torrent(infoHash); ok {
+		return true, nil
+	}
+
+	magnet := mi.Magnet(&infoHash, nil)
 	go func(magnetUrl string) {
 		t, err := torrentClient.AddMagnet(magnetUrl)
 		if err != nil {
