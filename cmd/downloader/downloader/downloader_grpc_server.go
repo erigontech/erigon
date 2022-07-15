@@ -34,18 +34,16 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for i, it := range request.Items {
+		var hash *metainfo.Hash
 		if it.TorrentHash == nil { // seed new snapshot
 			if err := BuildTorrentFileIfNeed(it.Path, s.d.SnapDir()); err != nil {
 				return nil, err
 			}
-		}
-		var hash metainfo.Hash
-		if it.TorrentHash != nil {
-			hash = Proto2InfoHash(it.TorrentHash)
-		}
-
-		if _, ok := torrentClient.Torrent(hash); ok {
-			continue
+		} else {
+			*hash = Proto2InfoHash(it.TorrentHash)
+			if _, ok := torrentClient.Torrent(*hash); ok {
+				continue
+			}
 		}
 
 		ok, err := AddSegment(it.Path, s.d.SnapDir(), torrentClient)
@@ -61,7 +59,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			continue
 		}
 
-		magnet := mi.Magnet(&hash, nil)
+		magnet := mi.Magnet(hash, nil)
 		go func(magnetUrl string) {
 			t, err := torrentClient.AddMagnet(magnetUrl)
 			if err != nil {
