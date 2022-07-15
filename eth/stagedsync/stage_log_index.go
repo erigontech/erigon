@@ -335,24 +335,20 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, logPrefix string, ctx context.Context) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	// how to get key set from inMem collector here?
-	keys := make([]string, 0, len(inMem))
-	for k := range inMem {
-		keys = append(keys, k)
-	}
+
 	c, err := tx.RwCursor(bucket)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	for _, kS := range keys {
-		seek := []byte(kS)
-		for k, _, err := c.Seek(seek); k != nil; k, _, err = c.Next() {
+
+	if err := inMem.Load(tx, bucket, func(key, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		for k, _, err := c.Seek(key); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			blockNum := uint64(binary.BigEndian.Uint32(k[len(seek):]))
-			if !bytes.HasPrefix(k, seek) || blockNum >= pruneTo {
+			blockNum := uint64(binary.BigEndian.Uint32(k[len(key):]))
+			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
 			select {
@@ -366,6 +362,9 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
 			}
 		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
 	}
 	return nil
 }
