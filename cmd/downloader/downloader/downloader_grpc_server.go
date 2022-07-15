@@ -49,7 +49,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return nil, err
 			}
 			if ok {
-				log.Warn("[snapshots] already have both seg and torrent file")
+				log.Debug("[snapshots] already have both seg and torrent file")
 				continue
 			}
 		}
@@ -124,10 +124,11 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 	if hash == nil {
 		return false, nil
 	}
-	log.Info("[downloader] downloading torrent and seg file")
 	infoHash := Proto2InfoHash(hash)
+	log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
+
 	if _, ok := torrentClient.Torrent(infoHash); ok {
-		log.Warn("[downloader] torrent client related to hash found")
+		log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
 		return true, nil
 	}
 
@@ -148,6 +149,6 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 			return
 		}
 	}(magnet.String())
-	log.Warn("[downloader] downloaded both seg and torrent files")
+	log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return false, nil
 }
