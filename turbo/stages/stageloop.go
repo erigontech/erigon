@@ -259,7 +259,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	if unwindPoint > 0 {
 		// Run it through the unwind
 		stateSync.UnwindTo(unwindPoint, common.Hash{})
-		if err = stateSync.Run(nil, batch, false); err != nil {
+		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}
 		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
@@ -269,8 +269,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			currentHeight := headersChain[i].Number.Uint64()
 			currentHash := headersChain[i].Hash()
 			// Prepare memory state for block execution
-			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
-				return err
+			if body != nil {
+				if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+					return err
+				}
 			}
 			rawdb.WriteHeader(batch, currentHeader)
 			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
@@ -282,17 +284,13 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		}
 	}
 	// If we did not specify header or body we stop here
-	if header == nil || body == nil {
+	if header == nil {
 		return nil
 	}
 	// Setup
 	height := header.Number.Uint64()
 	hash := header.Hash()
 	// Prepare memory state for block execution
-	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
-		return err
-	}
-
 	rawdb.WriteHeader(batch, header)
 	if err = rawdb.WriteHeaderNumber(batch, hash, height); err != nil {
 		return err
@@ -309,11 +307,18 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
 		return err
 	}
-
-	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
-		return err
+	if body != nil {
+		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
+			return err
+		}
+		if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
+			return err
+		}
+	} else {
+		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
+			return err
+		}
 	}
-
 	// Run state sync
 	if err = stateSync.Run(nil, batch, false); err != nil {
 		return err

@@ -242,6 +242,16 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			},
 		},
 		{
+			ID:          stages.Bodies,
+			Description: "Download block bodies",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return BodiesForward(s, u, ctx, tx, bodies, false, false)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindBodiesStage(u, tx, bodies, ctx)
+			},
+		},
+		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
@@ -249,16 +259,6 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
-			},
-		},
-		{
-			ID:          stages.Bodies,
-			Description: "Download block bodies",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return nil
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 		},
 		{

@@ -666,16 +666,32 @@ func schedulePoSDownload(
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
 	var lastValidHash common.Hash
-
+	var badChainError error
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
+		if badChainError != nil {
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
+		}
 		lastValidHash = h.ParentHash
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
-			return err
+			badChainError = err
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
+		}
+		// Validate state if possible (bodies will be retrieved through body download)
+		_, _, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, &h, nil, false)
+		if criticalError != nil {
+			return criticalError
+		}
+		if validationError != nil {
+			badChainError = validationError
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
 		}
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
@@ -686,7 +702,10 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 		},
 	})
 
-	if err != nil {
+	if err != nil || badChainError != nil {
+		if err == nil {
+			err = badChainError
+		}
 		log.Warn("Removing beacon request due to", "err", err, "requestId", cfg.hd.RequestId())
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
 		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)

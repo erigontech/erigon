@@ -14,12 +14,15 @@
 package engineapi
 
 import (
+	"bytes"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -191,8 +194,29 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		status = remote.EngineStatus_INVALID
 		return
 	}
+	// If we do not have the body we can recover it from the batch.
+	if body == nil {
+		var bodyWithTxs *types.Body
+		bodyWithTxs, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
+		if criticalError != nil {
+			return
+		}
+		var encodedTxs [][]byte
+		buf := bytes.NewBuffer(nil)
+		for _, tx := range bodyWithTxs.Transactions {
+			buf.Reset()
+			if criticalError = rlp.Encode(buf, tx); criticalError != nil {
+				return
+			}
+			encodedTxs = append(encodedTxs, common.CopyBytes(buf.Bytes()))
+		}
+		fv.sideForksBlock[header.Hash()] = forkSegment{header, &types.RawBody{
+			Transactions: encodedTxs,
+		}}
+	} else {
+		fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
+	}
 	status = remote.EngineStatus_VALID
-	fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
 	return
 }
 
