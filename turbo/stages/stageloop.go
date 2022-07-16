@@ -269,10 +269,8 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			currentHeight := headersChain[i].Number.Uint64()
 			currentHash := headersChain[i].Hash()
 			// Prepare memory state for block execution
-			if body != nil {
-				if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
-					return err
-				}
+			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+				return err
 			}
 			rawdb.WriteHeader(batch, currentHeader)
 			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {

@@ -180,7 +180,6 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 		}
 		fv.extendingFork.Rollback()
 	}
-	// Clean all data relative to txpool
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingFork = nil
 }
