@@ -50,8 +50,10 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			}
 			if ok {
 				log.Debug("[snapshots] already have both seg and torrent file")
-				continue
+			} else {
+				log.Warn("[snapshots] didn't get the seg or the torrent file")
 			}
+			continue
 		}
 
 		_, err := createMagnetLinkWithInfoHash(it.TorrentHash, torrentClient, snapDir)
