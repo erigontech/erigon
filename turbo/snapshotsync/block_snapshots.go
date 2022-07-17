@@ -786,14 +786,14 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 	return nil
 }
 
-func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots [][]uint64, err error) {
+func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []mergeRange, err error) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			missingSnapshots = append(missingSnapshots, []uint64{prevTo, f.From})
+			missingSnapshots = append(missingSnapshots, mergeRange{prevTo, f.From})
 			return nil, missingSnapshots, fmt.Errorf("%w: from %d to %d", snap.ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
@@ -847,7 +847,7 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func segments(dir string) (res []snap.FileInfo, missingSnapshots [][]uint64, err error) {
+func segments(dir string) (res []snap.FileInfo, missingSnapshots []mergeRange, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
