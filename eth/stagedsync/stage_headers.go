@@ -1200,7 +1200,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if err := cfg.snapshots.Reopen(); err != nil {
+	if err := cfg.snapshots.Reopen(ctx, cfg.snapshotDownloader); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 
@@ -1227,7 +1227,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				}
 			}
 
-			if err := cfg.snapshots.Reopen(); err != nil {
+			if err := cfg.snapshots.Reopen(ctx, cfg.snapshotDownloader); err != nil {
 				return fmt.Errorf("ReopenIndices: %w", err)
 			}
 		}

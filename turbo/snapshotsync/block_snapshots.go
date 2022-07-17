@@ -383,7 +383,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, snap.ErrSnapshotMissed) {
+			if err := s.Reopen(ctx, nil); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, snap.ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -394,7 +394,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 // OptimisticReopen - optimistically open snapshots (ignoring error), useful at App startup because:
 // - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
 // - RPC return Nil for historical blocks if snapshots are not open
-func (s *RoSnapshots) OptimisticReopen() { _ = s.Reopen() }
+func (s *RoSnapshots) OptimisticReopen(ctx context.Context) { _ = s.Reopen(ctx, nil) }
 
 func (s *RoSnapshots) Reopen(ctx context.Context, snapshotDownloader proto_downloader.DownloaderClient) error {
 	s.Headers.lock.Lock()
@@ -408,7 +408,7 @@ func (s *RoSnapshots) Reopen(ctx context.Context, snapshotDownloader proto_downl
 	if err != nil {
 		// if we have missing snapshots then the error is a missing snapshots error
 		// so we attempt to download the snapshots
-		if len(missingSnapshots) > 0 {
+		if len(missingSnapshots) > 0 && snapshotDownloader != nil {
 			if err := requestSnapshotDownload(ctx, missingSnapshots, snapshotDownloader); err != nil {
 				return err
 			}
@@ -511,7 +511,7 @@ func (s *RoSnapshots) ReopenSegments(ctx context.Context, snapshotDownloader pro
 	if err != nil {
 		// if we have missing snapshots then the error is a missing snapshots error
 		// so we attempt to download the snapshots
-		if len(missingSnapshots) > 0 {
+		if len(missingSnapshots) > 0 && snapshotDownloader != nil {
 			if err := requestSnapshotDownload(ctx, missingSnapshots, snapshotDownloader); err != nil {
 				return err
 			}
@@ -1013,11 +1013,11 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, ranges, snapshots.Dir(), true)
+	err := merger.Merge(ctx, snapshots, ranges, snapshots.Dir(), downloader, true)
 	if err != nil {
 		return err
 	}
-	if err := snapshots.Reopen(); err != nil {
+	if err := snapshots.Reopen(ctx, downloader); err != nil {
 		return fmt.Errorf("Reopen: %w", err)
 	}
 
@@ -1782,7 +1782,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapDir string, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapDir string, downloader proto_downloader.DownloaderClient, doIndex bool) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1830,7 +1830,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			}
 		}
 
-		if err := snapshots.Reopen(); err != nil {
+		if err := snapshots.Reopen(ctx, downloader); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
 		if m.notifier != nil { // notify about new snapshots of any size
