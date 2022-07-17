@@ -404,7 +404,7 @@ func (s *RoSnapshots) Reopen() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments(s.dir)
+	files, _, err := segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -499,7 +499,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments(s.dir)
+	files, _, err := segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -786,19 +786,20 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 	return nil
 }
 
-func noGaps(in []snap.FileInfo) (out []snap.FileInfo, err error) {
+func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots [][]uint64, err error) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("%w: from %d to %d", snap.ErrSnapshotMissed, prevTo, f.From)
+			missingSnapshots = append(missingSnapshots, []uint64{prevTo, f.From})
+			return nil, missingSnapshots, fmt.Errorf("%w: from %d to %d", snap.ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
 	}
-	return out, nil
+	return out, missingSnapshots, nil
 }
 
 func allTypeOfSegmentsMustExist(dir string, in []snap.FileInfo) (res []snap.FileInfo) {
@@ -846,10 +847,10 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func segments(dir string) (res []snap.FileInfo, err error) {
+func segments(dir string) (res []snap.FileInfo, missingSnapshots [][]uint64, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
-		return nil, err
+		return nil, missingSnapshots, err
 	}
 	for _, f := range list {
 		if f.T != snap.Headers {
