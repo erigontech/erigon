@@ -1093,7 +1093,8 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 		}
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadirCli, "snapshots"))
 		if useSnapshots {
-			if err := _allSnapshotsSingleton.Reopen(); err != nil {
+			// not downloading snapshots
+			if err := _allSnapshotsSingleton.Reopen(nil, nil); err != nil {
 				panic(err)
 			}
 		}

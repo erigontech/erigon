@@ -115,7 +115,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if useSnapshots {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
-		if err := allSnapshots.Reopen(); err != nil {
+		if err := allSnapshots.Reopen(ctx, nil); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
