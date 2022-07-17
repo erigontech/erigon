@@ -1003,24 +1003,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("Reopen: %w", err)
 	}
-	// start seed large .seg of large size
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
-	for _, r := range ranges {
-		if r.to-r.from != snap.DEFAULT_SEGMENT_SIZE {
-			continue
-		}
-		for _, t := range snap.AllSnapshotTypes {
-			req.Items = append(req.Items, &proto_downloader.DownloadItem{
-				Path: snap.SegmentFileName(r.from, r.to, t),
-			})
-		}
-	}
-	if len(req.Items) > 0 && downloader != nil {
-		if _, err := downloader.Download(ctx, req); err != nil {
-			return err
-		}
-	}
-	return nil
+
+	return requestSnapshotDownload(ctx, ranges, downloader)
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1943,4 +1927,27 @@ func assertSegment(segmentFile string) {
 	}); err != nil {
 		panic(err)
 	}
+}
+
+// builds the snapshots download request and downloads them
+func requestSnapshotDownload(ctx context.Context, ranges []mergeRange, downloader proto_downloader.DownloaderClient) error {
+	// start seed large .seg of large size
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
+	for _, r := range ranges {
+		if r.to-r.from != snap.DEFAULT_SEGMENT_SIZE {
+			continue
+		}
+		for _, t := range snap.AllSnapshotTypes {
+			req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				Path: snap.SegmentFileName(r.from, r.to, t),
+			})
+		}
+	}
+	if len(req.Items) > 0 && downloader != nil {
+		if _, err := downloader.Download(ctx, req); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
