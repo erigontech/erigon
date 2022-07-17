@@ -262,25 +262,26 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}
-		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
-		for i := range headersChain {
-			currentHeader := headersChain[i]
-			currentBody := bodiesChain[i]
-			currentHeight := headersChain[i].Number.Uint64()
-			currentHash := headersChain[i].Hash()
-			// Prepare memory state for block execution
-			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
-				return err
-			}
-			rawdb.WriteHeader(batch, currentHeader)
-			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
-				return err
-			}
-			if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
-				return err
-			}
+	}
+	// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+	for i := range headersChain {
+		currentHeader := headersChain[i]
+		currentBody := bodiesChain[i]
+		currentHeight := headersChain[i].Number.Uint64()
+		currentHash := headersChain[i].Hash()
+		// Prepare memory state for block execution
+		if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+			return err
+		}
+		rawdb.WriteHeader(batch, currentHeader)
+		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
+			return err
+		}
+		if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+			return err
 		}
 	}
+
 	// If we did not specify header or body we stop here
 	if header == nil {
 		return nil
