@@ -2128,14 +2128,14 @@ type Writer struct {
 	blockNum      uint64
 	changeFileNum uint64 // Block number associated with the current change files. It is the last block number whose changes will go into that file
 	changes       [NumberOfStateTypes]Changes
-	commTree      *btree.BTree // BTree used for gathering commitment data
+	commTree      *btree.BTreeG[*CommitmentItem] // BTree used for gathering commitment data
 	tx            kv.RwTx
 }
 
 func (a *Aggregator) MakeStateWriter(beforeOn bool) *Writer {
 	w := &Writer{
 		a:        a,
-		commTree: btree.New(32),
+		commTree: btree.NewG[*CommitmentItem](32, commitmentItemLess),
 	}
 	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
 		w.changes[fType].Init(fType.String(), a.aggregationStep, a.diffDir, w.a.changesets && fType != Commitment /* we do not unwind commitment ? */)
@@ -2186,6 +2186,9 @@ type CommitmentItem struct {
 	hashedKey []byte
 }
 
+func commitmentItemLess(i, j *CommitmentItem) bool {
+	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
+}
 func (i *CommitmentItem) Less(than btree.Item) bool {
 	return bytes.Compare(i.hashedKey, than.(*CommitmentItem).hashedKey) < 0
 }
@@ -2308,7 +2311,7 @@ func (w *Writer) storageFn(plainKey []byte, cell *commitment.Cell) error {
 	return nil
 }
 
-func (w *Writer) captureCommitmentType(fType FileType, trace bool, f func(commTree *btree.BTree, h hash.Hash, key, val []byte)) {
+func (w *Writer) captureCommitmentType(fType FileType, trace bool, f func(commTree *btree.BTreeG[*CommitmentItem], h hash.Hash, key, val []byte)) {
 	lastOffsetKey := 0
 	lastOffsetVal := 0
 	for i, offsetKey := range w.changes[fType].keys.wordOffsets {
@@ -2328,7 +2331,7 @@ func (w *Writer) captureCommitmentData(trace bool) {
 	if trace {
 		fmt.Printf("captureCommitmentData start w.commTree.Len()=%d\n", w.commTree.Len())
 	}
-	w.captureCommitmentType(Code, trace, func(commTree *btree.BTree, h hash.Hash, key, val []byte) {
+	w.captureCommitmentType(Code, trace, func(commTree *btree.BTreeG[*CommitmentItem], h hash.Hash, key, val []byte) {
 		h.Reset()
 		h.Write(key)
 		hashedKey := h.Sum(nil)
@@ -2339,7 +2342,7 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		}
 		commTree.ReplaceOrInsert(c)
 	})
-	w.captureCommitmentType(Account, trace, func(commTree *btree.BTree, h hash.Hash, key, val []byte) {
+	w.captureCommitmentType(Account, trace, func(commTree *btree.BTreeG[*CommitmentItem], h hash.Hash, key, val []byte) {
 		h.Reset()
 		h.Write(key)
 		hashedKey := h.Sum(nil)
@@ -2350,7 +2353,7 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		}
 		commTree.ReplaceOrInsert(c)
 	})
-	w.captureCommitmentType(Storage, trace, func(commTree *btree.BTree, h hash.Hash, key, val []byte) {
+	w.captureCommitmentType(Storage, trace, func(commTree *btree.BTreeG[*CommitmentItem], h hash.Hash, key, val []byte) {
 		hashedKey := make([]byte, 2*length.Hash)
 		h.Reset()
 		h.Write(key[:length.Addr])
@@ -2384,8 +2387,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 	plainKeys := make([][]byte, w.commTree.Len())
 	hashedKeys := make([][]byte, w.commTree.Len())
 	j := 0
-	w.commTree.Ascend(func(i btree.Item) bool {
-		item := i.(*CommitmentItem)
+	w.commTree.Ascend(func(item *CommitmentItem) bool {
 		plainKeys[j] = item.plainKey
 		hashedKeys[j] = item.hashedKey
 		j++
