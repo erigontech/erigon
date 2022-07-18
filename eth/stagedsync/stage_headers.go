@@ -17,7 +17,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -1333,11 +1332,20 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
+	var missingSnapshots []snapshotsync.MergeRange
+	if !dbEmpty {
+		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
+		if err != nil {
+			return err
+		}
+	}
 
 	// send all hashes to the Downloader service
 	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
+	var downloadRequest []snapshotsync.DownloadRequest
+	// build all download requests
+	// builds preverified snapshots request
 	for _, p := range preverified {
 		_, has := snInDB[p.Name]
 		if !dbEmpty && !has {
@@ -1346,13 +1354,15 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		if dbEmpty {
 			snInDB[p.Name] = p.Hash
 		}
-
-		req.Items = append(req.Items, &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(p.Hash),
-			Path:        p.Name,
-		})
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 		i++
 	}
+	// builds missing snapshots request
+	for _, r := range missingSnapshots {
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
+	}
+	req := snapshotsync.BuildProtoRequest(downloadRequest)
+
 	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
 		select {

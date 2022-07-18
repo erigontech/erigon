@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -39,6 +40,12 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 )
+
+type DownloadRequest struct {
+	ranges      *MergeRange
+	path        string
+	torrentHash string
+}
 
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
@@ -404,7 +411,7 @@ func (s *RoSnapshots) Reopen() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments(s.dir)
+	files, _, err := Segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -499,7 +506,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segments(s.dir)
+	files, _, err := Segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -786,19 +793,20 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 	return nil
 }
 
-func noGaps(in []snap.FileInfo) (out []snap.FileInfo, err error) {
+func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []MergeRange) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("%w: from %d to %d", snap.ErrSnapshotMissed, prevTo, f.From)
+			missingSnapshots = append(missingSnapshots, MergeRange{prevTo, f.From})
+			continue
 		}
 		prevTo = f.To
 		out = append(out, f)
 	}
-	return out, nil
+	return out, missingSnapshots
 }
 
 func allTypeOfSegmentsMustExist(dir string, in []snap.FileInfo) (res []snap.FileInfo) {
@@ -846,10 +854,10 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func segments(dir string) (res []snap.FileInfo, err error) {
+func Segments(dir string) (res []snap.FileInfo, missingSnapshots []MergeRange, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
-		return nil, err
+		return nil, missingSnapshots, err
 	}
 	for _, f := range list {
 		if f.T != snap.Headers {
@@ -857,7 +865,8 @@ func segments(dir string) (res []snap.FileInfo, err error) {
 		}
 		res = append(res, f)
 	}
-	return noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, res)))
+	res, missingSnapshots = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, res)))
+	return res, missingSnapshots, nil
 }
 
 func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
@@ -1003,24 +1012,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("Reopen: %w", err)
 	}
-	// start seed large .seg of large size
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
-	for _, r := range ranges {
-		if r.to-r.from != snap.DEFAULT_SEGMENT_SIZE {
-			continue
-		}
-		for _, t := range snap.AllSnapshotTypes {
-			req.Items = append(req.Items, &proto_downloader.DownloadItem{
-				Path: snap.SegmentFileName(r.from, r.to, t),
-			})
-		}
-	}
-	if len(req.Items) > 0 && downloader != nil {
-		if _, err := downloader.Download(ctx, req); err != nil {
-			return err
-		}
-	}
-	return nil
+
+	return RequestSnapshotDownload(ctx, ranges, downloader)
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1725,13 +1718,13 @@ func NewMerger(tmpDir string, workers int, lvl log.Lvl, chainID uint256.Int, not
 	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl, chainID: chainID, notifier: notifier}
 }
 
-type mergeRange struct {
+type MergeRange struct {
 	from, to uint64
 }
 
-func (r mergeRange) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
+func (r MergeRange) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
 
-func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
+func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []MergeRange) {
 	for i := len(snapshots.Headers.segments) - 1; i > 0; i-- {
 		sn := snapshots.Headers.segments[i]
 		if sn.To-sn.From >= snap.DEFAULT_SEGMENT_SIZE { // is complete .seg
@@ -1746,14 +1739,14 @@ func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
 				break
 			}
 			aggFrom := sn.To - span
-			res = append(res, mergeRange{from: aggFrom, to: sn.To})
+			res = append(res, MergeRange{from: aggFrom, to: sn.To})
 			for snapshots.Headers.segments[i].From > aggFrom {
 				i--
 			}
 			break
 		}
 	}
-	slices.SortFunc(res, func(i, j mergeRange) bool { return i.from < j.from })
+	slices.SortFunc(res, func(i, j MergeRange) bool { return i.from < j.from })
 	return res
 }
 func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeHeaders, toMergeBodies, toMergeTxs []string, err error) {
@@ -1781,7 +1774,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapDir string, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []MergeRange, snapDir string, doIndex bool) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1943,4 +1936,56 @@ func assertSegment(segmentFile string) {
 	}); err != nil {
 		panic(err)
 	}
+}
+
+func NewDownloadRequest(ranges *MergeRange, path string, torrentHash string) DownloadRequest {
+	return DownloadRequest{
+		ranges:      ranges,
+		path:        path,
+		torrentHash: torrentHash,
+	}
+}
+
+// builds the snapshots download request and downloads them
+func RequestSnapshotDownload(ctx context.Context, ranges []MergeRange, downloader proto_downloader.DownloaderClient) error {
+	// start seed large .seg of large size
+	var downloadRequest []DownloadRequest
+	for _, r := range ranges {
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
+	}
+	req := BuildProtoRequest(downloadRequest)
+	if len(req.Items) > 0 && downloader != nil {
+		if _, err := downloader.Download(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.DownloadRequest {
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
+	for _, r := range downloadRequest {
+		if r.path != "" {
+			if r.torrentHash != "" {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					TorrentHash: downloadergrpc.String2Proto(r.torrentHash),
+					Path:        r.path,
+				})
+			} else {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: r.path,
+				})
+			}
+		} else {
+			if r.ranges.to-r.ranges.from != snap.DEFAULT_SEGMENT_SIZE {
+				continue
+			}
+			for _, t := range snap.AllSnapshotTypes {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: snap.SegmentFileName(r.ranges.from, r.ranges.to, t),
+				})
+			}
+		}
+	}
+	return req
 }

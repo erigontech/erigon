@@ -148,8 +148,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 1_000_000, snap.Transactions)
 	s = NewRoSnapshots(cfg, dir)
 	err = s.Reopen()
-	require.Error(err)
-	require.Equal(0, len(s.Headers.segments)) //because, no gaps are allowed (expect snapshots from block 0)
+	require.NoError(err)
+	require.Equal(0, len(s.Headers.segments))
 	s.Close()
 
 	createFile(0, 500_000, snap.Bodies)
