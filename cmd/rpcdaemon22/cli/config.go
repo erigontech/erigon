@@ -348,7 +348,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			allSnapshots.OptimisticReopen(ctx)
+			allSnapshots.OptimisticReopen()
 			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
 			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
@@ -365,7 +365,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
-				if err := allSnapshots.Reopen(ctx, nil); err != nil {
+				if err := allSnapshots.Reopen(); err != nil {
 					log.Error("[Snapshots] reopen", "err", err)
 				} else {
 					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())

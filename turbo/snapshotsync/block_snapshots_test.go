@@ -73,7 +73,7 @@ func TestMergeSnapshots(t *testing.T) {
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	require.NoError(s.Reopen(nil, nil))
+	require.NoError(s.Reopen())
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
@@ -133,7 +133,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile := func(from, to uint64, name snap.Type) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err := s.Reopen(nil, nil)
+	err := s.Reopen()
 	require.NoError(err)
 	require.Equal(0, len(s.Headers.segments))
 	s.Close()
@@ -147,7 +147,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 1_000_000, snap.Headers)
 	createFile(500_000, 1_000_000, snap.Transactions)
 	s = NewRoSnapshots(cfg, dir)
-	err = s.Reopen(nil, nil)
+	err = s.Reopen()
 	require.Error(err)
 	require.Equal(0, len(s.Headers.segments)) //because, no gaps are allowed (expect snapshots from block 0)
 	s.Close()
@@ -158,7 +158,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
 
-	err = s.Reopen(nil, nil)
+	err = s.Reopen()
 	require.NoError(err)
 	require.Equal(2, len(s.Headers.segments))
 
@@ -186,7 +186,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
 	s = NewRoSnapshots(cfg, dir)
-	err = s.Reopen(nil, nil)
+	err = s.Reopen()
 	require.NoError(err)
 	defer s.Close()
 	require.Equal(2, len(s.Headers.segments))
@@ -197,7 +197,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err = s.Reopen(nil, nil)
+	err = s.Reopen()
 	require.NoError(err)
 }
 
