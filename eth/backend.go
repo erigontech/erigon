@@ -791,7 +791,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 
 	if isSnapshotEnabled {
 		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-		allSnapshots.OptimisticReopen(ctx)
+		allSnapshots.OptimisticReopen()
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if !cfg.Snapshot.NoDownloader {

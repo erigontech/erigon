@@ -247,7 +247,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := snapshots.Reopen(ctx, nil); err != nil {
+	if err := snapshots.Reopen(); err != nil {
 		return err
 	}
 
@@ -305,7 +305,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := allSnapshots.Reopen(ctx, nil); err != nil {
+	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
 	if err := snapshotsync.BuildIndices(ctx, allSnapshots, *chainID, dirs.Tmp, from, workers, log.LvlInfo); err != nil {
