@@ -25,30 +25,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSeekBothRange(t *testing.T) {
+func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
 	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			table: kv.TableCfgItem{Flags: kv.DupSort},
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer tx.Rollback()
 
 	c, err := tx.RwCursorDupSort(table)
 	require.NoError(t, err)
-	defer c.Close()
 
 	// Insert some dupsorted records
 	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
 	require.NoError(t, c.Put([]byte("key1"), []byte("value1.3")))
 	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
+
+	return db, tx, c
+}
+
+func TestSeekBothRange(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
 
 	v, err := c.SeekBothRange([]byte("key2"), []byte("value1.2"))
 	require.NoError(t, err)
@@ -61,37 +68,18 @@ func TestSeekBothRange(t *testing.T) {
 }
 
 func TestLastDup(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table: kv.TableCfgItem{Flags: kv.DupSort},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	// Insert some dupsorted records
-	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
-	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
-	require.NoError(t, c.Put([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.Put([]byte("key3"), []byte("value3.3")))
-
-	err = tx.Commit()
+	err := tx.Commit()
 	require.NoError(t, err)
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	roC, err := roTx.CursorDupSort(table)
+	roC, err := roTx.CursorDupSort("Table")
 	require.NoError(t, err)
 	defer roC.Close()
 
@@ -109,31 +97,15 @@ func TestLastDup(t *testing.T) {
 }
 
 func TestPutGet(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table: kv.TableCfgItem{Flags: kv.DupSort},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	// Insert some dupsorted records
-	require.NoError(t, c.Put([]byte("key1"), []byte("value1.1")))
-	require.NoError(t, c.Put([]byte("key3"), []byte("value3.1")))
 	require.Error(t, c.Put([]byte(""), []byte("value1.1")))
 
 	var v []byte
-	v, err = tx.GetOne(table, []byte("key1"))
+	v, err := tx.GetOne("Table", []byte("key1"))
 	require.Nil(t, err)
 	require.Equal(t, v, []byte("value1.1"))
 
@@ -143,70 +115,40 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestIncrementRead(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
+
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	// Insert some dupsorted records
-	require.NoError(t, tx.Put(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value2.1")))
-	require.NoError(t, tx.Put(table, []byte("key3"), []byte("value3.1")))
-	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
-	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
+	table := "Table"
 
-	_, err = tx.IncrementSequence(table, uint64(12))
+	_, err := tx.IncrementSequence(table, uint64(12))
 	require.Nil(t, err)
 	chaV, err := tx.ReadSequence(table)
 	require.Nil(t, err)
-	require.Equal(t, chaV, uint64(0xc))
+	require.Equal(t, chaV, uint64(12))
 	_, err = tx.IncrementSequence(table, uint64(240))
 	require.Nil(t, err)
 	chaV, err = tx.ReadSequence(table)
 	require.Nil(t, err)
-	require.Equal(t, chaV, uint64(0xfc))
+	require.Equal(t, chaV, uint64(252))
 }
 
 func TestHasDelete(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table: kv.TableCfgItem{Flags: kv.DupSort},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	require.NoError(t, tx.Put(table, []byte("key1"), []byte("value1.1")))
+	table := "Table"
+
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value2.1")))
-	require.NoError(t, tx.Put(table, []byte("key3"), []byte("value3.1")))
 	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
 	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
 
 	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1")))
+	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.3")))
 	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1"))) //valid but already deleted
 	require.NoError(t, tx.Delete(table, []byte("key2"), []byte("value1.1"))) //valid key but wrong value
 
@@ -220,7 +162,7 @@ func TestHasDelete(t *testing.T) {
 
 	res, err = tx.Has(table, []byte("key3"))
 	require.Nil(t, err)
-	require.True(t, res)
+	require.True(t, res) //There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
 	require.Nil(t, err)
@@ -228,39 +170,25 @@ func TestHasDelete(t *testing.T) {
 }
 
 func TestForAmount(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	require.NoError(t, tx.Put(table, []byte("key1"), []byte("value1.1")))
+	table := "Table"
+
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value2.1")))
-	require.NoError(t, tx.Put(table, []byte("key3"), []byte("value3.1")))
 	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
 	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
 
 	var keys []string
 
-	err = tx.ForAmount(table, []byte("key3"), uint32(2), func(k, v []byte) error {
+	err := tx.ForAmount(table, []byte("key3"), uint32(2), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		return nil
 	})
 	require.Nil(t, err)
-	require.Equal(t, []string{"key3", "key4"}, keys)
+	require.Equal(t, []string{"key3", "key3"}, keys)
 
 	var keys1 []string
 
@@ -269,7 +197,7 @@ func TestForAmount(t *testing.T) {
 		return nil
 	})
 	require.Nil(t, err1)
-	require.Equal(t, []string{"key1", "key2", "key3", "key4", "key5"}, keys1)
+	require.Equal(t, []string{"key1", "key1", "key2", "key3", "key3", "key4", "key5"}, keys1)
 
 	var keys2 []string
 
@@ -291,39 +219,21 @@ func TestForAmount(t *testing.T) {
 }
 
 func TestForPrefix(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	require.NoError(t, tx.Put(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value2.1")))
-	require.NoError(t, tx.Put(table, []byte("key3"), []byte("value3.1")))
-	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
-	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
+	table := "Table"
 
 	var keys []string
 
-	err = tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
+	err := tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		return nil
 	})
 	require.Nil(t, err)
-	require.Equal(t, []string{"key1", "key2", "key3", "key4", "key5"}, keys)
+	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
 	var keys1 []string
 
@@ -332,7 +242,7 @@ func TestForPrefix(t *testing.T) {
 		return nil
 	})
 	require.Nil(t, err)
-	require.Equal(t, []string{"key1"}, keys1)
+	require.Equal(t, []string{"key1", "key1"}, keys1)
 
 	var keys2 []string
 
@@ -345,27 +255,13 @@ func TestForPrefix(t *testing.T) {
 }
 
 func TestAppendFirstLast(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	require.NoError(t, tx.Append(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Append(table, []byte("key3"), []byte("value3.1")))
+	table := "Table"
+
 	require.Error(t, tx.Append(table, []byte("key2"), []byte("value2.1")))
 	require.NoError(t, tx.Append(table, []byte("key6"), []byte("value6.1")))
 	require.Error(t, tx.Append(table, []byte("key4"), []byte("value4.1")))
@@ -383,43 +279,25 @@ func TestAppendFirstLast(t *testing.T) {
 }
 
 func TestNextPrevCurrent(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db, tx, c := BaseCase(t)
 	defer db.Close()
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer tx.Rollback()
-
-	c, err := tx.RwCursorDupSort(table)
-	require.NoError(t, err)
 	defer c.Close()
 
-	require.NoError(t, tx.Append(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Append(table, []byte("key3"), []byte("value3.1")))
-	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.11")))
-
-	k, v, err := c.Next()
+	k, v, err := c.First()
 	require.Nil(t, err)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.1"))
 
 	k, v, err = c.Next()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key2"))
-	require.Equal(t, v, []byte("value1.11"))
+	require.Equal(t, k, []byte("key1"))
+	require.Equal(t, v, []byte("value1.3"))
 
 	k, v, err = c.Current()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key2"))
-	require.Equal(t, v, []byte("value1.11"))
+	require.Equal(t, k, []byte("key1"))
+	require.Equal(t, v, []byte("value1.3"))
 
 	k, v, err = c.Next()
 	require.Nil(t, err)
@@ -428,16 +306,80 @@ func TestNextPrevCurrent(t *testing.T) {
 
 	k, v, err = c.Prev()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key2"))
-	require.Equal(t, v, []byte("value1.11"))
+	require.Equal(t, k, []byte("key1"))
+	require.Equal(t, v, []byte("value1.3"))
 
 	k, v, err = c.Current()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key2"))
-	require.Equal(t, v, []byte("value1.11"))
+	require.Equal(t, k, []byte("key1"))
+	require.Equal(t, v, []byte("value1.3"))
 
 	k, v, err = c.Prev()
 	require.Nil(t, err)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.1"))
+}
+
+func TestSeek(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	var keys []string
+	var values []string
+	for k, v, err := c.Seek([]byte("k")); k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys = append(keys, string(k))
+		values = append(values, string(v))
+	}
+	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+
+	var keys1 []string
+	var values1 []string
+	for k, v, err := c.Seek([]byte("key3")); k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k))
+		values1 = append(values1, string(v))
+	}
+	require.Equal(t, []string{"key3", "key3"}, keys1)
+	require.Equal(t, []string{"value3.1", "value3.3"}, values1)
+
+	var keys2 []string
+	var values2 []string
+	for k, v, err := c.Seek([]byte("xy")); k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys2 = append(keys2, string(k))
+		values2 = append(values2, string(v))
+	}
+	require.Nil(t, keys2)
+	require.Nil(t, values2)
+}
+
+func TestSeekExact(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	var keys []string
+	var values []string
+	for k, v, err := c.SeekExact([]byte("key3")); k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys = append(keys, string(k))
+		values = append(values, string(v))
+	}
+	require.Equal(t, []string{"key3", "key3"}, keys)
+	require.Equal(t, []string{"value3.1", "value3.3"}, values)
+
+	var keys1 []string
+	var values1 []string
+	for k, v, err := c.SeekExact([]byte("key")); k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys1 = append(keys, string(k))
+		values1 = append(values, string(v))
+	}
+	require.Nil(t, keys1)
+	require.Nil(t, values1)
 }
