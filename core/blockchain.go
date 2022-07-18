@@ -80,7 +80,6 @@ func ExecuteBlockEphemerallyForBSC(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
@@ -138,7 +137,7 @@ func ExecuteBlockEphemerallyForBSC(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			if !statelessExec {
+			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
@@ -183,18 +182,18 @@ func ExecuteBlockEphemerallyForBSC(
 	}
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if !statelessExec && receiptSha != block.ReceiptHash() {
+		if !vmConfig.StatelessExec && receiptSha != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
 		}
 	}
-	if !statelessExec && newBlock.GasUsed() != header.GasUsed {
+	if !vmConfig.StatelessExec && newBlock.GasUsed() != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = newBlock.Bloom()
-		if !statelessExec && bloom != header.Bloom {
+		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
@@ -231,7 +230,6 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
@@ -282,7 +280,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			if !statelessExec {
+			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
@@ -295,18 +293,18 @@ func ExecuteBlockEphemerally(
 	}
 
 	receiptSha := types.DeriveSha(receipts)
-	if !statelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 	}
 
-	if !statelessExec && *usedGas != header.GasUsed {
+	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
-		if !statelessExec && bloom != header.Bloom {
+		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}

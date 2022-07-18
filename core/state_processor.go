@@ -36,6 +36,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	if err != nil {
 		return nil, nil, err
 	}
+	msg.SetCheckNonce(!cfg.StatelessExec)
 
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {

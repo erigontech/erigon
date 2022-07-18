@@ -137,9 +137,9 @@ func executeBlock(
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
 	if isPoSa {
-		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, getTracer)
 	} else {
-		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, getTracer)
 	}
 	if err != nil {
 		return err

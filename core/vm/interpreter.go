@@ -37,6 +37,7 @@ type Config struct {
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
 	EnableTEMV    bool   // true if execution with TEVM enable flag
+	StatelessExec bool   // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
