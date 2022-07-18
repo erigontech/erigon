@@ -401,9 +401,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 	defer logEvery.Stop()
 
 	bufferSize := etl.BufferOptimalSize
-	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewAppendBuffer(bufferSize))
+	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
 	defer topics.Close()
-	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewAppendBuffer(bufferSize))
+	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
 	defer addrs.Close()
 
 	reader := bytes.NewReader(nil)
@@ -438,11 +438,11 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 
 			for _, l := range logs {
 				for _, topic := range l.Topics {
-					if err := topics.Collect(topic.Bytes(), []byte{}); err != nil {
+					if err := topics.Collect(topic.Bytes(), nil); err != nil {
 						return err
 					}
 				}
-				if err := addrs.Collect(l.Address.Bytes(), []byte{}); err != nil {
+				if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
 					return err
 				}
 			}
