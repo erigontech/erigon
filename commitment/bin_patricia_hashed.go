@@ -1266,7 +1266,7 @@ func (cell *BinCell) deriveHashedKeys(depth int, keccak keccakState, accountKeyL
 }
 
 func (cell *BinCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
-	if fieldBits&HASHEDKEY_PART != 0 {
+	if fieldBits&HashedKeyPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
 			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey len")
@@ -1288,7 +1288,7 @@ func (cell *BinCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (
 		cell.downHashedLen = 0
 		cell.extLen = 0
 	}
-	if fieldBits&ACCOUNT_PLAIN_PART != 0 {
+	if fieldBits&AccountPlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
 			return 0, fmt.Errorf("fillFromFields buffer too small for accountPlainKey len")
@@ -1307,7 +1307,7 @@ func (cell *BinCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (
 	} else {
 		cell.apl = 0
 	}
-	if fieldBits&STORAGE_PLAIN_PART != 0 {
+	if fieldBits&StoragePlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
 			return 0, fmt.Errorf("fillFromFields buffer too small for storagePlainKey len")
@@ -1326,7 +1326,7 @@ func (cell *BinCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (
 	} else {
 		cell.spl = 0
 	}
-	if fieldBits&HASH_PART != 0 {
+	if fieldBits&HashPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
 			return 0, fmt.Errorf("fillFromFields buffer too small for hash len")

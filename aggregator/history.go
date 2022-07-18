@@ -38,7 +38,7 @@ import (
 // from state files, history files, and bitmap files produced by an Aggregator
 type History struct {
 	diffDir         string // Directory where the state diff files are stored
-	files           [NumberOfTypes]*btree.BTree
+	files           [NumberOfTypes]*btree.BTreeG[*byEndBlockItem]
 	aggregationStep uint64
 }
 
@@ -48,7 +48,7 @@ func NewHistory(diffDir string, blockTo uint64, aggregationStep uint64) (*Histor
 		aggregationStep: aggregationStep,
 	}
 	for fType := FirstType; fType < NumberOfTypes; fType++ {
-		h.files[fType] = btree.New(32)
+		h.files[fType] = btree.NewG(32, ByEndBlockItemLess)
 	}
 	var closeStateFiles = true // It will be set to false in case of success at the end of the function
 	defer func() {
@@ -111,8 +111,7 @@ func (h *History) scanStateFiles(files []fs.DirEntry, blockTo uint64) {
 		}
 		var item = &byEndBlockItem{startBlock: startBlock, endBlock: endBlock}
 		var foundI *byEndBlockItem
-		h.files[fType].AscendGreaterOrEqual(&byEndBlockItem{startBlock: endBlock, endBlock: endBlock}, func(i btree.Item) bool {
-			it := i.(*byEndBlockItem)
+		h.files[fType].AscendGreaterOrEqual(&byEndBlockItem{startBlock: endBlock, endBlock: endBlock}, func(it *byEndBlockItem) bool {
 			if it.endBlock == endBlock {
 				foundI = it
 			}
@@ -127,8 +126,7 @@ func (h *History) scanStateFiles(files []fs.DirEntry, blockTo uint64) {
 
 func (h *History) openFiles(fType FileType) error {
 	var err error
-	h.files[fType].Ascend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
+	h.files[fType].Ascend(func(item *byEndBlockItem) bool {
 		if item.decompressor, err = compress.NewDecompressor(path.Join(h.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))); err != nil {
 			return false
 		}
@@ -145,8 +143,7 @@ func (h *History) openFiles(fType FileType) error {
 }
 
 func (h *History) closeFiles(fType FileType) {
-	h.files[fType].Ascend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
+	h.files[fType].Ascend(func(item *byEndBlockItem) bool {
 		if item.decompressor != nil {
 			item.decompressor.Close()
 		}
@@ -201,8 +198,7 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 	var found bool
 	var foundTxNum uint64
 	var foundEndBlock uint64
-	hr.h.files[bitmapType].AscendGreaterOrEqual(&hr.search, func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
+	hr.h.files[bitmapType].AscendGreaterOrEqual(&hr.search, func(item *byEndBlockItem) bool {
 		offset := item.indexReader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
@@ -243,9 +239,9 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 	var historyItem *byEndBlockItem
 	hr.search.endBlock = foundEndBlock
 	hr.search.startBlock = foundEndBlock - 499_999
-	if i := hr.h.files[historyType].Get(&hr.search); i != nil {
-		historyItem = i.(*byEndBlockItem)
-	} else {
+	var ok bool
+	historyItem, ok = hr.h.files[historyType].Get(&hr.search)
+	if !ok || historyItem == nil {
 		return false, nil, fmt.Errorf("no %s file found for %d", historyType.String(), foundEndBlock)
 	}
 	offset := historyItem.indexReader.Lookup(lookupKey)
@@ -324,17 +320,16 @@ func (hr *HistoryReader) ReadAccountCodeSize(addr []byte, trace bool) (int, erro
 
 func (h *History) readFromFiles(fType FileType, filekey []byte, trace bool) []byte {
 	var val []byte
-	h.files[fType].Descend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
+	h.files[fType].Descend(func(item *byEndBlockItem) bool {
 		if trace {
 			fmt.Printf("read %s %x: search in file [%d-%d]\n", fType.String(), filekey, item.startBlock, item.endBlock)
 		}
 		if item.tree != nil {
-			ai := item.tree.Get(&AggregateItem{k: filekey})
-			if ai == nil {
+			ai, ok := item.tree.Get(&AggregateItem{k: filekey})
+			if !ok || ai == nil {
 				return true
 			}
-			val = ai.(*AggregateItem).v
+			val = ai.v
 			return false
 		}
 		if item.index.Empty() {

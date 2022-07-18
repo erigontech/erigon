@@ -617,19 +617,18 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 // aggregate gathers changes from the changefiles into a B-tree, and "removes" them from the database
 // This function is time-critical because it needs to be run in the same go-routine (thread) as the general
 // execution (due to read-write tx). After that, we can optimistically execute the rest in the background
-func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx, table string, commitMerger commitmentMerger) (*btree.BTree, error) {
+func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx, table string, commitMerger commitmentMerger) (*btree.BTreeG[*AggregateItem], error) {
 	if err := c.openFiles(blockTo, false /* write */); err != nil {
 		return nil, fmt.Errorf("open files: %w", err)
 	}
-	bt := btree.New(32)
+	bt := btree.NewG[*AggregateItem](32, AggregateItemLess)
 	err := c.aggregateToBtree(bt, prefixLen, commitMerger)
 	if err != nil {
 		return nil, fmt.Errorf("aggregateToBtree: %w", err)
 	}
 	// Clean up the DB table
 	var e error
-	bt.Ascend(func(i btree.Item) bool {
-		item := i.(*AggregateItem)
+	bt.Ascend(func(item *AggregateItem) bool {
 		if item.count == 0 {
 			return true
 		}
@@ -670,15 +669,14 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx
 	return bt, nil
 }
 
-func (a *Aggregator) updateArch(bt *btree.BTree, fType FileType, blockNum32 uint32) {
+func (a *Aggregator) updateArch(bt *btree.BTreeG[*AggregateItem], fType FileType, blockNum32 uint32) {
 	arch := a.arches[fType]
 	h := a.archHasher
 	n := uint64(len(arch))
 	if n == 0 {
 		return
 	}
-	bt.Ascend(func(i btree.Item) bool {
-		item := i.(*AggregateItem)
+	bt.Ascend(func(item *AggregateItem) bool {
 		if item.count == 0 {
 			return true
 		}
@@ -700,6 +698,7 @@ type AggregateItem struct {
 	count uint32
 }
 
+func AggregateItemLess(a, than *AggregateItem) bool { return bytes.Compare(a.k, than.k) < 0 }
 func (i *AggregateItem) Less(than btree.Item) bool {
 	return bytes.Compare(i.k, than.(*AggregateItem).k) < 0
 }
@@ -829,7 +828,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 // (there are 3 of them, one for "keys", one for values "before" every change, and one for values "after" every change)
 // and create a B-tree where each key is only represented once, with the value corresponding to the "after" value
 // of the latest change.
-func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitMerge commitmentMerger) error {
+func (c *Changes) aggregateToBtree(bt *btree.BTreeG[*AggregateItem], prefixLen int, commitMerge commitmentMerger) error {
 	var b bool
 	var e error
 	var key, before, after []byte
@@ -846,14 +845,14 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitMerge c
 			}
 
 			ai.k = key
-			i := bt.Get(&ai)
-			if i == nil {
+			i, ok := bt.Get(&ai)
+			if !ok || i == nil {
 				item := &AggregateItem{k: common.Copy(key), v: common.Copy(after), count: 1}
 				bt.ReplaceOrInsert(item)
 				continue
 			}
 
-			item := i.(*AggregateItem)
+			item := i
 			if commitMerge != nil {
 				mergedVal, err := commitMerge(item.v, after, nil)
 				if err != nil {
@@ -878,7 +877,7 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitMerge c
 
 const AggregatorPrefix = "aggregator"
 
-func btreeToFile(bt *btree.BTree, datPath, tmpdir string, trace bool, workers int) (int, error) {
+func btreeToFile(bt *btree.BTreeG[*AggregateItem], datPath, tmpdir string, trace bool, workers int) (int, error) {
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, workers, log.LvlDebug)
 	if err != nil {
 		return 0, err
@@ -886,8 +885,7 @@ func btreeToFile(bt *btree.BTree, datPath, tmpdir string, trace bool, workers in
 	defer comp.Close()
 	comp.SetTrace(trace)
 	count := 0
-	bt.Ascend(func(i btree.Item) bool {
-		item := i.(*AggregateItem)
+	bt.Ascend(func(item *AggregateItem) bool {
 		//fmt.Printf("btreeToFile %s [%x]=>[%x]\n", datPath, item.k, item.v)
 		if err = comp.AddUncompressedWord(item.k); err != nil {
 			return false
@@ -928,9 +926,16 @@ type byEndBlockItem struct {
 	getter       *compress.Getter // reader for the decompressor
 	getterMerge  *compress.Getter // reader for the decompressor used in the background merge thread
 	index        *recsplit.Index
-	indexReader  *recsplit.IndexReader // reader for the index
-	readerMerge  *recsplit.IndexReader // index reader for the background merge thread
-	tree         *btree.BTree          // Substitute for decompressor+index combination
+	indexReader  *recsplit.IndexReader         // reader for the index
+	readerMerge  *recsplit.IndexReader         // index reader for the background merge thread
+	tree         *btree.BTreeG[*AggregateItem] // Substitute for decompressor+index combination
+}
+
+func ByEndBlockItemLess(i, than *byEndBlockItem) bool {
+	if i.endBlock == than.endBlock {
+		return i.startBlock > than.startBlock
+	}
+	return i.endBlock < than.endBlock
 }
 
 func (i *byEndBlockItem) Less(than btree.Item) bool {
@@ -1123,14 +1128,14 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 func (a *Aggregator) rebuildRecentState(tx kv.RwTx) error {
 	t := time.Now()
 	var err error
-	trees := map[FileType]*btree.BTree{}
+	trees := map[FileType]*btree.BTreeG[*AggregateItem]{}
 
 	a.changesBtree.Ascend(func(i btree.Item) bool {
 		item := i.(*ChangesItem)
 		for fType := FirstType; fType < NumberOfStateTypes; fType++ {
 			tree, ok := trees[fType]
 			if !ok {
-				tree = btree.New(32)
+				tree = btree.NewG[*AggregateItem](32, AggregateItemLess)
 				trees[fType] = tree
 			}
 			var changes Changes
@@ -1162,8 +1167,7 @@ func (a *Aggregator) rebuildRecentState(tx kv.RwTx) error {
 	}
 	for fType, tree := range trees {
 		table := fType.Table()
-		tree.Ascend(func(i btree.Item) bool {
-			item := i.(*AggregateItem)
+		tree.Ascend(func(item *AggregateItem) bool {
 			if len(item.v) == 0 {
 				return true
 			}
@@ -1191,7 +1195,7 @@ func (a *Aggregator) rebuildRecentState(tx kv.RwTx) error {
 
 type AggregationTask struct {
 	changes   [NumberOfStateTypes]Changes
-	bt        [NumberOfStateTypes]*btree.BTree
+	bt        [NumberOfStateTypes]*btree.BTreeG[*AggregateItem]
 	blockFrom uint64
 	blockTo   uint64
 }
@@ -1944,11 +1948,14 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 			fmt.Printf("read %s %x: search in file [%d-%d]\n", fType.String(), filekey, item.startBlock, item.endBlock)
 		}
 		if item.tree != nil {
-			ai := item.tree.Get(&AggregateItem{k: filekey})
+			ai, ok := item.tree.Get(&AggregateItem{k: filekey})
+			if !ok {
+				return true
+			}
 			if ai == nil {
 				return true
 			}
-			val = ai.(*AggregateItem).v
+			val = ai.v
 			startBlock = item.startBlock
 
 			return false
@@ -2581,7 +2588,7 @@ type CursorItem struct {
 	endBlock uint64
 	key, val []byte
 	dg       *compress.Getter
-	tree     *btree.BTree
+	tree     *btree.BTreeG[*AggregateItem]
 	c        kv.Cursor
 }
 
@@ -2700,8 +2707,7 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
 	w.a.files[Storage].Ascend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if item.tree != nil {
-			item.tree.AscendGreaterOrEqual(&AggregateItem{k: addr}, func(ai btree.Item) bool {
-				aitem := ai.(*AggregateItem)
+			item.tree.AscendGreaterOrEqual(&AggregateItem{k: addr}, func(aitem *AggregateItem) bool {
 				if !bytes.HasPrefix(aitem.k, addr) {
 					return false
 				}
@@ -2769,12 +2775,12 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
 			case TREE_CURSOR:
 				skip := true
 				var aitem *AggregateItem
-				ci1.tree.AscendGreaterOrEqual(&AggregateItem{k: ci1.key}, func(ai btree.Item) bool {
+				ci1.tree.AscendGreaterOrEqual(&AggregateItem{k: ci1.key}, func(ai *AggregateItem) bool {
 					if skip {
 						skip = false
 						return true
 					}
-					aitem = ai.(*AggregateItem)
+					aitem = ai
 					return false
 				})
 				if aitem != nil && bytes.HasPrefix(aitem.k, addr) {
@@ -2929,7 +2935,7 @@ func (a *Aggregator) computeAggregation(fType FileType,
 	return item2, nil
 }
 
-func createDatAndIndex(treeName string, diffDir string, bt *btree.BTree, blockFrom uint64, blockTo uint64) (*compress.Decompressor, *recsplit.Index, error) {
+func createDatAndIndex(treeName string, diffDir string, bt *btree.BTreeG[*AggregateItem], blockFrom uint64, blockTo uint64) (*compress.Decompressor, *recsplit.Index, error) {
 	datPath := filepath.Join(diffDir, fmt.Sprintf("%s.%d-%d.dat", treeName, blockFrom, blockTo))
 	idxPath := filepath.Join(diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, blockFrom, blockTo))
 	count, err := btreeToFile(bt, datPath, diffDir, false /* trace */, 1 /* workers */)
