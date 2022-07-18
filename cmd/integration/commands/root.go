@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 var rootCmd = &cobra.Command{
@@ -46,6 +47,9 @@ func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
 }
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
+	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
+	// to read all options from DB, instead of overriding them
+	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
 	db := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())

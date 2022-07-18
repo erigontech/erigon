@@ -17,7 +17,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -164,16 +163,12 @@ func HeadersPOS(
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
-	if interrupt != engineapi.None {
-		if interrupt == engineapi.Stopping {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
-		}
-		if interrupt == engineapi.Synced {
-			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
-		}
-		if !useExternalTx {
-			return tx.Commit()
-		}
+	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
+	if err != nil {
+		return err
+	}
+
+	if interrupted {
 		return nil
 	}
 
@@ -181,20 +176,15 @@ func HeadersPOS(
 	requestStatus := requestWithStatus.Status
 
 	// Decide what kind of action we need to take place
-	var payloadMessage *engineapi.PayloadMessage
 	forkChoiceMessage, forkChoiceInsteadOfNewPayload := request.(*engineapi.ForkChoiceMessage)
-	if !forkChoiceInsteadOfNewPayload {
-		payloadMessage = request.(*engineapi.PayloadMessage)
-	}
-
 	cfg.hd.ClearPendingPayloadHash()
 	cfg.hd.SetPendingPayloadStatus(nil)
 
 	var payloadStatus *privateapi.PayloadStatus
-	var err error
 	if forkChoiceInsteadOfNewPayload {
 		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
 	} else {
+		payloadMessage := request.(*engineapi.PayloadMessage)
 		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
@@ -675,16 +665,43 @@ func schedulePoSDownload(
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
 	var lastValidHash common.Hash
+	var badChainError error
+	var foundPow bool
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
+		if badChainError != nil {
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
+		}
 		lastValidHash = h.ParentHash
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
-			return err
+			badChainError = err
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
+		}
+		// If we are in PoW range then block validation is not required anymore.
+		if foundPow {
+			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+		}
+
+		foundPow = h.Difficulty.Cmp(common.Big0) != 0
+		if foundPow {
+			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+		}
+		// Validate state if possible (bodies will be retrieved through body download)
+		_, _, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, &h, nil, false)
+		if criticalError != nil {
+			return criticalError
+		}
+		if validationError != nil {
+			badChainError = validationError
+			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			return nil
 		}
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
@@ -695,7 +712,10 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 		},
 	})
 
-	if err != nil {
+	if err != nil || badChainError != nil {
+		if err == nil {
+			err = badChainError
+		}
 		log.Warn("Removing beacon request due to", "err", err, "requestId", cfg.hd.RequestId())
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
 		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)
@@ -724,6 +744,22 @@ func forkingPoint(
 		return 0, err
 	}
 	return headerInserter.ForkingPoint(tx, header, parent)
+}
+
+func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, headerInserter *headerdownload.HeaderInserter, useExternalTx bool) (bool, error) {
+	if interrupt != engineapi.None {
+		if interrupt == engineapi.Stopping {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		}
+		if interrupt == engineapi.Synced {
+			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+		}
+		if !useExternalTx {
+			return true, tx.Commit()
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
@@ -1296,11 +1332,20 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
+	var missingSnapshots []snapshotsync.MergeRange
+	if !dbEmpty {
+		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
+		if err != nil {
+			return err
+		}
+	}
 
 	// send all hashes to the Downloader service
 	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
+	var downloadRequest []snapshotsync.DownloadRequest
+	// build all download requests
+	// builds preverified snapshots request
 	for _, p := range preverified {
 		_, has := snInDB[p.Name]
 		if !dbEmpty && !has {
@@ -1309,13 +1354,15 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		if dbEmpty {
 			snInDB[p.Name] = p.Hash
 		}
-
-		req.Items = append(req.Items, &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(p.Hash),
-			Path:        p.Name,
-		})
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 		i++
 	}
+	// builds missing snapshots request
+	for _, r := range missingSnapshots {
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
+	}
+	req := snapshotsync.BuildProtoRequest(downloadRequest)
+
 	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
 		select {
