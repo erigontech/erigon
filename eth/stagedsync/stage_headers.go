@@ -667,6 +667,8 @@ func schedulePoSDownload(
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
 	var lastValidHash common.Hash
 	var badChainError error
+	var foundPow bool
+
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
 		if err := rlp.DecodeBytes(value, &h); err != nil {
@@ -682,6 +684,15 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			badChainError = err
 			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
 			return nil
+		}
+		// If we are in PoW range then block validation is not required anymore.
+		if foundPow {
+			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+		}
+
+		foundPow = h.Difficulty.Cmp(common.Big0) != 0
+		if foundPow {
+			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
 		// Validate state if possible (bodies will be retrieved through body download)
 		_, _, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, &h, nil, false)

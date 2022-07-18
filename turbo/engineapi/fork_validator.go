@@ -15,6 +15,7 @@ package engineapi
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -130,6 +131,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if abs64(int64(fv.currentHeight)-header.Number.Int64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
+		fmt.Println("not in range")
 		return
 	}
 	// Let's assemble the side fork backwards
@@ -137,6 +139,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	currentHash := header.ParentHash
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 	if criticalError != nil {
+		fmt.Println("critical")
 		return
 	}
 
@@ -159,6 +162,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			return
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
+	}
+	// Do not set an unwind point if we are already there.
+	if unwindPoint == fv.currentHeight {
+		unwindPoint = 0
 	}
 	// if it is not canonical we validate it in memory and discard it aferwards.
 	batch := memdb.NewMemoryBatch(tx)
