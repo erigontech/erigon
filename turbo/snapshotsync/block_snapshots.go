@@ -396,7 +396,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 // - RPC return Nil for historical blocks if snapshots are not open
 func (s *RoSnapshots) OptimisticReopen() { _ = s.Reopen() }
 
-func (s *RoSnapshots) Reopen(ctx context.Context, snapshotDownloader proto_downloader.DownloaderClient) error {
+func (s *RoSnapshots) Reopen() error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
 	s.Bodies.lock.Lock()
@@ -404,17 +404,9 @@ func (s *RoSnapshots) Reopen(ctx context.Context, snapshotDownloader proto_downl
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, missingSnapshots, err := segments(s.dir)
+	files, _, err := segments(s.dir)
 	if err != nil {
-		// if we have missing snapshots then the error is a missing snapshots error
-		// so we attempt to download the snapshots
-		if len(missingSnapshots) > 0 {
-			if err := requestSnapshotDownload(ctx, missingSnapshots, snapshotDownloader); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -499,7 +491,7 @@ func (s *RoSnapshots) Reopen(ctx context.Context, snapshotDownloader proto_downl
 
 	return nil
 }
-func (s *RoSnapshots) ReopenSegments(ctx context.Context, snapshotDownloader proto_downloader.DownloaderClient) error {
+func (s *RoSnapshots) ReopenSegments() error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
 	s.Bodies.lock.Lock()
@@ -507,17 +499,9 @@ func (s *RoSnapshots) ReopenSegments(ctx context.Context, snapshotDownloader pro
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, missingSnapshots, err := segments(s.dir)
+	files, _, err := segments(s.dir)
 	if err != nil {
-		// if we have missing snapshots then the error is a missing snapshots error
-		// so we attempt to download the snapshots
-		if len(missingSnapshots) > 0 {
-			if err := requestSnapshotDownload(ctx, missingSnapshots, snapshotDownloader); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
 	s.Bodies.segments = s.Bodies.segments[:0]
 	s.Headers.segments = s.Headers.segments[:0]
@@ -995,7 +979,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
-	if err := snapshots.Reopen(ctx, downloader); err != nil {
+	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("Reopen: %w", err)
 	}
 	idxWorkers := workers
@@ -1005,7 +989,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesMax(), idxWorkers, log.LvlInfo); err != nil {
 		return err
 	}
-	if err := snapshots.Reopen(ctx, downloader); err != nil {
+	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("Reopen: %w", err)
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
