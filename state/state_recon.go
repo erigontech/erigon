@@ -41,8 +41,7 @@ func (d *Domain) MakeContext() *DomainContext {
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		bt := btree.New(32)
 		dc.files[fType] = bt
-		d.files[fType].Ascend(func(i btree.Item) bool {
-			item := i.(*filesItem)
+		d.files[fType].Ascend(func(item *filesItem) bool {
 			bt.ReplaceOrInsert(&filesItem{
 				startTxNum:   item.startTxNum,
 				endTxNum:     item.endTxNum,
