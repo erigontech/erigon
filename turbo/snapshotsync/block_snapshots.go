@@ -43,8 +43,8 @@ import (
 
 type DownloadRequest struct {
 	ranges      *MergeRange
-	path        *string
-	torrentHash *string
+	path        string
+	torrentHash string
 }
 
 type HeaderSegment struct {
@@ -1938,7 +1938,7 @@ func assertSegment(segmentFile string) {
 	}
 }
 
-func NewDownloadRequest(ranges *MergeRange, path *string, torrentHash *string) DownloadRequest {
+func NewDownloadRequest(ranges *MergeRange, path string, torrentHash string) DownloadRequest {
 	return DownloadRequest{
 		ranges:      ranges,
 		path:        path,
@@ -1951,7 +1951,7 @@ func RequestSnapshotDownload(ctx context.Context, ranges []MergeRange, downloade
 	// start seed large .seg of large size
 	var downloadRequest []DownloadRequest
 	for _, r := range ranges {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, nil, nil))
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
 	}
 	req := BuildProtoRequest(downloadRequest)
 	if len(req.Items) > 0 && downloader != nil {
@@ -1965,15 +1965,15 @@ func RequestSnapshotDownload(ctx context.Context, ranges []MergeRange, downloade
 func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.DownloadRequest {
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
 	for _, r := range downloadRequest {
-		if r.path != nil {
-			if r.torrentHash != nil {
+		if r.path != "" {
+			if r.torrentHash != "" {
 				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					TorrentHash: downloadergrpc.String2Proto(*r.torrentHash),
-					Path:        *r.path,
+					TorrentHash: downloadergrpc.String2Proto(r.torrentHash),
+					Path:        r.path,
 				})
 			} else {
 				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: *r.path,
+					Path: r.path,
 				})
 			}
 		} else {

@@ -1343,12 +1343,12 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		if dbEmpty {
 			snInDB[p.Name] = p.Hash
 		}
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, &p.Name, &p.Hash))
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 		i++
 	}
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, nil, nil))
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
 	}
 	req := snapshotsync.BuildProtoRequest(downloadRequest)
 
