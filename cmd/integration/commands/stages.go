@@ -850,7 +850,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnLogIndex(s, tx, cfg, ctx); err != nil {
+		if err := stagedsync.SpawnLogIndex(s, tx, cfg, ctx, block); err != nil {
 			return err
 		}
 	}
