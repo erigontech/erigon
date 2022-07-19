@@ -83,7 +83,7 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 // NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.currentHeight = currentHeight
-	// If the head changed then, previous assumptions on head are incorrect now.
+	// If the head changed,e previous assumptions on head are incorrect now.
 	if fv.extendingFork != nil {
 		fv.extendingFork.Rollback()
 	}
@@ -124,7 +124,13 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// Update fork head hash.
 		fv.extendingForkHeadHash = header.Hash()
-		return fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
+		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
+		if status == remote.EngineStatus_INVALID {
+			fv.extendingFork.Rollback()
+			fv.extendingFork = nil
+			fv.extendingForkHeadHash = common.Hash{}
+		}
+		return
 	}
 	// If the block is stored within the side fork it means it was already validated.
 	if _, ok := fv.sideForksBlock[header.Hash()]; ok {
