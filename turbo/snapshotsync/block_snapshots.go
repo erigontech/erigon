@@ -1017,9 +1017,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	for _, r := range ranges {
 		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
 	}
-	RequestSnapshotDownload(ctx, downloadRequest, downloader)
 
-	return nil
+	return RequestSnapshotDownload(ctx, downloadRequest, downloader)
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1953,13 +1952,14 @@ func NewDownloadRequest(ranges *MergeRange, path string, torrentHash string) Dow
 }
 
 // builds the snapshots download request and downloads them
-func RequestSnapshotDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient) {
+func RequestSnapshotDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient) error {
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Download(ctx, req); err != nil {
-		log.Error("[Snapshots] call downloader", "err", err)
 		time.Sleep(10 * time.Second)
+		return err
 	}
+	return nil
 }
 
 func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.DownloadRequest {

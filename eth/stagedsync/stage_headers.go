@@ -1336,7 +1336,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if !dbEmpty {
 		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
-			return err
+			log.Warn("[Snapshots] missing segments coudln't be downloaded", "err", err)
 		}
 	}
 
@@ -1361,7 +1361,6 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	for _, r := range missingSnapshots {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
 	}
-	req := snapshotsync.BuildProtoRequest(downloadRequest)
 
 	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
@@ -1370,9 +1369,8 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+		if err := snapshotsync.RequestSnapshotDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 			log.Error("[Snapshots] call downloader", "err", err)
-			time.Sleep(10 * time.Second)
 			continue
 		}
 		break
