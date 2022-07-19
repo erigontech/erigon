@@ -83,6 +83,12 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 // NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.currentHeight = currentHeight
+	// If the head changed then, previous assumptions on head are incorrect now.
+	if fv.extendingFork != nil {
+		fv.extendingFork.Rollback()
+	}
+	fv.extendingFork = nil
+	fv.extendingForkHeadHash = common.Hash{}
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
