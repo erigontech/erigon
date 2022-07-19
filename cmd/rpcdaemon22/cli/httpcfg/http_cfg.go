@@ -10,7 +10,9 @@ type HttpCfg struct {
 	Enabled                 bool
 	PrivateApiAddr          string
 	WithDatadir             bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
+	WithSnapdir             bool // This is to cover when snapshots directory is not located in the same directory
 	DataDir                 string
+	SnapDir                 string
 	Dirs                    datadir.Dirs
 	HttpListenAddress       string
 	EngineHTTPListenAddress string

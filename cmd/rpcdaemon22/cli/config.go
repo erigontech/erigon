@@ -64,7 +64,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
-	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon data directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.SnapDir, "snapdir", "", "path to snapshots directory (default inside data directory)")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
@@ -103,17 +104,24 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	if err := rootCmd.MarkPersistentFlagDirname("datadir"); err != nil {
 		panic(err)
 	}
+	if err := rootCmd.MarkPersistentFlagDirname("snapdir"); err != nil {
+		panic(err)
+	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
 		cfg.WithDatadir = cfg.DataDir != ""
-		if cfg.WithDatadir {
+		cfg.WithSnapdir = cfg.SnapDir != ""
+		if cfg.WithDatadir || cfg.WithSnapdir {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			cfg.Dirs = datadir.New(cfg.DataDir, paths.DefaultSnapDir())
+			if cfg.SnapDir == "" {
+				cfg.SnapDir = paths.DefaultSnapDir()
+			}
+			cfg.Dirs = datadir.New(cfg.DataDir, cfg.SnapDir)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
