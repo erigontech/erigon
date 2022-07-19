@@ -1336,8 +1336,12 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if !dbEmpty {
 		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
-			log.Warn("[Snapshots] missing segments coudln't be downloaded", "err", err)
+			return err
 		}
+	}
+
+	if len(missingSnapshots) > 0 {
+		log.Warn("[Snapshots] downloading missing snapshots")
 	}
 
 	// send all hashes to the Downloader service
