@@ -1956,7 +1956,6 @@ func RequestSnapshotDownload(ctx context.Context, downloadRequest []DownloadRequ
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Download(ctx, req); err != nil {
-		time.Sleep(10 * time.Second)
 		return err
 	}
 	return nil
