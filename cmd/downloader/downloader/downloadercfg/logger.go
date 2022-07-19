@@ -74,6 +74,9 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
 			break
 		}
+		if strings.Contains(str, "requested chunk too long") { // suppress useless errors
+			break
+		}
 
 		log.Warn(str)
 	case lg.Error:
