@@ -117,7 +117,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 	reader := bytes.NewReader(nil)
 
 	if endBlock != 0 {
-		log.Info(fmt.Sprintf("Running LogIndex from blocks %d to %d", start, endBlock), "block", endBlock)
+		log.Info(fmt.Sprintf("[%s] Running from blocks %d to %d", logPrefix, start, endBlock), "endBlock", endBlock)
 	}
 
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
@@ -133,7 +133,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		// if endBlock is positive, we only run the stage up until endBlock
 		// if endBlock is zero, we run the stage for all available blocks
 		if endBlock != 0 && blockNum > endBlock {
-			log.Info("Reached user-specified end block", "endBlock", endBlock)
+			log.Info(fmt.Sprintf("[%s] Reached user-specified end block", logPrefix), "endBlock", endBlock)
 			break
 		}
 
