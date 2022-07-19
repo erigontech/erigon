@@ -332,40 +332,35 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	return nil
 }
 
-func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pruneTo uint64, logPrefix string, ctx context.Context) error {
+func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, ctx context.Context) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	keys := make([]string, 0, len(inMem))
-	for k := range inMem {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+
 	c, err := tx.RwCursor(bucket)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	for _, kS := range keys {
-		seek := []byte(kS)
-		for k, _, err := c.Seek(seek); k != nil; k, _, err = c.Next() {
+
+	if err := inMem.Load(tx, bucket, func(key, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		for k, _, err := c.Seek(key); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			blockNum := uint64(binary.BigEndian.Uint32(k[len(seek):]))
-			if !bytes.HasPrefix(k, seek) || blockNum >= pruneTo {
+			blockNum := uint64(binary.BigEndian.Uint32(k[len(key):]))
+			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
-			select {
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
-			case <-ctx.Done():
-				return libcommon.ErrStopped
-			default:
-			}
+
 			if err = c.DeleteCurrent(); err != nil {
 				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
 			}
 		}
+		return nil
+	}, etl.TransformArgs{
+		Quit: ctx.Done(),
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -405,8 +400,11 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	topics := map[string]struct{}{}
-	addrs := map[string]struct{}{}
+	bufferSize := etl.BufferOptimalSize
+	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
+	defer topics.Close()
+	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
+	defer addrs.Close()
 
 	reader := bytes.NewReader(nil)
 	{
@@ -440,17 +438,21 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 
 			for _, l := range logs {
 				for _, topic := range l.Topics {
-					topics[string(topic.Bytes())] = struct{}{}
+					if err := topics.Collect(topic.Bytes(), nil); err != nil {
+						return err
+					}
 				}
-				addrs[string(l.Address.Bytes())] = struct{}{}
+				if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
-	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, ctx); err != nil {
 		return err
 	}
-	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, ctx); err != nil {
 		return err
 	}
 	return nil
