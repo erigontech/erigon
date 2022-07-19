@@ -84,6 +84,12 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 // NotifyCurrentHeight is to be called at the end of the stage cycle and repressent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.currentHeight = currentHeight
+	// If the head changed,e previous assumptions on head are incorrect now.
+	if fv.extendingFork != nil {
+		fv.extendingFork.Rollback()
+	}
+	fv.extendingFork = nil
+	fv.extendingForkHeadHash = common.Hash{}
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
@@ -176,7 +182,16 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
 // because fcu decides what the head is and after the call is done all the non-chosed forks are
 // to be considered obsolete.
-func (fv *ForkValidator) Clear(tx kv.RwTx) {
+func (fv *ForkValidator) Clear() {
+	if fv.extendingFork != nil {
+		fv.extendingFork.Rollback()
+	}
+	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingFork = nil
+}
+
+// Clear wipes out current extending fork data and notify txpool.
+func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx) {
 	sb, ok := fv.sideForksBlock[fv.extendingForkHeadHash]
 	// If we did not flush the fork state, then we need to notify the txpool through unwind.
 	if fv.extendingFork != nil && fv.extendingForkHeadHash != (common.Hash{}) && ok {
@@ -187,8 +202,7 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 		}
 		fv.extendingFork.Rollback()
 	}
-	fv.extendingForkHeadHash = common.Hash{}
-	fv.extendingFork = nil
+	fv.Clear()
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
@@ -198,6 +212,11 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	if validationError != nil {
 		latestValidHash = header.ParentHash
 		status = remote.EngineStatus_INVALID
+		if fv.extendingFork != nil {
+			fv.extendingFork.Rollback()
+			fv.extendingFork = nil
+		}
+		fv.extendingForkHeadHash = common.Hash{}
 		return
 	}
 	// If we do not have the body we can recover it from the batch.
