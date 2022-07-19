@@ -45,7 +45,7 @@ func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
 	}
 }
 
-func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context) error {
+func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, prematureEndBlock uint64) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -61,7 +61,15 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	if endBlock == s.BlockNumber {
+	// if prematureEndBlock is nonzero and less than the latest executed block,
+	// then we only run the log index stage until prematureEndBlock
+	if prematureEndBlock != 0 && prematureEndBlock < endBlock {
+		endBlock = prematureEndBlock
+	}
+	// It is possible that prematureEndBlock < s.BlockNumber,
+	// in which case it is important that we skip this stage,
+	// or else we could overwrite stage_at with prematureEndBlock
+	if endBlock <= s.BlockNumber {
 		return nil
 	}
 
@@ -73,8 +81,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if startBlock > 0 {
 		startBlock++
 	}
-
-	if err = promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -90,7 +97,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg, ctx context.Context) error {
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -112,6 +119,10 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 
 	reader := bytes.NewReader(nil)
 
+	if endBlock != 0 {
+		log.Info(fmt.Sprintf("[%s] Running from blocks %d to %d", logPrefix, start, endBlock), "endBlock", endBlock)
+	}
+
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
 		if err != nil {
 			return err
@@ -121,6 +132,13 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 			return err
 		}
 		blockNum := binary.BigEndian.Uint64(k[:8])
+
+		// if endBlock is positive, we only run the stage up until endBlock
+		// if endBlock is zero, we run the stage for all available blocks
+		if endBlock != 0 && blockNum > endBlock {
+			log.Info(fmt.Sprintf("[%s] Reached user-specified end block", logPrefix), "endBlock", endBlock)
+			break
+		}
 
 		select {
 		default:
