@@ -2069,6 +2069,7 @@ func (p *PendingPool) Len() int { return len(p.best.ms) }
 func (p *PendingPool) Remove(i *metaTx) {
 	heap.Remove(p.worst, i.worstIndex)
 	p.best.UnsafeRemove(i)
+	i.currentSubPool = 0
 }
 
 func (p *PendingPool) Add(i *metaTx) {
