@@ -1454,7 +1454,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 				stAccounts++
 			}
 			if (stStorage+stAccounts)%100000 == 0 {
-				fmt.Printf("State records: %d\n", stStorage+stAccounts)
+				//fmt.Printf("State records: %d\n", stStorage+stAccounts)
+				log.Info("State", "total", stStorage+stAccounts)
 			}
 		}
 		return e
@@ -1471,7 +1472,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	defer tx.Rollback()
 	if err := changeset.ForRange(tx, kv.AccountChangeSet, block1, block2, func(blockN uint64, k, v []byte) error {
 		if (blockN-block1)%100000 == 0 {
-			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
+			//fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
+			log.Info("Account changesets", "block", blockN, "accounts", len(accounts))
 		}
 		accounts[string(common.CopyBytes(k))] = struct{}{}
 		return nil
@@ -1482,7 +1484,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	storage := make(map[string]struct{})
 	if err := changeset.ForRange(tx, kv.StorageChangeSet, block1, block2, func(blockN uint64, k, v []byte) error {
 		if (blockN-block1)%100000 == 0 {
-			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
+			//fmt.Printf("at the block %d for storage, booster size: %d\n", blockN, len(storage))
+			log.Info("Storage changesets", "block", blockN, "len(storage)", len(storage))
 		}
 		storage[string(common.CopyBytes(k))] = struct{}{}
 		return nil
@@ -1490,7 +1493,8 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 		return err
 	}
 
-	fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
+	//fmt.Printf("accounts changed: %d, storage changed: %d\n", len(accounts), len(storage))
+	log.Info("Finished", "len(accounts)", len(accounts), "len(storage)", len(storage))
 	return nil
 }
 
