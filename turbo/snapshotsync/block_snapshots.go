@@ -390,7 +390,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, snap.ErrSnapshotMissed) {
+			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -1013,7 +1013,13 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("Reopen: %w", err)
 	}
 
-	return RequestSnapshotDownload(ctx, ranges, downloader)
+	var downloadRequest []DownloadRequest
+	for _, r := range ranges {
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
+	}
+	RequestSnapshotDownload(ctx, downloadRequest, downloader)
+
+	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1947,19 +1953,13 @@ func NewDownloadRequest(ranges *MergeRange, path string, torrentHash string) Dow
 }
 
 // builds the snapshots download request and downloads them
-func RequestSnapshotDownload(ctx context.Context, ranges []MergeRange, downloader proto_downloader.DownloaderClient) error {
+func RequestSnapshotDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient) {
 	// start seed large .seg of large size
-	var downloadRequest []DownloadRequest
-	for _, r := range ranges {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
-	}
 	req := BuildProtoRequest(downloadRequest)
-	if len(req.Items) > 0 && downloader != nil {
-		if _, err := downloader.Download(ctx, req); err != nil {
-			return err
-		}
+	if _, err := downloader.Download(ctx, req); err != nil {
+		log.Error("[Snapshots] call downloader", "err", err)
+		time.Sleep(10 * time.Second)
 	}
-	return nil
 }
 
 func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.DownloadRequest {

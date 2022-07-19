@@ -167,8 +167,6 @@ func TmpFiles(dir string) (res []string, err error) {
 	return res, nil
 }
 
-var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
-
 // ParseDir - reading dir (
 func ParseDir(dir string) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
