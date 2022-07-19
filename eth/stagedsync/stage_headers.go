@@ -259,6 +259,9 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*privateapi.PayloadStatus, error) {
+	if cfg.memoryOverlay {
+		defer cfg.forkValidator.ClearWithUnwind(tx)
+	}
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
@@ -291,10 +294,6 @@ func startHandlingForkChoice(
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: lastValidHash,
 		}, nil
-	}
-
-	if cfg.memoryOverlay {
-		defer cfg.forkValidator.ClearWithUnwind(tx)
 	}
 
 	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
@@ -582,7 +581,7 @@ func verifyAndSaveNewPoSHeader(
 
 	if cfg.memoryOverlay {
 		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-		extendCanonical := extendingHash == common.Hash{} || extendingHash == header.ParentHash
+		extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
 		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, extendCanonical)
 		if criticalError != nil {
 			return nil, false, criticalError
