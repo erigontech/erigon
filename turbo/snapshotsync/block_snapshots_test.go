@@ -163,14 +163,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.Equal(2, len(s.Headers.segments))
 
 	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
-		require.Equal(int(sn.To), 500_000)
+		require.Equal(int(sn.ranges.to), 500_000)
 		return nil
 	})
 	require.NoError(err)
 	require.True(ok)
 
 	ok, err = s.ViewTxs(500_000, func(sn *TxnSegment) error {
-		require.Equal(int(sn.To), 1_000_000) // [from:to)
+		require.Equal(int(sn.ranges.to), 1_000_000) // [from:to)
 		return nil
 	})
 	require.NoError(err)
