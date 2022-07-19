@@ -10,6 +10,14 @@ import (
 
 const dirname = "Erigon"
 
+// DefaultSnapDir is the default snap directory to use for the snapshots and 
+// by default will be a subdirectory of data directory
+func DefaultSnapDir() string {
+	// This is the equivalent of filepath.join(DefaultDataDir(), "snapshots")
+	// Because passing an empty string will defer to datadir.New()
+	return ""
+}
+
 // DefaultDataDir is the default data directory to use for the databases and other
 // persistence requirements.
 func DefaultDataDir() string {

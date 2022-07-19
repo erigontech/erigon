@@ -153,11 +153,11 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	return nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, dataDir string) error {
+func (m *Migrator) Apply(db kv.RwDB, dataDir string, snapDir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
-	dirs := datadir.New(dataDir)
+	dirs := datadir.New(dataDir, snapDir)
 
 	var applied map[string][]byte
 	if err := db.View(context.Background(), func(tx kv.Tx) error {

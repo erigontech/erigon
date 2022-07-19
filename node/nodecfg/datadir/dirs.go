@@ -1,6 +1,7 @@
 package datadir
 
 import (
+	//"fmt"
 	"path/filepath"
 )
 
@@ -18,7 +19,7 @@ type Dirs struct {
 	Nodes           string
 }
 
-func New(datadir string) Dirs {
+func New(datadir string, snapdir string) Dirs {
 	relativeDataDir := datadir
 	if datadir != "" {
 		var err error
@@ -29,12 +30,26 @@ func New(datadir string) Dirs {
 		datadir = absdatadir
 	}
 
+	if snapdir != "" {
+		var err error
+		//fmt.Printf("Setting snapdir to \"%s\"\n", snapdir)
+		abssnapdir, err := filepath.Abs(snapdir)
+		if err != nil {
+			panic(err)
+		}
+		snapdir = abssnapdir
+	} else {
+		//fmt.Printf("Setting snapdir default\n")
+		snapdir = filepath.Join(datadir, "snapshots")
+	}
+	//fmt.Printf("Snapshots directory set to: %s\n", snapdir)
+
 	return Dirs{
 		RelativeDataDir: relativeDataDir,
 		DataDir:         datadir,
 		Chaindata:       filepath.Join(datadir, "chaindata"),
 		Tmp:             filepath.Join(datadir, "etl-temp"),
-		Snap:            filepath.Join(datadir, "snapshots"),
+		Snap:            snapdir,
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 	}

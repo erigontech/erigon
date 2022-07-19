@@ -114,7 +114,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		cfg := txpool.DefaultConfig
-		dirs := datadir.New(datadirCli)
+		dirs := datadir.New(datadirCli, "")
 
 		cfg.DBDir = dirs.TxPool
 		cfg.CommitEvery = 30 * time.Second

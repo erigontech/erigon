@@ -57,7 +57,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = opts.Exclusive().MustOpen()
-			if err := migrator.Apply(db, datadirCli); err != nil {
+			if err := migrator.Apply(db, datadirCli, snapdirCli); err != nil {
 				panic(err)
 			}
 			db.Close()

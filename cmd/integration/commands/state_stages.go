@@ -152,7 +152,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	}
 	defer tx.Rollback()
 
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(datadirCli, snapdirCli)
 	quit := ctx.Done()
 
 	var batchSize datasize.ByteSize
@@ -406,7 +406,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(datadirCli, snapdirCli)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -471,7 +471,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(datadirCli, snapdirCli)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

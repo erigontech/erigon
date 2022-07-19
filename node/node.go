@@ -343,7 +343,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir, config.Dirs.Snap); err != nil {
 			return nil, err
 		}
 		db.Close()

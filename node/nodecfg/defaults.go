@@ -36,7 +36,7 @@ const (
 
 // DefaultConfig contains reasonable default settings.
 var DefaultConfig = Config{
-	Dirs:             datadir.New(paths.DefaultDataDir()),
+	Dirs:             datadir.New(paths.DefaultDataDir(), paths.DefaultSnapDir()),
 	HTTPPort:         DefaultHTTPPort,
 	HTTPModules:      []string{"net", "web3"},
 	HTTPVirtualHosts: []string{"localhost"},

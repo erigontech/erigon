@@ -34,6 +34,7 @@ import (
 
 var (
 	datadirCli                     string
+	snapdirCli                     string
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
@@ -52,6 +53,7 @@ func init() {
 	utils.CobraFlags(rootCmd, flags)
 
 	withDataDir(rootCmd)
+	withSnapDir(rootCmd)
 
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
@@ -77,6 +79,13 @@ func init() {
 func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
+}
+
+func withSnapDir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&snapdirCli, utils.SnapDirFlag.Name, paths.DefaultSnapDir(), utils.SnapDirFlag.Usage)
+	if err := cmd.MarkFlagDirname(utils.SnapDirFlag.Name); err != nil {
 		panic(err)
 	}
 }
@@ -113,7 +122,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(datadirCli, snapdirCli)
 	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
@@ -165,7 +174,7 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dirs := datadir.New(datadirCli)
+		dirs := datadir.New(datadirCli, snapdirCli)
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)

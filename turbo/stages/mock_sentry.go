@@ -193,7 +193,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	dirs := datadir.New(tmpdir)
+	dirs := datadir.New(tmpdir, "")
 	var err error
 
 	db := memdb.New()

@@ -78,6 +78,7 @@ var DefaultFlags = []cli.Flag{
 	EngineWriteTimeoutFlag,
 	EngineIdleTimeoutFlag,
 
+	utils.SnapDirFlag,
 	utils.SnapKeepBlocksFlag,
 	utils.SnapStopFlag,
 	utils.DbPageSizeFlag,

@@ -113,7 +113,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			cfg.Dirs = datadir.New(cfg.DataDir)
+			cfg.Dirs = datadir.New(cfg.DataDir, paths.DefaultSnapDir())
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr

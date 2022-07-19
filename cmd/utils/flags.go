@@ -98,7 +98,11 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
-
+	SnapDirFlag = DirectoryFlag{
+		Name:  "snapdir",
+		Usage: "Data directory for the snapshots (default = inside datadir)",
+		Value: DirectoryString(paths.DefaultSnapDir()),
+	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
@@ -1089,7 +1093,15 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	} else {
 		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
-	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
+
+	if ctx.GlobalIsSet(SnapDirFlag.Name) {
+		cfg.Dirs.Snap = ctx.GlobalString(SnapDirFlag.Name)
+		//log.Debug("Set", "snapdir", ctx.GlobalInt(SnapDirFlag.Name))
+	//} else {
+		//log.Debug("Default", "snapdir", cfg.Dirs.Snap)
+	}
+
+	cfg.Dirs = datadir.New(cfg.Dirs.DataDir, cfg.Dirs.Snap)
 
 	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
 		panic(err)
@@ -1122,8 +1134,16 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
 	}
 
+	snapdirname, err := f.GetString(SnapDirFlag.Name)
+	if err != nil {
+		panic(err)
+	}
+	if snapdirname != "" {
+		cfg.Dirs.Snap = snapdirname
+	}
+
 	cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
-	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
+	cfg.Dirs = datadir.New(cfg.Dirs.DataDir, cfg.Dirs.Snap)
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config) {

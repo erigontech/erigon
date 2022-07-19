@@ -121,7 +121,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name), cliCtx.String(utils.SnapDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
@@ -192,7 +192,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name), cliCtx.String(utils.SnapDirFlag.Name))
 	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
@@ -235,7 +235,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name), cliCtx.String(utils.SnapDirFlag.Name))
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
@@ -286,7 +286,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	if segmentSize < 1000 {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
 	}
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name), cliCtx.String(utils.SnapDirFlag.Name))
 	dir.MustExist(dirs.Snap)
 	dir.MustExist(filepath.Join(dirs.Snap, "db")) // this folder will be checked on existance - to understand that snapshots are ready
 	dir.MustExist(dirs.Tmp)

@@ -206,7 +206,7 @@ func DefaultIPCEndpoint(clientIdentifier string) string {
 			panic("empty executable name")
 		}
 	}
-	config := &Config{Dirs: datadir.New(paths.DefaultDataDir()), IPCPath: clientIdentifier + ".ipc"}
+	config := &Config{Dirs: datadir.New(paths.DefaultDataDir(), paths.DefaultSnapDir()), IPCPath: clientIdentifier + ".ipc"}
 	return config.IPCEndpoint()
 }
 
