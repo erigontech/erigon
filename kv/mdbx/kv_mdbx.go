@@ -75,7 +75,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
-		pageSize:   4096,
+		pageSize:   kv.DefaultPageSize(),
 	}
 }
 
@@ -208,11 +208,24 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		}
 	}
 
-	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+		}
 	}
 
+	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
+	in, err := env.Info(nil)
+	if err != nil {
+		if err != nil {
+			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+		}
+	}
+	opts.pageSize = uint64(in.PageSize)
+
+	// erigon using big transactions
+	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
 	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
@@ -220,10 +233,24 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		//if err = env.SetOption(mdbx.OptSpillMinDenominator, 8); err != nil {
 		//	return nil, err
 		//}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, 16*1024); err != nil {
+
+		txnDpInitial, err := env.GetOption(mdbx.OptTxnDpInitial)
+		if err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, 16*1024); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
+			return nil, err
+		}
+		dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
+		if err != nil {
+			return nil, err
+		}
+		if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+			return nil, err
+		}
+
+		defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+		if err != nil {
 			return nil, err
 		}
 		if err = env.SetOption(mdbx.OptTxnDpLimit, defaultDirtyPagesLimit*2); err != nil { // default is RAM/42
@@ -239,13 +266,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
 	if err != nil {
 		return nil, err
-	}
-
-	err = env.Open(opts.path, opts.flags, 0664)
-	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
 	}
 
 	if opts.syncPeriod != 0 {

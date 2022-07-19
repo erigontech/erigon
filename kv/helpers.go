@@ -3,11 +3,24 @@ package kv
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
 )
+
+func DefaultPageSize() uint64 {
+	osPageSize := os.Getpagesize()
+	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
+		osPageSize = 4096
+	} else if osPageSize > mdbx.MaxPageSize {
+		osPageSize = mdbx.MaxPageSize
+	}
+	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
+	return uint64(osPageSize)
+}
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes
 func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byte) (bool, error)) error {
