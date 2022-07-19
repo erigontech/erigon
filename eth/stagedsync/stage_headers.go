@@ -261,9 +261,6 @@ func startHandlingForkChoice(
 ) (*privateapi.PayloadStatus, error) {
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
-	if cfg.memoryOverlay {
-		defer cfg.forkValidator.Clear(tx)
-	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
@@ -294,6 +291,10 @@ func startHandlingForkChoice(
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: lastValidHash,
 		}, nil
+	}
+
+	if cfg.memoryOverlay {
+		defer cfg.forkValidator.ClearWithUnwind(tx)
 	}
 
 	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
@@ -578,10 +579,11 @@ func verifyAndSaveNewPoSHeader(
 	forkingHash, err := cfg.blockReader.CanonicalHash(ctx, tx, forkingPoint)
 
 	canExtendCanonical := forkingHash == currentHeadHash
-	canExtendFork := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
-	if cfg.memoryOverlay && (canExtendFork || header.ParentHash != currentHeadHash) {
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, header.ParentHash == currentHeadHash /* extendCanonical */)
+	if cfg.memoryOverlay {
+		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
+		extendCanonical := extendingHash == common.Hash{} || extendingHash == header.ParentHash
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, extendCanonical)
 		if criticalError != nil {
 			return nil, false, criticalError
 		}
@@ -665,6 +667,8 @@ func schedulePoSDownload(
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
+	defer cfg.forkValidator.Clear()
+
 	var lastValidHash common.Hash
 	var badChainError error
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {

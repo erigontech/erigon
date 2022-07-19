@@ -124,13 +124,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// Update fork head hash.
 		fv.extendingForkHeadHash = header.Hash()
-		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
-		if status == remote.EngineStatus_INVALID {
-			fv.extendingFork.Rollback()
-			fv.extendingFork = nil
-			fv.extendingForkHeadHash = common.Hash{}
-		}
-		return
+		return fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
 	}
 	// If the block is stored within the side fork it means it was already validated.
 	if _, ok := fv.sideForksBlock[header.Hash()]; ok {
@@ -181,7 +175,16 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
 // because fcu decides what the head is and after the call is done all the non-chosed forks are
 // to be considered obsolete.
-func (fv *ForkValidator) Clear(tx kv.RwTx) {
+func (fv *ForkValidator) Clear() {
+	if fv.extendingFork != nil {
+		fv.extendingFork.Rollback()
+	}
+	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingFork = nil
+}
+
+// Clear wipes out current extending fork data and notify txpool.
+func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx) {
 	sb, ok := fv.sideForksBlock[fv.extendingForkHeadHash]
 	// If we did not flush the fork state, then we need to notify the txpool through unwind.
 	if fv.extendingFork != nil && fv.extendingForkHeadHash != (common.Hash{}) && ok {
@@ -192,8 +195,7 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 		}
 		fv.extendingFork.Rollback()
 	}
-	fv.extendingForkHeadHash = common.Hash{}
-	fv.extendingFork = nil
+	fv.Clear()
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
@@ -203,6 +205,11 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	if validationError != nil {
 		latestValidHash = header.ParentHash
 		status = remote.EngineStatus_INVALID
+		if fv.extendingFork != nil {
+			fv.extendingFork.Rollback()
+			fv.extendingFork = nil
+		}
+		fv.extendingForkHeadHash = common.Hash{}
 		return
 	}
 	// If we do not have the body we can recover it from the batch.
