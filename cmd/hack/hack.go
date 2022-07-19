@@ -808,25 +808,43 @@ func dumpStorage() {
 	}
 }
 
-func printBucket(chaindata string) {
+func printBucket(chaindata string, bucket string) {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("bucket.txt")
+	f, err := os.Create(bucket + ".txt")
 	tool.Check(err)
 	defer f.Close()
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
+
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.StorageHistory)
+		fmt.Printf("Reading %s\n", bucket)
+
+		c, err := tx.Cursor(bucket)
 		if err != nil {
+			panic(err)
 			return err
 		}
+
+		var count int
+		startTime := time.Now()
+
 		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(fb, "%x %x\n", k, v)
+
+			count++
+			if count%100_000 == 0 {
+				log.Info("Processed", "row", count)
+				if count == 1_000_000 {
+					break
+				}
+			}
 		}
+
+		log.Info("Finished", "duration", time.Since(startTime))
 		return nil
 	}); err != nil {
 		panic(err)
@@ -2399,7 +2417,7 @@ func main() {
 		printCurrentBlockNumber(*chaindata)
 
 	case "bucket":
-		printBucket(*chaindata)
+		printBucket(*chaindata, *bucket)
 
 	case "val-tx-lookup-2":
 		ValidateTxLookups2(*chaindata)
