@@ -14,12 +14,16 @@
 package engineapi
 
 import (
+	"bytes"
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -127,6 +131,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if abs64(int64(fv.currentHeight)-header.Number.Int64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
+		fmt.Println("not in range")
 		return
 	}
 	// Let's assemble the side fork backwards
@@ -134,6 +139,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	currentHash := header.ParentHash
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 	if criticalError != nil {
+		fmt.Println("critical")
 		return
 	}
 
@@ -157,6 +163,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
+	// Do not set an unwind point if we are already there.
+	if unwindPoint == fv.currentHeight {
+		unwindPoint = 0
+	}
 	// if it is not canonical we validate it in memory and discard it aferwards.
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Close()
@@ -177,7 +187,6 @@ func (fv *ForkValidator) Clear(tx kv.RwTx) {
 		}
 		fv.extendingFork.Rollback()
 	}
-	// Clean all data relative to txpool
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingFork = nil
 }
@@ -191,8 +200,29 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		status = remote.EngineStatus_INVALID
 		return
 	}
+	// If we do not have the body we can recover it from the batch.
+	if body == nil {
+		var bodyWithTxs *types.Body
+		bodyWithTxs, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
+		if criticalError != nil {
+			return
+		}
+		var encodedTxs [][]byte
+		buf := bytes.NewBuffer(nil)
+		for _, tx := range bodyWithTxs.Transactions {
+			buf.Reset()
+			if criticalError = rlp.Encode(buf, tx); criticalError != nil {
+				return
+			}
+			encodedTxs = append(encodedTxs, common.CopyBytes(buf.Bytes()))
+		}
+		fv.sideForksBlock[header.Hash()] = forkSegment{header, &types.RawBody{
+			Transactions: encodedTxs,
+		}}
+	} else {
+		fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
+	}
 	status = remote.EngineStatus_VALID
-	fv.sideForksBlock[header.Hash()] = forkSegment{header, body}
 	return
 }
 

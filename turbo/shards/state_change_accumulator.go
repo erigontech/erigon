@@ -105,6 +105,7 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
 	accountChange.Action = remote.Action_REMOVE
+	delete(a.storageChangeIndex, address)
 }
 
 // ChangeCode adds code to the latest change
