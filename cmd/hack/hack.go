@@ -2066,6 +2066,7 @@ func fixState(chaindata string) error {
 	defer c.Close()
 	var prevHeaderKey [40]byte
 	var k, v []byte
+	var iterated int
 	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
 		var headerKey [40]byte
 		copy(headerKey[:], k)
@@ -2087,10 +2088,17 @@ func fixState(chaindata string) error {
 			copy(parentK[8:], header.ParentHash[:])
 			if !bytes.Equal(parentK[:], prevHeaderKey[:]) {
 				fmt.Printf("broken ancestry from %d %x (parent hash %x): prevKey %x\n", header.Number.Uint64(), v, header.ParentHash, prevHeaderKey)
+				// TODO: tx.Put missing here?
+				// fixState() opens the database for write and commits the transaction at the end but does make changes
 			}
 		}
 		copy(prevHeaderKey[:], headerKey[:])
+		iterated++
+		if iterated%100_000 == 0 {
+			fmt.Printf("Iterated %d\n", iterated)
+		}
 	}
+	fmt.Printf("Done, processed %d records\n", iterated)
 	if err != nil {
 		return err
 	}
