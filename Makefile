@@ -22,7 +22,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.20.1/protoc-3.20.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v21.2/protoc-21.2-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -72,7 +72,7 @@ lintci-deps-clean: golangci-lint-clean
 
 # download and build golangci-lint (https://golangci-lint.run)
 $(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.46.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.47.0
 
 golangci-lint-clean:
 	rm -f "$(GOBIN)/golangci-lint"
