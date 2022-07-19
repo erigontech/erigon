@@ -13,6 +13,7 @@
   "istanbulBlock": 1561651,
   "berlinBlock": 4460644,
   "londonBlock": 5062605,
+  "terminalTotalDifficulty": 10790000,
   "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "clique": {
     "period": 15,
