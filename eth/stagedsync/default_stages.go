@@ -177,7 +177,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			ID:          stages.LogIndex,
 			Description: "Generate receipt logs index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnLogIndex(s, tx, logIndex, ctx)
+				return SpawnLogIndex(s, tx, logIndex, ctx, 0)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindLogIndex(u, s, tx, logIndex, ctx)

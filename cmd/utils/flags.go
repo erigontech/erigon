@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
@@ -700,8 +701,8 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
-		Value: "4kb",
+		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb'. default: equal to OperationSystem's pageSize",
+		Value: datasize.ByteSize(kv.DefaultPageSize()).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
