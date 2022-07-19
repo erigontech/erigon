@@ -66,7 +66,10 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if prematureEndBlock != 0 && prematureEndBlock < endBlock {
 		endBlock = prematureEndBlock
 	}
-	if endBlock == s.BlockNumber {
+	// It is possible that prematureEndBlock < s.BlockNumber,
+	// in which case it is important that we skip this stage,
+	// or else we could overwrite stage_at with prematureEndBlock
+	if endBlock <= s.BlockNumber {
 		return nil
 	}
 
