@@ -6,34 +6,23 @@ import (
 	"strconv"
 	"strings"
 
+	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/exp/slices"
 )
 
-//go:embed erigon-snapshots/mainnet.toml
-var mainnet []byte
-var Mainnet = fromToml(mainnet)
+var Mainnet = fromToml(snapshothashes.Mainnet)
 
-//go:embed erigon-snapshots/goerli.toml
-var goerli []byte
-var Goerli = fromToml(goerli)
+var Goerli = fromToml(snapshothashes.Goerli)
 
-//go:embed erigon-snapshots/bsc.toml
-var bsc []byte
-var Bsc = fromToml(bsc)
+var Bsc = fromToml(snapshothashes.Bsc)
 
-//go:embed erigon-snapshots/ropsten.toml
-var ropsten []byte
-var Ropsten = fromToml(ropsten)
+var Ropsten = fromToml(snapshothashes.Ropsten)
 
-//go:embed erigon-snapshots/mumbai.toml
-var mumbai []byte
-var Mumbai = fromToml(mumbai)
+var Mumbai = fromToml(snapshothashes.Mumbai)
 
-//go:embed erigon-snapshots/bor-mainnet.toml
-var borMainnet []byte
-var BorMainnet = fromToml(borMainnet)
+var BorMainnet = fromToml(snapshothashes.BorMainnet)
 
 type PreverifiedItem struct {
 	Name string
