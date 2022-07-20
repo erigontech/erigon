@@ -259,7 +259,7 @@ func startHandlingForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 ) (*privateapi.PayloadStatus, error) {
 	if cfg.memoryOverlay {
-		defer cfg.forkValidator.ClearWithUnwind(tx)
+		defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	}
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
