@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
@@ -309,7 +309,7 @@ func (s *RoSnapshots) IndicesMax() uint64      { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64     { return s.segmentsMax.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
 
-func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
+func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}

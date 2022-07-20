@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -42,7 +42,7 @@ type SendersCfg struct {
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
 	blockRetire       *snapshotsync.BlockRetire
-	snapshotHashesCfg *snapshothashes.Config
+	snapshotHashesCfg *snapcfg.Cfg
 	hd                *headerdownload.HeaderDownload
 }
 
@@ -62,7 +62,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool
 		chainConfig:       chainCfg,
 		prune:             prune,
 		blockRetire:       br,
-		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
+		snapshotHashesCfg: snapcfg.KnownCfg(chainCfg.ChainName),
 		hd:                hd,
 	}
 }

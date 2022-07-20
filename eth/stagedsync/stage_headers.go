@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -1348,7 +1348,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	}
 
 	// send all hashes to the Downloader service
-	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
+	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName).Preverified
 	i := 0
 	var downloadRequest []snapshotsync.DownloadRequest
 	// build all download requests
