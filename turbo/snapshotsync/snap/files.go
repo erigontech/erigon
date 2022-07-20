@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"golang.org/x/exp/slices"
 )
 
@@ -214,7 +214,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 }
 
 func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
-	preverified := snapshothashes.KnownConfig(chainName).Preverified
+	preverified := snapcfg.KnownCfg(chainName).Preverified
 	keep := map[string]struct{}{}
 	for _, p := range preverified {
 		ext := filepath.Ext(p.Name)

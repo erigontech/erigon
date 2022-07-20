@@ -1,4 +1,4 @@
-package snapshothashes
+package snapcfg
 
 import (
 	_ "embed"
@@ -48,16 +48,16 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotConfig    = newConfig(Mainnet)
-	GoerliChainSnapshotConfig     = newConfig(Goerli)
-	BscChainSnapshotConfig        = newConfig(Bsc)
-	RopstenChainSnapshotConfig    = newConfig(Ropsten)
-	MumbaiChainSnapshotConfig     = newConfig(Mumbai)
-	BorMainnetChainSnapshotConfig = newConfig(BorMainnet)
+	MainnetChainSnapshotCfg    = newCfg(Mainnet)
+	GoerliChainSnapshotCfg     = newCfg(Goerli)
+	BscChainSnapshotCfg        = newCfg(Bsc)
+	RopstenChainSnapshotCfg    = newCfg(Ropsten)
+	MumbaiChainSnapshotCfg     = newCfg(Mumbai)
+	BorMainnetChainSnapshotCfg = newCfg(BorMainnet)
 )
 
-func newConfig(preverified Preverified) *Config {
-	return &Config{ExpectBlocks: maxBlockNum(preverified), Preverified: preverified}
+func newCfg(preverified Preverified) *Cfg {
+	return &Cfg{ExpectBlocks: maxBlockNum(preverified), Preverified: preverified}
 }
 
 func maxBlockNum(preverified Preverified) uint64 {
@@ -90,23 +90,23 @@ func maxBlockNum(preverified Preverified) uint64 {
 	return max*1_000 - 1
 }
 
-type Config struct {
+type Cfg struct {
 	ExpectBlocks uint64
 	Preverified  Preverified
 }
 
-var KnownConfigs map[string]*Config = map[string]*Config{
-	networkname.MainnetChainName:    MainnetChainSnapshotConfig,
-	networkname.GoerliChainName:     GoerliChainSnapshotConfig,
-	networkname.BSCChainName:        BscChainSnapshotConfig,
-	networkname.RopstenChainName:    RopstenChainSnapshotConfig,
-	networkname.MumbaiChainName:     MumbaiChainSnapshotConfig,
-	networkname.BorMainnetChainName: BorMainnetChainSnapshotConfig,
+var KnownCfgs = map[string]*Cfg{
+	networkname.MainnetChainName:    MainnetChainSnapshotCfg,
+	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
+	networkname.BSCChainName:        BscChainSnapshotCfg,
+	networkname.RopstenChainName:    RopstenChainSnapshotCfg,
+	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
+	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
 }
 
-func KnownConfig(networkName string) *Config {
-	if c, ok := KnownConfigs[networkName]; ok {
+func KnownCfg(networkName string) *Cfg {
+	if c, ok := KnownCfgs[networkName]; ok {
 		return c
 	}
-	return newConfig(Preverified{})
+	return newCfg(Preverified{})
 }
