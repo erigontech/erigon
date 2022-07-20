@@ -3,6 +3,14 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220720105945-114da7eca320
+	github.com/ledgerwatch/erigon-snapshot v1.0.0
+	github.com/ledgerwatch/log/v3 v3.4.1
+	github.com/ledgerwatch/secp256k1 v1.0.0
+	github.com/ledgerwatch/trackerslist v1.0.0
+)
+
+require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.10.0
 	github.com/VictoriaMetrics/metrics v1.18.1
@@ -36,9 +44,6 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220719040828-9ceeeac385ad
-	github.com/ledgerwatch/log/v3 v3.4.1
-	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.2
@@ -50,7 +55,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.11
-	github.com/torquem-ch/mdbx-go v0.24.3-0.20220614090901-342411560dde
+	github.com/torquem-ch/mdbx-go v0.25.1-0.20220720103744-b96489e94ece
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.9

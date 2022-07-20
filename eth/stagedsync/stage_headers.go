@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -258,11 +258,11 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*privateapi.PayloadStatus, error) {
+	if cfg.memoryOverlay {
+		defer cfg.forkValidator.ClearWithUnwind(tx)
+	}
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
-	if cfg.memoryOverlay {
-		defer cfg.forkValidator.Clear(tx)
-	}
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
@@ -577,10 +577,11 @@ func verifyAndSaveNewPoSHeader(
 	forkingHash, err := cfg.blockReader.CanonicalHash(ctx, tx, forkingPoint)
 
 	canExtendCanonical := forkingHash == currentHeadHash
-	canExtendFork := cfg.forkValidator.ExtendingForkHeadHash() == (common.Hash{}) || header.ParentHash == cfg.forkValidator.ExtendingForkHeadHash()
 
-	if cfg.memoryOverlay && (canExtendFork || header.ParentHash != currentHeadHash) {
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, header.ParentHash == currentHeadHash /* extendCanonical */)
+	if cfg.memoryOverlay {
+		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
+		extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, extendCanonical)
 		if criticalError != nil {
 			return nil, false, criticalError
 		}
@@ -664,6 +665,8 @@ func schedulePoSDownload(
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
+	defer cfg.forkValidator.Clear()
+
 	var lastValidHash common.Hash
 	var badChainError error
 	var foundPow bool
@@ -1340,8 +1343,12 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		}
 	}
 
+	if len(missingSnapshots) > 0 {
+		log.Warn("[Snapshots] downloading missing snapshots")
+	}
+
 	// send all hashes to the Downloader service
-	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
+	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName).Preverified
 	i := 0
 	var downloadRequest []snapshotsync.DownloadRequest
 	// build all download requests
@@ -1361,7 +1368,6 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	for _, r := range missingSnapshots {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
 	}
-	req := snapshotsync.BuildProtoRequest(downloadRequest)
 
 	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
@@ -1370,7 +1376,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+		if err := snapshotsync.RequestSnapshotDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
 			continue

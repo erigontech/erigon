@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -127,7 +127,7 @@ func TestCanRetire(t *testing.T) {
 }
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
+	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
 	createFile := func(from, to uint64, name snap.Type) { createTestSegmentFile(t, from, to, name, dir) }
@@ -163,14 +163,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.Equal(2, len(s.Headers.segments))
 
 	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
-		require.Equal(int(sn.To), 500_000)
+		require.Equal(int(sn.ranges.to), 500_000)
 		return nil
 	})
 	require.NoError(err)
 	require.True(ok)
 
 	ok, err = s.ViewTxs(500_000, func(sn *TxnSegment) error {
-		require.Equal(int(sn.To), 1_000_000) // [from:to)
+		require.Equal(int(sn.ranges.to), 1_000_000) // [from:to)
 		return nil
 	})
 	require.NoError(err)
