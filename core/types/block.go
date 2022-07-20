@@ -1198,13 +1198,19 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 	}
 }
 
-// RawBody creates a RawBody based on the block. It is not very efficient, so
-// will probably be removed in favour of RawBlock. Also it panics
-func (b *Block) RawBody() *RawBody {
+// RawBody creates a RawBody based on the block.
+func (b *Block) RawBody(marshallTypedTransactionsAsRlpStrings bool) *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles}
-	for i, tx := range b.transactions {
-		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+	var err error
+	if marshallTypedTransactionsAsRlpStrings {
+		for i, tx := range b.transactions {
+			br.Transactions[i], err = rlp.EncodeToBytes(tx)
+			if err != nil {
+				panic(err)
+			}
+		}
+	} else {
+		br.Transactions, err = MarshalTransactionsBinary(b.transactions)
 		if err != nil {
 			panic(err)
 		}
@@ -1213,7 +1219,7 @@ func (b *Block) RawBody() *RawBody {
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
-// and returning it, or returning a previsouly cached value.
+// and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
 	if size := b.size.Load(); size != nil {
 		return size.(common.StorageSize)

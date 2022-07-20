@@ -574,7 +574,7 @@ func TestPoSDownloader(t *testing.T) {
 	// Send a payload with missing parent
 	payloadMessage := engineapi.PayloadMessage{
 		Header: chain.TopBlock.Header(),
-		Body:   chain.TopBlock.RawBody(),
+		Body:   chain.TopBlock.RawBody(false),
 	}
 	m.SendPayloadRequest(&payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
@@ -643,7 +643,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	// Send a payload with missing parent
 	payloadMessage := engineapi.PayloadMessage{
 		Header: invalidTip,
-		Body:   chain.TopBlock.RawBody(),
+		Body:   chain.TopBlock.RawBody(false),
 	}
 	m.SendPayloadRequest(&payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
