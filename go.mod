@@ -163,7 +163,7 @@ require (
 	modernc.org/token v1.0.0 // indirect
 )
 
-require github.com/ledgerwatch/erigon-snapshot v0.0.0-20220720021800-efecf5a6e110
+require github.com/ledgerwatch/erigon-snapshot v0.0.0-20220720021932-79e430fe9278
 
 require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
