@@ -122,10 +122,3 @@ jobs:
         with:
           name: hive-ci-output
           path: results/*.xml
-
-      - name: publish hive results
-        uses: EnricoMi/publish-unit-test-result-action@v1
-        if: always()
-        with:
-          files: results/*.xml
-          check_name: "hive"      
