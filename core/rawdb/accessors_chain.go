@@ -1626,12 +1626,10 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("\n\n\tread: %s\n", strings.Split(",", string(v)))
 	return strings.Split(",", string(v)), nil
 }
 
 func WriteSnapshots(tx kv.RwTx, list []string) error {
-	//fmt.Printf("\n\n\twrite: %s\n", strings.Join(list, ","))
 	return tx.Put(kv.DatabaseInfo, SapshotsKey, []byte(strings.Join(list, ",")))
 }
 
