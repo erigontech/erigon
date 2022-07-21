@@ -571,12 +571,8 @@ func TestPoSDownloader(t *testing.T) {
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
-	// Send a payload with missing parent
-	payloadMessage := engineapi.PayloadMessage{
-		Header: chain.TopBlock.Header(),
-		Body:   chain.TopBlock.RawBody(),
-	}
-	m.SendPayloadRequest(&payloadMessage)
+	// Send a payload whose parent isn't downloaded yet
+	m.SendPayloadRequest(chain.TopBlock)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
@@ -640,12 +636,9 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	invalidTip := chain.TopBlock.Header()
 	invalidTip.ParentHash = invalidParent.Hash()
 
-	// Send a payload with missing parent
-	payloadMessage := engineapi.PayloadMessage{
-		Header: invalidTip,
-		Body:   chain.TopBlock.RawBody(),
-	}
-	m.SendPayloadRequest(&payloadMessage)
+	// Send a payload with the parent missing
+	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil)
+	m.SendPayloadRequest(payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
