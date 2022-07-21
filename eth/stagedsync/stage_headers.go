@@ -644,7 +644,7 @@ func schedulePoSDownload(
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
-		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
+		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", headerNumber, "hash", hashToDownload)
 		return
 	}
 
