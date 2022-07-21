@@ -103,6 +103,7 @@ func (fv *ForkValidator) rewindAccumulator(to uint64, accumulator *shards.Accumu
 		return err
 	}
 	// Start the changes
+	accumulator.Reset(0)
 	accumulator.StartChange(to, hash, txs, true)
 	accChangesCursor, err := fv.extendingFork.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
