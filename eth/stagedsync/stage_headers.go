@@ -488,9 +488,8 @@ func handleNewPayload(
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
-		heightToDownload := headerNumber - 1
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, hashToDownload, heightToDownload, s, cfg)
+		schedulePoSDownload(requestId, hashToDownload, headerNumber, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
