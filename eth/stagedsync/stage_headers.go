@@ -637,7 +637,7 @@ func verifyAndSaveNewPoSHeader(
 func schedulePoSDownload(
 	requestId int,
 	hashToDownload common.Hash,
-	heightToDownload uint64,
+	headerNumber uint64,
 	s *StageState,
 	cfg HeadersCfg,
 ) {
@@ -648,10 +648,10 @@ func schedulePoSDownload(
 		return
 	}
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", headerNumber, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
-	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
+	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, headerNumber)
 	cfg.hd.SetPOSSync(true) // This needs to be called afrer SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint

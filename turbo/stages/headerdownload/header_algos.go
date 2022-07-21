@@ -432,9 +432,9 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
 		return
 	}
-	parentHeight := anchor.blockHeight - 1
-	if anchor.blockHeight == 0 {
-		parentHeight = 0
+	var parentHeight uint64 = 0
+	if anchor.blockHeight > 0 {
+		parentHeight = anchor.blockHeight - 1
 	}
 
 	// Request ancestors
