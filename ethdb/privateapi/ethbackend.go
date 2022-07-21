@@ -314,7 +314,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			log.Warn("[NewPayload]typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			log.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
 				LatestValidHash: nil,
@@ -325,6 +325,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 	transactions, err := types.DecodeTransactions(req.Transactions)
 	if err != nil {
+		log.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: nil,
