@@ -111,4 +111,21 @@ jobs:
         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
       - name: run hive
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock gatewayfm/hive:latest --sim ethereum/sync --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
+        run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work gatewayfm/hive:latest --sim ethereum/sync --results-root=/work/results --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
+
+      - name: parse hive output
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput gatewayfm/hive:latest --resultsdir=/work/results --outdir=/work/results
+
+      - name: archive hive results              
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: hive-ci-output
+          path: results/*.xml
+
+      - name: publish hive results
+        uses: EnricoMi/publish-unit-test-result-action@v1
+        if: always()
+        with:
+          files: results/*.xml
+          check_name: "hive"      
