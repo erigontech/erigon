@@ -519,11 +519,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	for i := n; i < chain.Length(); i++ {
-		payloadMessage := engineapi.PayloadMessage{
-			Header: chain.Headers[i],
-			Body:   chain.Blocks[i].RawBody(),
-		}
-		ms.SendPayloadRequest(&payloadMessage)
+		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
 	initialCycle := false
