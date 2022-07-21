@@ -2,7 +2,7 @@ name: Hive results
 
 on:
   workflow_run:
-    workflows: ["Continuous integration", "ci"]
+    workflows: ["Hive"]
     types:
       - completed
 
