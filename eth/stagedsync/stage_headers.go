@@ -1206,14 +1206,14 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
-	if cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled || !initialCycle {
+	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
 	}
 
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if err := cfg.snapshots.Reopen(); err != nil {
+	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 
@@ -1235,13 +1235,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-					return fmt.Errorf("BuildIndices: %w", err)
+				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
 
-			if err := cfg.snapshots.Reopen(); err != nil {
-				return fmt.Errorf("ReopenIndices: %w", err)
+			if err := cfg.snapshots.ReopenFolder(); err != nil {
+				return err
 			}
 		}
 	}
@@ -1335,7 +1335,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var missingSnapshots []snapshotsync.MergeRange
+	var missingSnapshots []snapshotsync.Range
 	if !dbEmpty {
 		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
@@ -1354,13 +1354,13 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverified {
-		_, has := snInDB[p.Name]
-		if !dbEmpty && !has {
-			continue
-		}
-		if dbEmpty {
-			snInDB[p.Name] = p.Hash
-		}
+		//_, has := snInDB[p.Name]
+		//if !dbEmpty && !has {
+		//	continue
+		//}
+		//if dbEmpty {
+		//	snInDB[p.Name] = p.Hash
+		//}
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 		i++
 	}
@@ -1376,7 +1376,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if err := snapshotsync.RequestSnapshotDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+		if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
 			continue

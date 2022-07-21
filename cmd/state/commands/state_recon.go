@@ -379,7 +379,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var allSnapshots *snapshotsync.RoSnapshots
 	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
-	if err := allSnapshots.Reopen(); err != nil {
+	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)

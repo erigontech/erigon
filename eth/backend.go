@@ -29,11 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -68,6 +63,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -78,6 +74,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -85,6 +83,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -787,11 +786,25 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
-	var err error
-
 	if isSnapshotEnabled {
 		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-		allSnapshots.OptimisticReopen()
+
+		// EnforceSnapshotsInvariant: if DB has record - then file exists, if file exists - DB has record.
+		snListInFolder, err := snapshotsync.SegmentsList(allSnapshots.Dir())
+		if err != nil {
+			return nil, nil, err
+		}
+		var snList []string
+		if err := s.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
+			snList, err = rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
+			return err
+		}); err != nil {
+			return nil, nil, err
+		}
+		if err := allSnapshots.ReopenList(snList); err != nil {
+			return nil, nil, err
+		}
+
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if !cfg.Snapshot.NoDownloader {

@@ -247,7 +247,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := snapshots.Reopen(); err != nil {
+	if err := snapshots.ReopenWithDB(chainDB); err != nil {
 		return err
 	}
 
@@ -305,10 +305,10 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := allSnapshots.Reopen(); err != nil {
+	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, *chainID, dirs.Tmp, from, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
@@ -348,10 +348,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	}
 
 	log.Info("Last body number", "last", last)
-	workers := runtime.GOMAXPROCS(-1) - 1
-	if workers < 1 {
-		workers = 1
-	}
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}

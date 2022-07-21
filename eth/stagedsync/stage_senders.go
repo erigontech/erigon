@@ -387,11 +387,12 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
+	sn := cfg.blockRetire.Snapshots()
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
-	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
-		if cfg.blockRetire.Snapshots().Cfg().Produce {
-			if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
+	if sn != nil && sn.Cfg().Enabled {
+		if sn.Cfg().Produce {
+			if !sn.Cfg().KeepBlocks {
+				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, sn)
 				if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
 					return nil
 				}
@@ -400,7 +401,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 				}
 			}
 
-			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
+			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx, tx); err != nil {
 				return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 			}
 		}
@@ -419,7 +420,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	return nil
 }
 
-func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx context.Context) (err error) {
+func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	// if something already happens in background - noop
 	if cfg.blockRetire.Working() {
 		return nil
@@ -427,6 +428,10 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx con
 	if res := cfg.blockRetire.Result(); res != nil {
 		if res.Err != nil {
 			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
+		}
+
+		if err := rawdb.WriteSnapshots(tx, cfg.blockRetire.Snapshots().Files()); err != nil {
+			return err
 		}
 	}
 

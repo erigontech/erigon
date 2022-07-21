@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -1604,7 +1606,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
 
-// Transitioned returns true if the block number comes after POS transition or is the last POW block
+// IsPosBlock returns true if the block number comes after POS transition or is the last POW block
 func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	header, err := ReadHeaderByHash(db, blockHash)
 	if err != nil {
@@ -1617,29 +1619,48 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	return header.Difficulty.Cmp(common.Big0) == 0, nil
 }
 
-func ReadSnapshots(tx kv.Tx) (map[string]string, error) {
-	res := map[string]string{}
-	if err := tx.ForEach(kv.Snapshots, nil, func(k, v []byte) error {
-		res[string(k)] = string(v)
-		return nil
-	}); err != nil {
+var SapshotsKey = []byte("snapshots")
+
+func ReadSnapshots(tx kv.Tx) ([]string, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, SapshotsKey)
+	if err != nil {
 		return nil, err
 	}
-	return res, nil
+	//fmt.Printf("\n\n\tread: %s\n", strings.Split(",", string(v)))
+	return strings.Split(",", string(v)), nil
 }
 
-func WriteSnapshots(tx kv.RwTx, list map[string]string) error {
-	for k, v := range list {
-		has, err := tx.Has(kv.Snapshots, []byte(k))
-		if err != nil {
-			return err
-		}
-		if has {
+func WriteSnapshots(tx kv.RwTx, list []string) error {
+	//fmt.Printf("\n\n\twrite: %s\n", strings.Join(list, ","))
+	return tx.Put(kv.DatabaseInfo, SapshotsKey, []byte(strings.Join(list, ",")))
+}
+
+// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
+func EnforceSnapshotsInvariant(tx kv.RwTx, snListInFolder []string) (filtered []string, err error) {
+	snList, err := ReadSnapshots(tx)
+	if err != nil {
+		return filtered, err
+	}
+	exists := map[string]string{}
+
+	for _, fName := range snListInFolder {
+		exists[fName] = ""
+	}
+
+	for _, fName := range snList {
+		if _, ok := exists[fName]; !ok {
+			delete(exists, fName)
 			continue
 		}
-		if err = tx.Put(kv.Snapshots, []byte(k), []byte(v)); err != nil {
-			return err
-		}
+		filtered = append(filtered, fName)
+		delete(exists, fName)
 	}
-	return nil
+	for fName := range exists {
+		filtered = append(filtered, fName)
+	}
+	slices.Sort(filtered)
+	if err = WriteSnapshots(tx, filtered); err != nil {
+		return filtered, err
+	}
+	return filtered, nil
 }
