@@ -561,7 +561,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) SendPayloadRequest(message *engineapi.PayloadMessage) {
+func (ms *MockSentry) SendPayloadRequest(message *types.Block) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddPayloadRequest(message)
 }
 

@@ -10,12 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// The message we are going to send to the stage sync in NewPayload
-type PayloadMessage struct {
-	Header *types.Header
-	Body   *types.RawBody
-}
-
 // The message we are going to send to the stage sync in ForkchoiceUpdated
 type ForkChoiceMessage struct {
 	HeadBlockHash      common.Hash
@@ -31,7 +25,7 @@ const ( // RequestStatus values
 )
 
 type RequestWithStatus struct {
-	Message interface{} // *PayloadMessage or *ForkChoiceMessage
+	Message interface{} // *Block or *ForkChoiceMessage
 	Status  RequestStatus
 }
 
@@ -59,7 +53,7 @@ func NewRequestList() *RequestList {
 	return rl
 }
 
-func (rl *RequestList) AddPayloadRequest(message *PayloadMessage) {
+func (rl *RequestList) AddPayloadRequest(message *types.Block) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
