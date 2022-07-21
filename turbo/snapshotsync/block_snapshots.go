@@ -151,6 +151,9 @@ func (sn *TxnSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Transactions)
 	sn.Seg, err = compress.NewDecompressor(path.Join(dir, fileName))
+	if err != nil {
+		return err
+	}
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())))
 	if err != nil {
 		return err
@@ -341,7 +344,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		txs = seg.ranges.to - 1
 		break
 	}
-
 	return cmp.Min(headers, cmp.Min(bodies, txs))
 }
 
@@ -621,7 +623,6 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	errs := make(chan error, 1024)
 	wg := &sync.WaitGroup{}
 	sem := semaphore.NewWeighted(int64(workers))
-	i := 0
 	for _, t := range snap.AllSnapshotTypes {
 		for _, sn := range segments {
 			if sn.T != t {
@@ -634,8 +635,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			if err := sem.Acquire(ctx, 1); err != nil {
 				return err
 			}
-			i++
-			go func(sn snap.FileInfo, i int) {
+			go func(sn snap.FileInfo) {
 				defer sem.Release(1)
 				defer wg.Done()
 
@@ -655,7 +655,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 					log.Log(lvl, "[snapshots] Indexing", "type", t.String(), "blockNum", sn.To, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
 				}
-			}(sn, i)
+			}(sn)
 		}
 	}
 	go func() {
