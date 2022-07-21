@@ -284,7 +284,7 @@ func (fv *ForkValidator) Clear() {
 func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	sb, ok := fv.sideForksBlock[fv.extendingForkHeadHash]
 	// If we did not flush the fork state, then we need to notify the txpool through unwind.
-	if fv.extendingFork != nil && fv.extendingForkHeadHash != (common.Hash{}) && ok {
+	if fv.extendingFork != nil && accumulator != nil && fv.extendingForkHeadHash != (common.Hash{}) && ok {
 		fv.extendingFork.UpdateTxn(tx)
 		// this will call unwind of extending fork to notify txpool of reverting transactions.
 		if err := fv.rewindAccumulator(sb.header.Number.Uint64()-1, accumulator, c); err != nil {
