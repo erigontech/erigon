@@ -633,6 +633,20 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error {
 	return nil
 }
 
+// ReportBadTransaction - reports a bad tx in the txpool due for removal.
+func (p *TxPool) ReportBadTransaction(txHash [32]byte) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	best := p.pending.best
+	for i := 0; i < len(best.ms); i++ {
+		if bytes.Equal(best.ms[i].Tx.IDHash[:], txHash[:]) {
+			p.pending.Remove(best.ms[i])
+			return
+		}
+	}
+}
+
 func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
