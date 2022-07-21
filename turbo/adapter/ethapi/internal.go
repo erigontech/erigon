@@ -2,6 +2,7 @@ package ethapi
 
 // This file stores proxy-objects for `internal` package
 import (
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
@@ -45,8 +46,8 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 }
 
 //nolint
-func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borReceipt *types.Receipt, additional map[string]interface{}) (map[string]interface{}, error) {
-	fields, err := ethapi.RPCMarshalBlockEx(b, inclTx, fullTx, borTx, borReceipt)
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]interface{}) (map[string]interface{}, error) {
+	fields, err := ethapi.RPCMarshalBlockEx(b, inclTx, fullTx, borTx, borTxHash)
 	if err != nil {
 		return nil, err
 	}

@@ -443,7 +443,7 @@ Write-Host @"
 
 "@
 
-if (!$WnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean") {
+if (!$WnoSubmoduleUpdate -and $BuildTargets[0] -ne "clean" -and ($BuildTargets.Contains("test") -or $BuildTargets.Contains("db-tools"))) {
     Write-Host " Updating git submodules ..."
     Invoke-Expression -Command "git.exe submodule update --init --recursive --force --quiet"
     if (!($?)) {

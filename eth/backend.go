@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -135,8 +136,8 @@ type Ethereum struct {
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
-
-	downloader *downloader.Downloader
+	forkValidator           *engineapi.ForkValidator
+	downloader              *downloader.Downloader
 }
 
 // New creates a new Ethereum object (including the
@@ -235,16 +236,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return res
 		}
 
-		d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+		discovery, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 		if err != nil {
 			return nil, err
 		}
+		cfg := stack.Config().P2P
+		cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[cfg.ProtocolVersion])
+		server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, cfg.ProtocolVersion)
 
-		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
-		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
-		backend.sentryServers = append(backend.sentryServers, server66)
-		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
+		backend.sentryServers = append(backend.sentryServers, server)
+		sentries = []direct.SentryClient{direct.NewSentryClientDirect(cfg.ProtocolVersion, server)}
 
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
@@ -507,8 +508,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.Ethstats != "" {
 		headCh = make(chan *types.Block, 1)
 	}
-
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, inMemoryExecution)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
 	if err != nil {
 		return nil, err
 	}

@@ -65,7 +65,6 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	FakeSign(address common.Address) (Transaction, error)
-	WithHash(newHash common.Hash) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash
 	Size() common.StorageSize
@@ -99,13 +98,14 @@ type TransactionMisc struct {
 	from atomic.Value
 }
 
-type RawTransactions [][]byte
+// RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
+type BinaryTransactions [][]byte
 
-func (t RawTransactions) Len() int {
+func (t BinaryTransactions) Len() int {
 	return len(t)
 }
 
-func (t RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 

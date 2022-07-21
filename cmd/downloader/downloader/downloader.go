@@ -110,13 +110,14 @@ func (d *Downloader) SnapDir() string {
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
+	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
+	torrents := d.torrentClient.Torrents()
+	connStats := d.torrentClient.ConnStats()
+	peers := make(map[torrent.PeerID]struct{}, 16)
+
 	d.statsLock.Lock()
 	defer d.statsLock.Unlock()
 	prevStats, stats := d.stats, d.stats
-
-	peers := make(map[torrent.PeerID]struct{}, 16)
-	torrents := d.torrentClient.Torrents()
-	connStats := d.torrentClient.ConnStats()
 
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
@@ -262,6 +263,8 @@ func (d *Downloader) verify() error {
 }
 
 func (d *Downloader) addSegments() error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
 		return err
 	}
@@ -269,12 +272,27 @@ func (d *Downloader) addSegments() error {
 	if err != nil {
 		return fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
+	wg := &sync.WaitGroup{}
+	i := atomic.NewInt64(0)
 	for _, f := range files {
-		_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
-		if err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(f string) {
+			defer wg.Done()
+			_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
+			if err != nil {
+				log.Warn("[snapshots] AddSegment", "err", err)
+				return
+			}
+
+			i.Inc()
+			select {
+			case <-logEvery.C:
+				log.Info("[snpshots] initializing", "files", fmt.Sprintf("%s/%d", i.String(), len(files)))
+			default:
+			}
+		}(f)
 	}
+	wg.Wait()
 	return nil
 }
 

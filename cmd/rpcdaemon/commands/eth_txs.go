@@ -18,7 +18,7 @@ import (
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		var txnIndex uint64
 		var txn types2.Transaction
 		for i, transaction := range block.Transactions() {
-			if transaction.Hash() == hash {
+			if transaction.Hash() == txnHash {
 				txn = transaction
 				txnIndex = uint64(i)
 				break
@@ -61,17 +61,14 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 
 		// if no transaction was found then we return nil
 		if txn == nil {
-			if chainConfig.Bor != nil {
-				borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
-				if err != nil {
-					return nil, err
-				}
-				if borTx != nil {
-					return newRPCTransaction(borTx, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
-				}
+			if chainConfig.Bor == nil {
+				return nil, nil
 			}
-
-			return nil, nil
+			borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+			if borTx == nil {
+				return nil, nil
+			}
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -83,7 +80,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
-	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
+	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(txnHash)}})
 	if err != nil {
 		return nil, err
 	}
@@ -179,17 +176,15 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
 	} else if uint64(txIndex) == uint64(len(txs)) {
-		if chainConfig.Bor != nil {
-			borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, block.NumberU64(), block.Hash())
-			if err != nil {
-				return nil, err
-			}
-			if borTx != nil {
-				return newRPCTransaction(borTx, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
-			}
-		} else {
+		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx == nil {
+			return nil, nil // not error
+		}
+		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -245,17 +240,15 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
 	} else if uint64(txIndex) == uint64(len(txs)) {
-		if chainConfig.Bor != nil {
-			borTx, _, _, _, err := rawdb.ReadBorTransactionWithBlockNumberAndHash(tx, blockNum, block.Hash())
-			if err != nil {
-				return nil, err
-			}
-			if borTx != nil {
-				return newRPCTransaction(borTx, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
-			}
-		} else {
+		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx == nil {
+			return nil, nil
+		}
+		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil

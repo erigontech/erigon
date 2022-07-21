@@ -303,10 +303,37 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
+		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
+	if header.Hash() != blockHash {
+		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
+	}
+
+	for _, txn := range req.Transactions {
+		if types.TypedTransactionMarshalledAsRlpString(txn) {
+			log.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			return &remote.EnginePayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: nil,
+				ValidationError: "typed txn marshalled as RLP string",
+			}, nil
+		}
+	}
+
+	transactions, err := types.DecodeTransactions(req.Transactions)
+	if err != nil {
+		log.Warn("[NewPayload] failed to decode transactions", "err", err)
+		return &remote.EnginePayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: nil,
+			ValidationError: err.Error(),
+		}, nil
+	}
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -322,6 +349,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})}, nil
 	}
 	tx.Rollback()
+
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
 		// We are still syncing a commissioned payload
@@ -333,11 +361,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	if header.Hash() != blockHash {
-		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
-	}
-
 	// Lock the thread (We modify shared resources).
 	log.Debug("[NewPayload] acquiring lock")
 	s.lock.Lock()
@@ -345,13 +368,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	log.Debug("[NewPayload] lock acquired")
 
 	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
-	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
-		Header: &header,
-		Body: &types.RawBody{
-			Transactions: req.Transactions,
-			Uncles:       nil,
-		},
-	})
+	s.requestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.statusCh
 	log.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)

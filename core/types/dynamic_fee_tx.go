@@ -463,10 +463,6 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *par
 	return msg, err
 }
 
-func (tx *DynamicFeeTransaction) WithHash(newHash common.Hash) (Transaction, error) {
-	return nil, errors.New("hash is immutable for DynamicFeeTransaction")
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {

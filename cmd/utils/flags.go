@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -30,15 +31,17 @@ import (
 	"text/template"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
+
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -402,7 +405,7 @@ var (
 		Name:  "experimental.tevm",
 		Usage: "Enables Transpiled EVM experiment",
 	}
-	MemoryOverlayFlag = cli.BoolFlag{
+	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",
 	}
@@ -503,6 +506,11 @@ var (
 		Name:  "port",
 		Usage: "Network listening port",
 		Value: 30303,
+	}
+	P2pProtocolVersionFlag = cli.IntFlag{
+		Name:  "p2p.protocol",
+		Usage: "Version of eth p2p protocol",
+		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -693,8 +701,8 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
-		Value: "4kb",
+		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb'. default: equal to OperationSystem's pageSize",
+		Value: datasize.ByteSize(kv.DefaultPageSize()).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -850,6 +858,8 @@ func NewP2PConfig(
 	switch protocol {
 	case eth.ETH66:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
+	case eth.ETH67:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
@@ -909,6 +919,9 @@ func nodeKey(datadir string) (*ecdsa.PrivateKey, error) {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(P2pProtocolVersionFlag.Name) {
+		cfg.ProtocolVersion = uint(ctx.GlobalInt(P2pProtocolVersionFlag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
@@ -1059,28 +1072,48 @@ func DataDirForNetwork(datadir string, network string) string {
 	case networkname.DevChainName:
 		return "" // unless explicitly requested, use memory databases
 	case networkname.RinkebyChainName:
-		return filepath.Join(datadir, "rinkeby")
+		return networkDataDirCheckingLegacy(datadir, "rinkeby")
 	case networkname.GoerliChainName:
-		filepath.Join(datadir, "goerli")
+		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.KilnDevnetChainName:
-		filepath.Join(datadir, "kiln-devnet")
+		return networkDataDirCheckingLegacy(datadir, "kiln-devnet")
 	case networkname.SokolChainName:
-		return filepath.Join(datadir, "sokol")
+		return networkDataDirCheckingLegacy(datadir, "sokol")
 	case networkname.FermionChainName:
-		return filepath.Join(datadir, "fermion")
+		return networkDataDirCheckingLegacy(datadir, "fermion")
 	case networkname.MumbaiChainName:
-		return filepath.Join(datadir, "mumbai")
+		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
-		return filepath.Join(datadir, "bor-mainnet")
+		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
 	case networkname.BorDevnetChainName:
-		return filepath.Join(datadir, "bor-devnet")
+		return networkDataDirCheckingLegacy(datadir, "bor-devnet")
 	case networkname.SepoliaChainName:
-		return filepath.Join(datadir, "sepolia")
+		return networkDataDirCheckingLegacy(datadir, "sepolia")
+	case networkname.GnosisChainName:
+		return networkDataDirCheckingLegacy(datadir, "gnosis")
+
 	default:
 		return datadir
 	}
+}
 
-	return datadir
+// networkDataDirCheckingLegacy checks if the datadir for the network already exists and uses that if found.
+// if not checks for a LOCK file at the root of the datadir and uses this if found
+// or by default assume a fresh node and to use the nested directory for the network
+func networkDataDirCheckingLegacy(datadir, network string) string {
+	anticipated := filepath.Join(datadir, network)
+
+	if _, err := os.Stat(anticipated); !os.IsNotExist(err) {
+		return anticipated
+	}
+
+	legacyLockFile := filepath.Join(datadir, "LOCK")
+	if _, err := os.Stat(legacyLockFile); !os.IsNotExist(err) {
+		log.Info("Using legacy datadir")
+		return datadir
+	}
+
+	return anticipated
 }
 
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
