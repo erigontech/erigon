@@ -130,7 +130,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
 				// Block is prefetched, no need to request
 				bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
-				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody(true)
+				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 
 				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 				if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
@@ -155,7 +155,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
 						bd.requestedMap[doubleHash] = blockNum
 					} else {
-						bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody(true)
+						bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 						request = false
 					}
 				} else {
