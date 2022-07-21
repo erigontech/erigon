@@ -80,7 +80,7 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-%.cmd: git-submodules
+%.cmd:
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
