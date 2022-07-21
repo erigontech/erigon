@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
 )
 
 func init() {
@@ -239,7 +240,8 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 	} else if err = os.RemoveAll(reconDbPath); err != nil {
 		return err
 	}
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(make(chan struct{}, runtime.NumCPU()+1)).Open()
+	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
 	}
