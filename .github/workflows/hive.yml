@@ -1,0 +1,35 @@
+name: Hive
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+jobs:
+  hive:
+    runs-on: ubuntu-20.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch git tags for "git describe"
+
+      - name: build erigon image
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      # check with root permissions, should be cached from previous build
+      - name: build erigon image (root permissions)
+        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      - name: run hive
+        run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work gatewayfm/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
+
+      - name: parse hive output
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput gatewayfm/hive:latest --resultsdir=/work/results --outdir=/work/results
+
+      - name: archive hive results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: hive-ci-output
+          path: results/*.xml

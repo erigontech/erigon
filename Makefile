@@ -33,12 +33,14 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
+## go-version:                        print and verify go version
 go-version:
 	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
 		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
 
+## validate_docker_build_args:        ensure docker build args are valid
 validate_docker_build_args:
 	@echo "Docker build args:"
 	@echo "    DOCKER_UID: $(DOCKER_UID)"
@@ -51,6 +53,7 @@ validate_docker_build_args:
 	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
+## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
@@ -67,16 +70,18 @@ ifdef XDG_DATA_HOME
 endif
 xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
 
+## setup_xdg_data_home:               TODO
 setup_xdg_data_home:
 	mkdir -p $(xdg_data_home_subdirs)
 	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || sudo chown -R 472:0 $(xdg_data_home)/erigon-grafana
 	@echo "✔️ xdg_data_home setup"
 	@ls -al $(xdg_data_home)
 
+## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
 docker-compose: validate_docker_build_args setup_xdg_data_home
 	docker-compose up
 
-# debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
@@ -86,8 +91,10 @@ dbg:
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
+## geth:                              run erigon (TODO: remove?)
 geth: erigon
 
+## erigon:                            build erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
@@ -108,8 +115,10 @@ COMMANDS += txpool
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
 
+## all:                               run erigon with all commands
 all: erigon $(COMMANDS)
 
+## db-tools:                          build db tools
 db-tools: git-submodules
 	@echo "Building db-tools"
 
@@ -126,23 +135,29 @@ db-tools: git-submodules
 	cp libmdbx/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
+## test:                              run unit tests with a 50s timeout
 test:
 	$(GOTEST) --timeout 50s
 
+## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
+## lint:                              run golangci-lint with .golangci.yml config file
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
+## lintci:                            run golangci-lint (additionally outputs message before run)
 lintci:
 	@echo "--> Running linter for code"
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
+## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.47.0
 
+## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
@@ -151,6 +166,7 @@ clean:
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
+## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
@@ -165,16 +181,20 @@ devtools:
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
+## bindings:                          generate test contracts and core contracts
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
 	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
+## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
 	docker-compose up prometheus grafana
 
+## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
+## git-submodules:                    update git submodules
 git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
@@ -189,7 +209,7 @@ ERIGON_USER_UID ?= 3473
 ERIGON_USER_GID ?= 3473
 ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
 
-# create "erigon" user
+## user_linux:                        create "erigon" user (Linux)
 user_linux:
 ifdef DOCKER
 	sudo groupadd -f docker
@@ -203,7 +223,7 @@ ifdef DOCKER
 endif
 	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
-# create "erigon" user
+## user_macos:                        create "erigon" user (MacOS)
 user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER)
 	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
@@ -212,3 +232,12 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+
+## coverage:                          run code coverage report and output total coverage %
+coverage:
+	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+
+## help:                              print commands help
+help	:	Makefile
+	@sed -n 's/^##//p' $<
+
