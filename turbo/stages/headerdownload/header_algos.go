@@ -432,16 +432,12 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
 		return
 	}
-	var parentHeight uint64 = 0
-	if anchor.blockHeight > 0 {
-		parentHeight = anchor.blockHeight - 1
-	}
 
 	// Request ancestors
 	request = &HeaderRequest{
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
-		Number:  parentHeight, // Since posAnchor may be an estimate, do not specify it here
+		Number:  anchor.blockHeight - 1,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -628,7 +624,7 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
-	log.Debug("Set posAnchor", "blockHeight", height)
+	log.Debug("Set posAnchor", "blockHeight", height+1)
 	hd.posAnchor = &Anchor{
 		parentHash:  hash,
 		blockHeight: height + 1,

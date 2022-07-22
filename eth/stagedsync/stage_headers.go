@@ -305,9 +305,8 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
-		hashToDownload := headerHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -487,9 +486,8 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
-		hashToDownload := header.ParentHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, hashToDownload, headerNumber, s, cfg)
+		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
 		return &privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -637,22 +635,22 @@ func verifyAndSaveNewPoSHeader(
 func schedulePoSDownload(
 	requestId int,
 	hashToDownload common.Hash,
-	headerNumber uint64,
+	heightToDownload uint64,
 	s *StageState,
 	cfg HeadersCfg,
 ) {
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
-		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", headerNumber, "hash", hashToDownload)
+		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 		return
 	}
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", headerNumber, "hash", hashToDownload, "requestId", requestId)
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
-	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, headerNumber)
-	cfg.hd.SetPOSSync(true) // This needs to be called afrer SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
+	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
+	cfg.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
