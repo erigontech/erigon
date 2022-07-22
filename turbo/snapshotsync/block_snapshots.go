@@ -476,6 +476,16 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
+func (s *RoSnapshots) Ranges() (ranges []Range) {
+	_ = s.Headers.View(func(segments []*HeaderSegment) error {
+		for _, sn := range segments {
+			ranges = append(ranges, sn.ranges)
+		}
+		return nil
+	})
+	return ranges
+}
+
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
@@ -562,6 +572,25 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 		return false, nil
 	}
 	return s.Txs.ViewSegment(blockNum, f)
+}
+
+func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, lvl log.Lvl) error {
+	switch sn.T {
+	case snap.Headers:
+		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
+			return err
+		}
+	case snap.Bodies:
+		if err := BodiesIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
+			return err
+		}
+	case snap.Transactions:
+		dir, _ := filepath.Split(sn.Path)
+		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, lvl); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, lvl log.Lvl) error {
