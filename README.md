@@ -77,6 +77,8 @@ Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
 
+Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile)
+
 ### Modularity
 
 Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.

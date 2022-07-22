@@ -76,4 +76,5 @@ go.work
 
 docker-compose.*.yml
 .env
+coverage.out
 
