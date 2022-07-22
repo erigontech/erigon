@@ -610,6 +610,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 				defer sem.Release(1)
 				defer wg.Done()
 
+				log.Log(log.LvlInfo, "[snapshots] BuildMissedIndices", "from", sn.From, "to", sn.To)
 				if err := buildIdx(ctx, sn, chainID, tmpDir, lvl); err != nil {
 					errs <- err
 				}
@@ -831,10 +832,12 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) error {
-	return retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
+func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
+	chainConfig := tool.ChainConfigFromDB(br.db)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, chainID uint256.Int, lvl log.Lvl) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
 	if br.working.Load() {
 		// go-routine is still working
 		return
@@ -855,7 +858,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 			return
 		}
 
-		err := br.RetireBlocks(ctx, blockFrom, blockTo, chainID, lvl)
+		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -1212,7 +1215,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	if err := f.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
-
 	return nil
 }
 

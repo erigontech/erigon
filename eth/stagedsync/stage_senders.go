@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -435,8 +434,7 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx con
 		}
 	}
 
-	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, *chainID, log.LvlInfo)
+	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
 
 	return nil
 }
