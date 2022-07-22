@@ -51,6 +51,24 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	return db, tx, c
 }
 
+func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]string, []string) {
+	var keys []string
+	var values []string
+	var err error
+	i := 0
+	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
+		require.Nil(t, err)
+		keys = append(keys, string(k))
+		values = append(values, string(v))
+		i += 1
+	}
+	for ind := i; ind > 1; ind-- {
+		c.Prev()
+	}
+
+	return keys, values
+}
+
 func TestSeekBothRange(t *testing.T) {
 	db, tx, c := BaseCase(t)
 	defer db.Close()
@@ -265,17 +283,25 @@ func TestAppendFirstLast(t *testing.T) {
 	require.Error(t, tx.Append(table, []byte("key2"), []byte("value2.1")))
 	require.NoError(t, tx.Append(table, []byte("key6"), []byte("value6.1")))
 	require.Error(t, tx.Append(table, []byte("key4"), []byte("value4.1")))
-	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.11")))
+	require.NoError(t, tx.AppendDup(table, []byte("key2"), []byte("value1.11")))
 
 	k, v, err := c.First()
 	require.Nil(t, err)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.1"))
 
+	keys, values := iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key1", "key2", "key3", "key3", "key6"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3", "value1.11", "value3.1", "value3.3", "value6.1"}, values)
+
 	k, v, err = c.Last()
 	require.Nil(t, err)
 	require.Equal(t, k, []byte("key6"))
 	require.Equal(t, v, []byte("value6.1"))
+
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key6"}, keys)
+	require.Equal(t, []string{"value6.1"}, values)
 }
 
 func TestNextPrevCurrent(t *testing.T) {
@@ -286,38 +312,57 @@ func TestNextPrevCurrent(t *testing.T) {
 
 	k, v, err := c.First()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.1"))
+	keys, values := iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Next()
+	require.Equal(t, []byte("key1"), k)
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Current()
 	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.3"))
 
 	k, v, err = c.Next()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key3"))
-	require.Equal(t, v, []byte("value3.1"))
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key3", "key3"}, keys)
+	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
 	k, v, err = c.Prev()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Current()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Prev()
 	require.Nil(t, err)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.1"))
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+
+	err = c.DeleteCurrent()
+	require.Nil(t, err)
+	k, v, err = c.Current()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
+
 }
 
 func TestSeek(t *testing.T) {
@@ -326,35 +371,23 @@ func TestSeek(t *testing.T) {
 	defer tx.Rollback()
 	defer c.Close()
 
-	var keys []string
-	var values []string
-	for k, v, err := c.Seek([]byte("k")); k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-	}
+	k, v, err := c.Seek([]byte("k"))
+	require.Nil(t, err)
+	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
-	var keys1 []string
-	var values1 []string
-	for k, v, err := c.Seek([]byte("key3")); k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys1 = append(keys1, string(k))
-		values1 = append(values1, string(v))
-	}
-	require.Equal(t, []string{"key3", "key3"}, keys1)
-	require.Equal(t, []string{"value3.1", "value3.3"}, values1)
+	k, v, err = c.Seek([]byte("key3"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key3", "key3"}, keys)
+	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
-	var keys2 []string
-	var values2 []string
-	for k, v, err := c.Seek([]byte("xy")); k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys2 = append(keys2, string(k))
-		values2 = append(values2, string(v))
-	}
-	require.Nil(t, keys2)
-	require.Nil(t, values2)
+	k, v, err = c.Seek([]byte("xyz"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Nil(t, keys)
+	require.Nil(t, values)
 }
 
 func TestSeekExact(t *testing.T) {
@@ -363,23 +396,130 @@ func TestSeekExact(t *testing.T) {
 	defer tx.Rollback()
 	defer c.Close()
 
-	var keys []string
-	var values []string
-	for k, v, err := c.SeekExact([]byte("key3")); k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-	}
+	k, v, err := c.SeekExact([]byte("key3"))
+	require.Nil(t, err)
+	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
-	var keys1 []string
-	var values1 []string
-	for k, v, err := c.SeekExact([]byte("key")); k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
-		keys1 = append(keys, string(k))
-		values1 = append(values, string(v))
-	}
-	require.Nil(t, keys1)
-	require.Nil(t, values1)
+	k, v, err = c.SeekExact([]byte("key"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Nil(t, keys)
+	require.Nil(t, values)
+}
+
+func TestSeekBothExact(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	k, v, err := c.SeekBothExact([]byte("key1"), []byte("value1.2"))
+	require.Nil(t, err)
+	keys, values := iteration(t, c, k, v)
+	require.Nil(t, keys)
+	require.Nil(t, values)
+
+	k, v, err = c.SeekBothExact([]byte("key2"), []byte("value1.1"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Nil(t, keys)
+	require.Nil(t, values)
+
+	k, v, err = c.SeekBothExact([]byte("key1"), []byte("value1.1"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+
+	k, v, err = c.SeekBothExact([]byte("key3"), []byte("value3.3"))
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key3"}, keys)
+	require.Equal(t, []string{"value3.3"}, values)
+}
+
+func TestNextDups(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	table := "Table"
+
+	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1")))
+	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.3")))
+	require.NoError(t, tx.Delete(table, []byte("key3"), []byte("value3.1"))) //valid but already deleted
+	require.NoError(t, tx.Delete(table, []byte("key3"), []byte("value3.3"))) //valid key but wrong value
+
+	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.1")))
+	require.NoError(t, c.Put([]byte("key2"), []byte("value1.2")))
+	require.NoError(t, c.Put([]byte("key3"), []byte("value1.6")))
+	require.NoError(t, c.Put([]byte("key"), []byte("value1.7")))
+
+	k, v, err := c.Current()
+	require.Nil(t, err)
+	keys, values := iteration(t, c, k, v)
+	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
+	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
+
+	v, err = c.FirstDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
+	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
+
+	k, v, err = c.NextNoDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key2", "key2", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.2", "value1.6"}, values)
+
+	k, v, err = c.NextDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key2", "key3"}, keys)
+	require.Equal(t, []string{"value1.2", "value1.6"}, values)
+
+	v, err = c.LastDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key2", "key3"}, keys)
+	require.Equal(t, []string{"value1.2", "value1.6"}, values)
+
+	k, v, err = c.NextDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Nil(t, keys)
+	require.Nil(t, values)
+
+	k, v, err = c.NextNoDup()
+	require.Nil(t, err)
+	keys, values = iteration(t, c, k, v)
+	require.Equal(t, []string{"key3"}, keys)
+	require.Equal(t, []string{"value1.6"}, values)
+}
+
+func TestCurrentDup(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	count, err := c.CountDuplicates()
+	require.Nil(t, err)
+	require.Equal(t, count, uint64(2))
+
+	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
+	require.NoError(t, c.DeleteCurrentDuplicates())
+
+	k, v, err := c.SeekExact([]byte("key1"))
+	require.Nil(t, err)
+	keys, values := iteration(t, c, k, v)
+	require.Equal(t, []string{"key1", "key1"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3"}, values)
+
+	require.Equal(t, []string{"key1", "key1"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.3"}, values)
 }
