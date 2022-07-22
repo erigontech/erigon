@@ -583,25 +583,6 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, lvl log.Lvl) error {
-	switch sn.T {
-	case snap.Headers:
-		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
-			return err
-		}
-	case snap.Bodies:
-		if err := BodiesIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
-			return err
-		}
-	case snap.Transactions:
-		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, lvl); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
