@@ -317,23 +317,19 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
-	for i := 0; i < len(s.Headers.segments); i++ {
-		seg := s.Headers.segments[i]
+	for _, seg := range s.Headers.segments {
 		if seg.idxHeaderHash == nil {
 			break
 		}
 		headers = seg.ranges.to - 1
 	}
-	for i := 0; i < len(s.Bodies.segments); i++ {
-		seg := s.Bodies.segments[i]
+	for _, seg := range s.Bodies.segments {
 		if seg.idxBodyNumber == nil {
 			break
 		}
 		bodies = seg.ranges.to - 1
 	}
-
-	for i := 0; i < len(s.Txs.segments); i++ {
-		seg := s.Txs.segments[i]
+	for _, seg := range s.Txs.segments {
 		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
 			break
 		}
