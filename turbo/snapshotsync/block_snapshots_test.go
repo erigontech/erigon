@@ -77,7 +77,7 @@ func TestMergeSnapshots(t *testing.T) {
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
-		ranges := merger.FindMergeRanges(s)
+		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) > 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
@@ -92,7 +92,7 @@ func TestMergeSnapshots(t *testing.T) {
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
-		ranges := merger.FindMergeRanges(s)
+		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) == 0)
 		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)

@@ -116,7 +116,7 @@ jobs:
       - name: parse hive output
         run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput gatewayfm/hive:latest --resultsdir=/work/results --outdir=/work/results
 
-      - name: archive hive results              
+      - name: archive hive results
         uses: actions/upload-artifact@v3
         if: always()
         with:
