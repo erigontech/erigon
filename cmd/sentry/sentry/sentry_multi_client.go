@@ -500,7 +500,7 @@ func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direc
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

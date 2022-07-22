@@ -130,13 +130,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
-		workers := runtime.GOMAXPROCS(-1) - 1
-		if workers < 1 {
-			workers = 1
-		}
-		if workers > 4 {
-			workers = 4
-		}
+		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
 		if err := rebuildIndices(ctx, chainDB, cfg, dirs, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
@@ -244,8 +238,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
-	chainConfig := tool.ChainConfigFromDB(chainDB)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := snapshots.Reopen(); err != nil {
 		return err
@@ -256,7 +248,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
-		if err := br.RetireBlocks(ctx, i, i+every, *chainID, log.LvlInfo); err != nil {
+		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
 		}
 		if err := chainDB.Update(ctx, func(tx kv.RwTx) error {

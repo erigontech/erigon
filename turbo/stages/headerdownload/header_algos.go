@@ -437,7 +437,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 	request = &HeaderRequest{
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
-		Number:  0, // Since posAnchor may be an estimate, do not specify it here
+		Number:  anchor.blockHeight - 1,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,

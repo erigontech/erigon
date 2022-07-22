@@ -228,7 +228,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if abs64(int64(fv.currentHeight)-header.Number.Int64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
-		fmt.Println("not in range")
 		return
 	}
 	// Let's assemble the side fork backwards

@@ -9,6 +9,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const BlockBufferSize = 128
@@ -195,7 +196,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID [64]byte) {
+func (bd *BodyDownload) DeliverBodies(txs *[][][]byte, uncles *[][]*types.Header, lenOfP2PMsg uint64, peerID [64]byte) {
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
@@ -240,8 +241,19 @@ Loop:
 			break Loop
 		}
 
+		if delivery.txs == nil {
+			log.Warn("nil transactions delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+		}
+		if delivery.uncles == nil {
+			log.Warn("nil uncles delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+		}
+		if delivery.txs == nil || delivery.uncles == nil {
+			log.Debug("delivery body processing has been skipped due to nil tx|data")
+			continue
+		}
+
 		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage, _ := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
+		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
 		var delivered, undelivered int
 
 		for i := range txs {
