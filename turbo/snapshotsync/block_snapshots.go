@@ -890,7 +890,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("Reopen: %w", err)
+		return fmt.Errorf("reopen: %w", err)
 	}
 
 	var downloadRequest []DownloadRequest
