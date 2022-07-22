@@ -130,13 +130,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
-		workers := runtime.GOMAXPROCS(-1) - 1
-		if workers < 1 {
-			workers = 1
-		}
-		if workers > 4 {
-			workers = 4
-		}
+		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
 		if err := rebuildIndices(ctx, chainDB, cfg, dirs, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
