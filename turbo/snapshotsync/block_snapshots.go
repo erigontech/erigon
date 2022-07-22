@@ -42,7 +42,7 @@ import (
 )
 
 type DownloadRequest struct {
-	ranges      *MergeRange
+	ranges      *Range
 	path        string
 	torrentHash string
 }
@@ -50,20 +50,20 @@ type DownloadRequest struct {
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
 	idxHeaderHash *recsplit.Index        // header_hash       -> headers_segment_offset
-	ranges        MergeRange
+	ranges        Range
 }
 
 type BodySegment struct {
 	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
 	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	ranges        MergeRange
+	ranges        Range
 }
 
 type TxnSegment struct {
 	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
 	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
 	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
-	ranges              MergeRange
+	ranges              Range
 }
 
 func (sn *HeaderSegment) close() {
@@ -382,22 +382,6 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...snap.Type) (err error) {
 	return nil
 }
 
-func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
-	go func() {
-		for !s.segmentsReady.Load() || !s.indicesReady.Load() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) {
-				log.Error("AsyncOpenAll", "err", err)
-			}
-			time.Sleep(15 * time.Second)
-		}
-	}()
-}
-
 // OptimisticReopen - optimistically open snapshots (ignoring error), useful at App startup because:
 // - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
 // - RPC return Nil for historical blocks if snapshots are not open
@@ -422,7 +406,7 @@ func (s *RoSnapshots) Reopen() error {
 	s.Txs.segments = s.Txs.segments[:0]
 	for _, f := range files {
 		{
-			seg := &BodySegment{ranges: MergeRange{f.From, f.To}}
+			seg := &BodySegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Bodies)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -434,7 +418,7 @@ func (s *RoSnapshots) Reopen() error {
 			s.Bodies.segments = append(s.Bodies.segments, seg)
 		}
 		{
-			seg := &HeaderSegment{ranges: MergeRange{f.From, f.To}}
+			seg := &HeaderSegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Headers)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -446,7 +430,7 @@ func (s *RoSnapshots) Reopen() error {
 			s.Headers.segments = append(s.Headers.segments, seg)
 		}
 		{
-			seg := &TxnSegment{ranges: MergeRange{f.From, f.To}}
+			seg := &TxnSegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Transactions)
 			seg.Seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -517,7 +501,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	var segmentsMaxSet bool
 	for _, f := range files {
 		{
-			seg := &BodySegment{ranges: MergeRange{f.From, f.To}}
+			seg := &BodySegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Bodies)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -529,7 +513,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.Bodies.segments = append(s.Bodies.segments, seg)
 		}
 		{
-			seg := &HeaderSegment{ranges: MergeRange{f.From, f.To}}
+			seg := &HeaderSegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Headers)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -541,7 +525,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.Headers.segments = append(s.Headers.segments, seg)
 		}
 		{
-			seg := &TxnSegment{ranges: MergeRange{f.From, f.To}}
+			seg := &TxnSegment{ranges: Range{f.From, f.To}}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Transactions)
 			seg.Seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
@@ -793,14 +777,14 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 	return nil
 }
 
-func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []MergeRange) {
+func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []Range) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			missingSnapshots = append(missingSnapshots, MergeRange{prevTo, f.From})
+			missingSnapshots = append(missingSnapshots, Range{prevTo, f.From})
 			continue
 		}
 		prevTo = f.To
@@ -854,7 +838,7 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func Segments(dir string) (res []snap.FileInfo, missingSnapshots []MergeRange, err error) {
+func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
@@ -944,10 +928,12 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) error {
-	return retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
+func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
+	chainConfig := tool.ChainConfigFromDB(br.db)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, chainID uint256.Int, lvl log.Lvl) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
 	if br.working.Load() {
 		// go-routine is still working
 		return
@@ -968,7 +954,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 			return
 		}
 
-		err := br.RetireBlocks(ctx, blockFrom, blockTo, chainID, lvl)
+		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -988,7 +974,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.Reopen(); err != nil {
-		return fmt.Errorf("Reopen: %w", err)
+		return fmt.Errorf("reopen: %w", err)
 	}
 	idxWorkers := workers
 	if idxWorkers > 4 {
@@ -998,7 +984,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	if err := snapshots.Reopen(); err != nil {
-		return fmt.Errorf("Reopen: %w", err)
+		return fmt.Errorf("reopen: %w", err)
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
 	ranges := merger.FindMergeRanges(snapshots)
@@ -1010,7 +996,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	if err := snapshots.Reopen(); err != nil {
-		return fmt.Errorf("Reopen: %w", err)
+		return fmt.Errorf("reopen: %w", err)
 	}
 
 	var downloadRequest []DownloadRequest
@@ -1723,13 +1709,13 @@ func NewMerger(tmpDir string, workers int, lvl log.Lvl, chainID uint256.Int, not
 	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl, chainID: chainID, notifier: notifier}
 }
 
-type MergeRange struct {
+type Range struct {
 	from, to uint64
 }
 
-func (r MergeRange) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
+func (r Range) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
 
-func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []MergeRange) {
+func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []Range) {
 	for i := len(snapshots.Headers.segments) - 1; i > 0; i-- {
 		sn := snapshots.Headers.segments[i]
 		if sn.ranges.to-sn.ranges.from >= snap.DEFAULT_SEGMENT_SIZE { // is complete .seg
@@ -1744,14 +1730,14 @@ func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []MergeRange) {
 				break
 			}
 			aggFrom := sn.ranges.to - span
-			res = append(res, MergeRange{from: aggFrom, to: sn.ranges.to})
+			res = append(res, Range{from: aggFrom, to: sn.ranges.to})
 			for snapshots.Headers.segments[i].ranges.from > aggFrom {
 				i--
 			}
 			break
 		}
 	}
-	slices.SortFunc(res, func(i, j MergeRange) bool { return i.from < j.from })
+	slices.SortFunc(res, func(i, j Range) bool { return i.from < j.from })
 	return res
 }
 func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeHeaders, toMergeBodies, toMergeTxs []string, err error) {
@@ -1779,7 +1765,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []MergeRange, snapDir string, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1943,7 +1929,7 @@ func assertSegment(segmentFile string) {
 	}
 }
 
-func NewDownloadRequest(ranges *MergeRange, path string, torrentHash string) DownloadRequest {
+func NewDownloadRequest(ranges *Range, path string, torrentHash string) DownloadRequest {
 	return DownloadRequest{
 		ranges:      ranges,
 		path:        path,

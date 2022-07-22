@@ -1311,7 +1311,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var missingSnapshots []snapshotsync.MergeRange
+	var missingSnapshots []snapshotsync.Range
 	if !dbEmpty {
 		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
