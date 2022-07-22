@@ -67,24 +67,33 @@ type TxnSegment struct {
 	ranges              Range
 }
 
-func (sn *HeaderSegment) close() {
-	if sn.seg != nil {
-		sn.seg.Close()
-		sn.seg = nil
-	}
+func (sn *HeaderSegment) closeIdx() {
 	if sn.idxHeaderHash != nil {
 		sn.idxHeaderHash.Close()
 		sn.idxHeaderHash = nil
 	}
 }
-
-func (sn *HeaderSegment) reopen(dir string) (err error) {
-	sn.close()
+func (sn *HeaderSegment) closeSeg() {
+	if sn.seg != nil {
+		sn.seg.Close()
+		sn.seg = nil
+	}
+}
+func (sn *HeaderSegment) close() {
+	sn.closeSeg()
+	sn.closeIdx()
+}
+func (sn *HeaderSegment) reopenSeg(dir string) (err error) {
+	sn.closeSeg()
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Headers)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return err
 	}
+	return nil
+}
+func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
+	sn.closeIdx()
 	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Headers.String())))
 	if err != nil {
 		return err
@@ -92,24 +101,34 @@ func (sn *HeaderSegment) reopen(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) close() {
+func (sn *BodySegment) closeSeg() {
 	if sn.seg != nil {
 		sn.seg.Close()
 		sn.seg = nil
 	}
+}
+func (sn *BodySegment) closeIdx() {
 	if sn.idxBodyNumber != nil {
 		sn.idxBodyNumber.Close()
 		sn.idxBodyNumber = nil
 	}
 }
+func (sn *BodySegment) close() {
+	sn.closeSeg()
+	sn.closeIdx()
+}
 
-func (sn *BodySegment) reopen(dir string) (err error) {
-	sn.close()
+func (sn *BodySegment) reopenSeg(dir string) (err error) {
+	sn.closeSeg()
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Bodies)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return err
 	}
+	return nil
+}
+func (sn *BodySegment) reopenIdx(dir string) (err error) {
+	sn.closeIdx()
 	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Bodies.String())))
 	if err != nil {
 		return err
@@ -133,11 +152,7 @@ func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) erro
 	return nil
 }
 
-func (sn *TxnSegment) close() {
-	if sn.Seg != nil {
-		sn.Seg.Close()
-		sn.Seg = nil
-	}
+func (sn *TxnSegment) closeIdx() {
 	if sn.IdxTxnHash != nil {
 		sn.IdxTxnHash.Close()
 		sn.IdxTxnHash = nil
@@ -147,19 +162,35 @@ func (sn *TxnSegment) close() {
 		sn.IdxTxnHash2BlockNum = nil
 	}
 }
-func (sn *TxnSegment) reopen(dir string) (err error) {
-	sn.close()
+func (sn *TxnSegment) closeSeg() {
+	if sn.Seg != nil {
+		sn.Seg.Close()
+		sn.Seg = nil
+	}
+}
+func (sn *TxnSegment) close() {
+	sn.closeSeg()
+	sn.closeIdx()
+}
+func (sn *TxnSegment) reopenSeg(dir string) (err error) {
+	sn.closeSeg()
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Transactions)
 	sn.Seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return err
 	}
+	return nil
+}
+func (sn *TxnSegment) reopenIdx(dir string) (err error) {
+	sn.closeIdx()
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())))
 	if err != nil {
+		fmt.Printf("alex23: %s, %s\n", sn.ranges, err)
 		return err
 	}
 	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions2Block.String())))
 	if err != nil {
+		fmt.Printf("alex24: %s, %s\n", sn.ranges, err)
 		return err
 	}
 	return nil
@@ -174,17 +205,6 @@ func (s *headerSegments) closeLocked() {
 	for i := range s.segments {
 		s.segments[i].close()
 	}
-}
-func (s *headerSegments) reopen(dir string) error {
-	for _, seg := range s.segments {
-		if err := seg.reopen(dir); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return err
-		}
-	}
-	return nil
 }
 func (s *headerSegments) View(f func(segments []*HeaderSegment) error) error {
 	s.lock.RLock()
@@ -213,17 +233,6 @@ func (s *bodySegments) closeLocked() {
 		s.segments[i].close()
 	}
 }
-func (s *bodySegments) reopen(dir string) error {
-	for _, seg := range s.segments {
-		if err := seg.reopen(dir); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return err
-		}
-	}
-	return nil
-}
 func (s *bodySegments) View(f func([]*BodySegment) error) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
@@ -250,17 +259,6 @@ func (s *txnSegments) closeLocked() {
 	for i := range s.segments {
 		s.segments[i].close()
 	}
-}
-func (s *txnSegments) reopen(dir string) error {
-	for _, seg := range s.segments {
-		if err := seg.reopen(dir); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return err
-		}
-	}
-	return nil
 }
 func (s *txnSegments) View(f func([]*TxnSegment) error) error {
 	s.lock.RLock()
@@ -319,68 +317,29 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
-	for i := len(s.Headers.segments) - 1; i >= 0; i-- {
+	for i := 0; i < len(s.Headers.segments); i++ {
 		seg := s.Headers.segments[i]
 		if seg.idxHeaderHash == nil {
-			continue
+			break
 		}
 		headers = seg.ranges.to - 1
-		break
 	}
-	for i := len(s.Bodies.segments) - 1; i >= 0; i-- {
+	for i := 0; i < len(s.Bodies.segments); i++ {
 		seg := s.Bodies.segments[i]
 		if seg.idxBodyNumber == nil {
-			continue
+			break
 		}
 		bodies = seg.ranges.to - 1
-		break
 	}
 
-	for i := len(s.Txs.segments) - 1; i >= 0; i-- {
+	for i := 0; i < len(s.Txs.segments); i++ {
 		seg := s.Txs.segments[i]
 		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
-			continue
+			break
 		}
 		txs = seg.ranges.to - 1
-		break
 	}
 	return cmp.Min(headers, cmp.Min(bodies, txs))
-}
-
-func (s *RoSnapshots) ReopenIndices() error {
-	return s.ReopenSomeIndices(snap.AllSnapshotTypes...)
-}
-
-func (s *RoSnapshots) ReopenSomeIndices(types ...snap.Type) (err error) {
-	s.Headers.lock.Lock()
-	defer s.Headers.lock.Unlock()
-	s.Bodies.lock.Lock()
-	defer s.Bodies.lock.Unlock()
-	s.Txs.lock.Lock()
-	defer s.Txs.lock.Unlock()
-
-	for _, t := range types {
-		switch t {
-		case snap.Headers:
-			if err := s.Headers.reopen(s.dir); err != nil {
-				return err
-			}
-		case snap.Bodies:
-			if err := s.Bodies.reopen(s.dir); err != nil {
-				return err
-			}
-		case snap.Transactions:
-			if err := s.Txs.reopen(s.dir); err != nil {
-				return err
-			}
-		default:
-			panic(fmt.Sprintf("unknown snapshot type: %s", t))
-		}
-	}
-
-	s.idxMax.Store(s.idxAvailability())
-	s.indicesReady.Store(true)
-	return nil
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
@@ -441,6 +400,7 @@ func (s *RoSnapshots) ReopenList(fileNames []string) error {
 	s.Bodies.segments = s.Bodies.segments[:0]
 	s.Headers.segments = s.Headers.segments[:0]
 	s.Txs.segments = s.Txs.segments[:0]
+Loop:
 	for _, fName := range fileNames {
 		f, err := snap.ParseFileName(s.dir, fName)
 		if err != nil {
@@ -451,31 +411,46 @@ func (s *RoSnapshots) ReopenList(fileNames []string) error {
 		switch f.T {
 		case snap.Headers:
 			sn := &HeaderSegment{ranges: Range{f.From, f.To}}
-			if err := sn.reopen(s.dir); err != nil {
+			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					break
+					break Loop
 				}
 				return err
 			}
 			s.Headers.segments = append(s.Headers.segments, sn)
+			if err := sn.reopenIdx(s.dir); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
 		case snap.Bodies:
 			sn := &BodySegment{ranges: Range{f.From, f.To}}
-			if err := sn.reopen(s.dir); err != nil {
+			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					break
 				}
 				return err
 			}
 			s.Bodies.segments = append(s.Bodies.segments, sn)
+			if err := sn.reopenIdx(s.dir); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
 		case snap.Transactions:
 			sn := &TxnSegment{ranges: Range{f.From, f.To}}
-			if err := sn.reopen(s.dir); err != nil {
+			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					break
+					break Loop
 				}
 				return err
 			}
 			s.Txs.segments = append(s.Txs.segments, sn)
+			if err := sn.reopenIdx(s.dir); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
 		}
 
 		if f.To > 0 {

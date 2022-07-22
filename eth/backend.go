@@ -804,6 +804,9 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 		if err := allSnapshots.ReopenList(snList); err != nil {
 			return nil, nil, err
 		}
+		if s.notifications != nil {
+			s.notifications.Events.OnNewSnapshot()
+		}
 
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
