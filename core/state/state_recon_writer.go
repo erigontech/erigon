@@ -156,7 +156,7 @@ func (rs *ReconState) RollbackTx(txTask TxTask, dependency uint64) {
 	if rs.doneBitmap.Contains(dependency) {
 		heap.Push(&rs.queue, txTask)
 	} else {
-		tt, _ := rs.triggers[dependency]
+		tt := rs.triggers[dependency]
 		tt = append(tt, txTask)
 		rs.triggers[dependency] = tt
 	}

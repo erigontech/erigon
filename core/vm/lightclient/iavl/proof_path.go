@@ -118,7 +118,7 @@ func (pl PathToLeaf) isRightmost() bool {
 }
 
 func (pl PathToLeaf) isEmpty() bool {
-	return pl == nil || len(pl) == 0
+	return len(pl) == 0
 }
 
 func (pl PathToLeaf) dropRoot() PathToLeaf {

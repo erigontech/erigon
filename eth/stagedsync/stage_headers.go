@@ -184,7 +184,7 @@ func HeadersPOS(
 	if forkChoiceInsteadOfNewPayload {
 		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
 	} else {
-		payloadMessage := request.(*engineapi.PayloadMessage)
+		payloadMessage := request.(*types.Block)
 		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
 	}
 
@@ -430,7 +430,7 @@ func finishHandlingForkChoice(
 }
 
 func handleNewPayload(
-	payloadMessage *engineapi.PayloadMessage,
+	block *types.Block,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
 	s *StageState,
@@ -439,9 +439,9 @@ func handleNewPayload(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*privateapi.PayloadStatus, error) {
-	header := payloadMessage.Header
+	header := block.Header()
 	headerNumber := header.Number.Uint64()
-	headerHash := header.Hash()
+	headerHash := block.Hash()
 
 	log.Debug(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
@@ -504,38 +504,14 @@ func handleNewPayload(
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
-	for _, tx := range payloadMessage.Body.Transactions {
-		if types.TypedTransactionMarshalledAsRlpString(tx) {
-			log.Warn(fmt.Sprintf("[%s] typed txn marshalled as RLP string", s.LogPrefix()), "tx", common.Bytes2Hex(tx))
-			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-			return &privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: header.ParentHash,
-				ValidationError: errors.New("typed txn marshalled as RLP string"),
-			}, nil
-		}
-	}
-
-	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
-	if err != nil {
-		log.Warn(fmt.Sprintf("[%s] Error during Beacon transaction decoding", s.LogPrefix()), "err", err.Error())
-		cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-		return &privateapi.PayloadStatus{
-			Status:          remote.EngineStatus_INVALID,
-			LatestValidHash: header.ParentHash,
-			ValidationError: err,
-		}, nil
-	}
-
 	log.Debug(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
-	response, success, err := verifyAndSaveNewPoSHeader(requestStatus, s, ctx, tx, cfg, header, payloadMessage.Body, headerInserter)
+	response, success, err := verifyAndSaveNewPoSHeader(requestStatus, s, ctx, tx, cfg, block, headerInserter)
 	log.Debug(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return response, err
 	}
 
 	if cfg.bodyDownload != nil {
-		block := types.NewBlockFromStorage(headerHash, header, transactions, nil)
 		cfg.bodyDownload.AddToPrefetch(block)
 	}
 
@@ -548,12 +524,12 @@ func verifyAndSaveNewPoSHeader(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	header *types.Header,
-	body *types.RawBody,
+	block *types.Block,
 	headerInserter *headerdownload.HeaderInserter,
 ) (response *privateapi.PayloadStatus, success bool, err error) {
+	header := block.Header()
 	headerNumber := header.Number.Uint64()
-	headerHash := header.Hash()
+	headerHash := block.Hash()
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
@@ -578,7 +554,7 @@ func verifyAndSaveNewPoSHeader(
 	if cfg.memoryOverlay {
 		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
 		extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, body, extendCanonical)
+		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
 		if criticalError != nil {
 			return nil, false, criticalError
 		}
@@ -1332,7 +1308,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var missingSnapshots []snapshotsync.MergeRange
+	var missingSnapshots []snapshotsync.Range
 	if !dbEmpty {
 		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {

@@ -383,10 +383,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 	_, isForbidden := h.forbiddenList[method]
 	if len(h.allowList) == 0 {
-		if isForbidden {
-			return false
-		}
-		return true
+		return !isForbidden
 	}
 
 	_, ok := h.allowList[method]
