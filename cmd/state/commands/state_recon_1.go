@@ -173,26 +173,22 @@ func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
 		if err = ibs.MakeWriteSet(txTask.Rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
-		txTask.ReadKeys, txTask.ReadVals = rw.stateReader.ReadSet()
-		txTask.WriteKeys, txTask.WriteVals = rw.stateWriter.WriteSet()
+		txTask.ReadLists = rw.stateReader.ReadSet()
+		txTask.WriteLists = rw.stateWriter.WriteSet()
 		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
-		for _, bb := range txTask.ReadKeys {
-			for _, b := range bb {
+		for _, list := range txTask.ReadLists {
+			for _, b := range list.Keys {
+				size += len(b)
+			}
+			for _, b := range list.Vals {
 				size += len(b)
 			}
 		}
-		for _, bb := range txTask.ReadVals {
-			for _, b := range bb {
+		for _, list := range txTask.WriteLists {
+			for _, b := range list.Keys {
 				size += len(b)
 			}
-		}
-		for _, bb := range txTask.WriteKeys {
-			for _, b := range bb {
-				size += len(b)
-			}
-		}
-		for _, bb := range txTask.WriteVals {
-			for _, b := range bb {
+			for _, b := range list.Vals {
 				size += len(b)
 			}
 		}
@@ -205,8 +201,8 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.R
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
 		txTask := heap.Pop(rws).(state.TxTask)
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
-		if txTask.Error == nil && rs.ReadsValid(txTask.ReadKeys, txTask.ReadVals) {
-			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask.WriteKeys, txTask.WriteVals, txTask.BalanceIncreaseSet); err != nil {
+		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
+			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask); err != nil {
 				panic(err)
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
@@ -402,7 +398,7 @@ func Recon1(genesis *core.Genesis, logger log.Logger) error {
 							}
 						}
 						rwsReceiveCond.Signal()
-						lock.Lock()
+						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
 						// Drain results channel because read sets do not carry over
 						var drained bool

@@ -253,10 +253,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		allTxs roaring64.Bitmap
 		txsTo  roaring64.Bitmap
 	)
+	ac := api._agg.MakeContext()
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it := api._agg.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+			it := ac.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
 			for it.HasNext() {
 				allTxs.Add(it.Next())
 			}
@@ -266,7 +267,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it := api._agg.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+			it := ac.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
 			for it.HasNext() {
 				txsTo.Add(it.Next())
 			}
@@ -319,7 +320,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(api._agg, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := uint64(it.Next())
