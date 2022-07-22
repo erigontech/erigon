@@ -138,7 +138,7 @@ func SpawnStageHeaders(
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -152,12 +152,13 @@ func HeadersPOS(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	useExternalTx bool,
 ) error {
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
 
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -169,6 +170,11 @@ func HeadersPOS(
 	}
 
 	if interrupted {
+		return nil
+	}
+
+	if requestWithStatus == nil {
+		log.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", s.LogPrefix()))
 		return nil
 	}
 

@@ -102,7 +102,7 @@ func (rl *RequestList) firstRequest(onlyNew bool) (id int, request *RequestWithS
 	return 0, nil
 }
 
-func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int, request *RequestWithStatus) {
+func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Interrupt, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -119,7 +119,7 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int
 			return
 		}
 		id, request = rl.firstRequest(onlyNew)
-		if request != nil {
+		if request != nil || noWait {
 			return
 		}
 		rl.syncCond.Wait()

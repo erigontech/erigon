@@ -104,7 +104,7 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
+	beaconRequestList.WaitForRequest(true, false)
 	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	<-done
 	require.NoError(err)
@@ -163,7 +163,7 @@ func TestMockValidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
+	beaconRequestList.WaitForRequest(true, false)
 
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
@@ -199,7 +199,7 @@ func TestMockInvalidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
+	beaconRequestList.WaitForRequest(true, false)
 	// Simulate invalid status
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
