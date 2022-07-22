@@ -476,16 +476,6 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
-func (s *RoSnapshots) Ranges() (ranges []Range) {
-	_ = s.Headers.View(func(segments []*HeaderSegment) error {
-		for _, sn := range segments {
-			ranges = append(ranges, sn.ranges)
-		}
-		return nil
-	})
-	return ranges
-}
-
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
