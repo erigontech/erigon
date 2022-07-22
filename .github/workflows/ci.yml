@@ -1,4 +1,4 @@
-name: Continuous integration
+name: CI
 on:
   push:
     branches:
@@ -10,8 +10,15 @@ on:
       - devel
       - alpha
       - stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
 jobs:
   tests:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
@@ -59,6 +66,7 @@ jobs:
         run: make test
 
   tests-windows:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ windows-2022 ]
@@ -97,6 +105,7 @@ jobs:
         run: .\wmake.ps1 test
 
   docker:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
@@ -121,4 +130,4 @@ jobs:
         if: always()
         with:
           name: hive-ci-output
-          path: results/*.xml
+          path: results/*.xml        
