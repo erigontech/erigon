@@ -256,13 +256,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 				return err
 			}
 
-			progress, _ := stages.GetStageProgress(tx, stages.Headers)
-			canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
-			deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
-			if err != nil {
-				return nil
+			if !cfg.KeepBlocks {
+				progress, _ := stages.GetStageProgress(tx, stages.Headers)
+				canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
+				deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
+				if err != nil {
+					return nil
+				}
+				log.Info("Deleted blocks", "from", deletedFrom, "to", deletedTo)
 			}
-			log.Info("Deleted blocks", "from", deletedFrom, "to", deletedTo)
 			return nil
 		}); err != nil {
 			return err
