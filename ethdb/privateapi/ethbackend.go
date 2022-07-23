@@ -56,10 +56,7 @@ type EthBackendServer struct {
 	// Block proposing for proof-of-stake
 	payloadId uint64
 	builders  map[uint64]*builder.BlockBuilder
-	// Send Beacon Chain requests to staged sync
-	requestList *engineapi.RequestList
-	// Replies to newPayload & forkchoice requests
-	statusCh    <-chan engineapi.PayloadStatus
+
 	builderFunc builder.BlockBuilderFunc
 	proposing   bool
 	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
@@ -76,11 +73,10 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockAndTxnReader,
-	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan engineapi.PayloadStatus,
-	builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
+	config *params.ChainConfig, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		requestList: requestList, statusCh: statusCh, builders: make(map[uint64]*builder.BlockBuilder),
+		builders:    make(map[uint64]*builder.BlockBuilder),
 		builderFunc: builderFunc, proposing: proposing, logsFilter: NewLogsFilterAggregator(events), hd: hd,
 	}
 
@@ -249,7 +245,7 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
 	for i := 0; i < 20; i++ {
-		if !s.requestList.IsWaiting() {
+		if !s.hd.BeaconRequestList.IsWaiting() {
 			// This might happen, for example, in the following scenario:
 			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
 			// 2) We happily process NewPayload and stage loop is at the end.
@@ -261,7 +257,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
-	return !s.requestList.IsWaiting()
+	return !s.hd.BeaconRequestList.IsWaiting()
 }
 
 // EngineNewPayloadV1 validates and possibly executes payload
@@ -325,8 +321,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		}, nil
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
-	// Lock database access
-	s.lock.Lock()
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -339,7 +334,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	tx.Rollback()
-	s.lock.Unlock()
 
 	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
@@ -363,11 +357,13 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		log.Debug("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
-	s.requestList.AddPayloadRequest(block)
+	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	payloadStatus := <-s.statusCh
+	payloadStatus := <-s.hd.PayloadStatusCh
 	log.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
@@ -379,8 +375,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 // Check if we can make out a status from the payload hash/head hash.
 func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, newPayload bool) (*engineapi.PayloadStatus, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	if s.hd == nil {
 		return nil, nil
 	}
@@ -534,13 +528,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	s.lock.Lock()
 	tx1, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx1.Rollback()
-	s.lock.Unlock()
 
 	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
 	tx1.Rollback()
@@ -558,6 +550,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if status == nil {
 		if s.stageLoopIsBusy() {
 			log.Debug("[ForkChoiceUpdated] stage loop is busy")
@@ -566,9 +560,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 			}, nil
 		}
 		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
-		s.requestList.AddForkChoiceRequest(&forkChoice)
+		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
-		statusRef := <-s.statusCh
+		statusRef := <-s.hd.PayloadStatusCh
 		status = &statusRef
 		log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
