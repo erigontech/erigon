@@ -338,10 +338,10 @@ func NewStateReconWriter1(rs *ReconState1) *StateReconWriter1 {
 	return &StateReconWriter1{
 		rs: rs,
 		writeLists: map[string]*KvList{
-			kv.PlainState:        &KvList{},
-			kv.Code:              &KvList{},
-			kv.PlainContractCode: &KvList{},
-			kv.IncarnationMap:    &KvList{},
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.PlainContractCode: {},
+			kv.IncarnationMap:    {},
 		},
 	}
 }
@@ -352,10 +352,10 @@ func (w *StateReconWriter1) SetTxNum(txNum uint64) {
 
 func (w *StateReconWriter1) ResetWriteSet() {
 	w.writeLists = map[string]*KvList{
-		kv.PlainState:        &KvList{},
-		kv.Code:              &KvList{},
-		kv.PlainContractCode: &KvList{},
-		kv.IncarnationMap:    &KvList{},
+		kv.PlainState:        {},
+		kv.Code:              {},
+		kv.PlainContractCode: {},
+		kv.IncarnationMap:    {},
 	}
 }
 
@@ -427,10 +427,10 @@ func NewStateReconReader1(rs *ReconState1) *StateReconReader1 {
 	return &StateReconReader1{
 		rs: rs,
 		readLists: map[string]*KvList{
-			kv.PlainState:     &KvList{},
-			kv.Code:           &KvList{},
-			CodeSizeTable:     &KvList{},
-			kv.IncarnationMap: &KvList{},
+			kv.PlainState:     {},
+			kv.Code:           {},
+			CodeSizeTable:     {},
+			kv.IncarnationMap: {},
 		},
 	}
 }
@@ -445,10 +445,10 @@ func (r *StateReconReader1) SetTx(tx kv.Tx) {
 
 func (r *StateReconReader1) ResetReadSet() {
 	r.readLists = map[string]*KvList{
-		kv.PlainState:     &KvList{},
-		kv.Code:           &KvList{},
-		CodeSizeTable:     &KvList{},
-		kv.IncarnationMap: &KvList{},
+		kv.PlainState:     {},
+		kv.Code:           {},
+		CodeSizeTable:     {},
+		kv.IncarnationMap: {},
 	}
 }
 
