@@ -185,7 +185,7 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	var keys, vals []string
-	err = d.IteratePrefix([]byte("addr2"), func(k, v []byte) {
+	err = d.MakeContext().IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
 		vals = append(vals, string(v))
 	})
@@ -239,10 +239,11 @@ func TestAfterPrune(t *testing.T) {
 
 	d.integrateFiles(sf, 0, 16)
 	var v []byte
-	v, err = d.Get([]byte("key1"), tx)
+	dc := d.MakeContext()
+	v, err = dc.Get([]byte("key1"), tx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("value1.2"), v)
-	v, err = d.Get([]byte("key2"), tx)
+	v, err = dc.Get([]byte("key2"), tx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("value2.1"), v)
 
@@ -265,10 +266,10 @@ func TestAfterPrune(t *testing.T) {
 		require.Nil(t, k, table)
 	}
 
-	v, err = d.Get([]byte("key1"), tx)
+	v, err = dc.Get([]byte("key1"), tx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("value1.2"), v)
-	v, err = d.Get([]byte("key2"), tx)
+	v, err = dc.Get([]byte("key2"), tx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("value2.1"), v)
 }
@@ -319,6 +320,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	var err error
 	// Check the history
 	var roTx kv.Tx
+	dc := d.MakeContext()
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		if txNum == 976 {
 			// Create roTx obnly for the last several txNum, because all history before that
@@ -334,7 +336,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
-			val, err := d.GetBeforeTxNum(k[:], txNum+1, roTx)
+			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(t, err, label)
 			if txNum >= keyNum {
 				require.Equal(t, v[:], val, label)
@@ -454,7 +456,7 @@ func TestIterationMultistep(t *testing.T) {
 
 	var keys []string
 	var vals []string
-	err = d.IteratePrefix([]byte("addr2"), func(k, v []byte) {
+	err = d.MakeContext().IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
 		vals = append(vals, string(v))
 	})
@@ -571,8 +573,9 @@ func TestDelete(t *testing.T) {
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	dc := d.MakeContext()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
-		val, err := d.GetBeforeTxNum([]byte("key1"), txNum+1, roTx)
+		val, err := dc.GetBeforeTxNum([]byte("key1"), txNum+1, roTx)
 		require.NoError(t, err)
 		label := fmt.Sprintf("txNum=%d", txNum)
 		if txNum%2 == 0 {
@@ -580,7 +583,7 @@ func TestDelete(t *testing.T) {
 		} else {
 			require.Nil(t, val, label)
 		}
-		val, err = d.GetBeforeTxNum([]byte("key2"), txNum+1, roTx)
+		val, err = dc.GetBeforeTxNum([]byte("key2"), txNum+1, roTx)
 		require.NoError(t, err)
 		require.Nil(t, val, label)
 	}

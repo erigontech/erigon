@@ -220,11 +220,12 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
+	ic := ii.MakeContext()
 	// Check the iterator ranges first without roTx
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
-		it := ii.IterateRange(k[:], 0, 976, nil)
+		it := ic.IterateRange(k[:], 0, 976, nil)
 		defer it.Close()
 		for i := keyNum; i < 976; i += keyNum {
 			label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)
@@ -241,7 +242,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
-		it := ii.IterateRange(k[:], 400, 1000, roTx)
+		it := ic.IterateRange(k[:], 400, 1000, roTx)
 		defer it.Close()
 		for i := keyNum * ((400 + keyNum - 1) / keyNum); i < txs; i += keyNum {
 			label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)

@@ -50,11 +50,7 @@ type filesItem struct {
 	startTxNum   uint64
 	endTxNum     uint64
 	decompressor *compress.Decompressor
-	getter       *compress.Getter // reader for the decompressor
-	getterMerge  *compress.Getter // reader for the decompressor used in the background merge thread
 	index        *recsplit.Index
-	indexReader  *recsplit.IndexReader // reader for the index
-	readerMerge  *recsplit.IndexReader // index reader for the background merge thread
 }
 
 func filesItemLess(i, j *filesItem) bool {
@@ -64,18 +60,11 @@ func filesItemLess(i, j *filesItem) bool {
 	return i.endTxNum < j.endTxNum
 }
 
-func (i *filesItem) Less(than btree.Item) bool {
-	if i.endTxNum == than.(*filesItem).endTxNum {
-		return i.startTxNum > than.(*filesItem).startTxNum
-	}
-	return i.endTxNum < than.(*filesItem).endTxNum
-}
-
 type FileType int
 
 const (
 	Values FileType = iota
-	History
+	History1
 	EfHistory
 	NumberOfTypes
 )
@@ -84,7 +73,7 @@ func (ft FileType) String() string {
 	switch ft {
 	case Values:
 		return "values"
-	case History:
+	case History1:
 		return "history"
 	case EfHistory:
 		return "efhistory"
@@ -98,7 +87,7 @@ func ParseFileType(s string) (FileType, bool) {
 	case "values":
 		return Values, true
 	case "history":
-		return History, true
+		return History1, true
 	case "efhistory":
 		return EfHistory, true
 	default:
@@ -134,6 +123,7 @@ type Domain struct {
 	prefixLen        int                                      // Number of bytes in the keys that can be used for prefix iteration
 	compressVals     bool
 	stats            DomainStats
+	defaultDc        *DomainContext
 }
 
 func NewDomain(
@@ -175,6 +165,7 @@ func NewDomain(
 			return nil, err
 		}
 	}
+	d.defaultDc = d.MakeContext()
 	return d, nil
 }
 
@@ -245,10 +236,6 @@ func (d *Domain) openFiles(fType FileType) error {
 			return false
 		}
 		totalKeys += item.index.KeyCount()
-		item.getter = item.decompressor.MakeGetter()
-		item.getterMerge = item.decompressor.MakeGetter()
-		item.indexReader = recsplit.NewIndexReader(item.index)
-		item.readerMerge = recsplit.NewIndexReader(item.index)
 		return true
 	})
 	if err != nil {
@@ -284,10 +271,10 @@ func (d *Domain) SetTxNum(txNum uint64) {
 	d.txNum = txNum
 }
 
-func (d *Domain) get(key []byte, roTx kv.Tx) ([]byte, bool, error) {
+func (dc *DomainContext) get(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
-	keyCursor, err := roTx.CursorDupSort(d.keysTable)
+	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.d.txNum / dc.d.aggregationStep))
+	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return nil, false, err
 	}
@@ -297,21 +284,21 @@ func (d *Domain) get(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if foundInvStep == nil {
-		v, found := d.readFromFiles(Values, key)
+		v, found := dc.readFromFiles(Values, key)
 		return v, found, nil
 	}
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	copy(keySuffix[len(key):], foundInvStep)
-	v, err := roTx.GetOne(d.valsTable, keySuffix)
+	v, err := roTx.GetOne(dc.d.valsTable, keySuffix)
 	if err != nil {
 		return nil, false, err
 	}
 	return v, true, nil
 }
 
-func (d *Domain) Get(key []byte, roTx kv.Tx) ([]byte, error) {
-	v, _, err := d.get(key, roTx)
+func (dc *DomainContext) Get(key []byte, roTx kv.Tx) ([]byte, error) {
+	v, _, err := dc.get(key, roTx)
 	return v, err
 }
 
@@ -353,7 +340,7 @@ func (d *Domain) update(key, original []byte) error {
 }
 
 func (d *Domain) Put(key, val []byte) error {
-	original, _, err := d.get(key, d.tx)
+	original, _, err := d.defaultDc.get(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -375,7 +362,7 @@ func (d *Domain) Put(key, val []byte) error {
 }
 
 func (d *Domain) Delete(key []byte) error {
-	original, found, err := d.get(key, d.tx)
+	original, found, err := d.defaultDc.get(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -407,9 +394,10 @@ const (
 // over storage of a given account
 type CursorItem struct {
 	t        CursorType // Whether this item represents state file or DB record, or tree
+	reverse  bool
 	endTxNum uint64
 	key, val []byte
-	dg       *compress.Getter
+	dg, dg2  *compress.Getter
 	c        kv.CursorDupSort
 }
 
@@ -423,7 +411,10 @@ func (ch CursorHeap) Less(i, j int) bool {
 	cmp := bytes.Compare(ch[i].key, ch[j].key)
 	if cmp == 0 {
 		// when keys match, the items with later blocks are preferred
-		return ch[i].endTxNum > ch[j].endTxNum
+		if ch[i].reverse {
+			return ch[i].endTxNum > ch[j].endTxNum
+		}
+		return ch[i].endTxNum < ch[j].endTxNum
 	}
 	return cmp < 0
 }
@@ -444,21 +435,59 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
+// filesItem corresponding to a pair of files (.dat and .idx)
+type ctxItem struct {
+	startTxNum uint64
+	endTxNum   uint64
+	getter     *compress.Getter
+	reader     *recsplit.IndexReader
+}
+
+func ctxItemLess(i, j *ctxItem) bool {
+	if i.endTxNum == j.endTxNum {
+		return i.startTxNum > j.startTxNum
+	}
+	return i.endTxNum < j.endTxNum
+}
+
+// DomainContext allows accesing the same domain from multiple go-routines
+type DomainContext struct {
+	d     *Domain
+	files [NumberOfTypes]*btree.BTreeG[*ctxItem]
+}
+
+func (d *Domain) MakeContext() *DomainContext {
+	dc := &DomainContext{d: d}
+	for fType := FileType(0); fType < NumberOfTypes; fType++ {
+		bt := btree.NewG[*ctxItem](32, ctxItemLess)
+		dc.files[fType] = bt
+		d.files[fType].Ascend(func(item *filesItem) bool {
+			bt.ReplaceOrInsert(&ctxItem{
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				getter:     item.decompressor.MakeGetter(),
+				reader:     recsplit.NewIndexReader(item.index),
+			})
+			return true
+		})
+	}
+	return dc
+}
+
 // IteratePrefix iterates over key-value pairs of the domain that start with given prefix
 // The length of the prefix has to match the `prefixLen` parameter used to create the domain
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
-func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
-	//trace := fmt.Sprintf("%x", prefix) == "000000000000006f6502b7f2bbac8c30a3f67e9a"
-	if len(prefix) != d.prefixLen {
-		return fmt.Errorf("wrong prefix length, this %s domain supports prefixLen %d, given [%x]", d.filenameBase, d.prefixLen, prefix)
+func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
+	if len(prefix) != dc.d.prefixLen {
+		return fmt.Errorf("wrong prefix length, this %s domain supports prefixLen %d, given [%x]", dc.d.filenameBase, dc.d.prefixLen, prefix)
 	}
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
-	keysCursor, err := d.tx.CursorDupSort(d.keysTable)
+	keysCursor, err := dc.d.tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return err
 	}
@@ -471,19 +500,19 @@ func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * d.aggregationStep
-		if v, err = d.tx.GetOne(d.valsTable, keySuffix); err != nil {
+		txNum := step * dc.d.aggregationStep
+		if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum})
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
-	d.files[Values].Ascend(func(item *filesItem) bool {
-		if item.index.Empty() {
+	dc.files[Values].Ascend(func(item *ctxItem) bool {
+		if item.reader.Empty() {
 			return true
 		}
-		offset := item.indexReader.Lookup(prefix)
+		offset := item.reader.Lookup(prefix)
 		// Creating dedicated getter because the one in the item may be used to delete storage, for example
-		g := item.decompressor.MakeGetter()
+		g := item.getter
 		g.Reset(offset)
 		if g.HasNext() {
 			if keyMatch, _ := g.Match(prefix); !keyMatch {
@@ -495,7 +524,7 @@ func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 			key, _ := g.Next(nil)
 			if bytes.HasPrefix(key, prefix) {
 				val, _ := g.Next(nil)
-				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum})
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
 			}
 		}
 		return true
@@ -529,7 +558,7 @@ func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = d.tx.GetOne(d.valsTable, keySuffix); err != nil {
+					if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = common.Copy(v)
@@ -569,7 +598,7 @@ func (c Collation) Close() {
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
+func (d *Domain) collate(step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
 	var valuesComp, historyComp *compress.Compressor
 	var err error
 	closeComp := true
@@ -895,30 +924,18 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 		endTxNum:     txNumTo,
 		decompressor: sf.valuesDecomp,
 		index:        sf.valuesIdx,
-		getter:       sf.valuesDecomp.MakeGetter(),
-		getterMerge:  sf.valuesDecomp.MakeGetter(),
-		indexReader:  recsplit.NewIndexReader(sf.valuesIdx),
-		readerMerge:  recsplit.NewIndexReader(sf.valuesIdx),
 	})
-	d.files[History].ReplaceOrInsert(&filesItem{
+	d.files[History1].ReplaceOrInsert(&filesItem{
 		startTxNum:   txNumFrom,
 		endTxNum:     txNumTo,
 		decompressor: sf.historyDecomp,
 		index:        sf.historyIdx,
-		getter:       sf.historyDecomp.MakeGetter(),
-		getterMerge:  sf.historyDecomp.MakeGetter(),
-		indexReader:  recsplit.NewIndexReader(sf.historyIdx),
-		readerMerge:  recsplit.NewIndexReader(sf.historyIdx),
 	})
 	d.files[EfHistory].ReplaceOrInsert(&filesItem{
 		startTxNum:   txNumFrom,
 		endTxNum:     txNumTo,
 		decompressor: sf.efHistoryDecomp,
 		index:        sf.efHistoryIdx,
-		getter:       sf.efHistoryDecomp.MakeGetter(),
-		getterMerge:  sf.efHistoryDecomp.MakeGetter(),
-		indexReader:  recsplit.NewIndexReader(sf.efHistoryIdx),
-		readerMerge:  recsplit.NewIndexReader(sf.efHistoryIdx),
 	})
 }
 
@@ -988,14 +1005,14 @@ func (d *Domain) prune(step uint64, txFrom, txTo uint64) error {
 	return nil
 }
 
-func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
+func (dc *DomainContext) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 	var val []byte
 	var found bool
-	d.files[fType].Descend(func(item *filesItem) bool {
-		if item.index.Empty() {
+	dc.files[fType].Descend(func(item *ctxItem) bool {
+		if item.reader.Empty() {
 			return true
 		}
-		offset := item.indexReader.Lookup(filekey)
+		offset := item.reader.Lookup(filekey)
 		g := item.getter
 		g.Reset(offset)
 		if g.HasNext() {
@@ -1012,9 +1029,8 @@ func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
-func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	d.stats.HistoryQueries++
-	var search filesItem
+func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	var search ctxItem
 	search.startTxNum = txNum
 	search.endTxNum = txNum
 	var foundTxNum uint64
@@ -1022,14 +1038,14 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 	var foundStartTxNum uint64
 	var found bool
 	var anyItem bool // Whether any filesItem has been looked at in the loop below
-	var topState *filesItem
-	d.files[Values].AscendGreaterOrEqual(&search, func(i *filesItem) bool {
+	var topState *ctxItem
+	dc.files[Values].AscendGreaterOrEqual(&search, func(i *ctxItem) bool {
 		topState = i
 		return false
 	})
-	d.files[EfHistory].AscendGreaterOrEqual(&search, func(item *filesItem) bool {
+	dc.files[EfHistory].AscendGreaterOrEqual(&search, func(item *ctxItem) bool {
 		anyItem = true
-		offset := item.indexReader.Lookup(key)
+		offset := item.reader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
@@ -1054,16 +1070,16 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 		if anyItem {
 			// If there were no changes but there were history files, the value can be obtained from value files
 			var val []byte
-			d.files[Values].DescendLessOrEqual(topState, func(item *filesItem) bool {
-				if item.index.Empty() {
+			dc.files[Values].DescendLessOrEqual(topState, func(item *ctxItem) bool {
+				if item.reader.Empty() {
 					return true
 				}
-				offset := item.indexReader.Lookup(key)
+				offset := item.reader.Lookup(key)
 				g := item.getter
 				g.Reset(offset)
 				if g.HasNext() {
 					if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
-						if d.compressVals {
+						if dc.d.compressVals {
 							val, _ = g.Next(nil)
 						} else {
 							val, _ = g.NextUncompressed()
@@ -1079,7 +1095,7 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 		if roTx == nil {
 			return nil, false, fmt.Errorf("roTx is nil")
 		}
-		indexCursor, err := roTx.CursorDupSort(d.indexTable)
+		indexCursor, err := roTx.CursorDupSort(dc.d.indexTable)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1092,7 +1108,7 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 		}
 		if foundTxNumVal != nil {
 			var historyKeysCursor kv.CursorDupSort
-			if historyKeysCursor, err = roTx.CursorDupSort(d.historyKeysTable); err != nil {
+			if historyKeysCursor, err = roTx.CursorDupSort(dc.d.historyKeysTable); err != nil {
 				return nil, false, err
 			}
 			defer historyKeysCursor.Close()
@@ -1106,7 +1122,7 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 				return nil, true, nil
 			}
 			var v []byte
-			if v, err = roTx.GetOne(d.historyValsTable, vn[len(vn)-8:]); err != nil {
+			if v, err = roTx.GetOne(dc.d.historyValsTable, vn[len(vn)-8:]); err != nil {
 				return nil, false, err
 			}
 			return v, true, nil
@@ -1115,17 +1131,17 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-	var historyItem *filesItem
+	var historyItem *ctxItem
 	search.startTxNum = foundStartTxNum
 	search.endTxNum = foundEndTxNum
-	historyItem, ok := d.files[History].Get(&search)
+	historyItem, ok := dc.files[History1].Get(&search)
 	if !ok || historyItem == nil {
-		return nil, false, fmt.Errorf("no %s file found for [%x]", d.filenameBase, key)
+		return nil, false, fmt.Errorf("no %s file found for [%x]", dc.d.filenameBase, key)
 	}
-	offset := historyItem.indexReader.Lookup2(txKey[:], key)
+	offset := historyItem.reader.Lookup2(txKey[:], key)
 	g := historyItem.getter
 	g.Reset(offset)
-	if d.compressVals {
+	if dc.d.compressVals {
 		v, _ := g.Next(nil)
 		return v, true, nil
 	}
@@ -1135,15 +1151,15 @@ func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byt
 
 // GetBeforeTxNum does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
-func (d *Domain) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := d.historyBeforeTxNum(key, txNum, roTx)
+func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	v, hOk, err := dc.historyBeforeTxNum(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}
 	if hOk {
 		return v, nil
 	}
-	if v, _, err = d.get(key, roTx); err != nil {
+	if v, _, err = dc.get(key, roTx); err != nil {
 		return nil, err
 	}
 	return v, nil

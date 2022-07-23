@@ -22,39 +22,11 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 // Algorithms for reconstituting the state from state history
-
-// DomainContext allows accesing the same domain from multiple go-routines
-type DomainContext struct {
-	d     *Domain
-	files [NumberOfTypes]*btree.BTree
-}
-
-func (d *Domain) MakeContext() *DomainContext {
-	dc := &DomainContext{d: d}
-	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		bt := btree.New(32)
-		dc.files[fType] = bt
-		d.files[fType].Ascend(func(item *filesItem) bool {
-			bt.ReplaceOrInsert(&filesItem{
-				startTxNum:   item.startTxNum,
-				endTxNum:     item.endTxNum,
-				decompressor: item.decompressor,
-				index:        item.index,
-				getter:       item.decompressor.MakeGetter(),
-				indexReader:  recsplit.NewIndexReader(item.index),
-			})
-			return true
-		})
-	}
-	return dc
-}
 
 func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64, error) {
 	var foundTxNum uint64
@@ -63,12 +35,11 @@ func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uin
 	var found bool
 	var anyItem bool
 	var maxTxNum uint64
-	dc.files[EfHistory].Ascend(func(i btree.Item) bool {
-		item := i.(*filesItem)
-		if item.index.Empty() {
+	dc.files[EfHistory].Ascend(func(item *ctxItem) bool {
+		if item.reader.Empty() {
 			return true
 		}
-		offset := item.indexReader.Lookup(key)
+		offset := item.reader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
@@ -90,16 +61,15 @@ func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uin
 	if found {
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		var historyItem *filesItem
-		var search filesItem
+		var historyItem *ctxItem
+		var ok bool
+		var search ctxItem
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
-		if i := dc.files[History].Get(&search); i != nil {
-			historyItem = i.(*filesItem)
-		} else {
+		if historyItem, ok = dc.files[History1].Get(&search); !ok {
 			return nil, false, 0, fmt.Errorf("no %s file found for [%x]", dc.d.filenameBase, key)
 		}
-		offset := historyItem.indexReader.Lookup2(txKey[:], key)
+		offset := historyItem.reader.Lookup2(txKey[:], key)
 		g := historyItem.getter
 		g.Reset(offset)
 		if dc.d.compressVals {
@@ -118,12 +88,11 @@ func (dc *DomainContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uin
 func (dc *DomainContext) MaxTxNum(key []byte) (bool, uint64) {
 	var found bool
 	var foundTxNum uint64
-	dc.files[EfHistory].Descend(func(i btree.Item) bool {
-		item := i.(*filesItem)
-		if item.index.Empty() {
+	dc.files[EfHistory].Descend(func(item *ctxItem) bool {
+		if item.reader.Empty() {
 			return true
 		}
-		offset := item.indexReader.Lookup(key)
+		offset := item.reader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
@@ -247,8 +216,7 @@ func (si *ScanIterator) Total() uint64 {
 
 func (dc *DomainContext) iterateReconTxs(fromKey, toKey []byte, uptoTxNum uint64) *ScanIterator {
 	var si ScanIterator
-	dc.files[EfHistory].Ascend(func(i btree.Item) bool {
-		item := i.(*filesItem)
+	dc.files[EfHistory].Ascend(func(item *ctxItem) bool {
 		g := item.getter
 		for g.HasNext() {
 			key, offset := g.NextUncompressed()
@@ -259,7 +227,7 @@ func (dc *DomainContext) iterateReconTxs(fromKey, toKey []byte, uptoTxNum uint64
 				g.SkipUncompressed()
 			}
 		}
-		si.total += uint64(item.decompressor.Size())
+		si.total += uint64(item.getter.Size())
 		return true
 	})
 	si.dc = dc
@@ -301,16 +269,15 @@ func (hi *HistoryIterator) advance() {
 				hi.key = key
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], n)
-				var historyItem *filesItem
-				var search filesItem
+				var historyItem *ctxItem
+				var ok bool
+				var search ctxItem
 				search.startTxNum = top.startTxNum
 				search.endTxNum = top.endTxNum
-				if i := hi.dc.files[History].Get(&search); i != nil {
-					historyItem = i.(*filesItem)
-				} else {
+				if historyItem, ok = hi.dc.files[History1].Get(&search); !ok {
 					panic(fmt.Errorf("no %s file found for [%x]", hi.dc.d.filenameBase, hi.key))
 				}
-				offset := historyItem.indexReader.Lookup2(txKey[:], hi.key)
+				offset := historyItem.reader.Lookup2(txKey[:], hi.key)
 				g := historyItem.getter
 				g.Reset(offset)
 				if hi.compressVals {
@@ -344,8 +311,7 @@ func (hi *HistoryIterator) Total() uint64 {
 func (dc *DomainContext) iterateHistoryBeforeTxNum(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
 	var hi HistoryIterator
 	heap.Init(&hi.h)
-	dc.files[EfHistory].Ascend(func(i btree.Item) bool {
-		item := i.(*filesItem)
+	dc.files[EfHistory].Ascend(func(item *ctxItem) bool {
 		g := item.getter
 		g.Reset(0)
 		for g.HasNext() {
@@ -357,7 +323,7 @@ func (dc *DomainContext) iterateHistoryBeforeTxNum(fromKey, toKey []byte, txNum 
 				g.SkipUncompressed()
 			}
 		}
-		hi.total += uint64(item.decompressor.Size())
+		hi.total += uint64(item.getter.Size())
 		return true
 	})
 	hi.dc = dc

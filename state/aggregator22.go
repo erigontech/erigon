@@ -18,34 +18,30 @@ package state
 
 import (
 	"fmt"
-
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// Reconstruction of the aggregator in another package, `aggregator`
-
-type Aggregator struct {
+type Aggregator22 struct {
 	aggregationStep uint64
-	accounts        *Domain
-	storage         *Domain
-	code            *Domain
+	accounts        *History
+	storage         *History
+	code            *History
 	logAddrs        *InvertedIndex
 	logTopics       *InvertedIndex
 	tracesFrom      *InvertedIndex
 	tracesTo        *InvertedIndex
 	txNum           uint64
 	rwTx            kv.RwTx
-	keyBuf          []byte
 }
 
-func NewAggregator(
+func NewAggregator22(
 	dir string,
 	aggregationStep uint64,
-) (*Aggregator, error) {
-	a := &Aggregator{
+) (*Aggregator22, error) {
+	a := &Aggregator22{
 		aggregationStep: aggregationStep,
 	}
 	closeAgg := true
@@ -55,13 +51,13 @@ func NewAggregator(
 		}
 	}()
 	var err error
-	if a.accounts, err = NewDomain(dir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountVals, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountSettings, kv.AccountIdx, 0 /* prefixLen */, false /* compressVals */); err != nil {
+	if a.accounts, err = NewHistory(dir, aggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings, false /* compressVals */); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, aggregationStep, "storage", kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx, 20 /* prefixLen */, false /* compressVals */); err != nil {
+	if a.storage, err = NewHistory(dir, aggregationStep, "storage", kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings, false /* compressVals */); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx, 0 /* prefixLen */, true /* compressVals */); err != nil {
+	if a.code, err = NewHistory(dir, aggregationStep, "code", kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings, true /* compressVals */); err != nil {
 		return nil, err
 	}
 	if a.logAddrs, err = NewInvertedIndex(dir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx); err != nil {
@@ -80,15 +76,7 @@ func NewAggregator(
 	return a, nil
 }
 
-func (a *Aggregator) GetAndResetStats() DomainStats {
-	stats := DomainStats{}
-	stats.Accumulate(a.accounts.GetAndResetStats())
-	stats.Accumulate(a.storage.GetAndResetStats())
-	stats.Accumulate(a.code.GetAndResetStats())
-	return stats
-}
-
-func (a *Aggregator) Close() {
+func (a *Aggregator22) Close() {
 	if a.accounts != nil {
 		a.accounts.Close()
 	}
@@ -112,7 +100,7 @@ func (a *Aggregator) Close() {
 	}
 }
 
-func (a *Aggregator) SetTx(tx kv.RwTx) {
+func (a *Aggregator22) SetTx(tx kv.RwTx) {
 	a.rwTx = tx
 	a.accounts.SetTx(tx)
 	a.storage.SetTx(tx)
@@ -123,7 +111,7 @@ func (a *Aggregator) SetTx(tx kv.RwTx) {
 	a.tracesTo.SetTx(tx)
 }
 
-func (a *Aggregator) SetTxNum(txNum uint64) {
+func (a *Aggregator22) SetTxNum(txNum uint64) {
 	a.txNum = txNum
 	a.accounts.SetTxNum(txNum)
 	a.storage.SetTxNum(txNum)
@@ -134,24 +122,24 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 	a.tracesTo.SetTxNum(txNum)
 }
 
-type AggCollation struct {
-	accounts   Collation
-	storage    Collation
-	code       Collation
+type Agg22Collation struct {
+	accounts   HistoryCollation
+	storage    HistoryCollation
+	code       HistoryCollation
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
 	tracesFrom map[string]*roaring64.Bitmap
 	tracesTo   map[string]*roaring64.Bitmap
 }
 
-func (c AggCollation) Close() {
+func (c Agg22Collation) Close() {
 	c.accounts.Close()
 	c.storage.Close()
 	c.code.Close()
 }
 
-func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggCollation, error) {
-	var ac AggCollation
+func (a *Aggregator22) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (Agg22Collation, error) {
+	var ac Agg22Collation
 	var err error
 	closeColl := true
 	defer func() {
@@ -160,41 +148,41 @@ func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggC
 		}
 	}()
 	if ac.accounts, err = a.accounts.collate(step, txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.storage, err = a.storage.collate(step, txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.code, err = a.code.collate(step, txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.logTopics, err = a.logTopics.collate(txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	if ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, roTx); err != nil {
-		return AggCollation{}, err
+		return Agg22Collation{}, err
 	}
 	closeColl = false
 	return ac, nil
 }
 
-type AggStaticFiles struct {
-	accounts   StaticFiles
-	storage    StaticFiles
-	code       StaticFiles
+type Agg22StaticFiles struct {
+	accounts   HistoryFiles
+	storage    HistoryFiles
+	code       HistoryFiles
 	logAddrs   InvertedFiles
 	logTopics  InvertedFiles
 	tracesFrom InvertedFiles
 	tracesTo   InvertedFiles
 }
 
-func (sf AggStaticFiles) Close() {
+func (sf Agg22StaticFiles) Close() {
 	sf.accounts.Close()
 	sf.storage.Close()
 	sf.code.Close()
@@ -204,8 +192,8 @@ func (sf AggStaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
-func (a *Aggregator) buildFiles(step uint64, collation AggCollation) (AggStaticFiles, error) {
-	var sf AggStaticFiles
+func (a *Aggregator22) buildFiles(step uint64, collation Agg22Collation) (Agg22StaticFiles, error) {
+	var sf Agg22StaticFiles
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -278,7 +266,7 @@ func (a *Aggregator) buildFiles(step uint64, collation AggCollation) (AggStaticF
 	return sf, lastError
 }
 
-func (a *Aggregator) integrateFiles(sf AggStaticFiles, txNumFrom, txNumTo uint64) {
+func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo uint64) {
 	a.accounts.integrateFiles(sf.accounts, txNumFrom, txNumTo)
 	a.storage.integrateFiles(sf.storage, txNumFrom, txNumTo)
 	a.code.integrateFiles(sf.code, txNumFrom, txNumTo)
@@ -288,7 +276,7 @@ func (a *Aggregator) integrateFiles(sf AggStaticFiles, txNumFrom, txNumTo uint64
 	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
 }
 
-func (a *Aggregator) prune(step uint64, txFrom, txTo uint64) error {
+func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {
 	if err := a.accounts.prune(step, txFrom, txTo); err != nil {
 		return err
 	}
@@ -313,7 +301,7 @@ func (a *Aggregator) prune(step uint64, txFrom, txTo uint64) error {
 	return nil
 }
 
-func (a *Aggregator) EndTxNumMinimax() uint64 {
+func (a *Aggregator22) EndTxNumMinimax() uint64 {
 	min := a.accounts.endTxNumMinimax()
 	if txNum := a.storage.endTxNumMinimax(); txNum < min {
 		min = txNum
@@ -336,10 +324,10 @@ func (a *Aggregator) EndTxNumMinimax() uint64 {
 	return min
 }
 
-type Ranges struct {
-	accounts                                 DomainRanges
-	storage                                  DomainRanges
-	code                                     DomainRanges
+type Ranges22 struct {
+	accounts                                 HistoryRanges
+	storage                                  HistoryRanges
+	code                                     HistoryRanges
 	logAddrsStartTxNum, logAddrsEndTxNum     uint64
 	logAddrs                                 bool
 	logTopicsStartTxNum, logTopicsEndTxNum   uint64
@@ -350,12 +338,12 @@ type Ranges struct {
 	tracesTo                                 bool
 }
 
-func (r Ranges) any() bool {
+func (r Ranges22) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
 
-func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
-	var r Ranges
+func (a *Aggregator22) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
+	var r Ranges22
 	r.accounts = a.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = a.storage.findMergeRange(maxEndTxNum, maxSpan)
 	r.code = a.code.findMergeRange(maxEndTxNum, maxSpan)
@@ -367,39 +355,26 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 	return r
 }
 
-type SelectedStaticFiles struct {
-	accounts    [][NumberOfTypes]*filesItem
-	accountsI   int
-	storage     [][NumberOfTypes]*filesItem
-	storageI    int
-	code        [][NumberOfTypes]*filesItem
-	codeI       int
-	logAddrs    []*filesItem
-	logAddrsI   int
-	logTopics   []*filesItem
-	logTopicsI  int
-	tracesFrom  []*filesItem
-	tracesFromI int
-	tracesTo    []*filesItem
-	tracesToI   int
+type SelectedStaticFiles22 struct {
+	accountsIdx, accountsHist []*filesItem
+	accountsI                 int
+	storageIdx, storageHist   []*filesItem
+	storageI                  int
+	codeIdx, codeHist         []*filesItem
+	codeI                     int
+	logAddrs                  []*filesItem
+	logAddrsI                 int
+	logTopics                 []*filesItem
+	logTopicsI                int
+	tracesFrom                []*filesItem
+	tracesFromI               int
+	tracesTo                  []*filesItem
+	tracesToI                 int
 }
 
-func (sf SelectedStaticFiles) Close() {
-	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		for _, group := range [][][NumberOfTypes]*filesItem{sf.accounts, sf.storage, sf.code} {
-			for _, items := range group {
-				if items[fType] != nil {
-					if items[fType].decompressor != nil {
-						items[fType].decompressor.Close()
-					}
-					if items[fType].decompressor != nil {
-						items[fType].index.Close()
-					}
-				}
-			}
-		}
-	}
-	for _, group := range [][]*filesItem{sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
+func (sf SelectedStaticFiles22) Close() {
+	for _, group := range [][]*filesItem{sf.accountsIdx, sf.accountsHist, sf.storageIdx, sf.accountsHist, sf.codeIdx, sf.codeHist,
+		sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
 		for _, item := range group {
 			if item != nil {
 				if item.decompressor != nil {
@@ -413,16 +388,16 @@ func (sf SelectedStaticFiles) Close() {
 	}
 }
 
-func (a *Aggregator) staticFilesInRange(r Ranges) SelectedStaticFiles {
-	var sf SelectedStaticFiles
+func (a *Aggregator22) staticFilesInRange(r Ranges22) SelectedStaticFiles22 {
+	var sf SelectedStaticFiles22
 	if r.accounts.any() {
-		sf.accounts, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
+		sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
 	}
 	if r.storage.any() {
-		sf.storage, sf.storageI = a.storage.staticFilesInRange(r.storage)
+		sf.storageIdx, sf.storageHist, sf.storageI = a.storage.staticFilesInRange(r.storage)
 	}
 	if r.code.any() {
-		sf.code, sf.codeI = a.code.staticFilesInRange(r.code)
+		sf.codeIdx, sf.codeHist, sf.codeI = a.code.staticFilesInRange(r.code)
 	}
 	if r.logAddrs {
 		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
@@ -439,30 +414,19 @@ func (a *Aggregator) staticFilesInRange(r Ranges) SelectedStaticFiles {
 	return sf
 }
 
-type MergedFiles struct {
-	accounts   [NumberOfTypes]*filesItem
-	storage    [NumberOfTypes]*filesItem
-	code       [NumberOfTypes]*filesItem
-	logAddrs   *filesItem
-	logTopics  *filesItem
-	tracesFrom *filesItem
-	tracesTo   *filesItem
+type MergedFiles22 struct {
+	accountsIdx, accountsHist *filesItem
+	storageIdx, storageHist   *filesItem
+	codeIdx, codeHist         *filesItem
+	logAddrs                  *filesItem
+	logTopics                 *filesItem
+	tracesFrom                *filesItem
+	tracesTo                  *filesItem
 }
 
-func (mf MergedFiles) Close() {
-	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		for _, items := range [][NumberOfTypes]*filesItem{mf.accounts, mf.storage, mf.code} {
-			if items[fType] != nil {
-				if items[fType].decompressor != nil {
-					items[fType].decompressor.Close()
-				}
-				if items[fType].decompressor != nil {
-					items[fType].index.Close()
-				}
-			}
-		}
-	}
-	for _, item := range []*filesItem{mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
+func (mf MergedFiles22) Close() {
+	for _, item := range []*filesItem{mf.accountsIdx, mf.accountsHist, mf.storageIdx, mf.storageHist, mf.codeIdx, mf.codeHist,
+		mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
 		if item != nil {
 			if item.decompressor != nil {
 				item.decompressor.Close()
@@ -474,8 +438,8 @@ func (mf MergedFiles) Close() {
 	}
 }
 
-func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uint64) (MergedFiles, error) {
-	var mf MergedFiles
+func (a *Aggregator22) mergeFiles(files SelectedStaticFiles22, r Ranges22, maxSpan uint64) (MergedFiles22, error) {
+	var mf MergedFiles22
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -489,7 +453,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.accounts.any() {
-			if mf.accounts, err = a.accounts.mergeFiles(files.accounts, r.accounts, maxSpan); err != nil {
+			if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(files.accountsIdx, files.accountsHist, r.accounts, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -498,7 +462,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.storage.any() {
-			if mf.storage, err = a.storage.mergeFiles(files.storage, r.storage, maxSpan); err != nil {
+			if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(files.storageIdx, files.storageHist, r.storage, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -507,7 +471,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.code.any() {
-			if mf.code, err = a.code.mergeFiles(files.code, r.code, maxSpan); err != nil {
+			if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(files.codeIdx, files.codeHist, r.code, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -562,24 +526,24 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 	return mf, lastError
 }
 
-func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFiles) {
-	a.accounts.integrateMergedFiles(outs.accounts, in.accounts)
-	a.storage.integrateMergedFiles(outs.storage, in.storage)
-	a.code.integrateMergedFiles(outs.code, in.code)
+func (a *Aggregator22) integrateMergedFiles(outs SelectedStaticFiles22, in MergedFiles22) {
+	a.accounts.integrateMergedFiles(outs.accountsIdx, outs.accountsHist, in.accountsIdx, in.accountsHist)
+	a.storage.integrateMergedFiles(outs.storageIdx, outs.storageHist, in.storageIdx, in.storageHist)
+	a.code.integrateMergedFiles(outs.codeIdx, outs.codeHist, in.codeIdx, in.codeHist)
 	a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
 	a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
 	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
 }
 
-func (a *Aggregator) deleteFiles(outs SelectedStaticFiles) error {
-	if err := a.accounts.deleteFiles(outs.accounts); err != nil {
+func (a *Aggregator22) deleteFiles(outs SelectedStaticFiles22) error {
+	if err := a.accounts.deleteFiles(outs.accountsIdx, outs.accountsHist); err != nil {
 		return err
 	}
-	if err := a.storage.deleteFiles(outs.storage); err != nil {
+	if err := a.storage.deleteFiles(outs.storageIdx, outs.storageHist); err != nil {
 		return err
 	}
-	if err := a.code.deleteFiles(outs.code); err != nil {
+	if err := a.code.deleteFiles(outs.codeIdx, outs.codeHist); err != nil {
 		return err
 	}
 	if err := a.logAddrs.deleteFiles(outs.logAddrs); err != nil {
@@ -597,65 +561,11 @@ func (a *Aggregator) deleteFiles(outs SelectedStaticFiles) error {
 	return nil
 }
 
-func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.Get(addr, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.GetBeforeTxNum(addr, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.Get(ac.keyBuf, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.GetBeforeTxNum(ac.keyBuf, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.code.Get(addr, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	return ac.code.GetBeforeTxNum(addr, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
-	code, err := ac.code.Get(addr, roTx)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSizeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) (int, error) {
-	code, err := ac.code.GetBeforeTxNum(addr, txNum, roTx)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
-}
-
-func (a *Aggregator) ReadyToFinishTx() bool {
+func (a *Aggregator22) ReadyToFinishTx() bool {
 	return (a.txNum+1)%a.aggregationStep == 0
 }
 
-func (a *Aggregator) FinishTx() error {
+func (a *Aggregator22) FinishTx() error {
 	if (a.txNum+1)%a.aggregationStep != 0 {
 		return nil
 	}
@@ -714,103 +624,59 @@ func (a *Aggregator) FinishTx() error {
 	return nil
 }
 
-func (a *Aggregator) UpdateAccountData(addr []byte, account []byte) error {
-	return a.accounts.Put(addr, account)
-}
-
-func (a *Aggregator) UpdateAccountCode(addr []byte, code []byte) error {
-	if len(code) == 0 {
-		return a.code.Delete(addr)
-	}
-	return a.code.Put(addr, code)
-}
-
-func (a *Aggregator) DeleteAccount(addr []byte) error {
-	if err := a.accounts.Delete(addr); err != nil {
-		return err
-	}
-	if err := a.code.Delete(addr); err != nil {
-		return err
-	}
-	var e error
-	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
-		if e == nil {
-			e = a.storage.Delete(k)
-		}
-	}); err != nil {
-		return err
-	}
-	return e
-}
-
-func (a *Aggregator) WriteAccountStorage(addr, loc []byte, value []byte) error {
-	if cap(a.keyBuf) < len(addr)+len(loc) {
-		a.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(a.keyBuf) != len(addr)+len(loc) {
-		a.keyBuf = a.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(a.keyBuf, addr)
-	copy(a.keyBuf[len(addr):], loc)
-	if len(value) == 0 {
-		return a.storage.Delete(a.keyBuf)
-	}
-	return a.storage.Put(a.keyBuf, value)
-}
-
-func (a *Aggregator) AddTraceFrom(addr []byte) error {
+func (a *Aggregator22) AddTraceFrom(addr []byte) error {
 	return a.tracesFrom.Add(addr)
 }
 
-func (a *Aggregator) AddTraceTo(addr []byte) error {
+func (a *Aggregator22) AddTraceTo(addr []byte) error {
 	return a.tracesTo.Add(addr)
 }
 
-func (a *Aggregator) AddLogAddr(addr []byte) error {
+func (a *Aggregator22) AddLogAddr(addr []byte) error {
 	return a.logAddrs.Add(addr)
 }
 
-func (a *Aggregator) AddLogTopic(topic []byte) error {
+func (a *Aggregator22) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
 }
 
-func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *Aggregator22Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *Aggregator22Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *Aggregator22Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *Aggregator22Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-type FilesStats struct {
+type FilesStats22 struct {
 }
 
-func (a *Aggregator) Stats() FilesStats {
-	var fs FilesStats
+func (a *Aggregator22) Stats() FilesStats22 {
+	var fs FilesStats22
 	return fs
 }
 
-type AggregatorContext struct {
-	a          *Aggregator
-	accounts   *DomainContext
-	storage    *DomainContext
-	code       *DomainContext
+type Aggregator22Context struct {
+	a          *Aggregator22
+	accounts   *HistoryContext
+	storage    *HistoryContext
+	code       *HistoryContext
 	logAddrs   *InvertedIndexContext
 	logTopics  *InvertedIndexContext
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
-	keyBuf     []byte
 }
 
-func (a *Aggregator) MakeContext() *AggregatorContext {
-	return &AggregatorContext{
+func (a *Aggregator22) MakeContext() *Aggregator22Context {
+	return &Aggregator22Context{
 		a:          a,
 		accounts:   a.accounts.MakeContext(),
 		storage:    a.storage.MakeContext(),
@@ -820,74 +686,4 @@ func (a *Aggregator) MakeContext() *AggregatorContext {
 		tracesFrom: a.tracesFrom.MakeContext(),
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
-}
-
-func (ac *AggregatorContext) IterateAccountsReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.accounts.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateStorageReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.storage.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateCodeReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.code.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	return ac.accounts.GetNoState(addr, txNum)
-}
-
-func (ac *AggregatorContext) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.GetNoState(ac.keyBuf, txNum)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	return ac.code.GetNoState(addr, txNum)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64, error) {
-	code, noState, stateTxNum, err := ac.code.GetNoState(addr, txNum)
-	if err != nil {
-		return 0, false, 0, err
-	}
-	return len(code), noState, stateTxNum, nil
-}
-
-func (ac *AggregatorContext) MaxAccountsTxNum(addr []byte) (bool, uint64) {
-	return ac.accounts.MaxTxNum(addr)
-}
-
-func (ac *AggregatorContext) MaxStorageTxNum(addr []byte, loc []byte) (bool, uint64) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.MaxTxNum(ac.keyBuf)
-}
-
-func (ac *AggregatorContext) MaxCodeTxNum(addr []byte) (bool, uint64) {
-	return ac.code.MaxTxNum(addr)
-}
-
-func (ac *AggregatorContext) IterateAccountsHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.accounts.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateStorageHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.storage.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateCodeHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.code.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
 }

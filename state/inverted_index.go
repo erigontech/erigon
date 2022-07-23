@@ -45,7 +45,7 @@ type InvertedIndex struct {
 	indexTable      string // Needs to be table with DupSort
 	tx              kv.RwTx
 	txNum           uint64
-	files           *btree.BTree
+	files           *btree.BTreeG[*filesItem]
 }
 
 func NewInvertedIndex(
@@ -55,27 +55,27 @@ func NewInvertedIndex(
 	keysTable string,
 	indexTable string,
 ) (*InvertedIndex, error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	ii := &InvertedIndex{
+	ii := InvertedIndex{
 		dir:             dir,
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 		keysTable:       keysTable,
 		indexTable:      indexTable,
 	}
-	ii.files = btree.New(32)
+	ii.files = btree.NewG[*filesItem](32, filesItemLess)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
 	ii.scanStateFiles(files)
 	if err = ii.openFiles(); err != nil {
 		return nil, err
 	}
-	return ii, nil
+	return &ii, nil
 }
 
 func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
-	re := regexp.MustCompile(ii.filenameBase + ".([0-9]+)-([0-9]+).(dat|idx)")
+	re := regexp.MustCompile(ii.filenameBase + ".([0-9]+)-([0-9]+).(ef|efi)")
 	var err error
 	for _, f := range files {
 		name := f.Name()
@@ -101,8 +101,7 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 		}
 		var item = &filesItem{startTxNum: startTxNum * ii.aggregationStep, endTxNum: endTxNum * ii.aggregationStep}
 		var foundI *filesItem
-		ii.files.AscendGreaterOrEqual(&filesItem{startTxNum: endTxNum * ii.aggregationStep, endTxNum: endTxNum * ii.aggregationStep}, func(i btree.Item) bool {
-			it := i.(*filesItem)
+		ii.files.AscendGreaterOrEqual(&filesItem{startTxNum: endTxNum * ii.aggregationStep, endTxNum: endTxNum * ii.aggregationStep}, func(it *filesItem) bool {
 			if it.endTxNum == endTxNum {
 				foundI = it
 			}
@@ -118,21 +117,16 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 func (ii *InvertedIndex) openFiles() error {
 	var err error
 	var totalKeys uint64
-	ii.files.Ascend(func(i btree.Item) bool {
-		item := i.(*filesItem)
-		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep))
+	ii.files.Ascend(func(item *filesItem) bool {
+		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep))
 		if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 			return false
 		}
-		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep))
+		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep))
 		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return false
 		}
 		totalKeys += item.index.KeyCount()
-		item.getter = item.decompressor.MakeGetter()
-		item.getterMerge = item.decompressor.MakeGetter()
-		item.indexReader = recsplit.NewIndexReader(item.index)
-		item.readerMerge = recsplit.NewIndexReader(item.index)
 		return true
 	})
 	if err != nil {
@@ -142,8 +136,7 @@ func (ii *InvertedIndex) openFiles() error {
 }
 
 func (ii *InvertedIndex) closeFiles() {
-	ii.files.Ascend(func(i btree.Item) bool {
-		item := i.(*filesItem)
+	ii.files.Ascend(func(item *filesItem) bool {
 		if item.decompressor != nil {
 			item.decompressor.Close()
 		}
@@ -166,16 +159,20 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	ii.txNum = txNum
 }
 
-func (ii *InvertedIndex) Add(key []byte) error {
+func (ii *InvertedIndex) add(key, indexKey []byte) error {
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], ii.txNum)
 	if err := ii.tx.Put(ii.keysTable, txKey[:], key); err != nil {
 		return err
 	}
-	if err := ii.tx.Put(ii.indexTable, key, txKey[:]); err != nil {
+	if err := ii.tx.Put(ii.indexTable, indexKey, txKey[:]); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (ii *InvertedIndex) Add(key []byte) error {
+	return ii.add(key, key)
 }
 
 // InvertedIterator allows iteration over range of tx numbers
@@ -185,7 +182,7 @@ func (ii *InvertedIndex) Add(key []byte) error {
 type InvertedIterator struct {
 	key                  []byte
 	startTxNum, endTxNum uint64
-	stack                []*filesItem
+	stack                []*ctxItem
 	efIt                 *eliasfano32.EliasFanoIter
 	next                 uint64
 	hasNextInFiles       bool
@@ -210,7 +207,7 @@ func (it *InvertedIterator) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset := item.indexReader.Lookup(it.key)
+			offset := item.reader.Lookup(it.key)
 			g := item.getter
 			g.Reset(offset)
 			if k, _ := g.NextUncompressed(); bytes.Equal(k, it.key) {
@@ -296,23 +293,42 @@ func (it *InvertedIterator) Next() uint64 {
 	return n
 }
 
+type InvertedIndexContext struct {
+	ii    *InvertedIndex
+	files *btree.BTreeG[*ctxItem]
+}
+
+func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
+	var ic = InvertedIndexContext{ii: ii}
+	ic.files = btree.NewG[*ctxItem](32, ctxItemLess)
+	ii.files.Ascend(func(item *filesItem) bool {
+		ic.files.ReplaceOrInsert(&ctxItem{
+			startTxNum: item.startTxNum,
+			endTxNum:   item.endTxNum,
+			getter:     item.decompressor.MakeGetter(),
+			reader:     recsplit.NewIndexReader(item.index),
+		})
+		return true
+	})
+	return &ic
+}
+
 // IterateRange is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (ii *InvertedIndex) IterateRange(key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	it := InvertedIterator{
 		key:        key,
 		startTxNum: startTxNum,
 		endTxNum:   endTxNum,
-		indexTable: ii.indexTable,
+		indexTable: ic.ii.indexTable,
 		roTx:       roTx,
 	}
-	var search filesItem
+	var search ctxItem
 	it.hasNextInDb = true
 	search.startTxNum = 0
 	search.endTxNum = startTxNum
-	ii.files.DescendGreaterThan(&search, func(i btree.Item) bool {
-		item := i.(*filesItem)
+	ic.files.DescendGreaterThan(&search, func(item *ctxItem) bool {
 		if item.startTxNum < endTxNum {
 			it.stack = append(it.stack, item)
 			it.hasNextInFiles = true
@@ -390,7 +406,7 @@ func (ii *InvertedIndex) buildFiles(step uint64, bitmaps map[string]*roaring64.B
 	}()
 	txNumFrom := step * ii.aggregationStep
 	txNumTo := (step + 1) * ii.aggregationStep
-	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
+	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
 	comp, err = compress.NewCompressor(context.Background(), "ef", datPath, ii.dir, compress.MinPatternScore, 1, log.LvlDebug)
 	if err != nil {
 		return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
@@ -425,9 +441,9 @@ func (ii *InvertedIndex) buildFiles(step uint64, bitmaps map[string]*roaring64.B
 	if decomp, err = compress.NewDecompressor(datPath); err != nil {
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
-	idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
+	idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
 	if index, err = buildIndex(decomp, idxPath, ii.dir, len(keys), false /* values */); err != nil {
-		return InvertedFiles{}, fmt.Errorf("build %s idx: %w", ii.filenameBase, err)
+		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	closeComp = false
 	return InvertedFiles{decomp: decomp, index: index}, nil
@@ -439,10 +455,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 		endTxNum:     txNumTo,
 		decompressor: sf.decomp,
 		index:        sf.index,
-		getter:       sf.decomp.MakeGetter(),
-		getterMerge:  sf.decomp.MakeGetter(),
-		indexReader:  recsplit.NewIndexReader(sf.index),
-		readerMerge:  recsplit.NewIndexReader(sf.index),
 	})
 }
 

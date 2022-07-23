@@ -362,6 +362,10 @@ func (g *Getter) nextPattern() []byte {
 	return pattern
 }
 
+func (g *Getter) Size() int {
+	return len(g.data)
+}
+
 func (d *Decompressor) Count() int           { return int(d.wordsCount) }
 func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 

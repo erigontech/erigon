@@ -44,15 +44,7 @@ func NewReadIndices(
 	closeIndices := true
 	defer func() {
 		if closeIndices {
-			if ri.accounts != nil {
-				ri.accounts.Close()
-			}
-			if ri.storage != nil {
-				ri.storage.Close()
-			}
-			if ri.code != nil {
-				ri.code.Close()
-			}
+			ri.Close()
 		}
 	}()
 	var err error
