@@ -1626,7 +1626,7 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return strings.Split(",", string(v)), nil
+	return strings.Split(string(v), ","), nil
 }
 
 func WriteSnapshots(tx kv.RwTx, list []string) error {
