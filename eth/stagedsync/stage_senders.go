@@ -390,23 +390,16 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
 	if sn != nil && sn.Cfg().Enabled {
 		if sn.Cfg().Produce {
-			if !sn.Cfg().KeepBlocks {
-				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, sn)
-				if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
-					return nil
-				}
-				if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
-					return err
-				}
+			if err := cfg.blockRetire.PruneAncientBlocks(s.ForwardProgress, tx); err != nil {
+				return err
 			}
-
 			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx, tx); err != nil {
 				return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 			}
 		}
 	} else if cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if err = PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
+		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
 			return err
 		}
 	}

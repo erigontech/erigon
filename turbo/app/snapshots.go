@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
@@ -255,15 +254,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
 				return err
 			}
-
-			if !cfg.KeepBlocks {
-				progress, _ := stages.GetStageProgress(tx, stages.Headers)
-				canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
-				deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
-				if err != nil {
-					return nil
-				}
-				log.Info("Deleted blocks", "from", deletedFrom, "to", deletedTo)
+			if err := br.PruneAncientBlocks(tx); err != nil {
+				return err
 			}
 			return nil
 		}); err != nil {

@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -860,6 +861,25 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
+
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
+	if !br.snapshots.cfg.KeepBlocks {
+		return nil
+	}
+	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
+	if err != nil {
+		return err
+	}
+	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
+	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+		return nil
+	}
+	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), 100); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
 	if br.working.Load() {
 		// go-routine is still working
