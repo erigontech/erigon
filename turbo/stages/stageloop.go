@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -35,13 +34,13 @@ import (
 func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
 	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
 		if err != nil {
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
 			hd.PayloadStatusCh <- *pendingPayloadStatus
 		}
 	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
 		if err != nil {
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
 			var status remote.EngineStatus
 			if headBlockHash == pendingPayloadHash {
@@ -50,7 +49,7 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
 				status = remote.EngineStatus_INVALID
 			}
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{
 				Status:          status,
 				LatestValidHash: headBlockHash,
 			}

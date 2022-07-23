@@ -669,11 +669,10 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
-	payloadStatus2 := m.ReceivePayloadStatus()
-	require.Equal(t, remote.EngineStatus_INVALID, payloadStatus2.Status)
-	assert.Equal(t, lastValidHeader.Hash(), payloadStatus2.LatestValidHash)
+	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
+	assert.True(t, bad)
+	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
 }
