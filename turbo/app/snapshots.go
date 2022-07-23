@@ -234,24 +234,28 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
+	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := snapshots.ReopenWithDB(chainDB); err != nil {
+	if err := snapshots.ReopenWithDB(db); err != nil {
 		return err
 	}
 
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
-	br := snapshotsync.NewBlockRetire(workers, dirs.Tmp, snapshots, chainDB, nil, nil)
+	br := snapshotsync.NewBlockRetire(workers, dirs.Tmp, snapshots, db, nil, nil)
 
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
 		}
-		if err := chainDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
+				return err
+			}
+
 			progress, _ := stages.GetStageProgress(tx, stages.Headers)
 			canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
 			deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
@@ -263,6 +267,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}); err != nil {
 			return err
 		}
+	}
+
+	_, err := snapshotsync.EnforceSnapshotsInvariantWithDB(db, dirs.Snap)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -283,17 +292,22 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	dir.MustExist(filepath.Join(dirs.Snap, "db")) // this folder will be checked on existance - to understand that snapshots are ready
 	dir.MustExist(dirs.Tmp)
 
-	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).Readonly().MustOpen()
-	defer chainDB.Close()
+	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).Readonly().MustOpen()
+	defer db.Close()
 
-	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
+	if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
 		log.Error("Error", "err", err)
+	}
+
+	_, err := snapshotsync.EnforceSnapshotsInvariantWithDB(db, dirs.Snap)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
-	chainConfig := tool.ChainConfigFromDB(chainDB)
+func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
@@ -306,7 +320,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	return nil
 }
 
-func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapDir, tmpDir string) error {
+func snapshotBlocks(ctx context.Context, db kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapDir, tmpDir string) error {
 	var last uint64
 
 	if toBlock > 0 {
@@ -331,7 +345,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 			return last, nil
 		}
 
-		if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
 			last, err = lastChunk(tx, blocksPerFile)
 			return err
 		}); err != nil {
@@ -341,7 +355,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 
 	log.Info("Last body number", "last", last)
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
-	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, db, workers, log.LvlInfo); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	return nil

@@ -789,14 +789,10 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 	if isSnapshotEnabled {
 		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
 
-		// EnforceSnapshotsInvariant: if DB has record - then file exists, if file exists - DB has record.
-		snListInFolder, err := snapshotsync.SegmentsList(allSnapshots.Dir())
-		if err != nil {
-			return nil, nil, err
-		}
 		var snList []string
+		var err error
 		if err := s.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
-			snList, err = rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
+			snList, err = snapshotsync.EnforceSnapshotsInvariant(tx, allSnapshots.Dir())
 			return err
 		}); err != nil {
 			return nil, nil, err

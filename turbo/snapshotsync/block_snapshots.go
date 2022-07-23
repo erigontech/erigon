@@ -713,6 +713,29 @@ func SegmentsList(dir string) (res []string, err error) {
 	return res, nil
 }
 
+// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
+func EnforceSnapshotsInvariant(tx kv.RwTx, dir string) ([]string, error) {
+	snListInFolder, err := SegmentsList(dir)
+	if err != nil {
+		return nil, err
+	}
+	snList, err := rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
+	if err != nil {
+		return nil, err
+	}
+	return snList, nil
+}
+
+func EnforceSnapshotsInvariantWithDB(db kv.RwDB, dir string) (snList []string, err error) {
+	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		snList, err = EnforceSnapshotsInvariant(tx, dir)
+		return err
+	}); err != nil {
+		return snList, err
+	}
+	return snList, nil
+}
+
 func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
