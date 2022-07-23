@@ -90,10 +90,10 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	makeTestDb(ctx, db)
 	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	statusCh := make(chan engineapi.PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -105,7 +105,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	beaconRequestList.WaitForRequest(true)
-	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
+	statusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
@@ -149,10 +149,10 @@ func TestMockValidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	statusCh := make(chan engineapi.PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -165,7 +165,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	beaconRequestList.WaitForRequest(true)
 
-	statusCh <- PayloadStatus{
+	statusCh <- engineapi.PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
@@ -185,10 +185,10 @@ func TestMockInvalidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	statusCh := make(chan engineapi.PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -201,7 +201,7 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	beaconRequestList.WaitForRequest(true)
 	// Simulate invalid status
-	statusCh <- PayloadStatus{
+	statusCh <- engineapi.PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
@@ -221,10 +221,10 @@ func TestNoTTD(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	statusCh := make(chan engineapi.PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 

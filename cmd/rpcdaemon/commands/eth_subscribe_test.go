@@ -40,7 +40,7 @@ func TestEthSubscribe(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	ctx := context.Background()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReader(), nil, nil, nil, nil, false)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReader(), nil, nil, nil, nil, nil, false)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, snapshotsync.NewBlockReader())
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {})

@@ -381,6 +381,9 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, newPayload bool) (*engineapi.PayloadStatus, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	if s.hd == nil {
+		return nil, nil
+	}
 	var prefix string
 	if newPayload {
 		prefix = "NewPayload"
@@ -461,6 +464,7 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	if blockHash != headHash && canonicalHash == blockHash {
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 	}
+
 	return nil, nil
 }
 
