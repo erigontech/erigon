@@ -397,8 +397,14 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	var parent *types.Header
 	if newPayload {
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
-	} else if header != nil {
-		parent, err = rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var canonicalHash common.Hash
+	if header != nil {
+		canonicalHash, err = rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 	}
 	if err != nil {
 		return nil, err
@@ -417,7 +423,7 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	bad, lastValidHash := s.hd.IsBadHeaderPoS(blockHash)
 	if bad {
 		log.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
-	} else if !newPayload {
+	} else if newPayload {
 		bad, lastValidHash = s.hd.IsBadHeaderPoS(parentHash)
 		if bad {
 			log.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
@@ -430,7 +436,7 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
-		if header != nil {
+		if header != nil && canonicalHash == blockHash {
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 		}
 
@@ -450,7 +456,6 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 
 	headHash := rawdb.ReadHeadBlockHash(tx)
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -550,8 +555,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	if status == nil {
 		if s.stageLoopIsBusy() {
 			log.Debug("[ForkChoiceUpdated] stage loop is busy")
@@ -559,6 +562,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 				PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 			}, nil
 		}
+		s.lock.Lock()
+		defer s.lock.Unlock()
+
 		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
@@ -569,6 +575,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
+	} else {
+		s.lock.Lock()
+		defer s.lock.Unlock()
 	}
 
 	// No need for payload building
