@@ -172,5 +172,3 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	gotest.tools/v3 v3.3.0 // indirect
 )
-
-replace github.com/ledgerwatch/erigon-lib => /Users/alexeysharp/github/erigon-lib
