@@ -128,7 +128,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(api._agg, tx, crit.Topics, fromTxNum, toTxNum)
+	ac := api._agg.MakeContext()
+
+	topicsBitmap, err := getTopicsBitmap(ac, tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +141,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var addrBitmap *roaring64.Bitmap
 	for _, addr := range crit.Addresses {
 		var bitmapForORing roaring64.Bitmap
-		it := api._agg.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+		it := ac.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
 		for it.HasNext() {
 			bitmapForORing.Add(it.Next())
 		}
@@ -162,7 +164,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(api._agg, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
 	for iter.HasNext() {
 		txNum := iter.Next()
@@ -233,12 +235,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(a *libstate.Aggregator, c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
+func getTopicsBitmap(ac *libstate.AggregatorContext, c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			it := a.LogTopicIterator(topic.Bytes(), from, to, nil)
+			it := ac.LogTopicIterator(topic.Bytes(), from, to, nil)
 			for it.HasNext() {
 				bitmapForORing.Add(it.Next())
 			}
