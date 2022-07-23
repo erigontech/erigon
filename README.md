@@ -4,6 +4,10 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
+![Coverage](https://gist.githubusercontent.com/revittm/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+
+![Hive](https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
+
 <!--ts-->
 
 - [System Requirements](#system-requirements)
@@ -76,6 +80,8 @@ Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now ha
 Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+
+Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile)
 
 ### Modularity
 
