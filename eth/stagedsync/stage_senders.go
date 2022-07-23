@@ -390,7 +390,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
 	if sn != nil && sn.Cfg().Enabled {
 		if sn.Cfg().Produce {
-			if err := cfg.blockRetire.PruneAncientBlocks(s.ForwardProgress, tx); err != nil {
+			if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
 				return err
 			}
 			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx, tx); err != nil {
