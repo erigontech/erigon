@@ -59,6 +59,9 @@ var (
 	propagateToNewPeerTimer = metrics.NewSummary(`pool_propagate_to_new_peer`)
 	propagateNewTxsTimer    = metrics.NewSummary(`pool_propagate_new_txs`)
 	writeToDBBytesCounter   = metrics.GetOrCreateCounter(`pool_write_to_db_bytes`)
+	pendingSubCounter       = metrics.GetOrCreateCounter(`txpool_pending`)
+	queuedSubCounter        = metrics.GetOrCreateCounter(`txpool_queued`)
+	basefeeSubCounter       = metrics.GetOrCreateCounter(`txpool_basefee`)
 )
 
 const ASSERT = false
@@ -1690,16 +1693,13 @@ func (p *TxPool) logStats() {
 		//log.Info("[txpool] Not started yet, waiting for new blocks...")
 		return
 	}
-	//protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
 
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	//idsInMem := p.senders.idsCount()
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	ctx := []interface{}{
-		//"baseFee", fmt.Sprintf("%d, %dm", protocolBaseFee, pendingBaseFee/1_000_000),
 		"block", p.lastSeenBlock.Load(),
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
@@ -1711,22 +1711,9 @@ func (p *TxPool) logStats() {
 	}
 	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	log.Info("[txpool] stat", ctx...)
-	//if ASSERT {
-	//stats := kvcache.DebugStats(p.senders.cache)
-	//log.Info(fmt.Sprintf("[txpool] cache %T, roots amount %d", p.senders.cache, len(stats)))
-	//for i := range stats {
-	//	log.Info("[txpool] cache", "root", stats[i].BlockNum, "len", stats[i].Lenght)
-	//}
-	//stats := kvcache.DebugStats(p.senders.cache)
-	//log.Info(fmt.Sprintf("[txpool] cache %T, roots amount %d", p.senders.cache, len(stats)))
-	//for i := range stats {
-	//	log.Info("[txpool] cache", "root", stats[i].BlockNum, "len", stats[i].Lenght)
-	//}
-	//ages := kvcache.DebugAges(p.senders.cache)
-	//for i := range ages {
-	//	log.Info("[txpool] age", "age", ages[i].BlockNum, "amount", ages[i].Lenght)
-	//}
-	//}
+	pendingSubCounter.Set(uint64(p.pending.Len()))
+	basefeeSubCounter.Set(uint64(p.baseFee.Len()))
+	queuedSubCounter.Set(uint64(p.queued.Len()))
 }
 
 //Deprecated need switch to streaming-like
