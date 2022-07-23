@@ -27,12 +27,13 @@ import (
 
 func TestParseTransactionRLP(t *testing.T) {
 	for _, testSet := range allNetsTestCases {
+		testSet := testSet
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
-			ctx := NewTxParseContext(testSet.chainID)
 			require := require.New(t)
-
+			ctx := NewTxParseContext(testSet.chainID)
 			tx, txSender := &TxSlot{}, [20]byte{}
 			for i, tt := range testSet.tests {
+				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := decodeHex(tt.PayloadStr)
 					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:], false /* hasEnvelope */, nil)

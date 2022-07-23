@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -169,7 +168,8 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*u256.N1)
+			chainID := uint256.NewInt(tt.chainID)
+			ctx := NewTxParseContext(*chainID)
 			slots := &TxSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
@@ -227,7 +227,8 @@ func TestTransactionsPacket(t *testing.T) {
 			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*u256.N1)
+			chainID := uint256.NewInt(tt.chainID)
+			ctx := NewTxParseContext(*chainID)
 			slots := &TxSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
