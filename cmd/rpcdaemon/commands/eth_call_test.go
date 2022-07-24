@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -361,19 +360,19 @@ func prune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 
 	logEvery := time.NewTicker(20 * time.Second)
 
-	err = stagedsync.PruneTableDupSort(tx, kv.AccountChangeSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTableDupSort(tx, kv.AccountChangeSet, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = stagedsync.PruneTableDupSort(tx, kv.StorageChangeSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = stagedsync.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32)
 	assert.NoError(t, err)
 
-	err = stagedsync.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32)
 	assert.NoError(t, err)
 
-	err = stagedsync.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
 	err = tx.Commit()
