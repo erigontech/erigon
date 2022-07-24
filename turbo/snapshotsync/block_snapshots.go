@@ -715,24 +715,24 @@ func SegmentsList(dir string) (res []string, err error) {
 }
 
 // EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
-func EnforceSnapshotsInvariant(tx kv.RwTx, dir string) ([]string, error) {
+// it also does notify about changes after db commit
+func EnforceSnapshotsInvariant(db kv.RwDB, dir string, notifier DBEventNotifier) (snList []string, err error) {
 	snListInFolder, err := SegmentsList(dir)
 	if err != nil {
 		return nil, err
 	}
-	snList, err := rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
-	if err != nil {
-		return nil, err
-	}
-	return snList, nil
-}
-
-func EnforceSnapshotsInvariantWithDB(db kv.RwDB, dir string) (snList []string, err error) {
 	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		snList, err = EnforceSnapshotsInvariant(tx, dir)
+		snList, err = rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
+		if err != nil {
+			return err
+		}
 		return err
 	}); err != nil {
 		return snList, err
+	}
+	if notifier != nil {
+		notifier.OnNewSnapshot()
+		notifier.SendOnNewSnapshot()
 	}
 	return snList, nil
 }
@@ -912,6 +912,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 type DBEventNotifier interface {
 	OnNewSnapshot()
+	SendOnNewSnapshot()
 }
 
 func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
@@ -934,6 +935,10 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen: %w", err)
+	}
+	if notifier != nil { // notify about new snapshots of any size
+		notifier.OnNewSnapshot()
+		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use
 	}
 
 	var downloadRequest []DownloadRequest

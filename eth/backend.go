@@ -789,16 +789,14 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 		blockReader := snapshotsync.NewBlockReader()
 		return blockReader, nil, nil
 	}
+
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-	snList, err := snapshotsync.EnforceSnapshotsInvariantWithDB(s.chainDB, cfg.Dirs.Snap)
+	snList, err := snapshotsync.EnforceSnapshotsInvariant(s.chainDB, cfg.Dirs.Snap, s.notifications.Events)
 	if err != nil {
 		return nil, nil, err
 	}
 	if err := allSnapshots.ReopenList(snList); err != nil {
 		return nil, nil, err
-	}
-	if s.notifications != nil {
-		s.notifications.Events.OnNewSnapshot()
 	}
 
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)

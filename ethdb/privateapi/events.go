@@ -104,16 +104,13 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
-func (e *Events) OnNewSnapshotHappened() bool {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
-	return e.onNewSnapshotsHappened
-}
-
-func (e *Events) OnNewSnapshot() {
+func (e *Events) SendOnNewSnapshot() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	e.onNewSnapshotsHappened = true
+	if !e.onNewSnapshotsHappened {
+		return
+	}
+	e.onNewSnapshotsHappened = false
 	for _, ch := range e.newSnapshotSubscription {
 		select {
 		case ch <- struct{}{}:
@@ -127,6 +124,13 @@ func (e *Events) OnNewSnapshot() {
 			ch <- struct{}{}
 		}
 	}
+}
+
+// OnNewSnapshot save event, will send it later by SendOnNewSnapshot
+func (e *Events) OnNewSnapshot() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.onNewSnapshotsHappened = true
 }
 
 func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {

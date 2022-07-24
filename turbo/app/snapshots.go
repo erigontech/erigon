@@ -263,7 +263,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	_, err := snapshotsync.EnforceSnapshotsInvariantWithDB(db, dirs.Snap)
+	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, nil)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 		log.Error("Error", "err", err)
 	}
 
-	_, err := snapshotsync.EnforceSnapshotsInvariantWithDB(db, dirs.Snap)
+	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, nil)
 	if err != nil {
 		return err
 	}
