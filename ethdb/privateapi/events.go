@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
+	"go.uber.org/atomic"
 )
 
 type RpcEventType uint64
@@ -27,7 +28,7 @@ type Events struct {
 	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
 	hasLogSubscriptions       bool
 	lock                      sync.RWMutex
-	onNewSnapshotsHappened    bool
+	onNewSnapshotsHappened    atomic.Bool
 }
 
 func NewEvents() *Events {
@@ -105,12 +106,13 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 }
 
 func (e *Events) SendOnNewSnapshot() {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	if !e.onNewSnapshotsHappened {
+	if !e.onNewSnapshotsHappened.Load() {
 		return
 	}
-	e.onNewSnapshotsHappened = false
+	e.onNewSnapshotsHappened.Store(false)
+
+	e.lock.Lock()
+	defer e.lock.Unlock()
 	for _, ch := range e.newSnapshotSubscription {
 		select {
 		case ch <- struct{}{}:
@@ -128,9 +130,7 @@ func (e *Events) SendOnNewSnapshot() {
 
 // OnNewSnapshot save event, will send it later by SendOnNewSnapshot
 func (e *Events) OnNewSnapshot() {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	e.onNewSnapshotsHappened = true
+	e.onNewSnapshotsHappened.Store(true)
 }
 
 func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
