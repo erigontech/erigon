@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -423,7 +424,27 @@ func handleNewPayload(
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
+		if currentHeadNumber != nil && math.GetAbsoluteDifference(int64(*currentHeadNumber), int64(headerNumber)) < 32 {
+			// we try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+			// so that we will perform full validation.
+			for i := 0; cfg.hd.PosStatus() == headerdownload.Syncing && i < 10; i++ {
+				time.Sleep(10 * time.Millisecond)
+			}
+			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
+			if cfg.hd.PosStatus() == headerdownload.Synced {
+				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+				bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+				if bad {
+					cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
+					return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, nil
+				} else if !cfg.forkValidator.IsForkMarkedAsValid(header.ParentHash) {
+					return &engineapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, nil
+				}
+			} else {
+				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+			}
+		}
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
@@ -620,7 +641,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
 		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)
 	} else {
-		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
+		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId(), "fork head", lastValidHash)
 	}
 
 	cfg.hd.HeadersCollector().Close()
@@ -651,7 +672,7 @@ func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, 
 		if interrupt == engineapi.Stopping {
 			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
 		}
-		if interrupt == engineapi.Synced {
+		if interrupt == engineapi.Synced && cfg.hd.HeadersCollector() != nil {
 			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 		}
 		if !useExternalTx {

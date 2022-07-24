@@ -96,3 +96,10 @@ func SafeMul(x, y uint64) (uint64, bool) {
 	hi, lo := bits.Mul64(x, y)
 	return lo, hi != 0
 }
+
+// GetAbsoluteDifference is a utility method that given 2 int64, it returns the absolute value of their difference in uint64 format.
+func GetAbsoluteDifference(x, y int64) uint64 {
+	z := x - y
+	w := (z >> 63)
+	return uint64((z ^ w) - w)
+}
