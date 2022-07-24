@@ -50,14 +50,14 @@ var erigon22Cmd = &cobra.Command{
 	},
 }
 
-type ReconWorker1 struct {
+type Worker22 struct {
 	lock         sync.Locker
 	wg           *sync.WaitGroup
-	rs           *state.ReconState1
+	rs           *state.State22
 	blockReader  services.FullBlockReader
 	allSnapshots *snapshotsync.RoSnapshots
-	stateWriter  *state.StateReconWriter1
-	stateReader  *state.StateReconReader1
+	stateWriter  *state.StateWriter22
+	stateReader  *state.StateReader22
 	getHeader    func(hash common.Hash, number uint64) *types.Header
 	ctx          context.Context
 	engine       consensus.Engine
@@ -68,20 +68,20 @@ type ReconWorker1 struct {
 	resultCh     chan state.TxTask
 }
 
-func NewReconWorker1(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState1,
+func NewWorker22(lock sync.Locker, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	resultCh chan state.TxTask,
-) *ReconWorker1 {
-	return &ReconWorker1{
+) *Worker22 {
+	return &Worker22{
 		lock:         lock,
 		wg:           wg,
 		rs:           rs,
 		blockReader:  blockReader,
 		allSnapshots: allSnapshots,
 		ctx:          context.Background(),
-		stateWriter:  state.NewStateReconWriter1(rs),
-		stateReader:  state.NewStateReconReader1(rs),
+		stateWriter:  state.NewStateWriter22(rs),
+		stateReader:  state.NewStateReader22(rs),
 		txNums:       txNums,
 		chainConfig:  chainConfig,
 		logger:       logger,
@@ -90,11 +90,11 @@ func NewReconWorker1(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState1
 	}
 }
 
-func (rw *ReconWorker1) SetTx(tx kv.Tx) {
+func (rw *Worker22) SetTx(tx kv.Tx) {
 	rw.stateReader.SetTx(tx)
 }
 
-func (rw *ReconWorker1) run() {
+func (rw *Worker22) run() {
 	defer rw.wg.Done()
 	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
 		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
@@ -110,7 +110,7 @@ func (rw *ReconWorker1) run() {
 	}
 }
 
-func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
+func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	txTask.Error = nil
@@ -196,7 +196,7 @@ func (rw *ReconWorker1) runTxTask(txTask *state.TxTask) {
 	}
 }
 
-func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.ReconState1, applyTx kv.Tx,
+func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, applyTx kv.Tx,
 	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
 		txTask := heap.Pop(rws).(state.TxTask)
@@ -269,9 +269,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
 	workCh := make(chan state.TxTask, 128)
-	rs := state.NewReconState1()
+	rs := state.NewState22()
 	var lock sync.RWMutex
-	reconWorkers := make([]*ReconWorker1, workerCount)
+	reconWorkers := make([]*Worker22, workerCount)
 	var applyTx kv.Tx
 	defer func() {
 		if applyTx != nil {
@@ -298,7 +298,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var wg sync.WaitGroup
 	resultCh := make(chan state.TxTask, 128)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewReconWorker1(lock.RLocker(), &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
+		reconWorkers[i] = NewWorker22(lock.RLocker(), &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
