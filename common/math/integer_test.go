@@ -118,8 +118,8 @@ func TestMustParseUint64Panic(t *testing.T) {
 }
 
 func TestGetAbsoluteDifference(t *testing.T) {
-	x1 := int64(99)
-	x2 := int64(45)
+	x1 := uint64(99)
+	x2 := uint64(45)
 	assert.Equal(t, GetAbsoluteDifference(x1, x2), uint64(x1-x2))
 	assert.Equal(t, GetAbsoluteDifference(x2, x1), uint64(x1-x2))
 }

@@ -425,8 +425,8 @@ func handleNewPayload(
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
 		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
-		if currentHeadNumber != nil && math.GetAbsoluteDifference(int64(*currentHeadNumber), int64(headerNumber)) < 32 {
-			// we try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+		if currentHeadNumber != nil && math.GetAbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			for i := 0; cfg.hd.PosStatus() == headerdownload.Syncing && i < 10; i++ {
 				time.Sleep(10 * time.Millisecond)
