@@ -230,7 +230,7 @@ func TestNoTTD(t *testing.T) {
 	go func() {
 		_, err = backend.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 			ParentHash:    gointerfaces.ConvertHashToH256(common.HexToHash("0x2")),
-			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
+			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0xe6a580606b065e08034dcd6eea026cfdcbd3b41918d98b41cb9bf797d0c27033")),
 			ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 			PrevRandao:    gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),

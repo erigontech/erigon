@@ -234,7 +234,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.EnginePayloadStatus {
 	reply := remote.EnginePayloadStatus{Status: payloadStatus.Status}
-	if payloadStatus.LatestValidHash != (common.Hash{}) {
+	if payloadStatus.Status != remote.EngineStatus_SYNCING {
 		reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
 	}
 	if payloadStatus.ValidationError != nil {
@@ -262,11 +262,6 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	if s.config.TerminalTotalDifficulty == nil {
-		log.Error("[NewPayload] not a proof-of-stake chain")
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
 	var baseFee *big.Int
 	eip1559 := false
 
@@ -322,24 +317,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
 
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, req.BlockNumber-1)
-	if err != nil {
-		return nil, err
-	}
-
-	tx.Rollback()
-
-	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})}, nil
-	}
-
 	possibleStatus, err := s.getPayloadStatusFromHashIfPossible(blockHash, req.BlockNumber, header.ParentHash, true)
 	if err != nil {
 		return nil, err
@@ -375,15 +352,22 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 // Check if we can make out a status from the payload hash/head hash.
 func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, newPayload bool) (*engineapi.PayloadStatus, error) {
-	if s.hd == nil {
-		return nil, nil
-	}
+	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
 		prefix = "NewPayload"
 	} else {
 		prefix = "ForkChoiceUpdated"
 	}
+	if s.config.TerminalTotalDifficulty == nil {
+		log.Error(fmt.Sprintf("[%s] not a proof-of-stake chain", prefix))
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	if s.hd == nil {
+		return nil, nil
+	}
+
 	tx, err := s.db.BeginRo(s.ctx)
 	if err != nil {
 		return nil, err
@@ -394,12 +378,26 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	if err != nil {
 		return nil, err
 	}
+	// Retrieve parent and total difficulty.
 	var parent *types.Header
+	var td *big.Int
 	if newPayload {
+		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
+		if err != nil {
+			return nil, err
+		}
+		td, err = rawdb.ReadTdByHash(tx, parentHash)
+	} else {
+		td, err = rawdb.ReadTdByHash(tx, blockHash)
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Check if we already reached TTD.
+	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", common.Hash(blockHash))
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
 	}
 
 	var canonicalHash common.Hash
@@ -523,32 +521,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
 	forkChoice := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
-	}
-
-	tx1, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx1.Rollback()
-
-	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
-	tx1.Rollback()
-	if err != nil {
-		return nil, err
-	}
-	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
-		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})},
-		}, nil
 	}
 
 	status, err := s.getPayloadStatusFromHashIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, false)
