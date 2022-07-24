@@ -599,12 +599,8 @@ loop:
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	trieStage, err := stagedSync.StageState(stages.IntermediateHashes, rwTx, db)
-	if err != nil {
-		return err
-	}
 	var rootHash common.Hash
-	if rootHash, err = stagedsync.SpawnIntermediateHashesStage(trieStage, stagedSync, rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), ctx); err != nil {
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
