@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -222,7 +223,7 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask) error {
+func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if txTask.WriteLists != nil {

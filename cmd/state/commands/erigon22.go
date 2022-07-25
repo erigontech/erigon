@@ -18,6 +18,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -61,6 +62,8 @@ var erigon22Cmd = &cobra.Command{
 
 type Worker22 struct {
 	lock         sync.Locker
+	db           kv.RoDB
+	tx           kv.Tx
 	wg           *sync.WaitGroup
 	rs           *state.State22
 	blockReader  services.FullBlockReader
@@ -77,13 +80,14 @@ type Worker22 struct {
 	resultCh     chan state.TxTask
 }
 
-func NewWorker22(lock sync.Locker, wg *sync.WaitGroup, rs *state.State22,
+func NewWorker22(lock sync.Locker, db kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	resultCh chan state.TxTask,
 ) *Worker22 {
 	return &Worker22{
 		lock:         lock,
+		db:           db,
 		wg:           wg,
 		rs:           rs,
 		blockReader:  blockReader,
@@ -99,8 +103,11 @@ func NewWorker22(lock sync.Locker, wg *sync.WaitGroup, rs *state.State22,
 	}
 }
 
-func (rw *Worker22) SetTx(tx kv.Tx) {
-	rw.stateReader.SetTx(tx)
+func (rw *Worker22) ResetTx() {
+	if rw.tx != nil {
+		rw.tx.Rollback()
+		rw.tx = nil
+	}
 }
 
 func (rw *Worker22) run() {
@@ -122,6 +129,13 @@ func (rw *Worker22) run() {
 func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	if rw.tx == nil {
+		var err error
+		if rw.tx, err = rw.db.BeginRo(rw.ctx); err != nil {
+			panic(err)
+		}
+		rw.stateReader.SetTx(rw.tx)
+	}
 	txTask.Error = nil
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter.SetTxNum(txTask.TxNum)
@@ -205,13 +219,13 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 	}
 }
 
-func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, applyTx kv.Tx,
+func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *libstate.Aggregator22, applyTx kv.Tx,
 	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
 		txTask := heap.Pop(rws).(state.TxTask)
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask); err != nil {
+			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
 				panic(err)
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
@@ -322,37 +336,22 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	rwTx.Rollback()
 
 	rs := state.NewState22()
-	var lock sync.RWMutex
-	reconWorkers := make([]*Worker22, workerCount)
-	var applyTx kv.Tx
-	defer func() {
-		if applyTx != nil {
-			applyTx.Rollback()
-		}
-	}()
-	if applyTx, err = db.BeginRo(ctx); err != nil {
+	agg, err := libstate.NewAggregator22(datadir, AggregationStep)
+	if err != nil {
 		return err
 	}
-	roTxs := make([]kv.Tx, workerCount)
-	defer func() {
-		for i := 0; i < workerCount; i++ {
-			if roTxs[i] != nil {
-				roTxs[i].Rollback()
-			}
-		}
-	}()
-	for i := 0; i < workerCount; i++ {
-		roTxs[i], err = db.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-	}
+	var lock sync.RWMutex
+	reconWorkers := make([]*Worker22, workerCount)
 	var wg sync.WaitGroup
 	resultCh := make(chan state.TxTask, 128)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker22(lock.RLocker(), &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
-		reconWorkers[i].SetTx(roTxs[i])
+		reconWorkers[i] = NewWorker22(lock.RLocker(), db, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
 	}
+	defer func() {
+		for i := 0; i < workerCount; i++ {
+			reconWorkers[i].ResetTx()
+		}
+	}()
 	wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].run()
@@ -379,6 +378,16 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	// Go-routine gathering results from the workers
 	var maxTxNum uint64 = txNums[len(txNums)-1]
 	go func() {
+		var applyTx kv.RwTx
+		defer func() {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}()
+		if applyTx, err = db.BeginRw(ctx); err != nil {
+			panic(err)
+		}
+		agg.SetTx(applyTx)
 		defer rs.Finish()
 		for outputTxNum < atomic.LoadUint64(&maxTxNum) {
 			select {
@@ -389,7 +398,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					defer rwsLock.Unlock()
 					atomic.AddInt64(&resultsSize, txTask.ResultsSize)
 					heap.Push(&rws, txTask)
-					processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+					processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 					rwsReceiveCond.Signal()
 				}()
 			case <-logEvery.C:
@@ -442,7 +451,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 									drained = true
 								}
 							}
-							processResultQueue(&rws, &outputTxNum, rs, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+							processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 							if rws.Len() == 0 {
 								break
 							}
@@ -466,9 +475,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
-						applyTx.Rollback()
+						if err = applyTx.Commit(); err != nil {
+							return err
+						}
 						for i := 0; i < workerCount; i++ {
-							roTxs[i].Rollback()
+							reconWorkers[i].ResetTx()
 						}
 						rwTx, err = db.BeginRw(ctx)
 						if err != nil {
@@ -480,15 +491,10 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 						if err = rwTx.Commit(); err != nil {
 							return err
 						}
-						if applyTx, err = db.BeginRo(ctx); err != nil {
+						if applyTx, err = db.BeginRw(ctx); err != nil {
 							return err
 						}
-						for i := 0; i < workerCount; i++ {
-							if roTxs[i], err = db.BeginRo(ctx); err != nil {
-								return err
-							}
-							reconWorkers[i].SetTx(roTxs[i])
-						}
+						agg.SetTx(applyTx)
 						return nil
 					}()
 					if err != nil {
@@ -497,6 +503,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					log.Info("Committed", "time", time.Since(commitStart))
 				}
 			}
+		}
+		if err = applyTx.Commit(); err != nil {
+			panic(err)
 		}
 	}()
 	var inputTxNum uint64
@@ -558,9 +567,8 @@ loop:
 	}
 	close(workCh)
 	wg.Wait()
-	applyTx.Rollback()
 	for i := 0; i < workerCount; i++ {
-		roTxs[i].Rollback()
+		reconWorkers[i].ResetTx()
 	}
 	rwTx, err = db.BeginRw(ctx)
 	if err != nil {
