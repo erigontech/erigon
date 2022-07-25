@@ -10,9 +10,9 @@ set -o pipefail  # fail if anything in pipe fails
 # $(id -u) and $(id -g) will be 0
 #
 # so we need to specify the erigon user uid/gid in the image
-# choose 3473 matching defaults in .env.example
+# choose 1000 matching defaults in .env.example
 DOCKER_FLAGS="-t ${IMAGE_NAME}" \
-DOCKER_UID=3473 \
-DOCKER_GID=3473 \
+DOCKER_UID=1000 \
+DOCKER_GID=1000 \
 GIT_TAG=$(git describe --tags '--match=v*' --dirty) \
     make docker
