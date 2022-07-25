@@ -131,9 +131,7 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 		misc.ApplyDAOHardFork(ibs)
-		if err := ibs.FinalizeTx(rules, noop); err != nil {
-			panic(err)
-		}
+		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
@@ -147,15 +145,24 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	} else {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
-		usedGas := new(uint64)
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
-		_, _, err = core.ApplyTransaction(rw.chainConfig, getHashFn, rw.engine, nil, gp, ibs, noop, txTask.Header, txTask.Tx, usedGas, vmConfig, contractHasTEVM)
+		blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */, contractHasTEVM)
+		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
+		if err != nil {
+			panic(err)
+		}
+		txContext := core.NewEVMTxContext(msg)
+		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
+		}
+		if err = ibs.FinalizeTx(rules, noop); err != nil {
+			panic(err)
 		}
 	}
 	if dependency, ok := rw.stateReader.ReadError(); ok {
@@ -259,12 +266,8 @@ func (fw *FillWorker) fillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
-			if len(val) > 1 || val[0] != 0 {
-				if err := plainStateCollector.Collect(compositeKey, val); err != nil {
-					panic(err)
-				}
-			} else {
-				fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
+				panic(err)
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
@@ -283,19 +286,15 @@ func (fw *FillWorker) fillCode(codeCollector, plainContractCollector *etl.Collec
 		fw.currentKey = key
 		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
 		if len(val) > 0 {
-			if len(val) > 1 || val[0] != 0 {
-				codeHash, err := common.HashData(val)
-				if err != nil {
-					panic(err)
-				}
-				if err = codeCollector.Collect(codeHash[:], val); err != nil {
-					panic(err)
-				}
-				if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
-					panic(err)
-				}
-			} else {
-				fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+			codeHash, err := common.HashData(val)
+			if err != nil {
+				panic(err)
+			}
+			if err = codeCollector.Collect(codeHash[:], val); err != nil {
+				panic(err)
+			}
+			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
+				panic(err)
 			}
 			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
 		}
@@ -376,8 +375,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.Reopen(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -601,9 +599,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}()
 	var inputTxNum uint64
+	var header *types.Header
 	for bn := uint64(0); bn < blockNum; bn++ {
-		header, err := blockReader.HeaderByNumber(ctx, nil, bn)
-		if err != nil {
+		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
 			panic(err)
 		}
 		blockHash := header.Hash()
@@ -852,11 +850,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	if _, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	var rootHash common.Hash
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
+	}
+	if rootHash != header.Root {
+		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }

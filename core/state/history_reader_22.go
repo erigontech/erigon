@@ -21,14 +21,14 @@ func bytesToUint64(buf []byte) (x uint64) {
 
 // Implements StateReader and StateWriter
 type HistoryReader22 struct {
-	a     *libstate.Aggregator
+	ac    *libstate.AggregatorContext
 	ri    *libstate.ReadIndices
 	txNum uint64
 	trace bool
 }
 
-func NewHistoryReader22(a *libstate.Aggregator, ri *libstate.ReadIndices) *HistoryReader22 {
-	return &HistoryReader22{a: a, ri: ri}
+func NewHistoryReader22(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReader22 {
+	return &HistoryReader22{ac: ac, ri: ri}
 }
 
 func (hr *HistoryReader22) SetTx(tx kv.RwTx) {
@@ -37,7 +37,6 @@ func (hr *HistoryReader22) SetTx(tx kv.RwTx) {
 
 func (hr *HistoryReader22) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
-	hr.a.SetTxNum(txNum)
 	if hr.ri != nil {
 		hr.ri.SetTxNum(txNum)
 	}
@@ -57,7 +56,7 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 			return nil, err
 		}
 	}
-	enc, err := hr.a.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
+	enc, err := hr.ac.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +107,7 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 			return nil, err
 		}
 	}
-	enc, err := hr.a.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, nil /* roTx */)
+	enc, err := hr.ac.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +130,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 			return nil, err
 		}
 	}
-	enc, err := hr.a.ReadAccountCodeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
+	enc, err := hr.ac.ReadAccountCodeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +146,7 @@ func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnati
 			return 0, err
 		}
 	}
-	size, err := hr.a.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
+	size, err := hr.ac.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
 	if err != nil {
 		return 0, err
 	}

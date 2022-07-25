@@ -130,13 +130,13 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	prevTime := time.Now()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.Reopen(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	readWrapper := state.NewHistoryReader22(h.MakeContext(), ri)
 
 	for !interrupt {
 		select {
@@ -170,7 +170,6 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
 			continue
 		}
-		readWrapper := state.NewHistoryReader22(h, ri)
 		if traceBlock != 0 {
 			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}

@@ -1,13 +1,6 @@
 [submodule "tests"]
 	path = tests/testdata
 	url = https://github.com/ethereum/tests
-[submodule "turbo/snapshotsync/snapshothashes/erigon-snapshots"]
-	path = turbo/snapshotsync/snapshothashes/erigon-snapshots
-	url = https://github.com/ledgerwatch/erigon-snapshot.git
-[submodule "cmd/downloader/trackers/trackerslist"]
-	path = cmd/downloader/trackers/trackerslist
-	url = https://github.com/ngosang/trackerslist.git
-	
 [submodule "libmdbx"]
 	path = libmdbx
 	url = https://github.com/torquem-ch/libmdbx.git

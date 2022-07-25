@@ -2,29 +2,18 @@ package trackers
 
 import (
 	"bufio"
-	_ "embed"
 	"strings"
+
+	"github.com/ledgerwatch/trackerslist"
 )
 
-//go:embed trackerslist/trackers_best.txt
-var best string
-var Best = split(best)
-
-//go:embed trackerslist/trackers_all_https.txt
-var https string
-var Https = split(https)
-
-//go:embed trackerslist/trackers_all_http.txt
-var http string
-var Http = split(http)
-
-//go:embed trackerslist/trackers_all_udp.txt
-var udp string
-var Udp = split(udp)
-
-//go:embed trackerslist/trackers_all_ws.txt
-var ws string
-var Ws = split(ws)
+var (
+	Best  = split(trackerslist.Best)
+	Https = split(trackerslist.Https)
+	Http  = split(trackerslist.Http)
+	Udp   = split(trackerslist.Udp)
+	Ws    = split(trackerslist.Ws)
+)
 
 func split(txt string) (lines []string) {
 	sc := bufio.NewScanner(strings.NewReader(txt))

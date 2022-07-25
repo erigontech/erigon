@@ -30,14 +30,14 @@ var resetBlocks = Migration{
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}
-			return
+			return tx.Commit()
 		}
 		genesisBlock := rawdb.ReadHeaderByNumber(tx, 0)
 		if genesisBlock == nil {
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}
-			return nil
+			return tx.Commit()
 		}
 		chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 		if err != nil {

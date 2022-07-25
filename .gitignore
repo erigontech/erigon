@@ -78,4 +78,5 @@ docker-compose.*.yml
 
 dist
 .env
+coverage.out
 

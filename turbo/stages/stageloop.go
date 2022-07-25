@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -35,13 +34,13 @@ import (
 func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
 	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
 		if err != nil {
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
 			hd.PayloadStatusCh <- *pendingPayloadStatus
 		}
 	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
 		if err != nil {
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
 			var status remote.EngineStatus
 			if headBlockHash == pendingPayloadHash {
@@ -50,7 +49,7 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
 				status = remote.EngineStatus_INVALID
 			}
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			hd.PayloadStatusCh <- engineapi.PayloadStatus{
 				Status:          status,
 				LatestValidHash: headBlockHash,
 			}
@@ -259,40 +258,37 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	if unwindPoint > 0 {
 		// Run it through the unwind
 		stateSync.UnwindTo(unwindPoint, common.Hash{})
-		if err = stateSync.Run(nil, batch, false); err != nil {
+		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}
-		// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
-		for i := range headersChain {
-			currentHeader := headersChain[i]
-			currentBody := bodiesChain[i]
-			currentHeight := headersChain[i].Number.Uint64()
-			currentHash := headersChain[i].Hash()
-			// Prepare memory state for block execution
-			if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
-				return err
-			}
-			rawdb.WriteHeader(batch, currentHeader)
-			if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
-				return err
-			}
-			if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
-				return err
-			}
+	}
+	// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+	for i := range headersChain {
+		currentHeader := headersChain[i]
+		currentBody := bodiesChain[i]
+		currentHeight := headersChain[i].Number.Uint64()
+		currentHash := headersChain[i].Hash()
+		// Prepare memory state for block execution
+		if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+			return err
+		}
+		rawdb.WriteHeader(batch, currentHeader)
+		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
+			return err
+		}
+		if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+			return err
 		}
 	}
+
 	// If we did not specify header or body we stop here
-	if header == nil || body == nil {
+	if header == nil {
 		return nil
 	}
 	// Setup
 	height := header.Number.Uint64()
 	hash := header.Hash()
 	// Prepare memory state for block execution
-	if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
-		return err
-	}
-
 	rawdb.WriteHeader(batch, header)
 	if err = rawdb.WriteHeaderNumber(batch, hash, height); err != nil {
 		return err
@@ -309,11 +305,18 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
 		return err
 	}
-
-	if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
-		return err
+	if body != nil {
+		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
+			return err
+		}
+		if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
+			return err
+		}
+	} else {
+		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
+			return err
+		}
 	}
-
 	// Run state sync
 	if err = stateSync.Run(nil, batch, false); err != nil {
 		return err

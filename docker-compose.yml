@@ -20,16 +20,16 @@ x-erigon-service: &default-erigon-service
   volumes_from: [ erigon ]
   restart: unless-stopped
   mem_swappiness: 0
+  user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
 
 services:
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build:
       args:
-        UID: ${DOCKER_UID:1000}
-        GID: ${DOCKER_GID:1000}
+        UID: ${DOCKER_UID:-1000}
+        GID: ${DOCKER_GID:-1000}
       context: .
-    user: "${DOCKER_UID:1000}:${DOCKER_GID:1000}"
     command: |
       erigon ${ERIGON_FLAGS-} --private.api.addr=0.0.0.0:9090
       --sentry.api.addr=sentry:9091 --downloader.api.addr=downloader:9093 --txpool.disable
@@ -66,8 +66,8 @@ services:
 
 
   prometheus:
-    image: prom/prometheus:v2.36.2
-    user: ${DOCKER_UID:1000}:${DOCKER_GID:1000} # Uses erigon user from Dockerfile
+    image: prom/prometheus:v2.37.0
+    user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports: [ "9090:9090" ]
     volumes:
@@ -76,7 +76,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:9.0.2
+    image: grafana/grafana:9.0.3
     user: "472:0" # required for grafana version >= 7.3
     ports: [ "3000:3000" ]
     volumes:

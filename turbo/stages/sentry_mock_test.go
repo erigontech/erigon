@@ -571,12 +571,8 @@ func TestPoSDownloader(t *testing.T) {
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
-	// Send a payload with missing parent
-	payloadMessage := engineapi.PayloadMessage{
-		Header: chain.TopBlock.Header(),
-		Body:   chain.TopBlock.RawBody(),
-	}
-	m.SendPayloadRequest(&payloadMessage)
+	// Send a payload whose parent isn't downloaded yet
+	m.SendPayloadRequest(chain.TopBlock)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
@@ -605,6 +601,7 @@ func TestPoSDownloader(t *testing.T) {
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	// Point forkChoice to the head
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -617,6 +614,8 @@ func TestPoSDownloader(t *testing.T) {
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
+	payloadStatus = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 }
 
@@ -637,12 +636,9 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	invalidTip := chain.TopBlock.Header()
 	invalidTip.ParentHash = invalidParent.Hash()
 
-	// Send a payload with missing parent
-	payloadMessage := engineapi.PayloadMessage{
-		Header: invalidTip,
-		Body:   chain.TopBlock.RawBody(),
-	}
-	m.SendPayloadRequest(&payloadMessage)
+	// Send a payload with the parent missing
+	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil)
+	m.SendPayloadRequest(payloadMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
@@ -673,11 +669,10 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
 	require.NoError(t, err)
-	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
-	payloadStatus2 := m.ReceivePayloadStatus()
-	require.Equal(t, remote.EngineStatus_INVALID, payloadStatus2.Status)
-	assert.Equal(t, lastValidHeader.Hash(), payloadStatus2.LatestValidHash)
+	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
+	assert.True(t, bad)
+	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
 }

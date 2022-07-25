@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -437,7 +436,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 	request = &HeaderRequest{
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
-		Number:  0, // Since posAnchor may be an estimate, do not specify it here
+		Number:  anchor.blockHeight - 1,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -1134,13 +1133,13 @@ func (hd *HeaderDownload) ClearPendingPayloadHash() {
 	hd.pendingPayloadHash = common.Hash{}
 }
 
-func (hd *HeaderDownload) GetPendingPayloadStatus() *privateapi.PayloadStatus {
+func (hd *HeaderDownload) GetPendingPayloadStatus() *engineapi.PayloadStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingPayloadStatus(response *privateapi.PayloadStatus) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(response *engineapi.PayloadStatus) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadStatus = response
