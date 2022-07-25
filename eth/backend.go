@@ -149,7 +149,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	tmpdir := stack.Config().Dirs.Tmp
-	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
+	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
 
@@ -911,4 +911,24 @@ func (s *Ethereum) SentryCtx() context.Context {
 
 func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 	return s.sentriesClient
+}
+
+// RemoveContents is like os.RemoveAll, but preserve dir itself
+func RemoveContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
