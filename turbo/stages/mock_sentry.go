@@ -565,7 +565,7 @@ func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage
 	ms.sentriesClient.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }
 
-func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
+func (ms *MockSentry) ReceivePayloadStatus() engineapi.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
 

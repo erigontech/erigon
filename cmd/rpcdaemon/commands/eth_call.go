@@ -320,7 +320,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber)
+		stateReader = state.NewPlainState(tx, blockNumber+1)
 	}
 
 	header := block.Header()

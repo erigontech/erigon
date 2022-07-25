@@ -73,7 +73,7 @@ xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana 
 ## setup_xdg_data_home:               TODO
 setup_xdg_data_home:
 	mkdir -p $(xdg_data_home_subdirs)
-	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || sudo chown -R 472:0 $(xdg_data_home)/erigon-grafana
+	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || chown -R 472:0 $(xdg_data_home)/erigon-grafana
 	@echo "✔️ xdg_data_home setup"
 	@ls -al $(xdg_data_home)
 
@@ -155,7 +155,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.47.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.47.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

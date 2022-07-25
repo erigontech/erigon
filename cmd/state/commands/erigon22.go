@@ -171,7 +171,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		}
 		return h
 	}
-	readWrapper := &ReaderWrapper22{r: agg, roTx: rwTx}
+	readWrapper := &ReaderWrapper22{ac: agg.MakeContext(), roTx: rwTx}
 	writeWrapper := &WriterWrapper22{w: agg}
 
 	for !interrupt {
@@ -396,7 +396,7 @@ func processBlock22(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 // Implements StateReader and StateWriter
 type ReaderWrapper22 struct {
 	roTx     kv.Tx
-	r        *libstate.Aggregator
+	ac       *libstate.AggregatorContext
 	blockNum uint64
 }
 
@@ -406,7 +406,7 @@ type WriterWrapper22 struct {
 }
 
 func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes(), rw.roTx)
+	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +444,7 @@ func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
+	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -458,11 +458,11 @@ func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (rw *ReaderWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return rw.r.ReadAccountCode(address.Bytes(), rw.roTx)
+	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
 }
 
 func (rw *ReaderWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return rw.r.ReadAccountCodeSize(address.Bytes(), rw.roTx)
+	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
 }
 
 func (rw *ReaderWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {

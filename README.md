@@ -4,6 +4,10 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
+![Coverage](https://gist.githubusercontent.com/revittm/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+
+![Hive](https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
+
 <!--ts-->
 
 - [System Requirements](#system-requirements)

@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -305,16 +304,16 @@ type HeaderDownload struct {
 	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus
-	posSync              bool                          // Whether the chain is syncing in the PoS mode
-	headersCollector     *etl.Collector                // ETL collector for headers
-	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
-	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
-	pendingPayloadHash   common.Hash                   // Header whose status we still should send to PayloadStatusCh
-	pendingPayloadStatus *privateapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
-	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
-	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
-	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
+	posSync              bool                         // Whether the chain is syncing in the PoS mode
+	headersCollector     *etl.Collector               // ETL collector for headers
+	BeaconRequestList    *engineapi.RequestList       // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan engineapi.PayloadStatus // Responses (validation/execution status)
+	pendingPayloadHash   common.Hash                  // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *engineapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
+	unsettledForkChoice  *engineapi.ForkChoiceMessage // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                       // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     common.Hash                  // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[common.Hash]common.Hash  // Invalid Tip -> Last Valid Ancestor
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -343,7 +342,7 @@ func NewHeaderDownload(
 		DeliveryNotify:     make(chan struct{}, 1),
 		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
-		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
+		PayloadStatusCh:    make(chan engineapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
 	}
