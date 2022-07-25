@@ -219,7 +219,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
-	if math.GetAbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
+	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
@@ -339,7 +339,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 // clean wipes out all outdated sideforks whose distance exceed the height of the head.
 func (fv *ForkValidator) clean() {
 	for hash, sb := range fv.sideForksBlock {
-		if math.GetAbsoluteDifference(fv.currentHeight, sb.header.Number.Uint64()) > maxForkDepth {
+		if math.AbsoluteDifference(fv.currentHeight, sb.header.Number.Uint64()) > maxForkDepth {
 			delete(fv.sideForksBlock, hash)
 		}
 	}

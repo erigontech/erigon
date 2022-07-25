@@ -425,12 +425,10 @@ func handleNewPayload(
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
 		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
-		if currentHeadNumber != nil && math.GetAbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			for i := 0; cfg.hd.PosStatus() == headerdownload.Syncing && i < 10; i++ {
-				time.Sleep(10 * time.Millisecond)
-			}
+			time.Sleep(100 * time.Millisecond)
 			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
 			if cfg.hd.PosStatus() == headerdownload.Synced {
 				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
@@ -444,6 +442,8 @@ func handleNewPayload(
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 			}
+		} else {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 	}
 
