@@ -795,7 +795,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := allSnapshots.ReopenList(snList); err != nil {
+	if err := allSnapshots.ReopenList(snList, false); err != nil {
 		return nil, nil, err
 	}
 

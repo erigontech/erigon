@@ -89,15 +89,16 @@ func (sn *HeaderSegment) reopenSeg(dir string) (err error) {
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Headers)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
 func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Headers.String())))
+	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Headers.String())
+	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
@@ -124,15 +125,16 @@ func (sn *BodySegment) reopenSeg(dir string) (err error) {
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Bodies)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
 func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Bodies.String())))
+	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Bodies.String())
+	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
@@ -178,21 +180,22 @@ func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 	fileName := snap.SegmentFileName(sn.ranges.from, sn.ranges.to, snap.Transactions)
 	sn.Seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
 func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())))
+	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())
+	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
-		fmt.Printf("alex23: %s, %s\n", sn.ranges, err)
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions2Block.String())))
+
+	fileName = snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions2Block.String())
+	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
-		fmt.Printf("alex24: %s, %s\n", sn.ranges, err)
-		return err
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
 	return nil
 }
@@ -348,7 +351,7 @@ func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 		if err != nil {
 			return err
 		}
-		return s.ReopenList(snList)
+		return s.ReopenList(snList, true)
 	})
 }
 
@@ -384,7 +387,7 @@ func (s *RoSnapshots) Files() (list []string) {
 	return list
 }
 
-func (s *RoSnapshots) ReopenList(fileNames []string) error {
+func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
 	s.Bodies.lock.Lock()
@@ -410,42 +413,84 @@ Loop:
 			sn := &HeaderSegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					break Loop
+					if optimistic {
+						continue Loop
+					} else {
+						break Loop
+					}
 				}
-				return err
+				if optimistic {
+					log.Warn("[snapshots] open segment", "err", err)
+					continue Loop
+				} else {
+					return err
+				}
 			}
+
+			// it's possible to iterate over .seg file even if you don't have index
+			// then make segment available even if index open may fail
 			s.Headers.segments = append(s.Headers.segments, sn)
 			if err := sn.reopenIdx(s.dir); err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
-					return err
+					if optimistic {
+						log.Warn("[snapshots] open index", "err", err)
+					} else {
+						return err
+					}
 				}
 			}
 		case snap.Bodies:
 			sn := &BodySegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					break
+					if optimistic {
+						continue Loop
+					} else {
+						break Loop
+					}
 				}
-				return err
+				if optimistic {
+					log.Warn("[snapshots] open segment", "err", err)
+					continue Loop
+				} else {
+					return err
+				}
 			}
 			s.Bodies.segments = append(s.Bodies.segments, sn)
 			if err := sn.reopenIdx(s.dir); err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
-					return err
+					if optimistic {
+						log.Warn("[snapshots] open index", "err", err)
+					} else {
+						return err
+					}
 				}
 			}
 		case snap.Transactions:
 			sn := &TxnSegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					break Loop
+					if optimistic {
+						continue Loop
+					} else {
+						break Loop
+					}
 				}
-				return err
+				if optimistic {
+					log.Warn("[snapshots] open segment", "err", err)
+					continue Loop
+				} else {
+					return err
+				}
 			}
 			s.Txs.segments = append(s.Txs.segments, sn)
 			if err := sn.reopenIdx(s.dir); err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
-					return err
+					if optimistic {
+						log.Warn("[snapshots] open index", "err", err)
+					} else {
+						return err
+					}
 				}
 			}
 		}
@@ -487,7 +532,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list)
+	return s.ReopenList(list, false)
 }
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -495,7 +540,7 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
-		return s.ReopenList(snList)
+		return s.ReopenList(snList, true)
 	}); err != nil {
 		return err
 	}
