@@ -436,8 +436,6 @@ func handleNewPayload(
 				if bad {
 					cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 					return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, nil
-				} else if !cfg.forkValidator.IsForkMarkedAsValid(header.ParentHash) {
-					return &engineapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, nil
 				}
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil

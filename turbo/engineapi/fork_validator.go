@@ -288,14 +288,6 @@ func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumul
 	fv.Clear()
 }
 
-// Clear wipes out current extending fork data, this method is called after fcu is called,
-// because fcu decides what the head is and after the call is done all the non-chosed forks are
-// to be considered obsolete.
-func (fv *ForkValidator) IsForkMarkedAsValid(hash common.Hash) bool {
-	_, ok := fv.sideForksBlock[hash]
-	return ok
-}
-
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
