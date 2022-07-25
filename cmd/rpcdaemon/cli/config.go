@@ -102,6 +102,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.EngineTimeouts.ReadTimeout, "engine.timeouts.read", rpccfg.DefaultHTTPTimeouts.ReadTimeout, "Maximum duration for reading the entire request, including the body.")
 	rootCmd.PersistentFlags().DurationVar(&cfg.EngineTimeouts.WriteTimeout, "engine.timeouts.write", rpccfg.DefaultHTTPTimeouts.WriteTimeout, "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.")
 	rootCmd.PersistentFlags().DurationVar(&cfg.EngineTimeouts.IdleTimeout, "engine.timeouts.idle", rpccfg.DefaultHTTPTimeouts.IdleTimeout, "Maximum amount of time to wait for the next request when keep-alives are enabled. If engine.timeouts.idle is zero, the value of engine.timeouts.read is used.")
+	rootCmd.PersistentFlags().StringVar(&cfg.AuthRPCHost, "authrpc.addr", nodecfg.DefaultHTTPHost, "rpc authentication address, for example: localhost")
+	rootCmd.PersistentFlags().IntVar(&cfg.AuthRPCPort, "authrpc.port", nodecfg.DefaultEngineHTTPPort, "rpc authentication port, for example: 8551")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -434,6 +436,15 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
+	err := startAuthenticatedRpcServer(ctx, cfg, rpcAPI)
+	if err != nil {
+		return err
+	}
+
+	return startRegularRpcServer(ctx, cfg, rpcAPI)
+}
+
+func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
 	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
@@ -550,6 +561,97 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 			grpcServer.GracefulStop()
 			_ = grpcListener.Close()
 			log.Info("GRPC endpoint closed", "url", grpcEndpoint)
+		}
+	}()
+	<-ctx.Done()
+	log.Info("Exiting...")
+	return nil
+}
+
+func startAuthenticatedRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
+	var engineListener *http.Server
+	var engineSrv *rpc.Server
+	var engineHttpEndpoint string
+
+	// register apis and create handler stack
+	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+
+	fmt.Printf("TraceRequests = %t\n", cfg.TraceRequests)
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
+
+	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
+	if err != nil {
+		return err
+	}
+	srv.SetAllowList(allowListForRPC)
+
+	var defaultAPIList []rpc.API
+	var engineAPI []rpc.API
+
+	for _, api := range rpcAPI {
+		if api.Namespace != "engine" {
+			defaultAPIList = append(defaultAPIList, api)
+		} else {
+			engineAPI = append(engineAPI, api)
+		}
+	}
+
+	if len(engineAPI) != 0 {
+		// eth API should also be exposed on the same port as engine API
+		for _, api := range rpcAPI {
+			if api.Namespace == "eth" {
+				engineAPI = append(engineAPI, api)
+			}
+		}
+	}
+
+	var apiFlags []string
+	for _, flag := range cfg.API {
+		if flag != "engine" {
+			apiFlags = append(apiFlags, flag)
+		}
+	}
+
+	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false); err != nil {
+		return fmt.Errorf("could not start register RPC apis: %w", err)
+	}
+
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
+
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
+	if err != nil {
+		return fmt.Errorf("could not start RPC api: %w", err)
+	}
+	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+
+	if len(engineAPI) > 0 {
+		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
+		if err != nil {
+			return fmt.Errorf("could not start RPC api for engine: %w", err)
+		}
+	}
+
+	log.Info("HTTP endpoint opened", info...)
+
+	defer func() {
+		srv.Stop()
+		if engineSrv != nil {
+			engineSrv.Stop()
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = listener.Shutdown(shutdownCtx)
+		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+
+		if engineListener != nil {
+			_ = engineListener.Shutdown(shutdownCtx)
+			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
 		}
 	}()
 	<-ctx.Done()

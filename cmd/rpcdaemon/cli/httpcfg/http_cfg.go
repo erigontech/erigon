@@ -47,4 +47,6 @@ type HttpCfg struct {
 	TraceRequests           bool   // Always trace requests in INFO level
 	HTTPTimeouts            rpccfg.HTTPTimeouts
 	EngineTimeouts          rpccfg.HTTPTimeouts
+	AuthRPCHost             string
+	AuthRPCPort             int
 }
