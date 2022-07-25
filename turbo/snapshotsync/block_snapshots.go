@@ -387,6 +387,7 @@ func (s *RoSnapshots) Files() (list []string) {
 	return list
 }
 
+// ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
