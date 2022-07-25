@@ -23,26 +23,24 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
 
 type SendersCfg struct {
-	db                kv.RwDB
-	batchSize         int
-	blockSize         int
-	bufferSize        int
-	numOfGoroutines   int
-	readChLen         int
-	badBlockHalt      bool
-	tmpdir            string
-	prune             prune.Mode
-	chainConfig       *params.ChainConfig
-	blockRetire       *snapshotsync.BlockRetire
-	snapshotHashesCfg *snapcfg.Cfg
-	hd                *headerdownload.HeaderDownload
+	db              kv.RwDB
+	batchSize       int
+	blockSize       int
+	bufferSize      int
+	numOfGoroutines int
+	readChLen       int
+	badBlockHalt    bool
+	tmpdir          string
+	prune           prune.Mode
+	chainConfig     *params.ChainConfig
+	blockRetire     *snapshotsync.BlockRetire
+	hd              *headerdownload.HeaderDownload
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
@@ -50,19 +48,18 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool
 	const sendersBlockSize = 4096
 
 	return SendersCfg{
-		db:                db,
-		batchSize:         sendersBatchSize,
-		blockSize:         sendersBlockSize,
-		bufferSize:        (sendersBlockSize * 10 / 20) * 10000, // 20*4096
-		numOfGoroutines:   secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
-		readChLen:         4,
-		badBlockHalt:      badBlockHalt,
-		tmpdir:            tmpdir,
-		chainConfig:       chainCfg,
-		prune:             prune,
-		blockRetire:       br,
-		snapshotHashesCfg: snapcfg.KnownCfg(chainCfg.ChainName),
-		hd:                hd,
+		db:              db,
+		batchSize:       sendersBatchSize,
+		blockSize:       sendersBlockSize,
+		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
+		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		readChLen:       4,
+		badBlockHalt:    badBlockHalt,
+		tmpdir:          tmpdir,
+		chainConfig:     chainCfg,
+		prune:           prune,
+		blockRetire:     br,
+		hd:              hd,
 	}
 }
 

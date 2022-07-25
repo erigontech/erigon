@@ -1245,7 +1245,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	}
 
 	// send all hashes to the Downloader service
-	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName).Preverified
+	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB).Preverified
 	var downloadRequest []snapshotsync.DownloadRequest
 	// build all download requests
 	// builds preverified snapshots request

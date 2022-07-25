@@ -104,9 +104,27 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
 }
 
-func KnownCfg(networkName string) *Cfg {
-	if c, ok := KnownCfgs[networkName]; ok {
+// KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
+func KnownCfg(networkName string, whiteList []string) *Cfg {
+	c, ok := KnownCfgs[networkName]
+	if !ok {
+		return newCfg(Preverified{})
+	}
+	if len(whiteList) == 0 {
 		return c
 	}
-	return newCfg(Preverified{})
+
+	wlMap := make(map[string]struct{}, len(whiteList))
+	for _, fName := range whiteList {
+		wlMap[fName] = struct{}{}
+	}
+
+	result := make(Preverified, 0, len(c.Preverified))
+	for _, p := range c.Preverified {
+		if _, ok := wlMap[p.Name]; !ok {
+			continue
+		}
+		result = append(result, p)
+	}
+	return newCfg(result)
 }
