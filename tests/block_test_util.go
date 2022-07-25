@@ -115,7 +115,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	if config.TerminalTotalDifficulty != nil {
 		engine = serenity.New(engine) // the Merge
 	}
-	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
+	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine, false)
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {

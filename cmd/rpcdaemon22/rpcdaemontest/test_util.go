@@ -86,7 +86,7 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 			GasLimit: 10000000,
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()

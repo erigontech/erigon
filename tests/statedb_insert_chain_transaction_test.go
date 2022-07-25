@@ -739,7 +739,7 @@ type tx struct {
 
 func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := stages.MockWithGenesis(t, gspec, key)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()

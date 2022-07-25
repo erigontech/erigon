@@ -58,7 +58,7 @@ func TestReimportMirroredState(t *testing.T) {
 		Config: params.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	m := stages.MockWithGenesisEngine(t, genspec, engine)
+	m := stages.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {

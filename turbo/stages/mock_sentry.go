@@ -173,20 +173,20 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
-func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode)
+func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
+	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
+func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
-	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false)
+func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -348,7 +348,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil), true),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil),
+			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -401,7 +402,7 @@ func Mock(t *testing.T) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(t, gspec, key)
+	return MockWithGenesis(t, gspec, key, false)
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
@@ -416,10 +417,10 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true, false)
 }
 
-func MockWithZeroTTD(t *testing.T) *MockSentry {
+func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -431,7 +432,7 @@ func MockWithZeroTTD(t *testing.T) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(t, gspec, key)
+	return MockWithGenesis(t, gspec, key, withPosDownloader)
 }
 
 func (ms *MockSentry) EnableLogs() {

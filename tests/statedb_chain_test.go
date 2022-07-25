@@ -59,7 +59,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 	db := olddb.NewObjectDatabase(m.DB)
 	defer db.Close()
 
