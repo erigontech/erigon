@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -917,6 +918,9 @@ func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 func RemoveContents(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
 	defer d.Close()
