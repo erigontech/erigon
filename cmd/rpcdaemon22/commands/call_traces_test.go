@@ -56,7 +56,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false),
 		m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
@@ -163,7 +163,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	}
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}

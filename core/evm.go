@@ -46,15 +46,12 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 		}
 	}
 
-	difficulty := new(big.Int)
-
+	var prevRandDao *common.Hash
 	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		// TODO: Turn DIFFICULTY into RANDOM when the Merge is done.
-		difficulty.SetBytes(header.MixDigest[:])
-	} else {
-		difficulty.Set(header.Difficulty)
+		prevRandDao = &header.MixDigest
 	}
+
 	if contractHasTEVM == nil {
 		contractHasTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil
@@ -75,10 +72,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 		Coinbase:        beneficiary,
 		BlockNumber:     header.Number.Uint64(),
 		Time:            header.Time,
-		Difficulty:      difficulty,
+		Difficulty:      new(big.Int).Set(header.Difficulty),
 		BaseFee:         &baseFee,
 		GasLimit:        header.GasLimit,
 		ContractHasTEVM: contractHasTEVM,
+		PrevRanDao:      prevRandDao,
 	}
 }
 
