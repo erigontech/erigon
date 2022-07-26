@@ -239,13 +239,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			Accumulator: shards.NewAccumulator(chainConfig),
 		},
 	}
-	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config)
 	if err != nil {
 		return nil, err
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots) // mdbx.NewMDBX(logger).RoTxsLimiter(limiter).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
+
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots)
 	backend.notifications.StateChangesConsumer = kvRPC
+
+	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
@@ -831,7 +833,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
-			return nil, fmt.Errorf("Ethereum backend MultiClient.Peers error: %w", err)
+			return nil, fmt.Errorf("ethereum backend MultiClient.Peers error: %w", err)
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
@@ -881,7 +883,7 @@ func (s *Ethereum) Stop() error {
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
-	s.engine.Close()
+	_ = s.engine.Close()
 	<-s.waitForStageLoopStop
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
