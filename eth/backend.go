@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -33,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/holiman/uint256"
@@ -780,7 +780,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 	}
 
 	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
-	sort.Sort(nodesInfo)
+	slices.SortFunc(nodesInfo.NodesInfo, remote.NodeInfoReplyLess)
 
 	return nodesInfo, nil
 }
