@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -320,17 +321,7 @@ func (s *StateChangePubSub) Pub(reply *remote.StateChangeBatch) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, ch := range s.chans {
-		select {
-		case ch <- reply:
-		default: //if channel is full (slow consumer), drop old messages
-			for i := 0; i < cap(ch)/2; i++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
-			ch <- reply
-		}
+		common.PrioritizedSend(ch, reply)
 	}
 }
 

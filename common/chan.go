@@ -44,3 +44,18 @@ func SafeClose(ch chan struct{}) {
 		close(ch)
 	}
 }
+
+// PrioritizedSend message to channel, but if channel is full (slow consumer) - drop half of old messages (not new)
+func PrioritizedSend[t any](ch chan t, msg t) {
+	select {
+	case ch <- msg:
+	default: //if channel is full (slow consumer), drop old messages (not new)
+		for i := 0; i < cap(ch)/2; i++ {
+			select {
+			case <-ch:
+			default:
+			}
+		}
+		ch <- msg
+	}
+}
