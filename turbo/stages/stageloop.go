@@ -219,9 +219,6 @@ func StageLoopStep(
 				}
 			}
 		}
-		if notifications.Events != nil {
-			notifications.Events.OnNewSnapshot()
-		}
 	}
 
 	return headBlockHash, nil
