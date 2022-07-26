@@ -66,13 +66,13 @@ func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
 	return m.tx.ReadSequence(bucket)
 }
 
-func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
-	m.len += uint64(len(key) + len(value))
-	c, err := m.cursor(bucket)
+func (m *TxDb) Put(table string, k, v []byte) error {
+	m.len += uint64(len(k) + len(v))
+	c, err := m.cursor(table)
 	if err != nil {
 		return err
 	}
-	return c.(kv.RwCursor).Put(key, value)
+	return c.(kv.RwCursor).Put(k, v)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
@@ -93,9 +93,9 @@ func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	return c.(kv.RwCursorDupSort).AppendDup(key, value)
 }
 
-func (m *TxDb) Delete(bucket string, k []byte) error {
+func (m *TxDb) Delete(table string, k []byte) error {
 	m.len += uint64(len(k))
-	c, err := m.cursor(bucket)
+	c, err := m.cursor(table)
 	if err != nil {
 		return err
 	}

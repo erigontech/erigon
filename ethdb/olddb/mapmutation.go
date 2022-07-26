@@ -161,23 +161,23 @@ func (m *mapmutation) Has(table string, key []byte) (bool, error) {
 }
 
 // puts a table key with a value and if the table is not found then it appends a table
-func (m *mapmutation) Put(table string, key []byte, value []byte) error {
+func (m *mapmutation) Put(table string, k, v []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.puts[table]; !ok {
 		m.puts[table] = make(map[string][]byte)
 	}
 
-	stringKey := *(*string)(unsafe.Pointer(&key))
+	stringKey := *(*string)(unsafe.Pointer(&k))
 
 	var ok bool
 	if _, ok = m.puts[table][stringKey]; !ok {
-		m.size += len(value) - len(m.puts[table][stringKey])
-		m.puts[table][stringKey] = value
+		m.size += len(v) - len(m.puts[table][stringKey])
+		m.puts[table][stringKey] = v
 		return nil
 	}
-	m.puts[table][stringKey] = value
-	m.size += len(key) + len(value)
+	m.puts[table][stringKey] = v
+	m.size += len(k) + len(v)
 	m.count++
 	return nil
 }
@@ -211,10 +211,7 @@ func (m *mapmutation) ForAmount(bucket string, prefix []byte, amount uint32, wal
 	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *mapmutation) Delete(bucket string, k []byte) error {
-	if v != nil {
-		return m.db.Delete(table, k) // TODO: mutation to support DupSort deletes
-	}
+func (m *mapmutation) Delete(table string, k []byte) error {
 	return m.Put(table, k, nil)
 }
 
