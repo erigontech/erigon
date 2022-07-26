@@ -161,10 +161,10 @@ func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k,
 }
 
 // Delete deletes the key from the queue and database
-func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
+func (db *ObjectDatabase) Delete(bucket string, k []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Delete(bucket, k, v)
+		return tx.Delete(bucket, k)
 	})
 	return err
 }

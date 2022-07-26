@@ -99,7 +99,7 @@ func TruncateRange(db kv.RwTx, bucket string, key []byte, to uint32) error {
 		if !bytes.HasPrefix(k, key) {
 			return false, nil
 		}
-		if err := db.Delete(bucket, k, nil); err != nil {
+		if err := db.Delete(bucket, k); err != nil {
 			return false, err
 		}
 		return true, nil

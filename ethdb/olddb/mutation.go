@@ -226,9 +226,9 @@ func (m *mutation) ForAmount(bucket string, prefix []byte, amount uint32, walker
 	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *mutation) Delete(table string, k, v []byte) error {
+func (m *mutation) Delete(bucket string, k []byte) error {
 	if v != nil {
-		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes
+		return m.db.Delete(table, k) // TODO: mutation to support DupSort deletes
 	}
 	//m.puts.Delete(table, k)
 	return m.Put(table, k, nil)

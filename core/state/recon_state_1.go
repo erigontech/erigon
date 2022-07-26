@@ -135,7 +135,7 @@ func (rs *ReconState1) Flush(rwTx kv.RwTx) error {
 		var err error
 		t.Ascend(func(item ReconStateItem1) bool {
 			if len(item.val) == 0 {
-				if err = rwTx.Delete(table, item.key, nil); err != nil {
+				if err = rwTx.Delete(table, item.key); err != nil {
 					return false
 				}
 				//fmt.Printf("Flush [%x]=>\n", ks)

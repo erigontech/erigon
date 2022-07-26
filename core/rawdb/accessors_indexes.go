@@ -60,7 +60,7 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Deleter, hash common.Hash) error {
-	return db.Delete(kv.TxLookup, hash.Bytes(), nil)
+	return db.Delete(kv.TxLookup, hash.Bytes())
 }
 
 // ReadTransactionByHash retrieves a specific transaction from the database, along with

@@ -93,7 +93,7 @@ func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	return c.(kv.RwCursorDupSort).AppendDup(key, value)
 }
 
-func (m *TxDb) Delete(bucket string, k, v []byte) error {
+func (m *TxDb) Delete(bucket string, k []byte) error {
 	m.len += uint64(len(k))
 	c, err := m.cursor(bucket)
 	if err != nil {
