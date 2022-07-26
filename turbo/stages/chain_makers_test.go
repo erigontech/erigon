@@ -54,7 +54,7 @@ func TestGenerateChain(t *testing.T) {
 		Config: &params.ChainConfig{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := stages.MockWithGenesis(t, gspec, key1)
+	m := stages.MockWithGenesis(t, gspec, key1, false)
 	db := olddb.NewObjectDatabase(m.DB)
 
 	// This call generates a chain of 5 blocks. The function runs for

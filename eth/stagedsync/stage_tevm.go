@@ -334,7 +334,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg Transpi
 			continue
 		}
 
-		err = tx.Delete(kv.ContractTEVMCode, codeHashBytes, nil)
+		err = tx.Delete(kv.ContractTEVMCode, codeHashBytes)
 		if err != nil {
 			return fmt.Errorf("can't delete TEVM code by hash %q: %w", codeHash, err)
 		}

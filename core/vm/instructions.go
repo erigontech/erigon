@@ -498,9 +498,16 @@ func opNumber(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v, overflow := uint256.FromBig(interpreter.evm.Context().Difficulty)
-	if overflow {
-		return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+	var v *uint256.Int
+	if interpreter.evm.Context().PrevRanDao != nil {
+		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
+		v = new(uint256.Int).SetBytes(interpreter.evm.Context().PrevRanDao.Bytes())
+	} else {
+		var overflow bool
+		v, overflow = uint256.FromBig(interpreter.evm.Context().Difficulty)
+		if overflow {
+			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+		}
 	}
 	scope.Stack.Push(v)
 	return nil, nil

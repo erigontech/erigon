@@ -70,7 +70,7 @@ func ResetBlocks(tx kv.RwTx) error {
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k, nil) }); err != nil {
+	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.NonCanonicalTxs); err != nil {

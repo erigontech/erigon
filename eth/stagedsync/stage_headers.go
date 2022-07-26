@@ -139,7 +139,7 @@ func SpawnStageHeaders(
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -153,12 +153,13 @@ func HeadersPOS(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	useExternalTx bool,
 ) error {
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
 
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -173,6 +174,11 @@ func HeadersPOS(
 		return nil
 	}
 
+	if requestWithStatus == nil {
+		log.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", s.LogPrefix()))
+		return nil
+	}
+
 	request := requestWithStatus.Message
 	requestStatus := requestWithStatus.Status
 
@@ -183,10 +189,10 @@ func HeadersPOS(
 
 	var payloadStatus *engineapi.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter)
 	} else {
 		payloadMessage := request.(*types.Block)
-		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, test, headerInserter)
 	}
 
 	if err != nil {
@@ -257,6 +263,7 @@ func startHandlingForkChoice(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	if cfg.memoryOverlay {
@@ -296,8 +303,12 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
-		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+		} else {
+			cfg.hd.SetPoSDownloaderTip(headerHash)
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -407,6 +418,7 @@ func handleNewPayload(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	header := block.Header()
@@ -422,6 +434,10 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
 		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)

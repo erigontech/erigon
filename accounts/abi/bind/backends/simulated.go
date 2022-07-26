@@ -91,7 +91,7 @@ type SimulatedBackend struct {
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
-	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
+	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -137,7 +137,6 @@ func (b *SimulatedBackend) Commit() {
 	if err := b.m.InsertChain(&core.ChainPack{
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
-		Length:   1,
 		TopBlock: b.pendingBlock,
 	}); err != nil {
 		panic(err)
