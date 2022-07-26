@@ -561,8 +561,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			borDb = casted.DB
 		}
 		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+		authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, httpRpcCfg)
 		go func() {
-			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
 				log.Error(err.Error())
 				return
 			}

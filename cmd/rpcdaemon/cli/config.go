@@ -433,8 +433,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
-	err := startAuthenticatedRpcServer(ctx, cfg, rpcAPI)
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {
+	err := startAuthenticatedRpcServer(ctx, cfg, authAPI)
 	if err != nil {
 		return err
 	}

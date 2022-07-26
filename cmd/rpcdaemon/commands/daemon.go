@@ -132,3 +132,27 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 
 	return list
 }
+
+func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
+	cfg httpcfg.HttpCfg) (list []rpc.API) {
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
+
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
+	engineImpl := NewEngineAPI(base, db, eth)
+
+	list = append(list, rpc.API{
+		Namespace: "eth",
+		Public:    true,
+		Service:   EthAPI(ethImpl),
+		Version:   "1.0",
+	})
+
+	list = append(list, rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   EngineAPI(engineImpl),
+		Version:   "1.0",
+	})
+	return list
+}
