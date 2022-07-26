@@ -531,16 +531,18 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	if status == nil {
-		if s.stageLoopIsBusy() {
-			log.Debug("[ForkChoiceUpdated] stage loop is busy")
-			return &remote.EngineForkChoiceUpdatedReply{
-				PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
-			}, nil
-		}
-		s.lock.Lock()
-		defer s.lock.Unlock()
 
+	if status == nil && s.stageLoopIsBusy() {
+		log.Debug("[ForkChoiceUpdated] stage loop is busy")
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
+		}, nil
+	}
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if status == nil {
 		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
@@ -551,9 +553,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
-	} else {
-		s.lock.Lock()
-		defer s.lock.Unlock()
 	}
 
 	// No need for payload building
