@@ -468,12 +468,17 @@ func (ii *InvertedIndex) prune(txFrom, txTo uint64) error {
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	var k, v []byte
+	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
 	for k, v, err = keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
 		}
-		if err = ii.tx.Delete(ii.indexTable, v, k); err != nil {
+		if err = idxC.DeleteExact(v, k); err != nil {
 			return err
 		}
 		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v

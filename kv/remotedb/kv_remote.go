@@ -303,7 +303,7 @@ func (tx *remoteTx) Cursor(bucket string) (kv.Cursor, error) {
 func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
 func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
 func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
-func (c *remoteCursor) Delete(k, v []byte) error                      { panic("not supported") }
+func (c *remoteCursor) Delete(k []byte) error                         { panic("not supported") }
 func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
 func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
 

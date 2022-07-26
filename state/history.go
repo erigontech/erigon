@@ -464,15 +464,25 @@ func (h *History) prune(step uint64, txFrom, txTo uint64) error {
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	var k, v []byte
+	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	valsC, err := h.tx.RwCursor(h.valsTable)
+	if err != nil {
+		return err
+	}
+	defer valsC.Close()
 	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
 		}
-		if err = h.tx.Delete(h.valsTable, v[len(v)-8:], nil); err != nil {
+		if err = valsC.Delete(v[len(v)-8:]); err != nil {
 			return err
 		}
-		if err = h.tx.Delete(h.indexTable, v[:len(v)-8], k); err != nil {
+		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
 			return err
 		}
 		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v

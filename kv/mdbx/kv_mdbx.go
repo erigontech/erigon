@@ -922,20 +922,20 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 	return c.(kv.RwCursor), nil
 }
 
-func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
-	c, err := tx.statelessCursor(bucket)
+func (tx *MdbxTx) Put(table string, k, v []byte) error {
+	c, err := tx.statelessCursor(table)
 	if err != nil {
 		return err
 	}
 	return c.Put(k, v)
 }
 
-func (tx *MdbxTx) Delete(bucket string, k, v []byte) error {
-	c, err := tx.statelessCursor(bucket)
+func (tx *MdbxTx) Delete(table string, k []byte) error {
+	c, err := tx.statelessCursor(table)
 	if err != nil {
 		return err
 	}
-	return c.Delete(k, v)
+	return c.Delete(k)
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
@@ -1304,13 +1304,13 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (c *MdbxCursor) Delete(k, v []byte) error {
+func (c *MdbxCursor) Delete(k []byte) error {
 	if c.bucketCfg.AutoDupSortKeysConversion {
 		return c.deleteDupSort(k)
 	}
 
 	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		_, err := c.getBoth(k, v)
+		_, err := c.getBoth(k, nil)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil

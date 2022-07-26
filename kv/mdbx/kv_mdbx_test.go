@@ -165,10 +165,13 @@ func TestHasDelete(t *testing.T) {
 	require.NoError(t, tx.Put(table, []byte("key4"), []byte("value4.1")))
 	require.NoError(t, tx.Put(table, []byte("key5"), []byte("value5.1")))
 
-	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.3")))
-	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1"))) //valid but already deleted
-	require.NoError(t, tx.Delete(table, []byte("key2"), []byte("value1.1"))) //valid key but wrong value
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) //valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
 	require.Nil(t, err)
@@ -448,10 +451,13 @@ func TestNextDups(t *testing.T) {
 
 	table := "Table"
 
-	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.1")))
-	require.NoError(t, tx.Delete(table, []byte("key1"), []byte("value1.3")))
-	require.NoError(t, tx.Delete(table, []byte("key3"), []byte("value3.1"))) //valid but already deleted
-	require.NoError(t, tx.Delete(table, []byte("key3"), []byte("value3.3"))) //valid key but wrong value
+	c, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) //valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) //valid key but wrong value
 
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.1")))
 	require.NoError(t, c.Put([]byte("key2"), []byte("value1.2")))

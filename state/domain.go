@@ -377,7 +377,7 @@ func (d *Domain) Delete(key []byte) error {
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-	if err = d.tx.Delete(d.valsTable, keySuffix, nil); err != nil {
+	if err = d.tx.Delete(d.valsTable, keySuffix); err != nil {
 		return err
 	}
 	return nil
@@ -983,15 +983,25 @@ func (d *Domain) prune(step uint64, txFrom, txTo uint64) error {
 	defer historyKeysCursor.Close()
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	idxC, err := d.tx.RwCursorDupSort(d.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	valsHistC, err := d.tx.RwCursor(d.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer valsHistC.Close()
 	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
 		}
-		if err = d.tx.Delete(d.historyValsTable, v[len(v)-8:], nil); err != nil {
+		if err = valsHistC.Delete(v[len(v)-8:]); err != nil {
 			return err
 		}
-		if err = d.tx.Delete(d.indexTable, v[:len(v)-8], k); err != nil {
+		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
 			return err
 		}
 		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v

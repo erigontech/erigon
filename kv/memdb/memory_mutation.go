@@ -180,8 +180,8 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 }
 
 // Put insert a new entry in the database, if it is hashed storage it will add it to a slice instead of a map.
-func (m *MemoryMutation) Put(table string, key []byte, value []byte) error {
-	return m.memTx.Put(table, key, value)
+func (m *MemoryMutation) Put(table string, k, v []byte) error {
+	return m.memTx.Put(table, k, v)
 }
 
 func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
@@ -206,12 +206,12 @@ func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, 
 	return m.db.ForPrefix(bucket, prefix, walker)
 }
 
-func (m *MemoryMutation) Delete(table string, k, v []byte) error {
+func (m *MemoryMutation) Delete(table string, k []byte) error {
 	if _, ok := m.deletedEntries[table]; !ok {
 		m.deletedEntries[table] = make(map[string]struct{})
 	}
 	m.deletedEntries[table][string(k)] = struct{}{}
-	return m.memTx.Delete(table, k, v)
+	return m.memTx.Delete(table, k)
 }
 
 func (m *MemoryMutation) Commit() error {
@@ -276,7 +276,7 @@ func (m *MemoryMutation) Flush(tx kv.RwTx) error {
 	// Obliterate entries who are to be deleted
 	for bucket, keys := range m.deletedEntries {
 		for key := range keys {
-			if err := tx.Delete(bucket, []byte(key), nil); err != nil {
+			if err := tx.Delete(bucket, []byte(key)); err != nil {
 				return err
 			}
 		}

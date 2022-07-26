@@ -231,7 +231,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 			return nil // nothing to delete after end of bucket
 		}
 		if len(v) == 0 {
-			if err := c.Delete(k, nil); err != nil {
+			if err := c.Delete(k); err != nil {
 				return err
 			}
 			return nil

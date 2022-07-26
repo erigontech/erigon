@@ -649,7 +649,7 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx
 			return false
 		}
 		if prevNum == item.count {
-			if e = tx.Delete(table, dbPrefix, nil); e != nil {
+			if e = tx.Delete(table, dbPrefix); e != nil {
 				return false
 			}
 		} else {

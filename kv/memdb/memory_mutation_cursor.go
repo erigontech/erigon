@@ -294,12 +294,15 @@ func (m *memoryMutationCursor) PutNoDupData(key, value []byte) error {
 	panic("DeleteCurrentDuplicates Not implemented")
 }
 
-func (m *memoryMutationCursor) Delete(k, v []byte) error {
-	return m.mutation.Delete(m.table, k, v)
+func (m *memoryMutationCursor) Delete(k []byte) error {
+	return m.mutation.Delete(m.table, k)
 }
 
 func (m *memoryMutationCursor) DeleteCurrent() error {
 	panic("DeleteCurrent Not implemented")
+}
+func (m *memoryMutationCursor) DeleteExact(k1, k2 []byte) error {
+	panic("DeleteExact Not implemented")
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
@@ -311,7 +314,7 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 		if err != nil {
 			return err
 		}
-		if err := m.Delete(k, v); err != nil {
+		if err := m.Delete(k); err != nil {
 			return err
 		}
 	}

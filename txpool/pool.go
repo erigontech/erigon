@@ -1477,7 +1477,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 			return err
 		}
 		if has {
-			if err := tx.Delete(kv.PoolTransaction, idHash, nil); err != nil {
+			if err := tx.Delete(kv.PoolTransaction, idHash); err != nil {
 				return err
 			}
 		}

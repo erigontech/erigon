@@ -131,13 +131,13 @@ type Getter interface {
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
-	Put(bucket string, key, value []byte) error
+	Put(table string, k, v []byte) error
 }
 
 // Deleter wraps the database delete operations.
 type Deleter interface {
 	// Delete removes a single entry.
-	Delete(bucket string, k, v []byte) error
+	Delete(table string, k []byte) error
 }
 
 type Closer interface {
@@ -306,7 +306,7 @@ type RwCursor interface {
 
 	Put(k, v []byte) error           // Put - based on order
 	Append(k []byte, v []byte) error // Append - append the given key/data pair to the end of the database. This option allows fast bulk loading when keys are already known to be in the correct order.
-	Delete(k, v []byte) error        // Delete - short version of SeekExact+DeleteCurrent or SeekBothExact+DeleteCurrent
+	Delete(k []byte) error           // Delete - short version of SeekExact+DeleteCurrent or SeekBothExact+DeleteCurrent
 
 	// DeleteCurrent This function deletes the key/data pair to which the cursor refers.
 	// This does not invalidate the cursor, so operations such as MDB_NEXT
@@ -337,6 +337,7 @@ type RwCursorDupSort interface {
 
 	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all of the data items for the current key
+	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 

@@ -117,8 +117,8 @@ func TestDeleteMining(t *testing.T) {
 	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
 	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
 
-	batch.Delete(kv.HashedAccounts, []byte("BAAA"), nil)
-	batch.Delete(kv.HashedAccounts, []byte("CBAA"), nil)
+	batch.Delete(kv.HashedAccounts, []byte("BAAA"))
+	batch.Delete(kv.HashedAccounts, []byte("CBAA"))
 
 	cursor, err := batch.Cursor(kv.HashedAccounts)
 	require.NoError(t, err)
