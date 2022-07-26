@@ -48,11 +48,16 @@ type KvServer struct {
 
 	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
+	snapsthots         Snapsthots
 	ctx                context.Context
 }
 
-func NewKvServer(ctx context.Context, kv kv.RoDB) *KvServer {
-	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx}
+type Snapsthots interface {
+	Files() []string
+}
+
+func NewKvServer(ctx context.Context, kv kv.RoDB, snapshots Snapsthots) *KvServer {
+	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx, snapsthots: snapshots}
 }
 
 // Version returns the service-side interface version number
@@ -279,6 +284,13 @@ func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV
 
 func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch) {
 	s.stateChangeStreams.Pub(sc)
+}
+
+func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
+	if s.snapsthots == nil {
+		return &remote.SnapshotsReply{Files: []string{}}, nil
+	}
+	return &remote.SnapshotsReply{Files: s.snapsthots.Files()}, nil
 }
 
 type StateChangePubSub struct {
