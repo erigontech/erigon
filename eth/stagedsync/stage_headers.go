@@ -453,7 +453,7 @@ func handleNewPayload(
 				}
 			}
 			if success {
-				// If we downloaded the headers in time, then save them
+				// If we downloaded the headers in time, then save them and proceed with the new header
 				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
