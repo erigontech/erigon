@@ -345,27 +345,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 	}
 
-	onNewSnapshot := func() {}
-	if cfg.WithDatadir {
-		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			allSnapshots.OptimisticReopenWithDB(db)
-
-			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-			// don't reopen it right here, because snapshots may be not ready yet
-			onNewSnapshot = func() {
-				if err := allSnapshots.ReopenWithDB(db); err != nil {
-					log.Error("[Snapshots] reopen", "err", err)
-				} else {
-					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-				}
-			}
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-		} else {
-			log.Info("Use --snapshots=false")
-		}
-	}
-
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("open tls cert: %w", err)
@@ -382,6 +361,31 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
+
+	onNewSnapshot := func() {}
+	if cfg.WithDatadir {
+		if cfg.Snap.Enabled {
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			onNewSnapshot = func() {
+				go func() { // don't block events processing by network communication
+					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+					if err != nil {
+						log.Warn("[Snapshots] reopen", "err", err)
+						return
+					}
+					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+						log.Error("[Snapshots] reopen", "err", err)
+					} else {
+						log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+					}
+				}()
+			}
+			onNewSnapshot()
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		} else {
+			log.Info("Use --snapshots=false")
+		}
+	}
 
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))

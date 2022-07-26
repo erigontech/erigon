@@ -381,7 +381,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			onNewSnapshot()
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
-			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
 			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 				for _, b := range bs {
