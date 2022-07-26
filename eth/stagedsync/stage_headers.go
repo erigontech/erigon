@@ -209,7 +209,11 @@ func HeadersPOS(
 	}
 
 	if requestStatus == engineapi.New {
-		cfg.hd.PayloadStatusCh <- *payloadStatus
+		if payloadStatus != nil && payloadStatus.Status == remote.EngineStatus_SYNCING {
+			cfg.hd.PayloadStatusCh <- *payloadStatus
+			return nil
+		}
+		cfg.hd.SetPendingPayloadStatus(payloadStatus)
 	}
 
 	return nil
