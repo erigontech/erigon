@@ -220,7 +220,7 @@ func StageLoopStep(
 			}
 		}
 		if notifications.Events != nil {
-			notifications.Events.SendOnNewSnapshot()
+			notifications.Events.OnNewSnapshot()
 		}
 	}
 
