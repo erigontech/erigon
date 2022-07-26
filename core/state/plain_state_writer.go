@@ -82,7 +82,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 	if w.accumulator != nil {
 		w.accumulator.DeleteAccount(address)
 	}
-	if err := w.db.Delete(kv.PlainState, address[:], nil); err != nil {
+	if err := w.db.Delete(kv.PlainState, address[:]); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
@@ -112,7 +112,7 @@ func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnati
 		w.accumulator.ChangeStorage(address, incarnation, *key, v)
 	}
 	if len(v) == 0 {
-		return w.db.Delete(kv.PlainState, compositeKey, nil)
+		return w.db.Delete(kv.PlainState, compositeKey)
 	}
 	return w.db.Put(kv.PlainState, compositeKey, v)
 }

@@ -113,7 +113,7 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	key := borReceiptKey(number)
 
-	if err := tx.Delete(kv.BorReceipts, key, nil); err != nil {
+	if err := tx.Delete(kv.BorReceipts, key); err != nil {
 		log.Crit("Failed to delete bor receipt", "err", err)
 	}
 }
@@ -211,7 +211,7 @@ func computeBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transact
 // TruncateBorReceipts removes all bor receipt for given block number or newer
 func TruncateBorReceipts(db kv.RwTx, number uint64) error {
 	if err := db.ForEach(kv.BorReceipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
-		return db.Delete(kv.BorReceipts, k, nil)
+		return db.Delete(kv.BorReceipts, k)
 	}); err != nil {
 		return err
 	}
