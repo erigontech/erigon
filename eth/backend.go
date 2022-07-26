@@ -191,11 +191,37 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		params.ApplyBinanceSmartChainParams()
 	}
 
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
+			return err
+		}
+
+		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
+		if err != nil {
+			return err
+		}
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
+			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
+		}
+		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
 	ctx, ctxCancel := context.WithCancel(context.Background())
+	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	//limiter := make(chan struct{}, kv.ReadersLimit)
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv) // mdbx.NewMDBX(logger).RoTxsLimiter(limiter).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
 	backend := &Ethereum{
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
@@ -209,12 +235,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
 		notifications: &stagedsync.Notifications{
-			Events:               privateapi.NewEvents(),
-			Accumulator:          shards.NewAccumulator(chainConfig),
-			StateChangesConsumer: kvRPC,
+			Events:      privateapi.NewEvents(),
+			Accumulator: shards.NewAccumulator(chainConfig),
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config)
+	if err != nil {
+		return nil, err
+	}
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots) // mdbx.NewMDBX(logger).RoTxsLimiter(limiter).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
+	backend.notifications.StateChangesConsumer = kvRPC
 
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
@@ -284,38 +315,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
-
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
-			return err
-		}
-
-		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
-		if err != nil {
-			return err
-		}
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-		}
-		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
-
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config)
-	if err != nil {
-		return nil, err
-	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
@@ -547,7 +546,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	httpRpcCfg := stack.Config().Http
 	if httpRpcCfg.Enabled {
 		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-			ctx, chainKv, httpRpcCfg.StateCache, blockReader,
+			ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots,
 			ethBackendRPC,
 			backend.txPool2GrpcServer,
 			miningRPC,
