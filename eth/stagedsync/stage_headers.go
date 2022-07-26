@@ -444,9 +444,16 @@ func handleNewPayload(
 		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			time.Sleep(100 * time.Millisecond)
-			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
-			if cfg.hd.PosStatus() == headerdownload.Synced {
+			success := false
+			for i := 0; i < 10; i++ {
+				time.Sleep(10 * time.Millisecond)
+				if cfg.hd.PosStatus() == headerdownload.Synced {
+					success = true
+					break
+				}
+			}
+			if success {
+				// If we downloaded the headers in time, then save them
 				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
