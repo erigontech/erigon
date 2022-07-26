@@ -778,7 +778,6 @@ func EnforceSnapshotsInvariant(db kv.RwDB, dir string, notifier DBEventNotifier)
 	}
 	if notifier != nil {
 		notifier.OnNewSnapshot()
-		notifier.SendOnNewSnapshot()
 	}
 	return snList, nil
 }
@@ -958,7 +957,6 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 type DBEventNotifier interface {
 	OnNewSnapshot()
-	SendOnNewSnapshot()
 }
 
 func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {

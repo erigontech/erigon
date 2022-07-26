@@ -343,39 +343,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 	}
 
-	onNewSnapshot := func() {}
-	if cfg.WithDatadir {
-		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			allSnapshots.OptimisticReopenWithDB(db)
-			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
-			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
-						txNums[blockNum] = baseTxNum + txAmount
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
-			// don't reopen it right here, because snapshots may be not ready yet
-			onNewSnapshot = func() {
-				if err := allSnapshots.ReopenWithDB(db); err != nil {
-					log.Error("[Snapshots] reopen", "err", err)
-				} else {
-					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-				}
-			}
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-		} else {
-			log.Info("Use --snapshots=false")
-		}
-	}
-
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("open tls cert: %w", err)
@@ -392,6 +359,46 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
+
+	onNewSnapshot := func() {}
+	if cfg.WithDatadir {
+		if cfg.Snap.Enabled {
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			onNewSnapshot = func() {
+				go func() { // don't block events processing by network communication
+					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+					if err != nil {
+						log.Warn("[Snapshots] reopen", "err", err)
+						return
+					}
+					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+						log.Error("[Snapshots] reopen", "err", err)
+					} else {
+						log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+					}
+				}()
+			}
+			onNewSnapshot()
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
+			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+				for _, b := range bs {
+					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+						txNums[blockNum] = baseTxNum + txAmount
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+		} else {
+			log.Info("Use --snapshots=false")
+		}
+	}
 
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
