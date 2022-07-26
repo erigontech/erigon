@@ -458,6 +458,9 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 		return nil, err
 	}
 
+	// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
+	// because otherwise (when FCU points to the head) we want go to stage headers
+	// so that it calls writeForkChoiceHashes.
 	if blockHash != headHash && canonicalHash == blockHash {
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 	}
