@@ -546,8 +546,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
-		statusRef := <-s.hd.PayloadStatusCh
-		status = &statusRef
+		statusDeref := <-s.hd.PayloadStatusCh
+		status = &statusDeref
 		log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
