@@ -1065,7 +1065,7 @@ func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
 
 func removeMigration(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.Delete(kv.Migrations, []byte(migration), nil)
+		return tx.Delete(kv.Migrations, []byte(migration))
 	})
 }
 

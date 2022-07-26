@@ -819,7 +819,7 @@ func trimTxs(chaindata string) error {
 			txId := iter.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
-			if err = txs.Delete(key[:], nil); err != nil {
+			if err = txs.Delete(key[:]); err != nil {
 				return err
 			}
 			deleted++

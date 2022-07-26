@@ -61,8 +61,8 @@ type Database interface {
 // MinDatabase is a minimalistic version of the Database interface.
 type MinDatabase interface {
 	Get(bucket string, key []byte) ([]byte, error)
-	Put(bucket string, key, value []byte) error
-	Delete(bucket string, k, v []byte) error
+	Put(table string, k, v []byte) error
+	Delete(table string, k []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,

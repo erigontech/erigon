@@ -84,7 +84,7 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 	if err != nil {
 		return err
 	}
-	if err := dsw.db.Delete(kv.HashedAccounts, addrHash[:], nil); err != nil {
+	if err := dsw.db.Delete(kv.HashedAccounts, addrHash[:]); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
@@ -136,7 +136,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	v := value.Bytes()
 	if len(v) == 0 {
-		return dsw.db.Delete(kv.HashedStorage, compositeKey, nil)
+		return dsw.db.Delete(kv.HashedStorage, compositeKey)
 	}
 	return dsw.db.Put(kv.HashedStorage, compositeKey, v)
 }
