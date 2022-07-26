@@ -272,7 +272,7 @@ func (m *mutation) doCommit(tx kv.RwTx) error {
 				}
 			}
 		} else if len(mi.value) == 0 {
-			if err := c.Delete(mi.key, nil); err != nil {
+			if err := c.Delete(mi.key); err != nil {
 				innerErr = err
 				return false
 			}

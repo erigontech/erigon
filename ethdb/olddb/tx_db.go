@@ -99,7 +99,7 @@ func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(kv.RwCursor).Delete(k, v)
+	return c.(kv.RwCursor).Delete(k)
 }
 
 func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {
