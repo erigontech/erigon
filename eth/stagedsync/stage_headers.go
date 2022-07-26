@@ -432,11 +432,6 @@ func handleNewPayload(
 			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
 			if cfg.hd.PosStatus() == headerdownload.Synced {
 				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
-				bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
-				if bad {
-					cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
-					return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, nil
-				}
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 			}
@@ -473,6 +468,12 @@ func verifyAndSaveNewPoSHeader(
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
+
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	if bad {
+		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, false, nil
+	}
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
