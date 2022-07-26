@@ -34,7 +34,7 @@ type KVClient interface {
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
-	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error)
+	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
 }
 
 type kVClient struct {
@@ -117,36 +117,13 @@ func (x *kVStateChangesClient) Recv() (*StateChangeBatch, error) {
 	return m, nil
 }
 
-func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/Snapshots", opts...)
+func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
+	out := new(SnapshotsReply)
+	err := c.cc.Invoke(ctx, "/remote.KV/Snapshots", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &kVSnapshotsClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type KV_SnapshotsClient interface {
-	Recv() (*SnapshotsReply, error)
-	grpc.ClientStream
-}
-
-type kVSnapshotsClient struct {
-	grpc.ClientStream
-}
-
-func (x *kVSnapshotsClient) Recv() (*SnapshotsReply, error) {
-	m := new(SnapshotsReply)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return out, nil
 }
 
 // KVServer is the server API for KV service.
@@ -163,7 +140,7 @@ type KVServer interface {
 	Tx(KV_TxServer) error
 	StateChanges(*StateChangeRequest, KV_StateChangesServer) error
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
-	Snapshots(*SnapshotsRequest, KV_SnapshotsServer) error
+	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -180,8 +157,8 @@ func (UnimplementedKVServer) Tx(KV_TxServer) error {
 func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesServer) error {
 	return status.Errorf(codes.Unimplemented, "method StateChanges not implemented")
 }
-func (UnimplementedKVServer) Snapshots(*SnapshotsRequest, KV_SnapshotsServer) error {
-	return status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
+func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -261,25 +238,22 @@ func (x *kVStateChangesServer) Send(m *StateChangeBatch) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _KV_Snapshots_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SnapshotsRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
+func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SnapshotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
 	}
-	return srv.(KVServer).Snapshots(m, &kVSnapshotsServer{stream})
-}
-
-type KV_SnapshotsServer interface {
-	Send(*SnapshotsReply) error
-	grpc.ServerStream
-}
-
-type kVSnapshotsServer struct {
-	grpc.ServerStream
-}
-
-func (x *kVSnapshotsServer) Send(m *SnapshotsReply) error {
-	return x.ServerStream.SendMsg(m)
+	if interceptor == nil {
+		return srv.(KVServer).Snapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.KV/Snapshots",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Snapshots(ctx, req.(*SnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
@@ -293,6 +267,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Version",
 			Handler:    _KV_Version_Handler,
 		},
+		{
+			MethodName: "Snapshots",
+			Handler:    _KV_Snapshots_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -304,11 +282,6 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StateChanges",
 			Handler:       _KV_StateChanges_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "Snapshots",
-			Handler:       _KV_Snapshots_Handler,
 			ServerStreams: true,
 		},
 	},

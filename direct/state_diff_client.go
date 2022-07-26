@@ -26,6 +26,7 @@ import (
 
 type StateDiffClient interface {
 	StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error)
+	Snapshots(ctx context.Context, in *remote.SnapshotsRequest, opts ...grpc.CallOption) (*remote.SnapshotsReply, error)
 }
 
 var _ StateDiffClient = (*StateDiffClientDirect)(nil) // compile-time interface check
@@ -38,6 +39,10 @@ type StateDiffClientDirect struct {
 
 func NewStateDiffClientDirect(server remote.KVServer) *StateDiffClientDirect {
 	return &StateDiffClientDirect{server: server}
+}
+
+func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remote.SnapshotsRequest, opts ...grpc.CallOption) (*remote.SnapshotsReply, error) {
+	return c.server.Snapshots(ctx, in)
 }
 
 // -- start StateChanges

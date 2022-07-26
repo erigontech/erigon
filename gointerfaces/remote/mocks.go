@@ -22,7 +22,7 @@ var _ KVClient = &KVClientMock{}
 //
 // 		// make and configure a mocked KVClient
 // 		mockedKVClient := &KVClientMock{
-// 			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error) {
+// 			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
 // 				panic("mock out the Snapshots method")
 // 			},
 // 			StateChangesFunc: func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
@@ -42,7 +42,7 @@ var _ KVClient = &KVClientMock{}
 // 	}
 type KVClientMock struct {
 	// SnapshotsFunc mocks the Snapshots method.
-	SnapshotsFunc func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error)
+	SnapshotsFunc func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
 
 	// StateChangesFunc mocks the StateChanges method.
 	StateChangesFunc func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
@@ -97,7 +97,7 @@ type KVClientMock struct {
 }
 
 // Snapshots calls SnapshotsFunc.
-func (mock *KVClientMock) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error) {
+func (mock *KVClientMock) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
 	callInfo := struct {
 		Ctx  context.Context
 		In   *SnapshotsRequest
@@ -112,10 +112,10 @@ func (mock *KVClientMock) Snapshots(ctx context.Context, in *SnapshotsRequest, o
 	mock.lockSnapshots.Unlock()
 	if mock.SnapshotsFunc == nil {
 		var (
-			kV_SnapshotsClientOut KV_SnapshotsClient
-			errOut                error
+			snapshotsReplyOut *SnapshotsReply
+			errOut            error
 		)
-		return kV_SnapshotsClientOut, errOut
+		return snapshotsReplyOut, errOut
 	}
 	return mock.SnapshotsFunc(ctx, in, opts...)
 }

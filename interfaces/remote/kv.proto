@@ -22,7 +22,7 @@ service KV {
   rpc StateChanges(StateChangeRequest) returns (stream StateChangeBatch);
 
   // Snapshots returns list of current snapshot files. Then client can just open all of them.
-  rpc Snapshots(SnapshotsRequest) returns (stream SnapshotsReply);
+  rpc Snapshots(SnapshotsRequest) returns (SnapshotsReply);
 }
 
 enum Op {
