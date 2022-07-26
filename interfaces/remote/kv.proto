@@ -21,6 +21,8 @@ service KV {
 
   rpc StateChanges(StateChangeRequest) returns (stream StateChangeBatch);
 
+  // Snapshots returns list of current snapshot files. Then client can just open all of them.
+  rpc Snapshots(SnapshotsRequest) returns (stream SnapshotsReply);
 }
 
 enum Op {
@@ -106,4 +108,11 @@ message StateChange {
 message StateChangeRequest {
   bool withStorage = 1;
   bool withTransactions = 2;
+}
+
+message SnapshotsRequest {
+}
+
+message SnapshotsReply {
+  repeated string files = 1;
 }

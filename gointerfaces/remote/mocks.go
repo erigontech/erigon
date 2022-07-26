@@ -22,6 +22,9 @@ var _ KVClient = &KVClientMock{}
 //
 // 		// make and configure a mocked KVClient
 // 		mockedKVClient := &KVClientMock{
+// 			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error) {
+// 				panic("mock out the Snapshots method")
+// 			},
 // 			StateChangesFunc: func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
 // 				panic("mock out the StateChanges method")
 // 			},
@@ -38,6 +41,9 @@ var _ KVClient = &KVClientMock{}
 //
 // 	}
 type KVClientMock struct {
+	// SnapshotsFunc mocks the Snapshots method.
+	SnapshotsFunc func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error)
+
 	// StateChangesFunc mocks the StateChanges method.
 	StateChangesFunc func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 
@@ -49,6 +55,15 @@ type KVClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Snapshots holds details about calls to the Snapshots method.
+		Snapshots []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *SnapshotsRequest
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
 		// StateChanges holds details about calls to the StateChanges method.
 		StateChanges []struct {
 			// Ctx is the ctx argument value.
@@ -75,9 +90,53 @@ type KVClientMock struct {
 			Opts []grpc.CallOption
 		}
 	}
+	lockSnapshots    sync.RWMutex
 	lockStateChanges sync.RWMutex
 	lockTx           sync.RWMutex
 	lockVersion      sync.RWMutex
+}
+
+// Snapshots calls SnapshotsFunc.
+func (mock *KVClientMock) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (KV_SnapshotsClient, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *SnapshotsRequest
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockSnapshots.Lock()
+	mock.calls.Snapshots = append(mock.calls.Snapshots, callInfo)
+	mock.lockSnapshots.Unlock()
+	if mock.SnapshotsFunc == nil {
+		var (
+			kV_SnapshotsClientOut KV_SnapshotsClient
+			errOut                error
+		)
+		return kV_SnapshotsClientOut, errOut
+	}
+	return mock.SnapshotsFunc(ctx, in, opts...)
+}
+
+// SnapshotsCalls gets all the calls that were made to Snapshots.
+// Check the length with:
+//     len(mockedKVClient.SnapshotsCalls())
+func (mock *KVClientMock) SnapshotsCalls() []struct {
+	Ctx  context.Context
+	In   *SnapshotsRequest
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *SnapshotsRequest
+		Opts []grpc.CallOption
+	}
+	mock.lockSnapshots.RLock()
+	calls = mock.calls.Snapshots
+	mock.lockSnapshots.RUnlock()
+	return calls
 }
 
 // StateChanges calls StateChangesFunc.

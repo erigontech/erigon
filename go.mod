@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/RoaringBitmap/roaring v1.2.1
-	github.com/VictoriaMetrics/metrics v1.18.1
+	github.com/VictoriaMetrics/metrics v1.20.1
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee
 	github.com/go-stack/stack v1.8.1
@@ -22,9 +22,9 @@ require (
 	github.com/torquem-ch/mdbx-go v0.25.1-0.20220720103744-b96489e94ece
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
-	golang.org/x/exp v0.0.0-20220713135740-79cabaa25d75
-	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
+	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
+	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f
 	google.golang.org/grpc v1.48.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.0
