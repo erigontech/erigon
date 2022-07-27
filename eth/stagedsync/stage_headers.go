@@ -1149,6 +1149,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
 
 	cfg.snapshots.LogStat()
 
