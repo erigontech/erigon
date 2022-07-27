@@ -442,8 +442,15 @@ func (ms *MockSentry) EnableLogs() {
 	})
 }
 
+func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
+	if ms.ChainConfig.TerminalTotalDifficulty == nil {
+		return chain.Length()
+	}
+	return chain.NumberOfPoWBlocks()
+}
+
 func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
-	n := chain.NumberOfPoWBlocks()
+	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
 		return nil
@@ -514,7 +521,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 }
 
 func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
-	n := chain.NumberOfPoWBlocks()
+	n := ms.numberOfPoWBlocks(chain)
 	if n >= chain.Length() {
 		return nil
 	}
