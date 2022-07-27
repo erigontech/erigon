@@ -501,9 +501,7 @@ func (h Hashes) DedupCopy() Hashes {
 	dest := length.Hash
 	for i := dest; i < len(h); i += length.Hash {
 		if !bytes.Equal(h[i:i+length.Hash], h[i-length.Hash:i]) {
-			if dest != i {
-				copy(c[dest:dest+length.Hash], h[i:i+length.Hash])
-			}
+			copy(c[dest:dest+length.Hash], h[i:i+length.Hash])
 			dest += length.Hash
 		}
 	}

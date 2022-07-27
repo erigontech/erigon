@@ -91,8 +91,40 @@ func TestDedupHashes(t *testing.T) {
 	assert := assert.New(t)
 	h := toHashes(2, 6, 2, 5, 2, 4)
 	c := h.DedupCopy()
+	assert.Equal(6, h.Len())
 	assert.Equal(4, c.Len())
+	assert.Equal(toHashes(2, 2, 2, 4, 5, 6), h)
 	assert.Equal(toHashes(2, 4, 5, 6), c)
+
+	h = toHashes(2, 2)
+	c = h.DedupCopy()
+	assert.Equal(toHashes(2, 2), h)
+	assert.Equal(toHashes(2), c)
+
+	h = toHashes(1)
+	c = h.DedupCopy()
+	assert.Equal(1, h.Len())
+	assert.Equal(1, c.Len())
+	assert.Equal(toHashes(1), h)
+	assert.Equal(toHashes(1), c)
+
+	h = toHashes()
+	c = h.DedupCopy()
+	assert.Equal(0, h.Len())
+	assert.Equal(0, c.Len())
+	assert.Equal(0, len(h))
+	assert.Equal(0, len(c))
+
+	h = toHashes(1, 2, 3, 4)
+	c = h.DedupCopy()
+	assert.Equal(toHashes(1, 2, 3, 4), h)
+	assert.Equal(toHashes(1, 2, 3, 4), c)
+
+	h = toHashes(4, 2, 1, 3)
+	c = h.DedupCopy()
+	assert.Equal(toHashes(1, 2, 3, 4), h)
+	assert.Equal(toHashes(1, 2, 3, 4), c)
+
 }
 
 func toHashes(h ...byte) (out Hashes) {
