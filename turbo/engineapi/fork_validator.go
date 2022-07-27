@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -58,14 +59,6 @@ type ForkValidator struct {
 	validatePayload validatePayloadFunc
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
-}
-
-// abs64 is a utility method that given an int64, it returns its absolute value in uint64.
-func abs64(n int64) uint64 {
-	if n < 0 {
-		return uint64(-n)
-	}
-	return uint64(n)
 }
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
@@ -226,7 +219,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
-	if abs64(int64(fv.currentHeight)-header.Number.Int64()) > maxForkDepth {
+	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
 		return
 	}
@@ -338,7 +331,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 // clean wipes out all outdated sideforks whose distance exceed the height of the head.
 func (fv *ForkValidator) clean() {
 	for hash, sb := range fv.sideForksBlock {
-		if abs64(int64(fv.currentHeight)-sb.header.Number.Int64()) > maxForkDepth {
+		if math.AbsoluteDifference(fv.currentHeight, sb.header.Number.Uint64()) > maxForkDepth {
 			delete(fv.sideForksBlock, hash)
 		}
 	}

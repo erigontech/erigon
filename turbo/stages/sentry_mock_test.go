@@ -509,7 +509,7 @@ func TestAnchorReplace2(t *testing.T) {
 }
 
 func TestForkchoiceToGenesis(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, false)
 
 	// Trivial forkChoice: everything points to genesis
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -530,7 +530,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 }
 
 func TestBogusForkchoice(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, false)
 
 	// Bogus forkChoice: head points to rubbish
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -564,7 +564,7 @@ func TestBogusForkchoice(t *testing.T) {
 }
 
 func TestPoSDownloader(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -621,7 +621,7 @@ func TestPoSDownloader(t *testing.T) {
 
 // https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 func TestPoSSyncWithInvalidHeader(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})

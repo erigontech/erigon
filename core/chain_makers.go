@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -219,18 +220,20 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Length   int
 	Headers  []*types.Header
 	Blocks   []*types.Block
 	Receipts []types.Receipts
 	TopBlock *types.Block // Convenience field to access the last block
 }
 
+func (cp *ChainPack) Length() int {
+	return len(cp.Blocks)
+}
+
 // OneBlock returns a ChainPack which contains just one
 // block with given index
-func (cp ChainPack) Slice(i, j int) *ChainPack {
+func (cp *ChainPack) Slice(i, j int) *ChainPack {
 	return &ChainPack{
-		Length:   j + 1 - i,
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
@@ -262,12 +265,20 @@ func (cp *ChainPack) Copy() *ChainPack {
 	topBlock := cp.TopBlock.Copy()
 
 	return &ChainPack{
-		Length:   cp.Length,
 		Headers:  headers,
 		Blocks:   blocks,
 		Receipts: receipts,
 		TopBlock: topBlock,
 	}
+}
+
+func (cp *ChainPack) NumberOfPoWBlocks() int {
+	for i, header := range cp.Headers {
+		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+			return i
+		}
+	}
+	return len(cp.Headers)
 }
 
 // GenerateChain creates a chain of n blocks. The first block's
@@ -425,7 +436,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	tx.Rollback()
 
-	return &ChainPack{Length: n, Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, timestamp uint64, targetGasLimit *uint64) *types.Header {

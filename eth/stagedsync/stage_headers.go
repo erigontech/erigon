@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -138,7 +139,7 @@ func SpawnStageHeaders(
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -152,12 +153,13 @@ func HeadersPOS(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	useExternalTx bool,
 ) error {
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
 
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -172,6 +174,11 @@ func HeadersPOS(
 		return nil
 	}
 
+	if requestWithStatus == nil {
+		log.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", s.LogPrefix()))
+		return nil
+	}
+
 	request := requestWithStatus.Message
 	requestStatus := requestWithStatus.Status
 
@@ -182,10 +189,10 @@ func HeadersPOS(
 
 	var payloadStatus *engineapi.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter)
 	} else {
 		payloadMessage := request.(*types.Block)
-		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, test, headerInserter)
 	}
 
 	if err != nil {
@@ -256,6 +263,7 @@ func startHandlingForkChoice(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	if cfg.memoryOverlay {
@@ -295,8 +303,12 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
-		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+		} else {
+			cfg.hd.SetPoSDownloaderTip(headerHash)
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -406,6 +418,7 @@ func handleNewPayload(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	header := block.Header()
@@ -421,9 +434,26 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
+		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+			// so that we will perform full validation.
+			time.Sleep(100 * time.Millisecond)
+			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
+			if cfg.hd.PosStatus() == headerdownload.Synced {
+				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+			} else {
+				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+			}
+		} else {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
@@ -454,6 +484,12 @@ func verifyAndSaveNewPoSHeader(
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
+
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	if bad {
+		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, false, nil
+	}
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
@@ -620,7 +656,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
 		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)
 	} else {
-		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
+		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId(), "fork head", lastValidHash)
 	}
 
 	cfg.hd.HeadersCollector().Close()
@@ -651,7 +687,7 @@ func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, 
 		if interrupt == engineapi.Stopping {
 			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
 		}
-		if interrupt == engineapi.Synced {
+		if interrupt == engineapi.Synced && cfg.hd.HeadersCollector() != nil {
 			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 		}
 		if !useExternalTx {
