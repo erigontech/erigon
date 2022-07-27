@@ -1174,10 +1174,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err := cfg.snapshots.ReopenFolder(); err != nil {
 				return err
 			}
+			if cfg.dbEventNotifier != nil {
+				cfg.dbEventNotifier.OnNewSnapshot()
+			}
 		}
-	}
-	if cfg.dbEventNotifier != nil {
-		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis

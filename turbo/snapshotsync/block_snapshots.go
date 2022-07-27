@@ -872,7 +872,7 @@ func SegmentsList(dir string) (res []string, err error) {
 
 // EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
 // it also does notify about changes after db commit
-func EnforceSnapshotsInvariant(db kv.RwDB, dir string, notifier DBEventNotifier) (snList []string, err error) {
+func EnforceSnapshotsInvariant(db kv.RwDB, dir string, allSnapshots *RoSnapshots, notifier DBEventNotifier) (snList []string, err error) {
 	snListInFolder, err := SegmentsList(dir)
 	if err != nil {
 		return nil, err
@@ -885,6 +885,11 @@ func EnforceSnapshotsInvariant(db kv.RwDB, dir string, notifier DBEventNotifier)
 		return err
 	}); err != nil {
 		return snList, err
+	}
+	if allSnapshots != nil {
+		if err := allSnapshots.ReopenList(snList, false); err != nil {
+			return snList, err
+		}
 	}
 	if notifier != nil {
 		notifier.OnNewSnapshot()
