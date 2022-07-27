@@ -37,7 +37,7 @@ import (
 const (
 	maxRequestContentLength = 1024 * 1024 * 5
 	contentType             = "application/json"
-	jwtTokenExpiry          = 5 * time.Second
+	jwtTokenExpiry          = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13

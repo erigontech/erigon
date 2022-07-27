@@ -302,6 +302,7 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
 
+func (s *RoSnapshots) Files() []string         { return []string{} }
 func (s *RoSnapshots) Cfg() ethconfig.Snapshot { return s.cfg }
 func (s *RoSnapshots) Dir() string             { return s.dir }
 func (s *RoSnapshots) SegmentsReady() bool     { return s.segmentsReady.Load() }

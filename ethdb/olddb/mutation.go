@@ -183,13 +183,13 @@ func (m *mutation) Has(table string, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) Put(table string, key []byte, value []byte) error {
+func (m *mutation) Put(table string, k, v []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	newMi := &MutationItem{table: table, key: key, value: value}
+	newMi := &MutationItem{table: table, key: k, value: v}
 	i := m.puts.ReplaceOrInsert(newMi)
-	m.size += int(unsafe.Sizeof(newMi)) + len(key) + len(value)
+	m.size += int(unsafe.Sizeof(newMi)) + len(k) + len(v)
 	if i != nil {
 		oldMi := i.(*MutationItem)
 		m.size -= (int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value))
@@ -226,10 +226,7 @@ func (m *mutation) ForAmount(bucket string, prefix []byte, amount uint32, walker
 	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *mutation) Delete(table string, k, v []byte) error {
-	if v != nil {
-		return m.db.Delete(table, k, v) // TODO: mutation to support DupSort deletes
-	}
+func (m *mutation) Delete(table string, k []byte) error {
 	//m.puts.Delete(table, k)
 	return m.Put(table, k, nil)
 }
@@ -272,7 +269,7 @@ func (m *mutation) doCommit(tx kv.RwTx) error {
 				}
 			}
 		} else if len(mi.value) == 0 {
-			if err := c.Delete(mi.key, nil); err != nil {
+			if err := c.Delete(mi.key); err != nil {
 				innerErr = err
 				return false
 			}

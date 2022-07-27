@@ -3,6 +3,7 @@ package privateapi
 import (
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -115,17 +116,7 @@ func (e *Events) OnNewSnapshot() {
 	defer e.lock.Unlock()
 	e.onNewSnapshotsHappened = true
 	for _, ch := range e.newSnapshotSubscription {
-		select {
-		case ch <- struct{}{}:
-		default: //if channel is full (slow consumer), drop old messages
-			for i := 0; i < cap(ch)/2; i++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
-			ch <- struct{}{}
-		}
+		common.PrioritizedSend(ch, struct{}{})
 	}
 }
 
@@ -133,17 +124,7 @@ func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.headerSubscriptions {
-		select {
-		case ch <- newHeadersRlp:
-		default: //if channel is full (slow consumer), drop old messages
-			for i := 0; i < cap(ch)/2; i++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
-			ch <- newHeadersRlp
-		}
+		common.PrioritizedSend(ch, newHeadersRlp)
 	}
 }
 
@@ -161,16 +142,6 @@ func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.logsSubscriptions {
-		select {
-		case ch <- logs:
-		default: //if channel is full (slow consumer), drop old messages
-			for i := 0; i < cap(ch)/2; i++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
-			ch <- logs
-		}
+		common.PrioritizedSend(ch, logs)
 	}
 }
