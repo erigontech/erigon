@@ -50,7 +50,7 @@ func (req *RequestGenerator) Get() rpctest.CallResult {
 	defer func(Body io.ReadCloser) {
 		closeErr := Body.Close()
 		if closeErr != nil {
-			log.Error("body close", "err", closeErr)
+			log.Warn("body close", "err", closeErr)
 		}
 	}(resp.Body)
 

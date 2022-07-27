@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 )
 
 func main() {

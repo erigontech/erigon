@@ -26,7 +26,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	defer func(Body io.ReadCloser) {
 		closeErr := Body.Close()
 		if closeErr != nil {
-			log.Error("body close", "err", closeErr)
+			log.Warn("body close", "err", closeErr)
 		}
 	}(r.Body)
 
