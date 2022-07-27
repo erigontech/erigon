@@ -458,6 +458,9 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 		return nil, err
 	}
 
+	// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
+	// because otherwise (when FCU points to the head) we want go to stage headers
+	// so that it calls writeForkChoiceHashes.
 	if blockHash != headHash && canonicalHash == blockHash {
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 	}
@@ -531,29 +534,28 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	if status == nil {
-		if s.stageLoopIsBusy() {
-			log.Debug("[ForkChoiceUpdated] stage loop is busy")
-			return &remote.EngineForkChoiceUpdatedReply{
-				PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
-			}, nil
-		}
-		s.lock.Lock()
-		defer s.lock.Unlock()
 
+	if status == nil && s.stageLoopIsBusy() {
+		log.Debug("[ForkChoiceUpdated] stage loop is busy")
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
+		}, nil
+	}
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if status == nil {
 		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
-		statusRef := <-s.hd.PayloadStatusCh
-		status = &statusRef
+		statusDeref := <-s.hd.PayloadStatusCh
+		status = &statusDeref
 		log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
-	} else {
-		s.lock.Lock()
-		defer s.lock.Unlock()
 	}
 
 	// No need for payload building
