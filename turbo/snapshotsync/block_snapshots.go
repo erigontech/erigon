@@ -351,7 +351,6 @@ func (s *RoSnapshots) LogStat() {
 	common2.ReadMemStats(&m)
 	log.Info("[Snapshots] Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
-		"segments", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
