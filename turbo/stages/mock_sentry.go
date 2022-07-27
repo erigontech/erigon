@@ -525,10 +525,12 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	_, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
 	if err != nil {
 		return err
 	}
+	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	ms.ReceivePayloadStatus()
 
 	fc := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      chain.TopBlock.Hash(),
@@ -536,8 +538,14 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	_, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
-	return err
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	if err != nil {
+		return err
+	}
+	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	ms.ReceivePayloadStatus()
+
+	return nil
 }
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
