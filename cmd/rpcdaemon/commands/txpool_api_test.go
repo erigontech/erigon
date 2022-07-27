@@ -22,13 +22,13 @@ import (
 )
 
 func TestTxPoolContent(t *testing.T) {
-	m, require := stages.MockWithTxPool(t), require.New(t)
+	m, assertions := stages.MockWithTxPool(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
-	require.NoError(err)
+	assertions.NoError(err)
 	err = m.InsertChain(chain)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
@@ -37,28 +37,28 @@ func TestTxPoolContent(t *testing.T) {
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	reply, err := txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
-	require.NoError(err)
+	assertions.NoError(err)
 	for _, res := range reply.Imported {
-		require.Equal(res, txPoolProto.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
+		assertions.Equal(res, txPoolProto.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
 	}
 
 	content, err := api.Content(ctx)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	sender := m.Address.String()
-	require.Equal(1, len(content["pending"][sender]))
-	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
+	assertions.Equal(1, len(content["pending"][sender]))
+	assertions.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
 
 	status, err := api.Status(ctx)
-	require.NoError(err)
-	require.Len(status, 3)
-	require.Equal(status["pending"], hexutil.Uint(1))
-	require.Equal(status["queued"], hexutil.Uint(0))
+	assertions.NoError(err)
+	assertions.Len(status, 3)
+	assertions.Equal(status["pending"], hexutil.Uint(1))
+	assertions.Equal(status["queued"], hexutil.Uint(0))
 }

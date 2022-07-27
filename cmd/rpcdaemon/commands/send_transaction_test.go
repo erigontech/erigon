@@ -27,12 +27,12 @@ import (
 
 func TestSendRawTransaction(t *testing.T) {
 	t.Skip("Flaky test")
-	m, require := stages.Mock(t), require.New(t)
+	m, assertions := stages.Mock(t), require.New(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
-	require.NoError(err)
+	assertions.NoError(err)
 	{ // Do 1 step to start txPool
 
 		// Send NewBlock message
@@ -40,20 +40,20 @@ func TestSendRawTransaction(t *testing.T) {
 			Block: chain.TopBlock,
 			TD:    big.NewInt(1), // This is ignored anyway
 		})
-		require.NoError(err)
+		assertions.NoError(err)
 		m.ReceiveWg.Add(1)
 		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-			require.NoError(err)
+			assertions.NoError(err)
 		}
 		// Send all the headers
 		b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 			RequestId:          1,
 			BlockHeadersPacket: chain.Headers,
 		})
-		require.NoError(err)
+		assertions.NoError(err)
 		m.ReceiveWg.Add(1)
 		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-			require.NoError(err)
+			assertions.NoError(err)
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
@@ -66,7 +66,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
@@ -76,28 +76,28 @@ func TestSendRawTransaction(t *testing.T) {
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
-	require.NoError(err)
+	assertions.NoError(err)
 
 	txsCh := make(chan []types.Transaction, 1)
 	id := ff.SubscribePendingTxs(txsCh)
 	defer ff.UnsubscribePendingTxs(id)
 
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NoError(err)
+	assertions.NoError(err)
 
 	got := <-txsCh
-	require.Equal(expectValue, got[0].GetValue().Uint64())
+	assertions.Equal(expectValue, got[0].GetValue().Uint64())
 
 	//send same tx second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NotNil(err)
-	require.Equal("ALREADY_EXISTS: already known", err.Error())
+	assertions.NotNil(err)
+	assertions.Equal("ALREADY_EXISTS: already known", err.Error())
 	m.ReceiveWg.Wait()
 
 	//TODO: make propagation easy to test - now race
 	//time.Sleep(time.Second)
 	//sent := m.SentMessage(0)
-	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+	//assertions.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
