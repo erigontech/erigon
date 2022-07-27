@@ -332,11 +332,11 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 		tmpPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.tmp", d.filenameBase, fType.String(), startTxNum/d.aggregationStep, endTxNum/d.aggregationStep))
 		datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), startTxNum/d.aggregationStep, endTxNum/d.aggregationStep))
 		if removeVals {
-			if comp, err = compress.NewCompressor(context.Background(), "merge", tmpPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+			if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", tmpPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 				return outItems, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
 			}
 		} else {
-			if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+			if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 				return outItems, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
 			}
 		}
@@ -453,7 +453,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 		outItem := &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 		outItems[fType] = outItem
 		if removeVals {
-			if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+			if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 				return outItems, fmt.Errorf("merge %s remove vals compressor: %w", d.filenameBase, err)
 			}
 			if decomp, err = compress.NewDecompressor(tmpPath); err != nil {
@@ -573,7 +573,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 		}
 	}()
 	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
-	if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, ii.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+	if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, ii.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
 	var cp CursorHeap
@@ -708,7 +708,7 @@ func (h *History) mergeFiles(indexFiles, historyFiles []*filesItem, r HistoryRan
 	}()
 	datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
 	idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
-	if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, h.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+	if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, h.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 		return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 	}
 	var cp CursorHeap
