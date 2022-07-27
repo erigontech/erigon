@@ -209,11 +209,11 @@ func HeadersPOS(
 	}
 
 	if requestStatus == engineapi.New && payloadStatus != nil {
-		if payloadStatus.Status == remote.EngineStatus_VALID && useExternalTx {
+		if payloadStatus.Status == remote.EngineStatus_SYNCING || payloadStatus.Status == remote.EngineStatus_ACCEPTED || !useExternalTx {
+			cfg.hd.PayloadStatusCh <- *payloadStatus
+		} else {
 			// Let the stage loop run to the end so that the transaction is committed prior to replying to CL
 			cfg.hd.SetPendingPayloadStatus(payloadStatus)
-		} else {
-			cfg.hd.PayloadStatusCh <- *payloadStatus
 		}
 	}
 
