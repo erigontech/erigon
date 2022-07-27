@@ -5,6 +5,7 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"sort"
 	"sync"
 	"unsafe"
@@ -12,12 +13,13 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -37,6 +39,10 @@ type TxTask struct {
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList
+	AccountPrevs       map[string][]byte
+	AccountDels        map[string]*accounts.Account
+	StoragePrevs       map[string][]byte
+	CodePrevs          map[string][]byte
 	ResultsSize        int64
 	Error              error
 }
@@ -223,42 +229,210 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
+func serialise2(a *accounts.Account) []byte {
+	var l int
+	l++
+	if a.Nonce > 0 {
+		l += (bits.Len64(a.Nonce) + 7) / 8
+	}
+	l++
+	if !a.Balance.IsZero() {
+		l += a.Balance.ByteLen()
+	}
+	l++
+	if !a.IsEmptyCodeHash() {
+		l += 32
+	}
+	l++
+	if a.Incarnation > 0 {
+		l += (bits.Len64(a.Incarnation) + 7) / 8
+	}
+	value := make([]byte, l)
+	pos := 0
+	if a.Nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
+		value[pos] = byte(nonceBytes)
+		var nonce = a.Nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if a.Balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := a.Balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if a.IsEmptyCodeHash() {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], a.CodeHash[:])
+		pos += 32
+	}
+	if a.Incarnation == 0 {
+		value[pos] = 0
+	} else {
+		incBytes := (bits.Len64(a.Incarnation) + 7) / 8
+		value[pos] = byte(incBytes)
+		var inc = a.Incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+	}
+	return value
+}
+
 func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	if txTask.WriteLists != nil {
-		for table, list := range txTask.WriteLists {
-			for i, key := range list.Keys {
-				val := list.Vals[i]
-				rs.put(table, key, val)
-			}
-		}
+	agg.SetTxNum(txTask.TxNum)
+	// Convert balance increases to read-write lists
+	readList, ok := txTask.ReadLists[kv.PlainState]
+	if !ok {
+		readList = &KvList{}
+		txTask.ReadLists[kv.PlainState] = readList
+	}
+	writeList, ok := txTask.WriteLists[kv.PlainState]
+	if !ok {
+		writeList = &KvList{}
+		txTask.WriteLists[kv.PlainState] = writeList
 	}
 	for addr, increase := range txTask.BalanceIncreaseSet {
-		//if increase.IsZero() {
-		//	continue
-		//}
-		enc := rs.get(kv.PlainState, addr.Bytes())
-		if enc == nil {
+		enc0 := rs.get(kv.PlainState, addr.Bytes())
+		if enc0 == nil {
 			var err error
-			enc, err = roTx.GetOne(kv.PlainState, addr.Bytes())
+			enc0, err = roTx.GetOne(kv.PlainState, addr.Bytes())
 			if err != nil {
 				return err
 			}
 		}
 		var a accounts.Account
-		if err := a.DecodeForStorage(enc); err != nil {
+		if err := a.DecodeForStorage(enc0); err != nil {
 			return err
 		}
+		if len(enc0) > 0 {
+			// Need to convert before balance increase
+			enc0 = serialise2(&a)
+		}
 		a.Balance.Add(&a.Balance, &increase)
+		var enc1 []byte
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
-			enc = []byte{}
+			enc1 = []byte{}
 		} else {
 			l := a.EncodingLengthForStorage()
-			enc = make([]byte, l)
-			a.EncodeForStorage(enc)
+			enc1 = make([]byte, l)
+			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addr.Bytes(), enc)
+		rs.put(kv.PlainState, addr.Bytes(), enc1)
+		if err := agg.AddAccountPrev(addr.Bytes(), enc0); err != nil {
+			return err
+		}
+	}
+	for addrS, original := range txTask.AccountDels {
+		addr := []byte(addrS)
+		addr1 := make([]byte, len(addr) + 8)
+		copy(addr1, addr)
+		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
+		prev := serialise2(original)
+		if err := agg.AddAccountPrev(addr, prev); err != nil {
+			return err
+		}
+		codePrev := rs.get(kv.Code, original.CodeHash.Bytes())
+		if codePrev == nil {
+			var err error
+			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash.Bytes())
+			if err != nil {
+				return err
+			}
+		}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
+			return err
+		}
+		// Iterate over storage
+		cursor, err := roTx.Cursor(kv.PlainState)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		var k, v []byte
+		var e error
+		if k, v, e = cursor.Seek(addr1); err != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, addr1) {
+			k = nil
+		}
+		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+			if !bytes.HasPrefix(item.key, addr1) {
+				return false
+			}
+			for ; e == nil && k != nil && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+				if !bytes.HasPrefix(k, addr1) {
+					k = nil
+				}
+				if !bytes.Equal(k, item.key) {
+					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+						return false
+					}
+				}
+			}
+			if e != nil {
+				return false
+			}
+			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+				return false
+			}
+			return true
+		})
+		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
+			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+				return e
+			}
+		}
+		if e != nil {
+			return e
+		}
+	}
+	for addrS, enc0 := range txTask.AccountPrevs {
+		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
+			return err
+		}
+	}
+	for compositeS, val := range txTask.StoragePrevs {
+		composite := []byte(compositeS)
+		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
+			return err
+		}
+	}
+	for addrS, val := range txTask.CodePrevs {
+		if err := agg.AddCodePrev([]byte(addrS), val); err != nil {
+			return err
+		}
+	}
+	if err := agg.FinishTx(); err != nil {
+		return err
+	}
+	if txTask.WriteLists == nil {
+		return nil
+	}
+	for table, list := range txTask.WriteLists {
+		for i, key := range list.Keys {
+			val := list.Vals[i]
+			rs.put(table, key, val)
+		}
 	}
 	return nil
 }
@@ -329,9 +503,13 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type StateWriter22 struct {
-	rs         *State22
-	txNum      uint64
-	writeLists map[string]*KvList
+	rs           *State22
+	txNum        uint64
+	writeLists   map[string]*KvList
+	accountPrevs map[string][]byte
+	accountDels  map[string]*accounts.Account
+	storagePrevs map[string][]byte
+	codePrevs    map[string][]byte
 }
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
@@ -343,6 +521,10 @@ func NewStateWriter22(rs *State22) *StateWriter22 {
 			kv.PlainContractCode: {},
 			kv.IncarnationMap:    {},
 		},
+		accountPrevs: map[string][]byte{},
+		accountDels:  map[string]*accounts.Account{},
+		storagePrevs: map[string][]byte{},
+		codePrevs:    map[string][]byte{},
 	}
 }
 
@@ -357,6 +539,10 @@ func (w *StateWriter22) ResetWriteSet() {
 		kv.PlainContractCode: {},
 		kv.IncarnationMap:    {},
 	}
+	w.accountPrevs = map[string][]byte{}
+	w.accountDels = map[string]*accounts.Account{}
+	w.storagePrevs = map[string][]byte{}
+	w.codePrevs = map[string][]byte{}
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
@@ -366,12 +552,21 @@ func (w *StateWriter22) WriteSet() map[string]*KvList {
 	return w.writeLists
 }
 
+func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
+	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
+}
+
 func (w *StateWriter22) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address.Bytes())
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
+	var prev []byte
+	if original.Initialised {
+		prev = serialise2(original)
+	}
+	w.accountPrevs[string(address.Bytes())] = prev
 	return nil
 }
 
@@ -383,6 +578,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
+	w.codePrevs[string(address.Bytes())] = nil
 	return nil
 }
 
@@ -395,6 +591,9 @@ func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts
 		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, address.Bytes())
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
+	if original.Initialised {
+		w.accountDels[string(address.Bytes())] = original
+	}
 	return nil
 }
 
@@ -402,9 +601,11 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes()))
+	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+	w.storagePrevs[string(composite)] = original.Bytes()
 	return nil
 }
 

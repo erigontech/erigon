@@ -198,6 +198,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		}
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
+		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
 		for _, list := range txTask.ReadLists {
 			for _, b := range list.Keys {
@@ -336,10 +337,24 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	rwTx.Rollback()
 
 	rs := state.NewState22()
-	agg, err := libstate.NewAggregator22(datadir, AggregationStep)
+	aggDir := path.Join(datadir, "agg22")
+	if reset {
+		if _, err = os.Stat(aggDir); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(aggDir); err != nil {
+			return err
+		}
+		if err = os.MkdirAll(aggDir, 0755); err != nil {
+			return err
+		}
+	}
+	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
 	if err != nil {
 		return err
 	}
+	defer agg.Close()
 	var lock sync.RWMutex
 	reconWorkers := make([]*Worker22, workerCount)
 	var wg sync.WaitGroup
@@ -373,6 +388,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	var outputTxNum uint64
+	if block > 0 {
+		outputTxNum = txNums[block-1]
+	}
 	var inputBlockNum, outputBlockNum uint64
 	var prevOutputBlockNum uint64 = block
 	// Go-routine gathering results from the workers
@@ -509,6 +527,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}()
 	var inputTxNum uint64
+	if block > 0 {
+		inputTxNum = txNums[block-1]
+	}
 	var header *types.Header
 	var blockNum uint64
 loop:

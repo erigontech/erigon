@@ -103,8 +103,8 @@ func ReplayTx(genesis *core.Genesis) error {
 		txNum = txnum
 	}
 	fmt.Printf("txNum = %d\n", txNum)
-	aggPath := filepath.Join(datadir, "erigon23")
-	agg, err := libstate.NewAggregator(aggPath, AggregationStep)
+	aggPath := filepath.Join(datadir, "agg22")
+	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -119,7 +119,7 @@ func ReplayTx(genesis *core.Genesis) error {
 }
 
 func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader,
-	txNum uint64, txNums []uint64, rs *state.ReconState, ac *libstate.AggregatorContext,
+	txNum uint64, txNums []uint64, rs *state.ReconState, ac *libstate.Aggregator22Context,
 ) error {
 	bn := uint64(sort.Search(len(txNums), func(i int) bool {
 		return txNums[i] > txNum
