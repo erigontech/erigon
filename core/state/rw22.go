@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -299,17 +299,6 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
-	// Convert balance increases to read-write lists
-	readList, ok := txTask.ReadLists[kv.PlainState]
-	if !ok {
-		readList = &KvList{}
-		txTask.ReadLists[kv.PlainState] = readList
-	}
-	writeList, ok := txTask.WriteLists[kv.PlainState]
-	if !ok {
-		writeList = &KvList{}
-		txTask.WriteLists[kv.PlainState] = writeList
-	}
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
@@ -343,7 +332,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 	}
 	for addrS, original := range txTask.AccountDels {
 		addr := []byte(addrS)
-		addr1 := make([]byte, len(addr) + 8)
+		addr1 := make([]byte, len(addr)+8)
 		copy(addr1, addr)
 		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 		prev := serialise2(original)
