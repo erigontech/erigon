@@ -250,9 +250,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
+	var err error
 	ctx := context.Background()
 	reconDbPath := path.Join(datadir, "db22")
-	var err error
 	if reset {
 		if _, err = os.Stat(reconDbPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -272,7 +272,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var allSnapshots *snapshotsync.RoSnapshots
 	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
-	if err := allSnapshots.ReopenWithDB(db); err != nil {
+	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
