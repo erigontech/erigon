@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -430,7 +431,7 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
@@ -1602,4 +1603,108 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	}
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
+}
+
+// Transitioned returns true if the block number comes after POS transition or is the last POW block
+func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
+	header, err := ReadHeaderByHash(db, blockHash)
+	if err != nil {
+		return false, err
+	}
+	if header == nil {
+		return false, nil
+	}
+
+	return header.Difficulty.Cmp(common.Big0) == 0, nil
+}
+
+func ReadSnapshots(tx kv.Tx) (map[string]string, error) {
+	res := map[string]string{}
+	if err := tx.ForEach(kv.Snapshots, nil, func(k, v []byte) error {
+		res[string(k)] = string(v)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func WriteSnapshots(tx kv.RwTx, list map[string]string) error {
+	for k, v := range list {
+		has, err := tx.Has(kv.Snapshots, []byte(k))
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if err = tx.Put(kv.Snapshots, []byte(k), []byte(v)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
+	c, err := tx.RwCursor(table)
+
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	i := 0
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		i++
+		if i > limit {
+			break
+		}
+
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return common2.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
+}
+
+func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(table)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
+		case <-ctx.Done():
+			return common2.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrentDuplicates(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
 }

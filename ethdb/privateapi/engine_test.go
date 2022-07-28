@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,11 +90,10 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -104,8 +104,8 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
-	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
+	hd.BeaconRequestList.WaitForRequest(true)
+	hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
@@ -148,11 +148,10 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -163,9 +162,9 @@ func TestMockValidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
+	hd.BeaconRequestList.WaitForRequest(true)
 
-	statusCh <- PayloadStatus{
+	hd.PayloadStatusCh <- engineapi.PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
@@ -184,11 +183,10 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -199,9 +197,9 @@ func TestMockInvalidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForRequest(true)
+	hd.BeaconRequestList.WaitForRequest(true)
 	// Simulate invalid status
-	statusCh <- PayloadStatus{
+	hd.PayloadStatusCh <- engineapi.PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
@@ -220,11 +218,10 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	beaconRequestList := engineapi.NewRequestList()
-	statusCh := make(chan PayloadStatus)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, nil, hd, false)
 
 	var err error
 
@@ -233,7 +230,7 @@ func TestNoTTD(t *testing.T) {
 	go func() {
 		_, err = backend.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 			ParentHash:    gointerfaces.ConvertHashToH256(common.HexToHash("0x2")),
-			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
+			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0xe6a580606b065e08034dcd6eea026cfdcbd3b41918d98b41cb9bf797d0c27033")),
 			ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 			PrevRandao:    gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),

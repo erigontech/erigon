@@ -357,6 +357,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
+			if protocol >= eth.ETH67 {
+				msg.Discard()
+				return fmt.Errorf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol)
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -491,7 +495,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 		peersStreams: NewPeersStreams(),
 	}
 
-	if protocol != eth.ETH66 {
+	if protocol != eth.ETH66 && protocol != eth.ETH67 {
 		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
 	}
 
@@ -631,7 +635,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
 	switch ss.Protocol.Version {
-	case eth.ETH66:
+	case eth.ETH66, eth.ETH67:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(),
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
@@ -805,6 +809,8 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	switch ss.Protocol.Version {
 	case eth.ETH66:
 		reply.Protocol = proto_sentry.Protocol_ETH66
+	case eth.ETH67:
+		reply.Protocol = proto_sentry.Protocol_ETH67
 	}
 	return reply, nil
 }

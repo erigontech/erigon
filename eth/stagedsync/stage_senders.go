@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,7 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -41,10 +41,11 @@ type SendersCfg struct {
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
 	blockRetire       *snapshotsync.BlockRetire
-	snapshotHashesCfg *snapshothashes.Config
+	snapshotHashesCfg *snapcfg.Cfg
+	hd                *headerdownload.HeaderDownload
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -60,7 +61,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool
 		chainConfig:       chainCfg,
 		prune:             prune,
 		blockRetire:       br,
-		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
+		snapshotHashesCfg: snapcfg.KnownCfg(chainCfg.ChainName),
+		hd:                hd,
 	}
 }
 
@@ -262,6 +264,10 @@ Loop:
 		if cfg.badBlockHalt {
 			return minBlockErr
 		}
+		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
+		if cfg.hd != nil {
+			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
+		}
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
@@ -380,26 +386,18 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
+	sn := cfg.blockRetire.Snapshots()
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
-	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
-		if cfg.blockRetire.Snapshots().Cfg().Produce {
-			if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
-				if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
-					return nil
-				}
-				if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
-					return err
-				}
-			}
-
-			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
-				return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
-			}
+	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
+			return err
+		}
+		if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
+			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 		}
 	} else if cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if err = PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
+		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
 			return err
 		}
 	}
@@ -423,8 +421,7 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx con
 		}
 	}
 
-	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, *chainID, log.LvlInfo)
+	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
 
 	return nil
 }

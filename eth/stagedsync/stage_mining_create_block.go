@@ -141,6 +141,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			if err != nil {
 				return err
 			}
+			if transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+				continue
+			}
 			txs = append(txs, transaction)
 		}
 		var sender common.Address

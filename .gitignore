@@ -77,3 +77,6 @@ go.work
 docker-compose.*.yml
 
 dist
+.env
+coverage.out
+

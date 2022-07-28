@@ -135,6 +135,16 @@ func TestCreation(t *testing.T) {
 				{6000000, ID{Hash: checksumToBytes(0xB8C6299D), Next: 0}},       // Future London block
 			},
 		},
+		// Sepolia test cases
+		{
+			params.SepoliaChainConfig,
+			params.SepoliaGenesisHash,
+			[]testcase{
+				{0, ID{Hash: checksumToBytes(0xfe3366e7), Next: 1735371}},       // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
+				{1735370, ID{Hash: checksumToBytes(0xfe3366e7), Next: 1735371}}, // Last pre-MergeNetsplit block
+				{1735371, ID{Hash: checksumToBytes(0xb96cbd13), Next: 0}},       // First MergeNetsplit block
+			},
+		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {

@@ -210,6 +210,16 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
+
+	applyOverrides := func(config *params.ChainConfig) {
+		if overrideMergeNetsplitBlock != nil {
+			config.MergeNetsplitBlock = overrideMergeNetsplitBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		}
+	}
+
 	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
@@ -217,12 +227,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 			genesis = DefaultGenesisBlock()
 			custom = false
 		}
-		if overrideMergeNetsplitBlock != nil {
-			genesis.Config.MergeNetsplitBlock = overrideMergeNetsplitBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			genesis.Config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-		}
+		applyOverrides(genesis.Config)
 		block, _, err1 := genesis.Write(db)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -250,12 +255,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	}
 	// Get the existing chain configuration.
 	newCfg := genesis.configOrDefault(storedHash)
-	if overrideMergeNetsplitBlock != nil {
-		newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
-	}
-	if overrideTerminalTotalDifficulty != nil {
-		newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-	}
+	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
@@ -276,12 +276,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	// In that case, only apply the overrides.
 	if genesis == nil && params.ChainConfigByGenesisHash(storedHash) == nil {
 		newCfg = storedCfg
-		if overrideMergeNetsplitBlock != nil {
-			newCfg.MergeNetsplitBlock = overrideMergeNetsplitBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-		}
+		applyOverrides(newCfg)
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -723,6 +718,26 @@ func DefaultBorDevnetGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultGnosisGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.GnosisChainConfig,
+		Timestamp:  0x0, //1558348305,
+		SealRlp:    sealRlp,
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(0x20000),
+		//Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		//Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc: readPrealloc("allocs/gnosis.json"),
+	}
+}
+
 // Pre-calculated version of:
 //    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
@@ -803,6 +818,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultBorDevnetGenesisBlock()
 	case networkname.KilnDevnetChainName:
 		return DefaultKilnDevnetGenesisBlock()
+	case networkname.GnosisChainName:
+		return DefaultGnosisGenesisBlock()
 	default:
 		return nil
 	}

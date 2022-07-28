@@ -1,4 +1,4 @@
-name: Continuous integration
+name: CI
 on:
   push:
     branches:
@@ -10,8 +10,15 @@ on:
       - devel
       - alpha
       - stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
 jobs:
   tests:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
@@ -53,14 +60,13 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.46
-          skip-pkg-cache: true
-          skip-build-cache: true
+          version: v1.47
 
       - name: Test
         run: make test
 
   tests-windows:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ windows-2022 ]
@@ -99,9 +105,63 @@ jobs:
         run: .\wmake.ps1 test
 
   docker:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
-      - run: make docker
+
+      - name: make docker
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      # check with root permissions, should be cached from previous build
+      - name: sudo make docker
+        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+  hive:
+    needs:
+      - tests
+      - tests-windows
+      - docker
+    runs-on: ubuntu-20.04
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch git tags for "git describe"
+
+      - name: build erigon image
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      # check with root permissions, should be cached from previous build
+      - name: build erigon image (root permissions)
+        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      - name: run hive
+        run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work gatewayfm/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
+
+      - name: parse hive output
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput gatewayfm/hive:latest --resultsdir=/work/results --outdir=/work/results
+
+      - name: archive hive results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: hive-ci-output
+          path: results/*.xml
+
+  event_file:
+    needs:
+      - tests
+      - tests-windows
+      - docker
+    name: archive event file
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    steps:
+      - name: upload
+        uses: actions/upload-artifact@v2
+        with:
+          name: event file
+          path: ${{ github.event_path }}
