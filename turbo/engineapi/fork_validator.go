@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -228,7 +229,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	currentHash := header.ParentHash
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 	if criticalError != nil {
-		fmt.Println("critical")
 		return
 	}
 
@@ -256,10 +256,25 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	// if it is not canonical we validate it in memory and discard it aferwards.
-	batch := memdb.NewMemoryBatch(tx)
-	defer batch.Close()
-	return fv.validateAndStorePayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
+	if criticalError = tx.Reset(); criticalError != nil {
+		return
+	}
+	// We do this, in case we previously saved blocks and deleted them.
+	for i := len(headersChain) - 1; i >= 0; i-- {
+		var parentTd *big.Int
+		currentHeader := headersChain[i]
+		parentTd, criticalError = rawdb.ReadTd(tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
+		if criticalError != nil || parentTd == nil {
+			criticalError = fmt.Errorf("parent's total difficulty not found with error: %v", criticalError)
+		}
+		td := new(big.Int).Add(parentTd, currentHeader.Difficulty)
+		if criticalError = rawdb.WriteTd(tx, currentHeader.Hash(), currentHeader.Number.Uint64(), td); criticalError != nil {
+			return
+		}
+		rawdb.WriteHeader(tx, currentHeader)
+	}
+	return
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
