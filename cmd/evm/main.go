@@ -19,6 +19,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	"math/big"
 	"os"
 
@@ -193,7 +194,10 @@ func main() {
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
 			code = ec.ExitCode()
 		}
-		fmt.Fprintln(os.Stderr, err)
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("print error", "err", printErr)
+		}
 		os.Exit(code)
 	}
 }

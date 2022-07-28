@@ -87,16 +87,16 @@ func stateTestCmd(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	var tests map[string]tests.StateTest
-	if err = json.Unmarshal(src, &tests); err != nil {
+	var stateTests map[string]tests.StateTest
+	if err = json.Unmarshal(src, &stateTests); err != nil {
 		return err
 	}
-	// Iterate over all the tests, run them and aggregate the results
+	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
 		Tracer: tracer,
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
-	results := make([]StatetestResult, 0, len(tests))
+	results := make([]StatetestResult, 0, len(stateTests))
 	db := memdb.New()
 	defer db.Close()
 
@@ -106,7 +106,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	for key, test := range tests {
+	for key, test := range stateTests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
