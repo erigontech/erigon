@@ -19,7 +19,7 @@ func (r *RequiredStateError) Error() string {
 }
 
 type HistoryReaderNoState struct {
-	ac         *libstate.AggregatorContext
+	ac         *libstate.Aggregator22Context
 	tx         kv.Tx
 	txNum      uint64
 	trace      bool
@@ -29,7 +29,7 @@ type HistoryReaderNoState struct {
 	composite  []byte
 }
 
-func NewHistoryReaderNoState(ac *libstate.AggregatorContext, rs *ReconState) *HistoryReaderNoState {
+func NewHistoryReaderNoState(ac *libstate.Aggregator22Context, rs *ReconState) *HistoryReaderNoState {
 	return &HistoryReaderNoState{ac: ac, rs: rs}
 }
 

@@ -188,12 +188,12 @@ func (rs *ReconState) SizeEstimate() uint64 {
 }
 
 type StateReconWriter struct {
-	ac    *libstate.AggregatorContext
+	ac    *libstate.Aggregator22Context
 	rs    *ReconState
 	txNum uint64
 }
 
-func NewStateReconWriter(ac *libstate.AggregatorContext, rs *ReconState) *StateReconWriter {
+func NewStateReconWriter(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriter {
 	return &StateReconWriter{
 		ac: ac,
 		rs: rs,

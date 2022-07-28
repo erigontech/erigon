@@ -72,7 +72,7 @@ type ReconWorker struct {
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
-	a *libstate.Aggregator, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
+	a *libstate.Aggregator22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 ) *ReconWorker {
 	ac := a.MakeContext()
@@ -122,7 +122,7 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
-		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txNum, blockNum)
+		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
 		_, ibs, err = rw.genesis.ToBlock()
 		if err != nil {
@@ -180,7 +180,7 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 type FillWorker struct {
 	txNum          uint64
 	doneCount      *uint64
-	ac             *libstate.AggregatorContext
+	ac             *libstate.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
@@ -188,7 +188,7 @@ type FillWorker struct {
 	progress       uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *uint64, a *libstate.Aggregator, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *uint64, a *libstate.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
@@ -355,8 +355,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	ctx := context.Background()
-	aggPath := filepath.Join(datadir, "erigon23")
-	agg, err := libstate.NewAggregator(aggPath, AggregationStep)
+	aggPath := filepath.Join(datadir, "agg22")
+	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
