@@ -407,9 +407,14 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		}
 		agg.SetTx(applyTx)
 		defer rs.Finish()
+		var waiting, applying time.Duration
+		waitStart := time.Now()
+		var waitEnd time.Time
 		for outputTxNum < atomic.LoadUint64(&maxTxNum) {
 			select {
 			case txTask := <-resultCh:
+				waitEnd = time.Now()
+				waiting += (waitEnd.Sub(waitStart))
 				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				func() {
 					rwsLock.Lock()
@@ -419,6 +424,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 					rwsReceiveCond.Signal()
 				}()
+				waitStart = time.Now()
+				applying += waitStart.Sub(waitEnd)
 			case <-logEvery.C:
 				var m runtime.MemStats
 				libcommon.ReadMemStats(&m)
@@ -438,6 +445,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					"input block", atomic.LoadUint64(&inputBlockNum),
 					"blk/s", fmt.Sprintf("%.1f", speedBlock),
 					"tx/s", fmt.Sprintf("%.1f", speedTx),
+					"waiting", waiting,
+					"applying", applying,
 					//"repeats", repeatCount-prevRepeatCount,
 					//"triggered", triggerCount-prevTriggerCount,
 					"result queue", rws.Len(),
@@ -520,6 +529,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				}
+				waiting = 0
+				applying = 0
 			}
 		}
 		if err = applyTx.Commit(); err != nil {
