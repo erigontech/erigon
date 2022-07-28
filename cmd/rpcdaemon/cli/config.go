@@ -439,7 +439,11 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, 
 		return err
 	}
 
-	return startRegularRpcServer(ctx, cfg, rpcAPI)
+	if cfg.Enabled {
+		return startRegularRpcServer(ctx, cfg, rpcAPI)
+	}
+
+	return nil
 }
 
 func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
