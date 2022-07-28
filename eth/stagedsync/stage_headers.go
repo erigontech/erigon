@@ -139,7 +139,7 @@ func SpawnStageHeaders(
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -153,9 +153,15 @@ func HeadersPOS(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	initialCycle bool,
 	test bool,
 	useExternalTx bool,
 ) error {
+	if initialCycle {
+		// Let execution and other stages to finish before waiting for CL
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
@@ -208,8 +214,13 @@ func HeadersPOS(
 		}
 	}
 
-	if requestStatus == engineapi.New {
-		cfg.hd.SetPendingPayloadStatus(payloadStatus)
+	if requestStatus == engineapi.New && payloadStatus != nil {
+		if payloadStatus.Status == remote.EngineStatus_SYNCING || payloadStatus.Status == remote.EngineStatus_ACCEPTED || !useExternalTx {
+			cfg.hd.PayloadStatusCh <- *payloadStatus
+		} else {
+			// Let the stage loop run to the end so that the transaction is committed prior to replying to CL
+			cfg.hd.SetPendingPayloadStatus(payloadStatus)
+		}
 	}
 
 	return nil
@@ -444,9 +455,16 @@ func handleNewPayload(
 		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
-			time.Sleep(100 * time.Millisecond)
-			// If we downloaded the headers in time then save them and if we saved the current header, we return VALID
-			if cfg.hd.PosStatus() == headerdownload.Synced {
+			success := false
+			for i := 0; i < 10; i++ {
+				time.Sleep(10 * time.Millisecond)
+				if cfg.hd.PosStatus() == headerdownload.Synced {
+					success = true
+					break
+				}
+			}
+			if success {
+				// If we downloaded the headers in time, then save them and proceed with the new header
 				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
