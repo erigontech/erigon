@@ -257,6 +257,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		unwindPoint = 0
 	}
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
+	if criticalError != nil {
+		return
+	}
+
 	if criticalError = tx.Reset(); criticalError != nil {
 		return
 	}
