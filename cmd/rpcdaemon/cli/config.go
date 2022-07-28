@@ -462,9 +462,7 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	var defaultAPIList []rpc.API
 
 	for _, api := range rpcAPI {
-		if api.Namespace != "engine" {
-			defaultAPIList = append(defaultAPIList, api)
-		}
+		defaultAPIList = append(defaultAPIList, api)
 	}
 
 	var apiFlags []string
@@ -551,9 +549,7 @@ func startAuthenticatedRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAP
 	var rpcAPIList []rpc.API
 
 	for _, api := range rpcAPI {
-		if api.Namespace == "engine" || api.Namespace == "eth" {
-			rpcAPIList = append(rpcAPIList, api)
-		}
+		rpcAPIList = append(rpcAPIList, api)
 	}
 
 	if len(rpcAPIList) > 0 {

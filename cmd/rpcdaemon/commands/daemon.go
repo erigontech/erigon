@@ -29,7 +29,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
-	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(db)
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
@@ -97,13 +96,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Namespace: "starknet",
 				Public:    true,
 				Service:   StarknetAPI(starknetImpl),
-				Version:   "1.0",
-			})
-		case "engine":
-			list = append(list, rpc.API{
-				Namespace: "engine",
-				Public:    true,
-				Service:   EngineAPI(engineImpl),
 				Version:   "1.0",
 			})
 		case "bor":
