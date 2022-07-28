@@ -271,6 +271,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		parentTd, criticalError = rawdb.ReadTd(tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
 		if criticalError != nil || parentTd == nil {
 			criticalError = fmt.Errorf("parent's total difficulty not found with error: %v", criticalError)
+			return
 		}
 		td := new(big.Int).Add(parentTd, currentHeader.Difficulty)
 		if criticalError = rawdb.WriteTd(tx, currentHeader.Hash(), currentHeader.Number.Uint64(), td); criticalError != nil {
