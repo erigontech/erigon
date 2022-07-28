@@ -173,20 +173,20 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
-func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode)
+func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
+	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
+func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
-	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false)
+func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -199,7 +199,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db)
+	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,
@@ -348,7 +348,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil), true),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil),
+			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -401,7 +402,7 @@ func Mock(t *testing.T) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(t, gspec, key)
+	return MockWithGenesis(t, gspec, key, false)
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
@@ -416,10 +417,10 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true, false)
 }
 
-func MockWithZeroTTD(t *testing.T) *MockSentry {
+func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -431,7 +432,7 @@ func MockWithZeroTTD(t *testing.T) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(t, gspec, key)
+	return MockWithGenesis(t, gspec, key, withPosDownloader)
 }
 
 func (ms *MockSentry) EnableLogs() {
@@ -441,10 +442,23 @@ func (ms *MockSentry) EnableLogs() {
 	})
 }
 
-func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
+func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
+	if ms.ChainConfig.TerminalTotalDifficulty == nil {
+		return chain.Length()
+	}
+	return chain.NumberOfPoWBlocks()
+}
+
+func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
+	n := ms.numberOfPoWBlocks(chain)
+	if n == 0 {
+		// No Proof-of-Work blocks
+		return nil
+	}
+
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
+		Block: chain.Blocks[n-1],
 		TD:    big.NewInt(1), // This is ignored anyway
 	})
 	if err != nil {
@@ -456,10 +470,11 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 			return err
 		}
 	}
+
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
+		BlockHeadersPacket: chain.Headers[0:n],
 	})
 	if err != nil {
 		return err
@@ -470,9 +485,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 			return err
 		}
 	}
+
 	// Send all the bodies
-	packet := make(eth.BlockBodiesPacket, chain.Length)
-	for i, block := range chain.Blocks {
+	packet := make(eth.BlockBodiesPacket, n)
+	for i, block := range chain.Blocks[0:n] {
 		packet[i] = (*eth.BlockBody)(block.Body())
 	}
 	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
@@ -488,9 +504,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 			return err
 		}
 	}
-	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
+
 	initialCycle := false
-	highestSeenHeader := chain.TopBlock.NumberU64()
+	highestSeenHeader := chain.Blocks[n-1].NumberU64()
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
@@ -500,8 +517,53 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Wait() // Wait for TxPool notification
 	}
+	return nil
+}
+
+func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
+	n := ms.numberOfPoWBlocks(chain)
+	if n >= chain.Length() {
+		return nil
+	}
+
+	for i := n; i < chain.Length(); i++ {
+		ms.SendPayloadRequest(chain.Blocks[i])
+	}
+
+	initialCycle := false
+	highestSeenHeader := chain.TopBlock.NumberU64()
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	if err != nil {
+		return err
+	}
+	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	ms.ReceivePayloadStatus()
+
+	fc := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain.TopBlock.Hash(),
+		SafeBlockHash:      chain.TopBlock.Hash(),
+		FinalizedBlockHash: chain.TopBlock.Hash(),
+	}
+	ms.SendForkChoiceRequest(&fc)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	if err != nil {
+		return err
+	}
+	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	ms.ReceivePayloadStatus()
+
+	return nil
+}
+
+func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
+	if err := ms.insertPoWBlocks(chain); err != nil {
+		return err
+	}
+	if err := ms.insertPoSBlocks(chain); err != nil {
+		return err
+	}
 	// Check if the latest header was imported or rolled back
-	if err = ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
+	if err := ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}

@@ -94,7 +94,7 @@ func newTestBackend(t *testing.T) *testBackend {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := stages.MockWithGenesis(t, gspec, key)
+	m := stages.MockWithGenesis(t, gspec, key, false)
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {

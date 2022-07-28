@@ -100,14 +100,14 @@ var txsBeginEnd = Migration{
 			}
 
 			// del first tx in block
-			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId), nil); err != nil {
+			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId)); err != nil {
 				return err
 			}
 			if err := writeTransactionsNewDeprecated(tx, txs, b.BaseTxId+1); err != nil {
 				return fmt.Errorf("failed to write body txs: %w", err)
 			}
 			// del last tx in block
-			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId+uint64(b.TxAmount)-1), nil); err != nil {
+			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId+uint64(b.TxAmount)-1)); err != nil {
 				return err
 			}
 
@@ -133,24 +133,24 @@ var txsBeginEnd = Migration{
 
 				for i := bodyForStorage.BaseTxId; i < bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount); i++ {
 					binary.BigEndian.PutUint64(numBuf, i)
-					if err = tx.Delete(kv.NonCanonicalTxs, numBuf, nil); err != nil {
+					if err = tx.Delete(kv.NonCanonicalTxs, numBuf); err != nil {
 						return err
 					}
 				}
 
-				if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
+				if err = tx.Delete(kv.BlockBody, k); err != nil {
 					return err
 				}
-				if err = tx.Delete(kv.Headers, k, nil); err != nil {
+				if err = tx.Delete(kv.Headers, k); err != nil {
 					return err
 				}
-				if err = tx.Delete(kv.HeaderTD, k, nil); err != nil {
+				if err = tx.Delete(kv.HeaderTD, k); err != nil {
 					return err
 				}
-				if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
+				if err = tx.Delete(kv.HeaderNumber, k[8:]); err != nil {
 					return err
 				}
-				if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
+				if err = tx.Delete(kv.HeaderNumber, k[8:]); err != nil {
 					return err
 				}
 
@@ -314,7 +314,7 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 				return err
 			}
 			id++
-			return tx.Delete(kv.EthTx, k, nil)
+			return tx.Delete(kv.EthTx, k)
 		}); err != nil {
 			return err
 		}

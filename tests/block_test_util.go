@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -111,7 +112,10 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
-	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
+	if config.TerminalTotalDifficulty != nil {
+		engine = serenity.New(engine) // the Merge
+	}
+	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine, false)
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
@@ -184,7 +188,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, Length: 1}
+		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 		if err1 := m.InsertChain(chain); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block

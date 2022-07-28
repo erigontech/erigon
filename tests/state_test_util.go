@@ -76,6 +76,7 @@ type stPostState struct {
 type stEnv struct {
 	Coinbase   common.Address `json:"currentCoinbase"   gencodec:"required"`
 	Difficulty *big.Int       `json:"currentDifficulty" gencodec:"required"`
+	Random     *big.Int       `json:"currentRandom"     gencodec:"optional"`
 	GasLimit   uint64         `json:"currentGasLimit"   gencodec:"required"`
 	Number     uint64         `json:"currentNumber"     gencodec:"required"`
 	Timestamp  uint64         `json:"currentTimestamp"  gencodec:"required"`
@@ -85,6 +86,7 @@ type stEnv struct {
 type stEnvMarshaling struct {
 	Coinbase   common.UnprefixedAddress
 	Difficulty *math.HexOrDecimal256
+	Random     *math.HexOrDecimal256
 	GasLimit   math.HexOrDecimal64
 	Number     math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
@@ -196,6 +198,10 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
 		context.BaseFee.SetFromBig(baseFee)
+	}
+	if t.json.Env.Random != nil {
+		rnd := common.BigToHash(t.json.Env.Random)
+		context.PrevRanDao = &rnd
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 

@@ -509,7 +509,7 @@ func TestAnchorReplace2(t *testing.T) {
 }
 
 func TestForkchoiceToGenesis(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, false)
 
 	// Trivial forkChoice: everything points to genesis
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -519,7 +519,8 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -530,7 +531,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 }
 
 func TestBogusForkchoice(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, false)
 
 	// Bogus forkChoice: head points to rubbish
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -540,7 +541,8 @@ func TestBogusForkchoice(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -555,7 +557,7 @@ func TestBogusForkchoice(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -564,7 +566,7 @@ func TestBogusForkchoice(t *testing.T) {
 }
 
 func TestPoSDownloader(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -573,7 +575,9 @@ func TestPoSDownloader(t *testing.T) {
 
 	// Send a payload whose parent isn't downloaded yet
 	m.SendPayloadRequest(chain.TopBlock)
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -593,12 +597,12 @@ func TestPoSDownloader(t *testing.T) {
 	m.ReceiveWg.Wait()
 
 	// First cycle: save the downloaded header
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
 	// Second cycle: process the previous beacon request
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
@@ -610,7 +614,7 @@ func TestPoSDownloader(t *testing.T) {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -621,7 +625,7 @@ func TestPoSDownloader(t *testing.T) {
 
 // https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 func TestPoSSyncWithInvalidHeader(t *testing.T) {
-	m := stages.MockWithZeroTTD(t)
+	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -639,7 +643,9 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	// Send a payload with the parent missing
 	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil)
 	m.SendPayloadRequest(payloadMessage)
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -658,7 +664,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	}
 	m.ReceiveWg.Wait()
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -669,7 +675,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 
 	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())

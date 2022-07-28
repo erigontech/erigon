@@ -283,7 +283,7 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
 	)
-	m := stages.MockWithGenesis(nil, gspec, key)
+	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -412,7 +412,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	m2 := stages.MockWithGenesis(nil, gspec, key)
+	m2 := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {
@@ -427,7 +427,7 @@ func initialState1() error {
 
 	// BLOCKS
 
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}

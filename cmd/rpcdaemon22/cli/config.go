@@ -210,7 +210,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader services.FullBlockReader, ethBackendServer remote.ETHBACKENDServer,
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader services.FullBlockReader, snapshots remotedbserver.Snapsthots, ethBackendServer remote.ETHBACKENDServer,
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
 ) (
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, err error,
@@ -220,9 +220,8 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-	_ = stateDiffClient
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
@@ -344,39 +343,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 	}
 
-	onNewSnapshot := func() {}
-	if cfg.WithDatadir {
-		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			allSnapshots.OptimisticReopen()
-			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
-			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
-						txNums[blockNum] = baseTxNum + txAmount
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
-			// don't reopen it right here, because snapshots may be not ready yet
-			onNewSnapshot = func() {
-				if err := allSnapshots.Reopen(); err != nil {
-					log.Error("[Snapshots] reopen", "err", err)
-				} else {
-					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
-				}
-			}
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-		} else {
-			log.Info("Use --snapshots=false")
-		}
-	}
-
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("open tls cert: %w", err)
@@ -393,6 +359,45 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
+
+	onNewSnapshot := func() {}
+	if cfg.WithDatadir {
+		if cfg.Snap.Enabled {
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			onNewSnapshot = func() {
+				go func() { // don't block events processing by network communication
+					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+					if err != nil {
+						log.Warn("[Snapshots] reopen", "err", err)
+						return
+					}
+					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+						log.Error("[Snapshots] reopen", "err", err)
+					} else {
+						allSnapshots.LogStat()
+					}
+				}()
+			}
+			onNewSnapshot()
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
+			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+				for _, b := range bs {
+					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+						txNums[blockNum] = baseTxNum + txAmount
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+		} else {
+			log.Info("Use --snapshots=false")
+		}
+	}
 
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))

@@ -119,8 +119,8 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 
 	reader := bytes.NewReader(nil)
 
-	if endBlock != 0 {
-		log.Info(fmt.Sprintf("[%s] Running from blocks %d to %d", logPrefix, start, endBlock), "endBlock", endBlock)
+	if endBlock != 0 && endBlock-start > 100 {
+		log.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock)
 	}
 
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {

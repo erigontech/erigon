@@ -310,7 +310,7 @@ func chainWithDeployedContract(t *testing.T) (kv.RwDB, common.Address, common.Ad
 			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, bankKey)
+	m := stages.MockWithGenesis(t, gspec, bankKey, false)
 	db := m.DB
 
 	var contractAddr common.Address

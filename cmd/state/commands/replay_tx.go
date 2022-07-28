@@ -42,9 +42,9 @@ var replayTxCmd = &cobra.Command{
 func ReplayTx(genesis *core.Genesis) error {
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
-	if err := allSnapshots.Reopen(); err != nil {
+	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
@@ -103,8 +103,8 @@ func ReplayTx(genesis *core.Genesis) error {
 		txNum = txnum
 	}
 	fmt.Printf("txNum = %d\n", txNum)
-	aggPath := filepath.Join(datadir, "erigon23")
-	agg, err := libstate.NewAggregator(aggPath, AggregationStep)
+	aggPath := filepath.Join(datadir, "agg22")
+	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -119,7 +119,7 @@ func ReplayTx(genesis *core.Genesis) error {
 }
 
 func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader,
-	txNum uint64, txNums []uint64, rs *state.ReconState, ac *libstate.AggregatorContext,
+	txNum uint64, txNums []uint64, rs *state.ReconState, ac *libstate.Aggregator22Context,
 ) error {
 	bn := uint64(sort.Search(len(txNums), func(i int) bool {
 		return txNums[i] > txNum

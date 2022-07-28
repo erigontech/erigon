@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -138,7 +139,7 @@ func SpawnStageHeaders(
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -152,12 +153,19 @@ func HeadersPOS(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	initialCycle bool,
+	test bool,
 	useExternalTx bool,
 ) error {
+	if initialCycle {
+		// Let execution and other stages to finish before waiting for CL
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
 
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -172,6 +180,11 @@ func HeadersPOS(
 		return nil
 	}
 
+	if requestWithStatus == nil {
+		log.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", s.LogPrefix()))
+		return nil
+	}
+
 	request := requestWithStatus.Message
 	requestStatus := requestWithStatus.Status
 
@@ -182,10 +195,10 @@ func HeadersPOS(
 
 	var payloadStatus *engineapi.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter)
 	} else {
 		payloadMessage := request.(*types.Block)
-		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, headerInserter)
+		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, test, headerInserter)
 	}
 
 	if err != nil {
@@ -201,8 +214,13 @@ func HeadersPOS(
 		}
 	}
 
-	if requestStatus == engineapi.New {
-		cfg.hd.SetPendingPayloadStatus(payloadStatus)
+	if requestStatus == engineapi.New && payloadStatus != nil {
+		if payloadStatus.Status == remote.EngineStatus_SYNCING || payloadStatus.Status == remote.EngineStatus_ACCEPTED || !useExternalTx {
+			cfg.hd.PayloadStatusCh <- *payloadStatus
+		} else {
+			// Let the stage loop run to the end so that the transaction is committed prior to replying to CL
+			cfg.hd.SetPendingPayloadStatus(payloadStatus)
+		}
 	}
 
 	return nil
@@ -256,6 +274,7 @@ func startHandlingForkChoice(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	if cfg.memoryOverlay {
@@ -295,8 +314,12 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
-		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+		} else {
+			cfg.hd.SetPoSDownloaderTip(headerHash)
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -406,6 +429,7 @@ func handleNewPayload(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
+	test bool,
 	headerInserter *headerdownload.HeaderInserter,
 ) (*engineapi.PayloadStatus, error) {
 	header := block.Header()
@@ -421,9 +445,33 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
+		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+			// so that we will perform full validation.
+			success := false
+			for i := 0; i < 10; i++ {
+				time.Sleep(10 * time.Millisecond)
+				if cfg.hd.PosStatus() == headerdownload.Synced {
+					success = true
+					break
+				}
+			}
+			if success {
+				// If we downloaded the headers in time, then save them and proceed with the new header
+				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+			} else {
+				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+			}
+		} else {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
@@ -454,6 +502,12 @@ func verifyAndSaveNewPoSHeader(
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
+
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	if bad {
+		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, false, nil
+	}
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
@@ -620,7 +674,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
 		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)
 	} else {
-		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
+		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId(), "fork head", lastValidHash)
 	}
 
 	cfg.hd.HeadersCollector().Close()
@@ -651,7 +705,7 @@ func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, 
 		if interrupt == engineapi.Stopping {
 			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
 		}
-		if interrupt == engineapi.Synced {
+		if interrupt == engineapi.Synced && cfg.hd.HeadersCollector() != nil {
 			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 		}
 		if !useExternalTx {
@@ -1103,20 +1157,21 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
-	if cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled || !initialCycle {
+	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
 	}
 
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if err := cfg.snapshots.Reopen(); err != nil {
+	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
 
-	var m runtime.MemStats
-	libcommon.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "segments", cfg.snapshots.SegmentsMax(), "indices", cfg.snapshots.IndicesMax(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	cfg.snapshots.LogStat()
 
 	// Create .idx files
 	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
@@ -1132,18 +1187,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-					return fmt.Errorf("BuildIndices: %w", err)
+				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
 
-			if err := cfg.snapshots.Reopen(); err != nil {
-				return fmt.Errorf("ReopenIndices: %w", err)
+			if err := cfg.snapshots.ReopenFolder(); err != nil {
+				return err
+			}
+			if cfg.dbEventNotifier != nil {
+				cfg.dbEventNotifier.OnNewSnapshot()
 			}
 		}
-	}
-	if cfg.dbEventNotifier != nil {
-		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
@@ -1245,21 +1300,12 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	}
 
 	// send all hashes to the Downloader service
-	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName).Preverified
-	i := 0
+	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB).Preverified
 	var downloadRequest []snapshotsync.DownloadRequest
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverified {
-		_, has := snInDB[p.Name]
-		if !dbEmpty && !has {
-			continue
-		}
-		if dbEmpty {
-			snInDB[p.Name] = p.Hash
-		}
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
-		i++
 	}
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
@@ -1273,7 +1319,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if err := snapshotsync.RequestSnapshotDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+		if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
 			continue

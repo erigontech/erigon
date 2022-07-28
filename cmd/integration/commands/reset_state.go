@@ -12,6 +12,7 @@ import (
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ var cmdResetState = &cobra.Command{
 		logger := log.New()
 		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
 			return err
 		}
 
@@ -37,7 +38,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
 			return err
 		}
 
@@ -52,7 +53,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(db kv.Tx) error {
+func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -107,6 +108,9 @@ func printStages(db kv.Tx) error {
 			fmt.Fprintf(w, "no bodies in db\n\n")
 		}
 	}
+
+	fmt.Fprintf(w, "--\n")
+	fmt.Fprintf(w, "snapsthos: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 
 	return nil
 }
