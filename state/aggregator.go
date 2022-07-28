@@ -32,13 +32,15 @@ type Aggregator struct {
 	accounts        *Domain
 	storage         *Domain
 	code            *Domain
+	accountsHistory *History
+	storageHistory  *History
+	codeHistory     *History
 	logAddrs        *InvertedIndex
 	logTopics       *InvertedIndex
 	tracesFrom      *InvertedIndex
 	tracesTo        *InvertedIndex
 	txNum           uint64
 	rwTx            kv.RwTx
-	keyBuf          []byte
 }
 
 func NewAggregator(
@@ -62,6 +64,15 @@ func NewAggregator(
 		return nil, err
 	}
 	if a.code, err = NewDomain(dir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx, 0 /* prefixLen */, true /* compressVals */); err != nil {
+		return nil, err
+	}
+	if a.accountsHistory, err = NewHistory(dir, aggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings, false /* compressVals */); err != nil {
+		return nil, err
+	}
+	if a.storageHistory, err = NewHistory(dir, aggregationStep, "storage", kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings, false /* compressVals */); err != nil {
+		return nil, err
+	}
+	if a.codeHistory, err = NewHistory(dir, aggregationStep, "code", kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings, true /* compressVals */); err != nil {
 		return nil, err
 	}
 	if a.logAddrs, err = NewInvertedIndex(dir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx); err != nil {
@@ -97,6 +108,15 @@ func (a *Aggregator) Close() {
 	}
 	if a.code != nil {
 		a.code.Close()
+	}
+	if a.accountsHistory != nil {
+		a.accountsHistory.Close()
+	}
+	if a.storageHistory != nil {
+		a.storageHistory.Close()
+	}
+	if a.codeHistory != nil {
+		a.codeHistory.Close()
 	}
 	if a.logAddrs != nil {
 		a.logAddrs.Close()
@@ -368,38 +388,32 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 }
 
 type SelectedStaticFiles struct {
-	accounts    [][NumberOfTypes]*filesItem
-	accountsI   int
-	storage     [][NumberOfTypes]*filesItem
-	storageI    int
-	code        [][NumberOfTypes]*filesItem
-	codeI       int
-	logAddrs    []*filesItem
-	logAddrsI   int
-	logTopics   []*filesItem
-	logTopicsI  int
-	tracesFrom  []*filesItem
-	tracesFromI int
-	tracesTo    []*filesItem
-	tracesToI   int
+	accounts                  []*filesItem
+	accountsIdx, accountsHist []*filesItem
+	accountsI                 int
+	storage                   []*filesItem
+	storageIdx, storageHist   []*filesItem
+	storageI                  int
+	code                      []*filesItem
+	codeIdx, codeHist         []*filesItem
+	codeI                     int
+	logAddrs                  []*filesItem
+	logAddrsI                 int
+	logTopics                 []*filesItem
+	logTopicsI                int
+	tracesFrom                []*filesItem
+	tracesFromI               int
+	tracesTo                  []*filesItem
+	tracesToI                 int
 }
 
 func (sf SelectedStaticFiles) Close() {
-	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		for _, group := range [][][NumberOfTypes]*filesItem{sf.accounts, sf.storage, sf.code} {
-			for _, items := range group {
-				if items[fType] != nil {
-					if items[fType].decompressor != nil {
-						items[fType].decompressor.Close()
-					}
-					if items[fType].decompressor != nil {
-						items[fType].index.Close()
-					}
-				}
-			}
-		}
-	}
-	for _, group := range [][]*filesItem{sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
+	for _, group := range [][]*filesItem{
+		sf.accounts, sf.accountsIdx, sf.accountsHist,
+		sf.storage, sf.storageIdx, sf.storageHist,
+		sf.code, sf.codeIdx, sf.codeHist,
+		sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo,
+	} {
 		for _, item := range group {
 			if item != nil {
 				if item.decompressor != nil {
@@ -416,13 +430,13 @@ func (sf SelectedStaticFiles) Close() {
 func (a *Aggregator) staticFilesInRange(r Ranges) SelectedStaticFiles {
 	var sf SelectedStaticFiles
 	if r.accounts.any() {
-		sf.accounts, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
+		sf.accounts, sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
 	}
 	if r.storage.any() {
-		sf.storage, sf.storageI = a.storage.staticFilesInRange(r.storage)
+		sf.storage, sf.storageIdx, sf.storageHist, sf.storageI = a.storage.staticFilesInRange(r.storage)
 	}
 	if r.code.any() {
-		sf.code, sf.codeI = a.code.staticFilesInRange(r.code)
+		sf.code, sf.codeIdx, sf.codeHist, sf.codeI = a.code.staticFilesInRange(r.code)
 	}
 	if r.logAddrs {
 		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
@@ -440,29 +454,25 @@ func (a *Aggregator) staticFilesInRange(r Ranges) SelectedStaticFiles {
 }
 
 type MergedFiles struct {
-	accounts   [NumberOfTypes]*filesItem
-	storage    [NumberOfTypes]*filesItem
-	code       [NumberOfTypes]*filesItem
-	logAddrs   *filesItem
-	logTopics  *filesItem
-	tracesFrom *filesItem
-	tracesTo   *filesItem
+	accounts                  *filesItem
+	accountsIdx, accountsHist *filesItem
+	storage                   *filesItem
+	storageIdx, storageHist   *filesItem
+	code                      *filesItem
+	codeIdx, codeHist         *filesItem
+	logAddrs                  *filesItem
+	logTopics                 *filesItem
+	tracesFrom                *filesItem
+	tracesTo                  *filesItem
 }
 
 func (mf MergedFiles) Close() {
-	for fType := FileType(0); fType < NumberOfTypes; fType++ {
-		for _, items := range [][NumberOfTypes]*filesItem{mf.accounts, mf.storage, mf.code} {
-			if items[fType] != nil {
-				if items[fType].decompressor != nil {
-					items[fType].decompressor.Close()
-				}
-				if items[fType].decompressor != nil {
-					items[fType].index.Close()
-				}
-			}
-		}
-	}
-	for _, item := range []*filesItem{mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
+	for _, item := range []*filesItem{
+		mf.accounts, mf.accountsIdx, mf.accountsHist,
+		mf.storage, mf.storageIdx, mf.storageHist,
+		mf.code, mf.codeIdx, mf.codeHist,
+		mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo,
+	} {
 		if item != nil {
 			if item.decompressor != nil {
 				item.decompressor.Close()
@@ -489,7 +499,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.accounts.any() {
-			if mf.accounts, err = a.accounts.mergeFiles(files.accounts, r.accounts, maxSpan); err != nil {
+			if mf.accounts, mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(files.accounts, files.accountsIdx, files.accountsHist, r.accounts, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -498,7 +508,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.storage.any() {
-			if mf.storage, err = a.storage.mergeFiles(files.storage, r.storage, maxSpan); err != nil {
+			if mf.storage, mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(files.storage, files.storageIdx, files.storageHist, r.storage, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -507,7 +517,7 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 		defer wg.Done()
 		var err error
 		if r.code.any() {
-			if mf.code, err = a.code.mergeFiles(files.code, r.code, maxSpan); err != nil {
+			if mf.code, mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(files.code, files.codeIdx, files.codeHist, r.code, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -563,9 +573,9 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 }
 
 func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFiles) {
-	a.accounts.integrateMergedFiles(outs.accounts, in.accounts)
-	a.storage.integrateMergedFiles(outs.storage, in.storage)
-	a.code.integrateMergedFiles(outs.code, in.code)
+	a.accounts.integrateMergedFiles(outs.accounts, outs.accountsIdx, outs.accountsHist, in.accounts, in.accountsIdx, in.accountsHist)
+	a.storage.integrateMergedFiles(outs.storage, outs.storageIdx, outs.storageHist, in.storage, in.storageIdx, in.storageHist)
+	a.code.integrateMergedFiles(outs.code, outs.codeIdx, outs.codeHist, in.code, in.codeIdx, in.codeHist)
 	a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
 	a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
@@ -573,13 +583,13 @@ func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFil
 }
 
 func (a *Aggregator) deleteFiles(outs SelectedStaticFiles) error {
-	if err := a.accounts.deleteFiles(outs.accounts); err != nil {
+	if err := a.accounts.deleteFiles(outs.accounts, outs.accountsIdx, outs.accountsHist); err != nil {
 		return err
 	}
-	if err := a.storage.deleteFiles(outs.storage); err != nil {
+	if err := a.storage.deleteFiles(outs.storage, outs.storageIdx, outs.storageHist); err != nil {
 		return err
 	}
-	if err := a.code.deleteFiles(outs.code); err != nil {
+	if err := a.code.deleteFiles(outs.code, outs.codeIdx, outs.codeHist); err != nil {
 		return err
 	}
 	if err := a.logAddrs.deleteFiles(outs.logAddrs); err != nil {
@@ -598,7 +608,7 @@ func (a *Aggregator) deleteFiles(outs SelectedStaticFiles) error {
 }
 
 func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.Get(addr, roTx)
+	return ac.accounts.Get(addr, nil, roTx)
 }
 
 func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -606,14 +616,7 @@ func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint6
 }
 
 func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.Get(ac.keyBuf, roTx)
+	return ac.storage.Get(addr, loc, roTx)
 }
 
 func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -628,7 +631,7 @@ func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []by
 }
 
 func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.code.Get(addr, roTx)
+	return ac.code.Get(addr, nil, roTx)
 }
 
 func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -636,7 +639,7 @@ func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint6
 }
 
 func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
-	code, err := ac.code.Get(addr, roTx)
+	code, err := ac.code.Get(addr, nil, roTx)
 	if err != nil {
 		return 0, err
 	}
@@ -715,27 +718,27 @@ func (a *Aggregator) FinishTx() error {
 }
 
 func (a *Aggregator) UpdateAccountData(addr []byte, account []byte) error {
-	return a.accounts.Put(addr, account)
+	return a.accounts.Put(addr, nil, account)
 }
 
 func (a *Aggregator) UpdateAccountCode(addr []byte, code []byte) error {
 	if len(code) == 0 {
-		return a.code.Delete(addr)
+		return a.code.Delete(addr, nil)
 	}
-	return a.code.Put(addr, code)
+	return a.code.Put(addr, nil, code)
 }
 
 func (a *Aggregator) DeleteAccount(addr []byte) error {
-	if err := a.accounts.Delete(addr); err != nil {
+	if err := a.accounts.Delete(addr, nil); err != nil {
 		return err
 	}
-	if err := a.code.Delete(addr); err != nil {
+	if err := a.code.Delete(addr, nil); err != nil {
 		return err
 	}
 	var e error
 	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
 		if e == nil {
-			e = a.storage.Delete(k)
+			e = a.storage.Delete(k, nil)
 		}
 	}); err != nil {
 		return err
@@ -744,17 +747,10 @@ func (a *Aggregator) DeleteAccount(addr []byte) error {
 }
 
 func (a *Aggregator) WriteAccountStorage(addr, loc []byte, value []byte) error {
-	if cap(a.keyBuf) < len(addr)+len(loc) {
-		a.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(a.keyBuf) != len(addr)+len(loc) {
-		a.keyBuf = a.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(a.keyBuf, addr)
-	copy(a.keyBuf[len(addr):], loc)
 	if len(value) == 0 {
-		return a.storage.Delete(a.keyBuf)
+		return a.storage.Delete(addr, loc)
 	}
-	return a.storage.Put(a.keyBuf, value)
+	return a.storage.Put(addr, loc, value)
 }
 
 func (a *Aggregator) AddTraceFrom(addr []byte) error {
@@ -798,44 +794,38 @@ func (a *Aggregator) Stats() FilesStats {
 }
 
 type AggregatorContext struct {
-	a          *Aggregator
-	accounts   *DomainContext
-	storage    *DomainContext
-	code       *DomainContext
-	logAddrs   *InvertedIndexContext
-	logTopics  *InvertedIndexContext
-	tracesFrom *InvertedIndexContext
-	tracesTo   *InvertedIndexContext
-	keyBuf     []byte
+	a               *Aggregator
+	accounts        *DomainContext
+	storage         *DomainContext
+	code            *DomainContext
+	accountsHistory *HistoryContext
+	storageHistory  *HistoryContext
+	codeHistory     *HistoryContext
+	logAddrs        *InvertedIndexContext
+	logTopics       *InvertedIndexContext
+	tracesFrom      *InvertedIndexContext
+	tracesTo        *InvertedIndexContext
+	keyBuf          []byte
 }
 
 func (a *Aggregator) MakeContext() *AggregatorContext {
 	return &AggregatorContext{
-		a:          a,
-		accounts:   a.accounts.MakeContext(),
-		storage:    a.storage.MakeContext(),
-		code:       a.code.MakeContext(),
-		logAddrs:   a.logAddrs.MakeContext(),
-		logTopics:  a.logTopics.MakeContext(),
-		tracesFrom: a.tracesFrom.MakeContext(),
-		tracesTo:   a.tracesTo.MakeContext(),
+		a:               a,
+		accounts:        a.accounts.MakeContext(),
+		storage:         a.storage.MakeContext(),
+		code:            a.code.MakeContext(),
+		accountsHistory: a.accountsHistory.MakeContext(),
+		storageHistory:  a.storageHistory.MakeContext(),
+		codeHistory:     a.codeHistory.MakeContext(),
+		logAddrs:        a.logAddrs.MakeContext(),
+		logTopics:       a.logTopics.MakeContext(),
+		tracesFrom:      a.tracesFrom.MakeContext(),
+		tracesTo:        a.tracesTo.MakeContext(),
 	}
 }
 
-func (ac *AggregatorContext) IterateAccountsReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.accounts.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateStorageReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.storage.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateCodeReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.code.iterateReconTxs(fromKey, toKey, txNum)
-}
-
 func (ac *AggregatorContext) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	return ac.accounts.GetNoState(addr, txNum)
+	return ac.accountsHistory.GetNoState(addr, txNum)
 }
 
 func (ac *AggregatorContext) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64, error) {
@@ -846,15 +836,15 @@ func (ac *AggregatorContext) ReadAccountStorageNoState(addr []byte, loc []byte, 
 	}
 	copy(ac.keyBuf, addr)
 	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.GetNoState(ac.keyBuf, txNum)
+	return ac.storageHistory.GetNoState(ac.keyBuf, txNum)
 }
 
 func (ac *AggregatorContext) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
-	return ac.code.GetNoState(addr, txNum)
+	return ac.codeHistory.GetNoState(addr, txNum)
 }
 
 func (ac *AggregatorContext) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64, error) {
-	code, noState, stateTxNum, err := ac.code.GetNoState(addr, txNum)
+	code, noState, stateTxNum, err := ac.codeHistory.GetNoState(addr, txNum)
 	if err != nil {
 		return 0, false, 0, err
 	}
@@ -862,7 +852,7 @@ func (ac *AggregatorContext) ReadAccountCodeSizeNoState(addr []byte, txNum uint6
 }
 
 func (ac *AggregatorContext) MaxAccountsTxNum(addr []byte) (bool, uint64) {
-	return ac.accounts.MaxTxNum(addr)
+	return ac.accountsHistory.MaxTxNum(addr)
 }
 
 func (ac *AggregatorContext) MaxStorageTxNum(addr []byte, loc []byte) (bool, uint64) {
@@ -873,21 +863,9 @@ func (ac *AggregatorContext) MaxStorageTxNum(addr []byte, loc []byte) (bool, uin
 	}
 	copy(ac.keyBuf, addr)
 	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.MaxTxNum(ac.keyBuf)
+	return ac.storageHistory.MaxTxNum(ac.keyBuf)
 }
 
 func (ac *AggregatorContext) MaxCodeTxNum(addr []byte) (bool, uint64) {
-	return ac.code.MaxTxNum(addr)
-}
-
-func (ac *AggregatorContext) IterateAccountsHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.accounts.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateStorageHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.storage.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *AggregatorContext) IterateCodeHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.code.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
+	return ac.codeHistory.MaxTxNum(addr)
 }

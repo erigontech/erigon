@@ -41,7 +41,7 @@ type InvertedIndex struct {
 	dir             string // Directory where static files are created
 	aggregationStep uint64
 	filenameBase    string
-	keysTable       string
+	indexKeysTable  string
 	indexTable      string // Needs to be table with DupSort
 	tx              kv.RwTx
 	txNum           uint64
@@ -52,14 +52,14 @@ func NewInvertedIndex(
 	dir string,
 	aggregationStep uint64,
 	filenameBase string,
-	keysTable string,
+	indexKeysTable string,
 	indexTable string,
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
 		dir:             dir,
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
-		keysTable:       keysTable,
+		indexKeysTable:  indexKeysTable,
 		indexTable:      indexTable,
 	}
 	ii.files = btree.NewG[*filesItem](32, filesItemLess)
@@ -162,7 +162,7 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 func (ii *InvertedIndex) add(key, indexKey []byte) error {
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], ii.txNum)
-	if err := ii.tx.Put(ii.keysTable, txKey[:], key); err != nil {
+	if err := ii.tx.Put(ii.indexKeysTable, txKey[:], key); err != nil {
 		return err
 	}
 	if err := ii.tx.Put(ii.indexTable, indexKey, txKey[:]); err != nil {
@@ -343,7 +343,7 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum ui
 }
 
 func (ii *InvertedIndex) collate(txFrom, txTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
-	keysCursor, err := roTx.CursorDupSort(ii.keysTable)
+	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return nil, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
@@ -460,7 +460,7 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 
 // [txFrom; txTo)
 func (ii *InvertedIndex) prune(txFrom, txTo uint64) error {
-	keysCursor, err := ii.tx.RwCursorDupSort(ii.keysTable)
+	keysCursor, err := ii.tx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}

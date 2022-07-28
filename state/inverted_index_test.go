@@ -169,7 +169,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	ii.SetTx(tx)
 
-	for _, table := range []string{ii.keysTable, ii.indexTable} {
+	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
 		var cur kv.Cursor
 		cur, err = tx.Cursor(table)
 		require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	ii.Close()
 	// Recreate InvertedIndex to scan the files
 	var err error
-	ii, err = NewInvertedIndex(path, ii.aggregationStep, ii.filenameBase, ii.keysTable, ii.indexTable)
+	ii, err = NewInvertedIndex(path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable)
 	require.NoError(t, err)
 
 	mergeInverted(t, db, ii, txs)
