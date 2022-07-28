@@ -2,17 +2,19 @@
 package node
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
+	"fmt"
+	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
 )
@@ -91,6 +93,7 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	return nodeConfig
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
+	defer func(t time.Time) { fmt.Printf("node.go:97: %s\n", time.Since(t)) }(time.Now())
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, nodeConfig, ethConfig)
 	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)

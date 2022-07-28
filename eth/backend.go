@@ -29,12 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"golang.org/x/exp/slices"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -69,6 +63,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -79,13 +74,17 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -788,41 +787,42 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
-	var err error
-
-	if isSnapshotEnabled {
-		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-		allSnapshots.OptimisticReopen()
-		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-		if !cfg.Snapshot.NoDownloader {
-			if cfg.Snapshot.DownloaderAddr != "" {
-				// connect to external Downloader
-				s.downloaderClient, err = downloadergrpc.NewClient(ctx, cfg.Snapshot.DownloaderAddr)
-			} else {
-				// start embedded Downloader
-				s.downloader, err = downloader.New(cfg.Downloader)
-				if err != nil {
-					return nil, nil, err
-				}
-				go downloader.MainLoop(ctx, s.downloader, true)
-				bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
-				if err != nil {
-					return nil, nil, fmt.Errorf("new server: %w", err)
-				}
-
-				s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-			}
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		return blockReader, allSnapshots, nil
-	} else {
+	if !isSnapshotEnabled {
 		blockReader := snapshotsync.NewBlockReader()
 		return blockReader, nil, nil
 	}
 
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
+	_, err := snapshotsync.EnforceSnapshotsInvariant(s.chainDB, cfg.Dirs.Snap, allSnapshots, s.notifications.Events)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+	if !cfg.Snapshot.NoDownloader {
+		if cfg.Snapshot.DownloaderAddr != "" {
+			// connect to external Downloader
+			s.downloaderClient, err = downloadergrpc.NewClient(ctx, cfg.Snapshot.DownloaderAddr)
+		} else {
+			// start embedded Downloader
+			s.downloader, err = downloader.New(cfg.Downloader)
+			if err != nil {
+				return nil, nil, err
+			}
+			go downloader.MainLoop(ctx, s.downloader, true)
+			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+			if err != nil {
+				return nil, nil, fmt.Errorf("new server: %w", err)
+			}
+
+			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return blockReader, allSnapshots, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
@@ -830,7 +830,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
-			return nil, fmt.Errorf("Ethereum backend MultiClient.Peers error: %w", err)
+			return nil, fmt.Errorf("ethereum backend MultiClient.Peers error: %w", err)
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
@@ -880,7 +880,7 @@ func (s *Ethereum) Stop() error {
 	}
 	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
 
-	s.engine.Close()
+	_ = s.engine.Close()
 	<-s.waitForStageLoopStop
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
