@@ -1046,6 +1046,28 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 	return info.Geo.Current, err
 }
 
+func (tx *MdbxTx) Reset() (err error) {
+	tx.Rollback()
+	//tx.printDebugInfo()
+	if tx.db.closed.Load() {
+		return fmt.Errorf("db closed")
+	}
+	runtime.LockOSThread()
+	defer func() {
+		if err == nil {
+			tx.db.wg.Add(1)
+		}
+	}()
+
+	tx.tx, err = tx.db.env.BeginTxn(nil, 0)
+	if err != nil {
+		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		return fmt.Errorf("%w, lable: %s, trace: %s", err, tx.db.opts.label.String(), stack2.Trace().String())
+	}
+	tx.tx.RawRead = true
+	return nil
+}
+
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
