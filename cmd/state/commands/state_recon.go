@@ -136,6 +136,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
 		misc.ApplyDAOHardFork(ibs)
