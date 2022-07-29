@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"io/ioutil"
 	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"gopkg.in/yaml.v3"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -315,6 +317,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
+
+	apis := ctx.GlobalString(utils.HTTPApiFlag.Name)
+	log.Info("starting HTTP APIs", "APIs", apis)
+
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
 		Dirs:    cfg.Dirs,
@@ -331,7 +337,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TraceRequests:           ctx.GlobalBool(utils.HTTPTraceFlag.Name),
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
-		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
+		API:                     strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.GlobalDuration(HTTPWriteTimeoutFlag.Name),
@@ -368,6 +374,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	} else {
 		c.WebsocketCompression = true
 	}
+
+	setFlagsFromYamlFile(ctx, c, ctx.GlobalString(utils.ConfigFileFlag.Name))
 
 	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
 
@@ -406,4 +414,18 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
 	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
+}
+
+func setFlagsFromYamlFile(ctx *cli.Context, httpCfg *httpcfg.HttpCfg, filePath string) error {
+	yamlFile, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	yamlFileConfig := make(map[interface{}]interface{})
+	err = yaml.Unmarshal(yamlFile, yamlFileConfig)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
