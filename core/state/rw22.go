@@ -50,7 +50,7 @@ type TxTask struct {
 	TraceTos           map[common.Address]struct{}
 }
 
-type TxTaskQueue []TxTask
+type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
 	return len(h)
@@ -65,7 +65,7 @@ func (h TxTaskQueue) Swap(i, j int) {
 }
 
 func (h *TxTaskQueue) Push(a interface{}) {
-	*h = append(*h, a.(TxTask))
+	*h = append(*h, a.(*TxTask))
 }
 
 func (h *TxTaskQueue) Pop() interface{} {
@@ -79,7 +79,7 @@ const CodeSizeTable = "CodeSize"
 type State22 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
-	triggers     map[uint64]TxTask
+	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
@@ -101,7 +101,7 @@ func stateItemLess(i, j StateItem) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]TxTask{},
+		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[StateItem]{},
 	}
@@ -165,19 +165,19 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *State22) Schedule() (TxTask, bool) {
+func (rs *State22) Schedule() (*TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(TxTask), true
+		return heap.Pop(&rs.queue).(*TxTask), true
 	}
-	return TxTask{}, false
+	return nil, false
 }
 
-func (rs *State22) RegisterSender(txTask TxTask) bool {
+func (rs *State22) RegisterSender(txTask *TxTask) bool {
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
@@ -214,7 +214,7 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *State22) AddWork(txTask TxTask) {
+func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	txTask.ReadLists = nil
 	txTask.WriteLists = nil
@@ -301,7 +301,7 @@ func serialise2(a *accounts.Account) []byte {
 	return value
 }
 
-func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)

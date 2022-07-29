@@ -82,7 +82,7 @@ type Worker22 struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
-	resultCh     chan state.TxTask
+	resultCh     chan *state.TxTask
 	epoch        epochReader
 	chain        chainReader
 }
@@ -90,7 +90,7 @@ type Worker22 struct {
 func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
-	resultCh chan state.TxTask, engine consensus.Engine,
+	resultCh chan *state.TxTask, engine consensus.Engine,
 ) *Worker22 {
 	return &Worker22{
 		lock:         lock,
@@ -133,7 +133,7 @@ func (rw *Worker22) run() {
 		return h
 	}
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
-		rw.runTxTask(&txTask)
+		rw.runTxTask(txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
 	}
 }
@@ -262,7 +262,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *libstate.Aggregator22, applyTx kv.Tx,
 	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
-		txTask := heap.Pop(rws).(state.TxTask)
+		txTask := heap.Pop(rws).(*state.TxTask)
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
 			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
@@ -403,7 +403,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var lock sync.RWMutex
 	reconWorkers := make([]*Worker22, workerCount)
 	var wg sync.WaitGroup
-	resultCh := make(chan state.TxTask, queueSize)
+	resultCh := make(chan *state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewWorker22(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
 	}
@@ -532,7 +532,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 						}
 						// Drain results queue as well
 						for rws.Len() > 0 {
-							txTask := heap.Pop(&rws).(state.TxTask)
+							txTask := heap.Pop(&rws).(*state.TxTask)
 							atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
@@ -597,7 +597,7 @@ loop:
 					rwsReceiveCond.Wait()
 				}
 			}()
-			txTask := state.TxTask{
+			txTask := &state.TxTask{
 				Header:    header,
 				BlockNum:  blockNum,
 				Rules:     rules,
