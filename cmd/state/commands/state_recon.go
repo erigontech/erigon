@@ -38,10 +38,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
 )
 
 func init() {
 	withBlock(reconCmd)
+	withChain(reconCmd)
 	withDataDir(reconCmd)
 	rootCmd.AddCommand(reconCmd)
 }
@@ -69,14 +71,17 @@ type ReconWorker struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
+	epoch        epochReader
+	chain        chainReader
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 	a *libstate.Aggregator22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
-	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
+	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainTx kv.Tx,
 ) *ReconWorker {
 	ac := a.MakeContext()
-	return &ReconWorker{
+	rw := &ReconWorker{
 		lock:         lock,
 		wg:           wg,
 		rs:           rs,
@@ -88,7 +93,11 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		chainConfig:  chainConfig,
 		logger:       logger,
 		genesis:      genesis,
+		engine:       engine,
 	}
+	rw.epoch = epochReader{tx: chainTx}
+	rw.chain = chainReader{config: chainConfig, tx: chainTx, blockReader: blockReader}
+	return rw
 }
 
 func (rw *ReconWorker) SetTx(tx kv.Tx) {
@@ -104,7 +113,6 @@ func (rw *ReconWorker) run() {
 		}
 		return h
 	}
-	rw.engine = initConsensusEngine(rw.chainConfig, rw.logger, rw.allSnapshots)
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(txTask)
 	}
@@ -136,12 +144,19 @@ func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+			}
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+		}
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
@@ -374,6 +389,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	chainDbPath := path.Join(datadir, "chaindata")
+	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
+	if err != nil {
+		return err
+	}
 	var blockReader services.FullBlockReader
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
@@ -512,21 +533,28 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
+	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
 		for i := 0; i < workerCount; i++ {
 			if roTxs[i] != nil {
 				roTxs[i].Rollback()
 			}
+			if chainTxs[i] != nil {
+				chainTxs[i].Rollback()
+			}
 		}
 	}()
 	for i := 0; i < workerCount; i++ {
-		roTxs[i], err = db.BeginRo(ctx)
-		if err != nil {
+		if roTxs[i], err = db.BeginRo(ctx); err != nil {
+			return err
+		}
+		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
 			return err
 		}
 	}
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis)
+		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
