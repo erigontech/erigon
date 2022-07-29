@@ -2,12 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"io/ioutil"
 	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"gopkg.in/yaml.v3"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -321,10 +319,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	apis := ctx.GlobalString(utils.HTTPApiFlag.Name)
 	log.Info("starting HTTP APIs", "APIs", apis)
 
-	if err := setFlagsFromYamlFile(ctx, ctx.GlobalString(utils.ConfigFileFlag.Name)); err != nil {
-		log.Warn("failed setting config flags from yaml file", "err", err)
-	}
-
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
 		Dirs:    cfg.Dirs,
@@ -416,25 +410,4 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
 	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
-}
-
-func setFlagsFromYamlFile(ctx *cli.Context, filePath string) error {
-	yamlFile, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-	yamlFileConfig := make(map[string]string)
-	err = yaml.Unmarshal(yamlFile, yamlFileConfig)
-	if err != nil {
-		return err
-	}
-
-	for key, value := range yamlFileConfig {
-		err := ctx.GlobalSet(key, value)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
