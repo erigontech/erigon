@@ -177,12 +177,18 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), nil)
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+		}
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, nil); err != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+			}
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				txTask.Error = err
 			} else {
 				txTask.TraceTos = map[common.Address]struct{}{}
