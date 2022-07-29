@@ -344,7 +344,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	workerCount := 1
+	workerCount := 4
 	queueSize := workerCount * 4
 	workCh := make(chan state.TxTask, queueSize)
 
@@ -621,11 +621,7 @@ loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if workerCount > 1 {
-					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
-					}
-				} else {
+				if ok := rs.RegisterSender(txTask); ok {
 					rs.AddWork(txTask)
 				}
 			} else {
