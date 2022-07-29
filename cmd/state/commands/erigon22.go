@@ -291,8 +291,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	workerCount := runtime.NumCPU()
-	workCh := make(chan state.TxTask, 128)
+	workerCount := 4
+	queueSize := workerCount * 4
+	workCh := make(chan state.TxTask, queueSize)
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -358,7 +359,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var lock sync.RWMutex
 	reconWorkers := make([]*Worker22, workerCount)
 	var wg sync.WaitGroup
-	resultCh := make(chan state.TxTask, 128)
+	resultCh := make(chan state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewWorker22(lock.RLocker(), db, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
 	}
@@ -407,14 +408,9 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		}
 		agg.SetTx(applyTx)
 		defer rs.Finish()
-		var waiting, applying time.Duration
-		waitStart := time.Now()
-		var waitEnd time.Time
 		for outputTxNum < atomic.LoadUint64(&maxTxNum) {
 			select {
 			case txTask := <-resultCh:
-				waitEnd = time.Now()
-				waiting += (waitEnd.Sub(waitStart))
 				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				func() {
 					rwsLock.Lock()
@@ -424,8 +420,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 					rwsReceiveCond.Signal()
 				}()
-				waitStart = time.Now()
-				applying += waitStart.Sub(waitEnd)
 			case <-logEvery.C:
 				var m runtime.MemStats
 				libcommon.ReadMemStats(&m)
@@ -445,10 +439,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					"input block", atomic.LoadUint64(&inputBlockNum),
 					"blk/s", fmt.Sprintf("%.1f", speedBlock),
 					"tx/s", fmt.Sprintf("%.1f", speedTx),
-					"waiting", waiting,
-					"applying", applying,
-					//"repeats", repeatCount-prevRepeatCount,
-					//"triggered", triggerCount-prevTriggerCount,
 					"result queue", rws.Len(),
 					"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
@@ -529,8 +519,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				}
-				waiting = 0
-				applying = 0
 			}
 		}
 		if err = applyTx.Commit(); err != nil {
@@ -561,7 +549,7 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > 128 || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
 			}()
