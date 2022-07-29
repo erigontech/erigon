@@ -103,7 +103,13 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func aggregateResultsFromStateTests(ctx *cli.Context, stateTests map[string]tests.StateTest, results []StatetestResult, tracer vm.Tracer, debugger *vm.StructLogger) error {
+func aggregateResultsFromStateTests(
+	ctx *cli.Context,
+	stateTests map[string]tests.StateTest,
+	results []StatetestResult,
+	tracer vm.Tracer,
+	debugger *vm.StructLogger,
+) error {
 	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
 		Tracer: tracer,
@@ -174,4 +180,5 @@ func aggregateResultsFromStateTests(ctx *cli.Context, stateTests map[string]test
 			}
 		}
 	}
+	return nil
 }
