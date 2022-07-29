@@ -7,12 +7,12 @@ Service to seed/download historical data (snapshots, immutable .seg files) by Bi
 As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process.
 
 ```shell
-# 1. Downloader by default run inside Erigon, by `--snapshots=true` flag:
-erigon --snapshots=true --datadir=<your_datadir> 
+# 1. Downloader by default run inside Erigon, by `--snapshots` flag:
+erigon --snapshots --datadir=<your_datadir> 
 ```
 
 ```shell
-# 2. It's possible to start Downloader as independent process, by `--snapshots=true --downloader.api.addr=127.0.0.1:9093` flags:
+# 2. It's possible to start Downloader as independent process, by `--snapshots --downloader.api.addr=127.0.0.1:9093` flags:
 make erigon downloader 
 
 # Start downloader (can limit network usage by 512mb/sec: --torrent.download.rate=512mb --torrent.upload.rate=512mb)
@@ -21,7 +21,7 @@ downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<
 # --torrent.port=42068  - is for public BitTorrent protocol listen 
 
 # Erigon on startup does send list of .torrent files to Downloader and wait for 100% download accomplishment
-erigon --snapshots=true --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
+erigon --snapshots --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
 ```
 
 Use `--snap.keepblocks=true` to don't delete retired blocks from DB
@@ -32,7 +32,7 @@ Any network/chain can start with snapshot sync:
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
 
-Flag `--snapshots=true` is compatible with `--prune` flag
+Flag `--snapshots` is compatible with `--prune` flag
 
 ## How to create new network or bootnode
 
@@ -50,7 +50,7 @@ downloader torrent_hashes --rebuild --datadir=<your_datadir>
 # Start downloader (seeds automatically)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 
-# Erigon is not required for snapshots seeding. But Erigon with --snapshots=true also does seeding. 
+# Erigon is not required for snapshots seeding. But Erigon with --snapshots also does seeding. 
 ```
 
 Additional info:
