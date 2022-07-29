@@ -527,11 +527,18 @@ func (c *remoteCursor) Close() {
 }
 
 func (tx *remoteTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
-	c, err := tx.Cursor(bucket)
+	b := tx.db.buckets[bucket]
+	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
+	tx.cursors = append(tx.cursors, c)
+	if err := c.stream.Send(&remote.Cursor{Op: remote.Op_OPEN_DUP_SORT, BucketName: c.bucketName}); err != nil {
+		return nil, err
+	}
+	msg, err := c.stream.Recv()
 	if err != nil {
 		return nil, err
 	}
-	return &remoteCursorDupSort{remoteCursor: c.(*remoteCursor)}, nil
+	c.id = msg.CursorID
+	return &remoteCursorDupSort{remoteCursor: c}, nil
 }
 
 func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {

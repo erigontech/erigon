@@ -183,6 +183,21 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
+		case remote.Op_OPEN_DUP_SORT:
+			CursorID++
+			var err error
+			c, err = tx.CursorDupSort(in.BucketName)
+			if err != nil {
+				return err
+			}
+			cursors[CursorID] = &CursorInfo{
+				bucket: in.BucketName,
+				c:      c,
+			}
+			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
+				return fmt.Errorf("server-side error: %w", err)
+			}
+			continue
 		case remote.Op_CLOSE:
 			cInfo, ok := cursors[in.Cursor]
 			if !ok {
