@@ -162,6 +162,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 	ibs := state.New(rw.stateReader)
+	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
@@ -171,6 +172,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
@@ -241,7 +243,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		//for addr, bal := range txTask.BalanceIncreaseSet {
 		//	fmt.Printf("[%x]=>[%d]\n", addr, &bal)
 		//}
-		if err = ibs.MakeWriteSet(txTask.Rules, rw.stateWriter); err != nil {
+		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
 		txTask.ReadLists = rw.stateReader.ReadSet()
