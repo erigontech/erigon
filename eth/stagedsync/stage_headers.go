@@ -503,9 +503,8 @@ func verifyAndSaveNewPoSHeader(
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
 
-	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
 	if bad {
-		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, false, nil
 	}
 
