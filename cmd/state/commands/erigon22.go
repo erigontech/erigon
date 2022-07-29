@@ -49,6 +49,7 @@ func init() {
 	erigon22Cmd.Flags().BoolVar(&reset, "reset", false, "Resets the state database and static files")
 	withDataDir(erigon22Cmd)
 	rootCmd.AddCommand(erigon22Cmd)
+	withChain(erigon22Cmd)
 }
 
 var erigon22Cmd = &cobra.Command{
