@@ -719,7 +719,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
-			log.Error("[parlia] init contract failed: %+v", err)
+			log.Error("[parlia] init contract failed", "err", err)
 			os.Exit(1)
 		}
 	}
