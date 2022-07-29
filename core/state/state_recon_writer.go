@@ -211,7 +211,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 		return nil
 	}
 	if txNum != w.txNum {
-		//fmt.Printf("no change account [%x] txNum = %d\n", address, txNum)
+		fmt.Printf("no change account [%x] txNum = %d\n", address, txNum)
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
