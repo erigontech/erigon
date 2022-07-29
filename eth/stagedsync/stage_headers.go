@@ -317,8 +317,7 @@ func startHandlingForkChoice(
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			cfg.hd.SetPoSDownloaderTip(headerHash)
-			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, headerHash, s, cfg)
 		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
@@ -449,8 +448,9 @@ func handleNewPayload(
 			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
-		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
+		if !schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, headerHash /* downloaderTip */, s, cfg) {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
 		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
@@ -589,19 +589,21 @@ func schedulePoSDownload(
 	requestId int,
 	hashToDownload common.Hash,
 	heightToDownload uint64,
+	downloaderTip common.Hash,
 	s *StageState,
 	cfg HeadersCfg,
-) {
+) bool {
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
 		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
-		return
+		return false
 	}
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
+	cfg.hd.SetPoSDownloaderTip(downloaderTip)
 	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 	cfg.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
@@ -612,6 +614,8 @@ func schedulePoSDownload(
 	cfg.hd.SetHeadersCollector(headerCollector)
 
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
+
+	return true
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
