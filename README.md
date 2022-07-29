@@ -26,6 +26,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+- [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
     + [Erigon Discord Server](#erigon-discord-server)
@@ -381,6 +382,16 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 ### Prune old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
+
+Documentation
+==============
+
+The `./docs` directory includes a lot of useful but outdated documentation. For code located
+in the `./cmd` directory, their respective documentation can be found in `./cmd/*/README.md`.
+A more recent collation of developments and happenings in Erigon can be found in the
+[Erigon Blog](https://erigon.substack.com/).
+
+
 
 FAQ
 ================
