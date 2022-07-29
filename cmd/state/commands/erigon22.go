@@ -183,12 +183,13 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, nil); err != nil {
-				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
-			}
-			txTask.TraceTos = map[common.Address]struct{}{}
-			txTask.TraceTos[txTask.Block.Coinbase()] = struct{}{}
-			for _, uncle := range txTask.Block.Uncles() {
-				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+				txTask.Error = err
+			} else {
+				txTask.TraceTos = map[common.Address]struct{}{}
+				txTask.TraceTos[txTask.Block.Coinbase()] = struct{}{}
+				for _, uncle := range txTask.Block.Uncles() {
+					txTask.TraceTos[uncle.Coinbase] = struct{}{}
+				}
 			}
 		}
 	} else {
@@ -210,12 +211,13 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
+		} else {
+			// Update the state with pending changes
+			ibs.SoftFinalise()
+			txTask.Logs = ibs.GetLogs(txHash)
+			txTask.TraceFroms = ct.froms
+			txTask.TraceTos = ct.tos
 		}
-		// Update the state with pending changes
-		ibs.SoftFinalise()
-		txTask.Logs = ibs.GetLogs(txHash)
-		txTask.TraceFroms = ct.froms
-		txTask.TraceTos = ct.tos
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
