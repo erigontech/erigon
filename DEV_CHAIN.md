@@ -23,7 +23,7 @@ If evereything is fine, by changing directory to erigon/build/bin you will see t
 On the terminal you can type the following command to start node1.
 
 ```bash
-./erigon --datadir=dev --chain dev --private.api.addr=localhost:9090 --mine
+./erigon --datadir=dev --chain=dev --private.api.addr=localhost:9090 --mine
 ```
  
  Argument notes:
@@ -63,8 +63,8 @@ To tell Node 2 where Node 1 is we will use the Enode info of Node 1 we saved bef
 Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following command the Enode info and run it, be careful to remove the last part ?discport=0.
 
 ```bash  
-./erigon --datadir=dev2  --chain dev --private.api.addr=localhost:9091 \
-    --staticpeers "enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
+./erigon --datadir=dev2  --chain=dev --private.api.addr=localhost:9091 \
+    --staticpeers="enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
     --nodiscover
 ```
     
