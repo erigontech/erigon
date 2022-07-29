@@ -300,6 +300,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
+	defer stream.WriteArrayEnd()
 	first := true
 	// Execute all transactions in picked blocks
 
@@ -320,17 +321,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
-			stream.WriteNil()
 			return hashErr
 		}
 
 		block, bErr := api.blockWithSenders(dbtx, hash, b)
 		if bErr != nil {
-			stream.WriteNil()
 			return bErr
 		}
 		if block == nil {
-			stream.WriteNil()
 			return fmt.Errorf("could not find block %x %d", hash, b)
 		}
 
@@ -339,7 +337,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
 		if tErr != nil {
-			stream.WriteNil()
 			return tErr
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
@@ -356,7 +353,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					pt.TransactionPosition = &txPosition
 					b, err := json.Marshal(pt)
 					if err != nil {
-						stream.WriteNil()
 						return err
 					}
 					if nSeen > after && nExported < count {
@@ -388,7 +384,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			tr.TraceAddress = []int{}
 			b, err := json.Marshal(tr)
 			if err != nil {
-				stream.WriteNil()
 				return err
 			}
 			if nSeen > after && nExported < count {
@@ -419,7 +414,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					tr.TraceAddress = []int{}
 					b, err := json.Marshal(tr)
 					if err != nil {
-						stream.WriteNil()
 						return err
 					}
 					if nSeen > after && nExported < count {
@@ -435,8 +429,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 	}
-	stream.WriteArrayEnd()
-	return stream.Flush()
+	return nil
 }
 
 func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {

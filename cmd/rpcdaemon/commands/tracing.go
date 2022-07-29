@@ -85,6 +85,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
+	defer stream.WriteArrayEnd()
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -107,8 +108,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		stream.Flush()
 	}
-	stream.WriteArrayEnd()
-	stream.Flush()
 	return nil
 }
 
@@ -403,6 +402,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	stream.WriteArrayStart()
+	defer stream.WriteArrayEnd()
 	for bundle_index, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change blockContext
@@ -420,9 +420,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream)
-
 			if err != nil {
-				stream.WriteNil()
 				return err
 			}
 
@@ -438,6 +436,5 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		blockCtx.BlockNumber++
 		blockCtx.Time++
 	}
-	stream.WriteArrayEnd()
 	return nil
 }
