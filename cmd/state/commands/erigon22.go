@@ -177,6 +177,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 		}
@@ -271,11 +272,11 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 			*outputTxNum++
 			*outputBlockNum = txTask.BlockNum
-			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+			fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
 			*repeatCount++
-			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+			fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}
 }
