@@ -80,7 +80,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
-	defer stream.WriteArrayEnd()
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -103,6 +102,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		stream.Flush()
 	}
+	stream.WriteArrayEnd()
+	stream.Flush()
 	return nil
 }
 
