@@ -158,6 +158,14 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
+		posa, isPoSA := rw.engine.(consensus.PoSA)
+		if isPoSA {
+			if isSystemTx, err := posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+				panic(err)
+			} else if isSystemTx {
+				return
+			}
+		}
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
