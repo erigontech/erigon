@@ -289,6 +289,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
+	fmt.Printf("maxBlockNum=%d\n", maxBlockNum)
 	txNums := make([]uint64, maxBlockNum)
 	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
