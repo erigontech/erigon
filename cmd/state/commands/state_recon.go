@@ -118,7 +118,7 @@ func (rw *ReconWorker) run() {
 	}
 }
 
-func (rw *ReconWorker) runTxTask(txTask state.TxTask) {
+func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -436,7 +436,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	workerCount := runtime.NumCPU()
 	var wg sync.WaitGroup
-	workCh := make(chan state.TxTask, 128)
+	workCh := make(chan *state.TxTask, 128)
 	rs := state.NewReconState(workCh)
 	var fromKey, toKey []byte
 	bigCount := big.NewInt(int64(workerCount))
@@ -640,7 +640,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
-				txTask := state.TxTask{
+				txTask := &state.TxTask{
 					Header:    header,
 					BlockNum:  bn,
 					Block:     b,

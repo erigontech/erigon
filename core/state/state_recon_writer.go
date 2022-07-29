@@ -43,18 +43,18 @@ func (i ReconStateItem) Less(than btree.Item) bool {
 type ReconState struct {
 	lock          sync.RWMutex
 	doneBitmap    roaring64.Bitmap
-	triggers      map[uint64][]TxTask
-	workCh        chan TxTask
+	triggers      map[uint64][]*TxTask
+	workCh        chan *TxTask
 	queue         TxTaskQueue
 	changes       map[string]*btree.BTree // table => [] (txNum; key1; key2; val)
 	sizeEstimate  uint64
 	rollbackCount uint64
 }
 
-func NewReconState(workCh chan TxTask) *ReconState {
+func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
 		workCh:   workCh,
-		triggers: map[uint64][]TxTask{},
+		triggers: map[uint64][]*TxTask{},
 		changes:  map[string]*btree.BTree{},
 	}
 	return rs
@@ -121,7 +121,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState) Schedule() (TxTask, bool) {
+func (rs *ReconState) Schedule() (*TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for rs.queue.Len() < 16 {
@@ -133,9 +133,9 @@ func (rs *ReconState) Schedule() (TxTask, bool) {
 		heap.Push(&rs.queue, txTask)
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(TxTask), true
+		return heap.Pop(&rs.queue).(*TxTask), true
 	}
-	return TxTask{}, false
+	return nil, false
 }
 
 func (rs *ReconState) CommitTxNum(txNum uint64) {
@@ -150,7 +150,7 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 	rs.doneBitmap.Add(txNum)
 }
 
-func (rs *ReconState) RollbackTx(txTask TxTask, dependency uint64) {
+func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {
