@@ -71,6 +71,7 @@ func setFlagsFromYamlFile(ctx *cli.Context, filePath string) error {
 		return err
 	}
 
+	// sets global flags to value in yaml file
 	for key, value := range yamlFileConfig {
 		err := ctx.GlobalSet(key, value)
 		if err != nil {
