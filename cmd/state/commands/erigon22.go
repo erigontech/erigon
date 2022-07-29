@@ -612,7 +612,11 @@ loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if ok := rs.RegisterSender(txTask); ok {
+				if workerCount > 1 {
+					if ok := rs.RegisterSender(txTask); ok {
+						rs.AddWork(txTask)
+					}
+				} else {
 					rs.AddWork(txTask)
 				}
 			} else {
