@@ -1,5 +1,0 @@
-chain: "goerli"
-port: 30302
-datadir: "~/Desktop/projects/erigon/testing-flag"
-http.port: 8542
-engine.port: 9999
