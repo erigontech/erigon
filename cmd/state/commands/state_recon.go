@@ -355,7 +355,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	ctx := context.Background()
-	aggPath := filepath.Join(datadir, "agg22")
+	aggPath := filepath.Join(datadir, "agg22-copy")
 	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)

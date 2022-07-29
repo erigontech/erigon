@@ -45,6 +45,9 @@ type TxTask struct {
 	CodePrevs          map[string][]byte
 	ResultsSize        int64
 	Error              error
+	Logs               []*types.Log
+	TraceFroms         map[common.Address]struct{}
+	TraceTos           map[common.Address]struct{}
 }
 
 type TxTaskQueue []TxTask
@@ -216,6 +219,9 @@ func (rs *State22) AddWork(txTask TxTask) {
 	txTask.ReadLists = nil
 	txTask.WriteLists = nil
 	txTask.ResultsSize = 0
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
@@ -411,16 +417,39 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 			return err
 		}
 	}
+	if txTask.TraceFroms != nil {
+		for addr := range txTask.TraceFroms {
+			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	if txTask.TraceTos != nil {
+		for addr := range txTask.TraceTos {
+			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	for _, log := range txTask.Logs {
+		if err := agg.AddLogAddr(log.Address[:]); err != nil {
+			return fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+		}
+		for _, topic := range log.Topics {
+			if err := agg.AddLogTopic(topic[:]); err != nil {
+				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
+			}
+		}
+	}
 	if err := agg.FinishTx(); err != nil {
 		return err
 	}
-	if txTask.WriteLists == nil {
-		return nil
-	}
-	for table, list := range txTask.WriteLists {
-		for i, key := range list.Keys {
-			val := list.Vals[i]
-			rs.put(table, key, val)
+	if txTask.WriteLists != nil {
+		for table, list := range txTask.WriteLists {
+			for i, key := range list.Keys {
+				val := list.Vals[i]
+				rs.put(table, key, val)
+			}
 		}
 	}
 	return nil

@@ -157,6 +157,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		//rw.engine.Initialize(rw.chainConfig, nil, nil, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), nil)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -164,12 +165,18 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
+			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceTos[txTask.Block.Coinbase()] = struct{}{}
+			for _, uncle := range txTask.Block.Uncles() {
+				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+			}
 		}
 	} else {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
+		ct := NewCallTracer()
+		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
@@ -186,6 +193,9 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		}
 		// Update the state with pending changes
 		ibs.SoftFinalise()
+		txTask.Logs = ibs.GetLogs(txHash)
+		txTask.TraceFroms = ct.froms
+		txTask.TraceTos = ct.tos
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
