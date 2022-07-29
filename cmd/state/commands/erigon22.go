@@ -84,7 +84,7 @@ type Worker22 struct {
 func NewWorker22(lock sync.Locker, db kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
-	resultCh chan state.TxTask,
+	resultCh chan state.TxTask, engine consensus.Engine,
 ) *Worker22 {
 	return &Worker22{
 		lock:         lock,
@@ -101,6 +101,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, wg *sync.WaitGroup, rs *state.Sta
 		logger:       logger,
 		genesis:      genesis,
 		resultCh:     resultCh,
+		engine:       engine,
 	}
 }
 
@@ -120,7 +121,6 @@ func (rw *Worker22) run() {
 		}
 		return h
 	}
-	rw.engine = initConsensusEngine(rw.chainConfig, rw.logger, rw.allSnapshots)
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(&txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
@@ -372,7 +372,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var wg sync.WaitGroup
 	resultCh := make(chan state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker22(lock.RLocker(), db, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh)
+		reconWorkers[i] = NewWorker22(lock.RLocker(), db, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
 	}
 	defer func() {
 		for i := 0; i < workerCount; i++ {
