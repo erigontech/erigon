@@ -26,6 +26,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+- [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
     + [Erigon Discord Server](#erigon-discord-server)
@@ -75,7 +76,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
+Default `--snapshots` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
@@ -106,7 +107,7 @@ of the public testnets, Görli. It syncs much quicker, and does not take so much
 git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir goerli --chain goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=goerli
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
@@ -381,6 +382,16 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 ### Prune old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
+
+Documentation
+==============
+
+The `./docs` directory includes a lot of useful but outdated documentation. For code located
+in the `./cmd` directory, their respective documentation can be found in `./cmd/*/README.md`.
+A more recent collation of developments and happenings in Erigon can be found in the
+[Erigon Blog](https://erigon.substack.com/).
+
+
 
 FAQ
 ================

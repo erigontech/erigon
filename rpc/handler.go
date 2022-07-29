@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -458,58 +459,57 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
-	if callb.streamable {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("jsonrpc")
-		stream.WriteString("2.0")
-		stream.WriteMore()
-		if msg.ID != nil {
-			stream.WriteObjectField("id")
-			stream.Write(msg.ID)
-			stream.WriteMore()
-		}
-		stream.WriteObjectField("result")
-		_, err := callb.call(ctx, msg.Method, args, stream)
-		if err != nil {
-			return msg.errorResponse(err)
-			/*
-				stream.WriteMore()
-				stream.WriteObjectField("error")
-				stream.WriteObjectStart()
-				stream.WriteObjectField("code")
-				ec, ok := err.(Error)
-				if ok {
-					stream.WriteInt(ec.ErrorCode())
-				} else {
-					stream.WriteInt(defaultErrorCode)
-				}
-				stream.WriteMore()
-				stream.WriteObjectField("message")
-				stream.WriteString(fmt.Sprintf("%v", err))
-				de, ok := err.(DataError)
-				if ok {
-					stream.WriteMore()
-					stream.WriteObjectField("data")
-					data, derr := json.Marshal(de.ErrorData())
-					if derr == nil {
-						stream.Write(data)
-					} else {
-						stream.WriteString(fmt.Sprintf("%v", derr))
-					}
-				}
-				stream.WriteObjectEnd()
-			*/
-		}
-		stream.WriteObjectEnd()
-		stream.Flush()
-		return nil
-	} else {
+	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
 			return msg.errorResponse(err)
 		}
 		return msg.response(result)
 	}
+
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	if msg.ID != nil {
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+	}
+	stream.WriteObjectField("result")
+	_, err := callb.call(ctx, msg.Method, args, stream)
+	if err != nil {
+		//return msg.errorResponse(err)
+
+		stream.WriteMore()
+		stream.WriteObjectField("error")
+		stream.WriteObjectStart()
+		stream.WriteObjectField("code")
+		ec, ok := err.(Error)
+		if ok {
+			stream.WriteInt(ec.ErrorCode())
+		} else {
+			stream.WriteInt(defaultErrorCode)
+		}
+		stream.WriteMore()
+		stream.WriteObjectField("message")
+		stream.WriteString(fmt.Sprintf("%v", err))
+		de, ok := err.(DataError)
+		if ok {
+			stream.WriteMore()
+			stream.WriteObjectField("data")
+			data, derr := json.Marshal(de.ErrorData())
+			if derr == nil {
+				stream.Write(data)
+			} else {
+				stream.WriteString(fmt.Sprintf("%v", derr))
+			}
+		}
+		stream.WriteObjectEnd()
+	}
+	stream.WriteObjectEnd()
+	stream.Flush()
+	return nil
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

@@ -20,6 +20,12 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -31,11 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type sentryMessageStream grpc.ClientStream
@@ -384,14 +385,15 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
+		hRaw := append([]byte{}, headerRaw...)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
 		}
 		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
 			Header:    header,
-			HeaderRaw: headerRaw,
-			Hash:      types.RawRlpHash(headerRaw),
+			HeaderRaw: hRaw,
+			Hash:      types.RawRlpHash(hRaw),
 			Number:    number,
 		})
 	}
@@ -497,7 +499,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
+		return fmt.Errorf("decode BlockBodiesPacket66: %w, data: %x", err, inreq.Data)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
 	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))

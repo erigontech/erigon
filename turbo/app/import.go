@@ -154,7 +154,6 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 		missingChain := &core.ChainPack{
 			Blocks:   missing,
 			TopBlock: missing[len(missing)-1],
-			Length:   len(missing),
 		}
 
 		if err := InsertChain(ethereum, missingChain); err != nil {
