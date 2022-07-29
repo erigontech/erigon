@@ -300,7 +300,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
-	defer stream.WriteArrayEnd()
 	first := true
 	// Execute all transactions in picked blocks
 
@@ -331,6 +330,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}))
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+				stream.WriteNil()
 				return err
 			}
 			lastBlockNum = blockNum
@@ -341,6 +341,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		if txNum+1 == api._txNums[blockNum] {
 			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
+				stream.WriteNil()
 				return err
 			}
 			// Block reward section, handle specially
@@ -361,6 +362,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
 				if err != nil {
+					stream.WriteNil()
 					return err
 				}
 				if nSeen > after && nExported < count {
@@ -391,6 +393,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						tr.TraceAddress = []int{}
 						b, err := json.Marshal(tr)
 						if err != nil {
+							stream.WriteNil()
 							return err
 						}
 						if nSeen > after && nExported < count {
@@ -415,11 +418,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
+			stream.WriteNil()
 			return err
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
+			stream.WriteNil()
 			return err
 		}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
@@ -446,13 +451,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
+			stream.WriteNil()
 			return err
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
+			stream.WriteNil()
 			return err
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+			stream.WriteNil()
 			return err
 		}
 		for _, pt := range traceResult.Trace {
@@ -464,6 +472,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				pt.TransactionPosition = &txIndex
 				b, err := json.Marshal(pt)
 				if err != nil {
+					stream.WriteNil()
 					return err
 				}
 				if nSeen > after && nExported < count {
@@ -478,7 +487,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 	}
-	return nil
+	stream.WriteArrayEnd()
+	return stream.Flush()
 }
 
 func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
