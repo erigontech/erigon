@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"path"
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -63,6 +65,8 @@ var erigon22Cmd = &cobra.Command{
 
 type Worker22 struct {
 	lock         sync.Locker
+	chainDb      kv.RoDB
+	chainTx      kv.Tx
 	db           kv.RoDB
 	tx           kv.Tx
 	wg           *sync.WaitGroup
@@ -79,9 +83,11 @@ type Worker22 struct {
 	logger       log.Logger
 	genesis      *core.Genesis
 	resultCh     chan state.TxTask
+	epoch        epochReader
+	chain        chainReader
 }
 
-func NewWorker22(lock sync.Locker, db kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
+func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	resultCh chan state.TxTask, engine consensus.Engine,
@@ -89,6 +95,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, wg *sync.WaitGroup, rs *state.Sta
 	return &Worker22{
 		lock:         lock,
 		db:           db,
+		chainDb:      chainDb,
 		wg:           wg,
 		rs:           rs,
 		blockReader:  blockReader,
@@ -109,6 +116,10 @@ func (rw *Worker22) ResetTx() {
 	if rw.tx != nil {
 		rw.tx.Rollback()
 		rw.tx = nil
+	}
+	if rw.chainTx != nil {
+		rw.chainTx.Rollback()
+		rw.chainTx = nil
 	}
 }
 
@@ -137,6 +148,14 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		}
 		rw.stateReader.SetTx(rw.tx)
 	}
+	if rw.chainTx == nil {
+		var err error
+		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
+			panic(err)
+		}
+		rw.epoch = epochReader{tx: rw.chainTx}
+		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+	}
 	txTask.Error = nil
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter.SetTxNum(txTask.TxNum)
@@ -158,12 +177,12 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
-		//rw.engine.Initialize(rw.chainConfig, nil, nil, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), nil)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), nil)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, nil, nil, nil); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, nil); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 			txTask.TraceTos = map[common.Address]struct{}{}
@@ -278,6 +297,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	chainDbPath := path.Join(datadir, "chaindata")
+	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
+	if err != nil {
+		return err
+	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
@@ -372,7 +396,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var wg sync.WaitGroup
 	resultCh := make(chan state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker22(lock.RLocker(), db, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker22(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
 	}
 	defer func() {
 		for i := 0; i < workerCount; i++ {
@@ -649,4 +673,67 @@ loop:
 		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
+}
+
+type chainReader struct {
+	config      *params.ChainConfig
+	tx          kv.Tx
+	blockReader services.FullBlockReader
+}
+
+func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
+func (cr chainReader) CurrentHeader() *types.Header { panic("") }
+func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		return h
+	}
+	return rawdb.ReadHeader(cr.tx, hash, number)
+}
+func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		return h
+	}
+	return rawdb.ReadHeaderByNumber(cr.tx, number)
+
+}
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	if cr.blockReader != nil {
+		number := rawdb.ReadHeaderNumber(cr.tx, hash)
+		if number == nil {
+			return nil
+		}
+		return cr.GetHeader(hash, *number)
+	}
+	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
+	return h
+}
+func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	td, err := rawdb.ReadTd(cr.tx, hash, number)
+	if err != nil {
+		log.Error("ReadTd failed", "err", err)
+		return nil
+	}
+	return td
+}
+
+type epochReader struct {
+	tx kv.Tx
+}
+
+func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+	panic("")
+}
+func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+	panic("")
+}
+func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
