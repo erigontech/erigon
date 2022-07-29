@@ -42,7 +42,7 @@ type TxTask struct {
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
-	CodePrevs          map[string][]byte
+	CodePrevs          map[string]uint64
 	ResultsSize        int64
 	Error              error
 	Logs               []*types.Log
@@ -412,8 +412,29 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 			return err
 		}
 	}
-	for addrS, val := range txTask.CodePrevs {
-		if err := agg.AddCodePrev([]byte(addrS), val); err != nil {
+	for addrS, incarnation := range txTask.CodePrevs {
+		addr := []byte(addrS)
+		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
+		codeHash := rs.get(kv.PlainContractCode, k)
+		if codeHash == nil {
+			var err error
+			codeHash, err = roTx.GetOne(kv.PlainContractCode, k)
+			if err != nil {
+				return err
+			}
+		}
+		var codePrev []byte
+		if codeHash != nil {
+			codePrev = rs.get(kv.Code, codeHash)
+			if codePrev == nil {
+				var err error
+				codePrev, err = roTx.GetOne(kv.Code, codeHash)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
 			return err
 		}
 	}
@@ -527,7 +548,7 @@ type StateWriter22 struct {
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
-	codePrevs    map[string][]byte
+	codePrevs    map[string]uint64
 }
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
@@ -542,7 +563,7 @@ func NewStateWriter22(rs *State22) *StateWriter22 {
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
-		codePrevs:    map[string][]byte{},
+		codePrevs:    map[string]uint64{},
 	}
 }
 
@@ -560,7 +581,7 @@ func (w *StateWriter22) ResetWriteSet() {
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string][]byte{}
+	w.codePrevs = map[string]uint64{}
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
@@ -570,7 +591,7 @@ func (w *StateWriter22) WriteSet() map[string]*KvList {
 	return w.writeLists
 }
 
-func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
+func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
@@ -596,7 +617,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
-	w.codePrevs[string(address.Bytes())] = nil
+	w.codePrevs[string(address.Bytes())] = incarnation
 	return nil
 }
 
