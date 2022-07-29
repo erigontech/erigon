@@ -106,7 +106,7 @@ of the public testnets, Görli. It syncs much quicker, and does not take so much
 git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir goerli --chain goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=goerli
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
