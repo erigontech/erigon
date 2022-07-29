@@ -256,6 +256,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
+	// Use the current tx to simulate validation and then Reset it, we are not using MemoryMutation due to its instability with deletions.
+	// TODO(Giulio2002): fix memory mutation.
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
 	if criticalError != nil {
 		return
