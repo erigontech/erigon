@@ -202,6 +202,14 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		}
 	} else {
 		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		posa, isPoSA := rw.engine.(consensus.PoSA)
+		if isPoSA {
+			if isSystemTx, err := posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+				panic(err)
+			} else if isSystemTx {
+				return
+			}
+		}
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
