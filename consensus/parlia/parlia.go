@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -720,7 +719,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 			log.Error("[parlia] init contract failed", "err", err)
-			os.Exit(1)
+			return nil, nil, fmt.Errorf("init contract failed: %v", err)
 		}
 	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
