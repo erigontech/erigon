@@ -667,7 +667,6 @@ func updateAccount(EIP161Enabled bool, stateWriter StateWriter, addr common.Addr
 		}
 		stateObject.deleted = true
 	}
-	fmt.Printf("updateAccount [%x] empty removal %t, isDity %t, stateObject.created %t, stateObject.suicided %t\n", addr, emptyRemoval, isDirty, stateObject.created, stateObject.suicided)
 	if isDirty && (stateObject.created || !stateObject.suicided) && !emptyRemoval {
 		stateObject.deleted = false
 		// Write any contract code associated with the state object

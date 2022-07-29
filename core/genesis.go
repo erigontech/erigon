@@ -330,7 +330,6 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				panic("overflow at genesis allocs")
 			}
 			statedb.AddBalance(addr, balance)
-			fmt.Printf("AddBalance [%x] => %d\n", addr, balance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
 			for key, value := range account.Storage {
