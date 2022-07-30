@@ -223,12 +223,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	}
 
 	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
-
-	if terminalTotalDifficulty == nil {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
-	}
-
-	if terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
+	if terminalTotalDifficulty != nil && terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
