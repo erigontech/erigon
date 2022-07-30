@@ -42,7 +42,7 @@ func runErigon(cliCtx *cli.Context) {
 	// initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	yamlFilePath := cliCtx.GlobalString(utils.YamlConfigFlag.Name)
+	yamlFilePath := cliCtx.GlobalString(utils.ConfigFlag.Name)
 	if yamlFilePath != "" {
 		if err := setFlagsFromConfigFile(cliCtx, yamlFilePath); err != nil {
 			log.Warn("failed setting config flags from yaml file", "err", err)

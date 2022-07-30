@@ -139,5 +139,5 @@ var DefaultFlags = []cli.Flag{
 	utils.OverrideTerminalTotalDifficulty,
 	utils.OverrideMergeNetsplitBlock,
 
-	utils.YamlConfigFlag,
+	utils.ConfigFlag,
 }
