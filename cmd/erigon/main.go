@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -12,6 +14,7 @@ import (
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli"
 	"gopkg.in/yaml.v2"
 )
@@ -41,7 +44,7 @@ func runErigon(cliCtx *cli.Context) {
 
 	yamlFilePath := cliCtx.GlobalString(utils.YamlConfigFlag.Name)
 	if yamlFilePath != "" {
-		if err := setFlagsFromYamlFile(cliCtx, yamlFilePath); err != nil {
+		if err := setFlagsFromConfigFile(cliCtx, yamlFilePath); err != nil {
 			log.Warn("failed setting config flags from yaml file", "err", err)
 		}
 	}
@@ -60,19 +63,35 @@ func runErigon(cliCtx *cli.Context) {
 	}
 }
 
-func setFlagsFromYamlFile(ctx *cli.Context, filePath string) error {
-	yamlFile, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-	yamlFileConfig := make(map[string]string)
-	err = yaml.Unmarshal(yamlFile, yamlFileConfig)
-	if err != nil {
-		return err
+func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
+	fileExtension := filepath.Ext(filePath)
+
+	fileConfig := make(map[string]string)
+
+	if fileExtension == ".yaml" {
+		yamlFile, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			return err
+		}
+		err = yaml.Unmarshal(yamlFile, fileConfig)
+		if err != nil {
+			return err
+		}
+	} else if fileExtension == ".toml" {
+		tomlFile, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			return err
+		}
+		err = toml.Unmarshal(tomlFile, &fileConfig)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.New("config files only accepted are .yaml and .toml")
 	}
 
-	// sets global flags to value in yaml file
-	for key, value := range yamlFileConfig {
+	// sets global flags to value in yaml/toml file
+	for key, value := range fileConfig {
 		if !ctx.GlobalIsSet(key) {
 			err := ctx.GlobalSet(key, value)
 			if err != nil {
