@@ -723,7 +723,7 @@ var (
 	}
 
 	ConfigFileFlag = cli.StringFlag{
-		Name:  "config.file",
+		Name:  "config.yaml.file",
 		Usage: "Sets erigon flags from YAML file",
 		Value: "",
 	}
