@@ -1346,10 +1346,8 @@ Loop:
 			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				if !cfg.snapshots.Cfg().Verify { // will verify after loop
-					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-						return err
-					}
+				if err := verifySnapshots(ctx, cfg); err != nil {
+					return err
 				}
 				break Loop
 			} else {
@@ -1367,6 +1365,12 @@ Loop:
 					"files", stats.FilesTotal,
 					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
+				if stats.BytesCompleted == stats.BytesTotal {
+					if err := verifySnapshots(ctx, cfg); err != nil {
+						return err
+					}
+					break Loop
+				}
 			}
 		}
 	}
@@ -1380,6 +1384,15 @@ Finish:
 
 	if dbEmpty {
 		if err = rawdb.WriteSnapshots(tx, snInDB); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifySnapshots(ctx context.Context, cfg HeadersCfg) error {
+	if !cfg.snapshots.Cfg().Verify { // will verify after loop
+		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
 	}
