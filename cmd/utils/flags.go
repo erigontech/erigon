@@ -722,7 +722,7 @@ var (
 		Usage: "Run without Heimdall service (for testing purpose)",
 	}
 
-	ConfigFileFlag = cli.StringFlag{
+	ConfigYamlFileFlag = cli.StringFlag{
 		Name:  "config.yaml.file",
 		Usage: "Sets erigon flags from YAML file",
 		Value: "",
