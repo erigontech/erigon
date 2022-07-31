@@ -75,7 +75,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon", "engine"}, "API's offered over the HTTP-RPC interface: eth,engine,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface: eth,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
@@ -437,15 +437,24 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
-	var engineListener *http.Server
-	var engineSrv *rpc.Server
-	var engineHttpEndpoint string
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {
+	err := startAuthenticatedRpcServer(ctx, cfg, authAPI)
+	if err != nil {
+		return err
+	}
 
+	if cfg.Enabled {
+		return startRegularRpcServer(ctx, cfg, rpcAPI)
+	}
+
+	return nil
+}
+
+func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
-	fmt.Printf("TraceRequests = %t\n", cfg.TraceRequests)
+	log.Trace("TraceRequests = %t\n", cfg.TraceRequests)
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
@@ -455,22 +464,10 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 	srv.SetAllowList(allowListForRPC)
 
 	var defaultAPIList []rpc.API
-	var engineAPI []rpc.API
 
 	for _, api := range rpcAPI {
 		if api.Namespace != "engine" {
 			defaultAPIList = append(defaultAPIList, api)
-		} else {
-			engineAPI = append(engineAPI, api)
-		}
-	}
-
-	if len(engineAPI) != 0 {
-		// eth API should also be exposed on the same port as engine API
-		for _, api := range rpcAPI {
-			if api.Namespace == "eth" {
-				engineAPI = append(engineAPI, api)
-			}
 		}
 	}
 
@@ -503,13 +500,6 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
-	if len(engineAPI) > 0 {
-		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
-		if err != nil {
-			return fmt.Errorf("could not start RPC api for engine: %w", err)
-		}
-	}
-
 	var (
 		healthServer *grpcHealth.Server
 		grpcServer   *grpc.Server
@@ -534,18 +524,10 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 
 	defer func() {
 		srv.Stop()
-		if engineSrv != nil {
-			engineSrv.Stop()
-		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
-
-		if engineListener != nil {
-			_ = engineListener.Shutdown(shutdownCtx)
-			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
-		}
 
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
@@ -554,6 +536,46 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 			grpcServer.GracefulStop()
 			_ = grpcListener.Close()
 			log.Info("GRPC endpoint closed", "url", grpcEndpoint)
+		}
+	}()
+	<-ctx.Done()
+	log.Info("Exiting...")
+	return nil
+}
+
+func startAuthenticatedRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
+	var engineListener *http.Server
+	var engineSrv *rpc.Server
+	var engineHttpEndpoint string
+	var err error
+
+	log.Trace("TraceRequests = %t\n", cfg.TraceRequests)
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
+
+	var rpcAPIList []rpc.API
+
+	for _, api := range rpcAPI {
+		rpcAPIList = append(rpcAPIList, api)
+	}
+
+	if len(rpcAPIList) > 0 {
+		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, rpcAPIList)
+		if err != nil {
+			return fmt.Errorf("could not start RPC api for engine: %w", err)
+		}
+	}
+
+	defer func() {
+		srv.Stop()
+		if engineSrv != nil {
+			engineSrv.Stop()
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if engineListener != nil {
+			_ = engineListener.Shutdown(shutdownCtx)
+			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
 		}
 	}()
 	<-ctx.Done()
