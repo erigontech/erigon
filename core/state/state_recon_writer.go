@@ -103,7 +103,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 				composite = make([]byte, 8+len(item.key1))
 			} else {
 				composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
-				binary.BigEndian.PutUint64(composite[8+len(item.key1):], 1)
+				binary.BigEndian.PutUint64(composite[8+len(item.key1):], FirstContractIncarnation)
 				copy(composite[8+len(item.key1)+8:], item.key2)
 			}
 			binary.BigEndian.PutUint64(composite, item.txNum)
@@ -215,6 +215,9 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
+	if account.Incarnation > 0 {
+		account.Incarnation = FirstContractIncarnation
+	}
 	account.EncodeForStorage(value)
 	fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.rs.Put(kv.PlainStateR, address[:], nil, value, w.txNum)
