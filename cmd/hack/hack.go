@@ -182,6 +182,20 @@ func readAccount(chaindata string, account common.Address) error {
 		}
 		fmt.Printf("%x => %x\n", k, v)
 	}
+	cc, err := tx.Cursor(kv.PlainContractCode)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("code hashes\n")
+	for k, v, e := cc.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, account.Bytes()) {
+			break
+		}
+		fmt.Printf("%x => %x\n", k, v)
+	}
 	return nil
 }
 
