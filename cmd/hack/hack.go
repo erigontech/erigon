@@ -1174,8 +1174,8 @@ const (
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"
-	viFilename := filename + "vi"
-	vFilename := filename + "v"
+	viFilename := filename + ".vi"
+	vFilename := filename + ".v"
 	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
