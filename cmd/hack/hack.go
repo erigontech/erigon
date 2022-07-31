@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"golang.org/x/exp/slices"
 
@@ -1173,13 +1174,25 @@ const (
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"
-	//viFilename := filename + "vi"
-	//vFilename := filename + "v"
+	viFilename := filename + "vi"
+	vFilename := filename + "v"
 	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
 	defer efDecomp.Close()
+	viIndex, err := recsplit.OpenIndex(viFilename)
+	if err != nil {
+		return err
+	}
+	defer viIndex.Close()
+	r := recsplit.NewIndexReader(viIndex)
+	vDecomp, err := compress.NewDecompressor(vFilename)
+	if err != nil {
+		return err
+	}
+	defer vDecomp.Close()
+	gv := vDecomp.MakeGetter()
 	g := efDecomp.MakeGetter()
 	for g.HasNext() {
 		key, _ := g.NextUncompressed()
@@ -1190,7 +1203,15 @@ func iterate(filename string, prefix string) error {
 			fmt.Printf("[%x] =>", key)
 			for efIt.HasNext() {
 				txNum := efIt.Next()
+				var txKey [8]byte
+				binary.BigEndian.PutUint64(txKey[:], txNum)
+				offset := r.Lookup2(txKey[:], key)
+				gv.Reset(offset)
+				v, _ := gv.Next(nil)
 				fmt.Printf(" %d", txNum)
+				if len(v) == 0 {
+					fmt.Printf("*")
+				}
 			}
 			fmt.Printf("\n")
 		} else {
