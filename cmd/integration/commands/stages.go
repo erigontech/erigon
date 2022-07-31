@@ -1161,15 +1161,15 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadirCli, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn, false /* readonly */)
 	} else if chainConfig.Aura != nil {
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadirCli, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadirCli, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn, false /* readonly */)
 	} else if chainConfig.Parlia != nil {
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadirCli, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, allSn, false /* readonly */)
 	} else if chainConfig.Bor != nil {
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadirCli, allSn)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadirCli, allSn, false /* readonly */)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
