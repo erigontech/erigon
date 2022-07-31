@@ -268,6 +268,9 @@ func (fw *FillWorker) fillAccounts(plainStateCollector *etl.Collector) {
 			if incBytes > 0 {
 				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
 			}
+			if a.Incarnation > 0 {
+				a.Incarnation = state.FirstContractIncarnation
+			}
 			value := make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(value)
 			if err := plainStateCollector.Collect(key, value); err != nil {
