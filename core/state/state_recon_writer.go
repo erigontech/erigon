@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"fmt"
 	"sync"
 	"unsafe"
 
@@ -219,7 +218,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 		account.Incarnation = FirstContractIncarnation
 	}
 	account.EncodeForStorage(value)
-	fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.rs.Put(kv.PlainStateR, address[:], nil, value, w.txNum)
 	return nil
 }
@@ -230,12 +229,12 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 		return nil
 	}
 	if txNum != w.txNum {
-		fmt.Printf("no change code [%x] %d %x txNum = %d\n", address, incarnation, codeHash, txNum)
+		//fmt.Printf("no change code [%x] %d %x txNum = %d\n", address, incarnation, codeHash, txNum)
 		return nil
 	}
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
 	if len(code) > 0 {
-		fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
+		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), nil, codeHash[:], w.txNum)
 	}
 	return nil
@@ -256,7 +255,7 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 		return nil
 	}
 	if !value.IsZero() {
-		fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
+		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
 		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(), value.Bytes(), w.txNum)
 	}
 	return nil
