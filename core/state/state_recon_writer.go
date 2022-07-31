@@ -227,7 +227,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 		return nil
 	}
 	if txNum != w.txNum {
-		//fmt.Printf("no change code [%x] txNum = %d\n", address, txNum)
+		fmt.Printf("no change code [%x] %d %x txNum = %d\n", address, incarnation, codeHash, txNum)
 		return nil
 	}
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
