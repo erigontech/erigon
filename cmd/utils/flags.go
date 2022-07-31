@@ -721,6 +721,12 @@ var (
 		Name:  "bor.withoutheimdall",
 		Usage: "Run without Heimdall service (for testing purpose)",
 	}
+
+	ConfigFlag = cli.StringFlag{
+		Name:  "config",
+		Usage: "Sets erigon flags from YAML/TOML file",
+		Value: "",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}

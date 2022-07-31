@@ -315,6 +315,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
+
+	apis := ctx.GlobalString(utils.HTTPApiFlag.Name)
+	log.Info("starting HTTP APIs", "APIs", apis)
+
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
 		Dirs:    cfg.Dirs,
@@ -331,7 +335,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TraceRequests:           ctx.GlobalBool(utils.HTTPTraceFlag.Name),
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
-		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
+		API:                     strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.GlobalDuration(HTTPWriteTimeoutFlag.Name),
