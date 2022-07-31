@@ -73,6 +73,19 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if err != nil {
 		return err
 	}
+	var blockReader services.FullBlockReader
+	var allSnapshots *snapshotsync.RoSnapshots
+	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
+	if useSnapshots {
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+		defer allSnapshots.Close()
+		if err := allSnapshots.ReopenWithDB(db); err != nil {
+			return fmt.Errorf("reopen snapshot segments: %w", err)
+		}
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
 	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb
@@ -109,19 +122,6 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenWithDB(db); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
-	}
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
 	for !interrupt {
