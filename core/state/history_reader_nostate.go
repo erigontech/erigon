@@ -182,6 +182,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		enc = hr.rs.Get(kv.CodeR, codeHash.Bytes(), nil, stateTxNum)
 		if enc == nil {
 			if hr.tx == nil {
+				fmt.Printf("ReadAccountCode [%x] %d\n", address, incarnation)
 				return nil, fmt.Errorf("hr.tx is nil")
 			}
 			if cap(hr.composite) < 8+32 {
