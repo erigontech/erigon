@@ -173,7 +173,8 @@ func readAccount(chaindata string, account common.Address) error {
 	if err != nil {
 		return err
 	}
-	for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+	defer c.Close()
+	for k, v, e := c.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
 		if e != nil {
 			return e
 		}
@@ -186,8 +187,9 @@ func readAccount(chaindata string, account common.Address) error {
 	if err != nil {
 		return err
 	}
+	defer cc.Close()
 	fmt.Printf("code hashes\n")
-	for k, v, e := cc.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+	for k, v, e := cc.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
 		if e != nil {
 			return e
 		}
