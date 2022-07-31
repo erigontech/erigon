@@ -374,11 +374,9 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 			if !bytes.HasPrefix(item.key, addr1) {
 				return false
 			}
-			for ; e == nil && k != nil && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.HasPrefix(k, addr1) {
-					k = nil
-				}
+			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
 				if !bytes.Equal(k, item.key) {
+					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
 					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
 						return false
 					}
