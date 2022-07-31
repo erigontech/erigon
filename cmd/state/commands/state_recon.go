@@ -180,7 +180,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		}
 		txContext := core.NewEVMTxContext(msg)
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
@@ -273,7 +273,7 @@ func (fw *FillWorker) fillAccounts(plainStateCollector *etl.Collector) {
 			if err := plainStateCollector.Collect(key, value); err != nil {
 				panic(err)
 			}
-			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+			fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 		}
 	}
 }
@@ -293,7 +293,7 @@ func (fw *FillWorker) fillStorage(plainStateCollector *etl.Collector) {
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
 				panic(err)
 			}
-			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+			fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		}
 	}
 }
@@ -320,7 +320,7 @@ func (fw *FillWorker) fillCode(codeCollector, plainContractCollector *etl.Collec
 			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
 				panic(err)
 			}
-			//fmt.Printf("Code [%x] => [%x]\n", compositeKey, val)
+			fmt.Printf("Code [%x] => %d\n", compositeKey, len(val))
 		}
 	}
 }
