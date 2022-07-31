@@ -619,8 +619,6 @@ func schedulePoSDownload(
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
-	defer cfg.forkValidator.Clear()
-
 	var lastValidHash common.Hash
 	var badChainError error
 	var foundPow bool
@@ -660,6 +658,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
 			return nil
 		}
+
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
 
