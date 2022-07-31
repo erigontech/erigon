@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -1165,20 +1166,35 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
-func iterate(filename string) error {
-	d, err := compress.NewDecompressor(filename)
+const (
+	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+)
+
+func iterate(filename string, prefix string) error {
+	pBytes := common.FromHex(prefix)
+	efFilename := filename + ".ef"
+	//viFilename := filename + "vi"
+	//vFilename := filename + "v"
+	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var buf, bufv []byte
+	defer efDecomp.Close()
+	g := efDecomp.MakeGetter()
 	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		bufv, _ = g.Next(bufv[:0])
-		s := fmt.Sprintf("%x", buf)
-		if strings.HasPrefix(s, "000000000000006f6502b7f2bbac8c30a3f67e9a") {
-			fmt.Printf("%s [%x]\n", s, bufv)
+		key, _ := g.NextUncompressed()
+		if bytes.HasPrefix(key, pBytes) {
+			val, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(val)
+			efIt := ef.Iterator()
+			fmt.Printf("[%x] =>", key)
+			for efIt.HasNext() {
+				txNum := efIt.Next()
+				fmt.Printf(" %d", txNum)
+			}
+			fmt.Printf("\n")
+		} else {
+			g.SkipUncompressed()
 		}
 	}
 	return nil
@@ -1307,7 +1323,7 @@ func main() {
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
-		err = iterate(*chaindata)
+		err = iterate(*chaindata, *account)
 	}
 
 	if err != nil {
