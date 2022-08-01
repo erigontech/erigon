@@ -21,7 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"math/bits"
 	"os"
@@ -571,7 +571,7 @@ func (rs *RecSplit) Build() error {
 	if ASSERT {
 		rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
-		b, _ := ioutil.ReadAll(rs.indexF)
+		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
 			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.indexFile))
 		}

@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"sort"
@@ -63,7 +62,7 @@ type MdbxOpts struct {
 }
 
 func testKVPath() string {
-	dir, err := ioutil.TempDir(os.TempDir(), "erigon-test-db")
+	dir, err := os.MkdirTemp(os.TempDir(), "erigon-test-db")
 	if err != nil {
 		panic(err)
 	}

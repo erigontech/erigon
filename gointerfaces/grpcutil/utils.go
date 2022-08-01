@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
@@ -36,7 +36,7 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 	if err != nil {
 		return nil, fmt.Errorf("load peer cert/key error:%w", err)
 	}
-	caCert, err = ioutil.ReadFile(tlsCACert)
+	caCert, err = os.ReadFile(tlsCACert)
 	if err != nil {
 		return nil, fmt.Errorf("read ca cert file error:%w", err)
 	}

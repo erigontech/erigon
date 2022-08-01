@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/bits"
 	"os"
 	"path/filepath"
@@ -681,7 +680,7 @@ func NewCompressorSequential(logPrefix, outputFile string, tmpDir string, minPat
 	if c.divsufsort, err = transform.NewDivSufSort(); err != nil {
 		return nil, err
 	}
-	if c.wordFile, err = ioutil.TempFile(c.tmpDir, "superstrings-"); err != nil {
+	if c.wordFile, err = os.CreateTemp(c.tmpDir, "superstrings-"); err != nil {
 		return nil, err
 	}
 	c.wordW = bufio.NewWriterSize(c.wordFile, etl.BufIOSize)
@@ -750,7 +749,7 @@ func (c *CompressorSequential) findMatches() error {
 		c.pt.Insert(p.word, p)
 	}
 	var err error
-	if c.interFile, err = ioutil.TempFile(c.tmpDir, "inter-compress-"); err != nil {
+	if c.interFile, err = os.CreateTemp(c.tmpDir, "inter-compress-"); err != nil {
 		return err
 	}
 	c.interW = bufio.NewWriterSize(c.interFile, etl.BufIOSize)

@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -56,15 +55,19 @@ func NewCollectorFromFiles(logPrefix, tmpdir string) (*Collector, error) {
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	fileInfos, err := ioutil.ReadDir(tmpdir)
+	dirEntries, err := os.ReadDir(tmpdir)
 	if err != nil {
 		return nil, fmt.Errorf("collector from files - reading directory %s: %w", tmpdir, err)
 	}
-	if len(fileInfos) == 0 {
+	if len(dirEntries) == 0 {
 		return nil, nil
 	}
-	dataProviders := make([]dataProvider, len(fileInfos))
-	for i, fileInfo := range fileInfos {
+	dataProviders := make([]dataProvider, len(dirEntries))
+	for i, dirEntry := range dirEntries {
+		fileInfo, err := dirEntry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("collector from files - reading file info %s: %w", dirEntry.Name(), err)
+		}
 		var dataProvider fileDataProvider
 		dataProvider.file, err = os.Open(filepath.Join(tmpdir, fileInfo.Name()))
 		if err != nil {

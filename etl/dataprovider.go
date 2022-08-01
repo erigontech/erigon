@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"runtime"
 
@@ -53,7 +52,7 @@ func FlushToDisk(b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvid
 		}
 	}
 
-	bufferFile, err := ioutil.TempFile(tmpdir, "erigon-sortable-buf-")
+	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err
 	}
