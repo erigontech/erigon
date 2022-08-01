@@ -322,13 +322,13 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: nodecfg.DefaultHTTPPort,
 	}
-	EngineAddr = cli.StringFlag{
-		Name:  "engine.addr",
+	AuthRpcAddr = cli.StringFlag{
+		Name:  "authrpc.addr",
 		Usage: "HTTP-RPC server listening interface for engineAPI",
 		Value: nodecfg.DefaultHTTPHost,
 	}
-	EnginePort = cli.UintFlag{
-		Name:  "engine.port",
+	AuthRpcPort = cli.UintFlag{
+		Name:  "authrpc.port",
 		Usage: "HTTP-RPC server listening port for the engineAPI",
 		Value: nodecfg.DefaultEngineHTTPPort,
 	}

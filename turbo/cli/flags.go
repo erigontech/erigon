@@ -170,18 +170,18 @@ var (
 	}
 
 	EngineReadTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.read",
+		Name:  "authrpc.timeouts.read",
 		Usage: "Maximum duration for reading the entire request, including the body.",
 		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
 	}
 	EngineWriteTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.write",
+		Name:  "authrpc.timeouts.write",
 		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
 		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
 	}
 	EngineIdleTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If engine.timeouts.idle is zero, the value of engine.timeouts.read is used.",
+		Name:  "authrpc.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 )
@@ -329,8 +329,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 
 		HttpListenAddress:       ctx.GlobalString(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                ctx.GlobalInt(utils.HTTPPortFlag.Name),
-		EngineHTTPListenAddress: ctx.GlobalString(utils.EngineAddr.Name),
-		EnginePort:              ctx.GlobalInt(utils.EnginePort.Name),
+		EngineHTTPListenAddress: ctx.GlobalString(utils.AuthRpcAddr.Name),
+		EnginePort:              ctx.GlobalInt(utils.AuthRpcPort.Name),
 		JWTSecretPath:           jwtSecretPath,
 		TraceRequests:           ctx.GlobalBool(utils.HTTPTraceFlag.Name),
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
