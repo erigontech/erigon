@@ -314,19 +314,19 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		n := hexutil.Uint(len(b.Transactions()))
 		return &n, nil
 	}
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	body, _, txAmount, err := rawdb.ReadBodyByNumber(tx, blockNum)
+	body, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if body == nil {
 		return nil, nil
 	}
-	n := hexutil.Uint(txAmount)
-	return &n, nil
+	txAmount := hexutil.Uint(len(body.Transactions) - 2) // 1 system txn in the begining of block, and 1 at the end
+	return &txAmount, nil
 }
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
@@ -346,6 +346,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	numOfTx := (uint)(len(blockBody.Transactions) - 2) // 1 system txn in the begining of block, and 1 at the end
-	return (*hexutil.Uint)(&numOfTx), nil
+	numOfTx := hexutil.Uint((len(blockBody.Transactions) - 2)) // 1 system txn in the begining of block, and 1 at the end
+	return &numOfTx, nil
 }
