@@ -79,7 +79,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func handleError(err error, stream *jsoniter.Stream) error {
+func HandleError(err error, stream *jsoniter.Stream) error {
 	if err != nil {
 		//return msg.errorResponse(err)
 		stream.WriteObjectStart()

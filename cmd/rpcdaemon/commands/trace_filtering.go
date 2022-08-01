@@ -326,7 +326,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(hashErr, stream)
+			rpc.HandleError(hashErr, stream)
 			continue
 		}
 
@@ -337,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(bErr, stream)
+			rpc.HandleError(bErr, stream)
 			continue
 		}
 		if block == nil {
@@ -346,7 +346,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
 			continue
 		}
 
@@ -360,7 +360,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(tErr, stream)
+			rpc.HandleError(tErr, stream)
 			continue
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
@@ -382,7 +382,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
-						rpc.handleError(err, stream)
+						rpc.HandleError(err, stream)
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -419,7 +419,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
-				rpc.handleError(err, stream)
+				rpc.HandleError(err, stream)
 				continue
 			}
 			if nSeen > after && nExported < count {
@@ -455,7 +455,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
-						rpc.handleError(err, stream)
+						rpc.HandleError(err, stream)
 						continue
 					}
 					if nSeen > after && nExported < count {
