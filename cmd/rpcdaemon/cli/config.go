@@ -438,7 +438,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {
-	err := startAuthenticatedRpcServer(ctx, cfg, authAPI)
+	engineInfo, err := startAuthenticatedRpcServer(cfg, authAPI)
+	go stopAuthenticatedRpcServer(ctx, engineInfo)
 	if err != nil {
 		return err
 	}
@@ -543,7 +544,14 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	return nil
 }
 
-func startAuthenticatedRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
+type engineInfo struct {
+	Srv                *rpc.Server
+	EngineSrv          *rpc.Server
+	EngineListener     *http.Server
+	EngineHttpEndpoint string
+}
+
+func startAuthenticatedRpcServer(cfg httpcfg.HttpCfg, rpcAPI []rpc.API) (*engineInfo, error) {
 	var engineListener *http.Server
 	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
@@ -561,26 +569,28 @@ func startAuthenticatedRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAP
 	if len(rpcAPIList) > 0 {
 		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, rpcAPIList)
 		if err != nil {
-			return fmt.Errorf("could not start RPC api for engine: %w", err)
+			return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 		}
 	}
+	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
+}
 
+func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo) {
 	defer func() {
-		srv.Stop()
-		if engineSrv != nil {
-			engineSrv.Stop()
+		engineInfo.Srv.Stop()
+		if engineInfo.EngineSrv != nil {
+			engineInfo.EngineSrv.Stop()
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if engineListener != nil {
-			_ = engineListener.Shutdown(shutdownCtx)
-			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
+		if engineInfo.EngineListener != nil {
+			_ = engineInfo.EngineListener.Shutdown(shutdownCtx)
+			log.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
 		}
 	}()
 	<-ctx.Done()
-	log.Info("Exiting...")
-	return nil
+	log.Info("Exiting Engine...")
 }
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.
