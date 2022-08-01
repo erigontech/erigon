@@ -120,7 +120,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 	}
 }
 
-func (rw *Worker22) ResetTx() {
+func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
 	if rw.tx != nil {
 		rw.tx.Rollback()
 		rw.tx = nil
@@ -128,6 +128,15 @@ func (rw *Worker22) ResetTx() {
 	if rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
+	}
+	if tx != nil {
+		rw.tx = tx
+		rw.stateReader.SetTx(rw.tx)
+	}
+	if chainTx != nil {
+		rw.chainTx = chainTx
+		rw.epoch = epochReader{tx: rw.chainTx}
+		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 }
 
@@ -348,7 +357,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	workerCount := 4
+	workerCount := 1
 	queueSize := workerCount * 4
 	workCh := make(chan state.TxTask, queueSize)
 
@@ -422,7 +431,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer func() {
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i].ResetTx()
+			reconWorkers[i].ResetTx(nil, nil)
 		}
 	}()
 	if workerCount > 1 {
@@ -430,6 +439,16 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		for i := 0; i < workerCount; i++ {
 			go reconWorkers[i].run()
 		}
+	} else {
+		tx, err := db.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		chainTx, err := chainDb.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		reconWorkers[0].ResetTx(tx, chainTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
@@ -456,8 +475,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	// Go-routine gathering results from the workers
 	var maxTxNum uint64 = txNums[len(txNums)-1]
 	var applyTx kv.RwTx
-	go func() {
-		if workerCount > 1 {
+	if workerCount > 1 {
+		go func() {
 			defer func() {
 				if applyTx != nil {
 					applyTx.Rollback()
@@ -467,55 +486,53 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 				panic(err)
 			}
 			agg.SetTx(applyTx)
-		}
-		defer rs.Finish()
-		for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
-			select {
-			case txTask := <-resultCh:
-				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-				func() {
-					rwsLock.Lock()
-					defer rwsLock.Unlock()
-					atomic.AddInt64(&resultsSize, txTask.ResultsSize)
-					heap.Push(&rws, txTask)
-					processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
-					rwsReceiveCond.Signal()
-				}()
-			case <-logEvery.C:
-				var m runtime.MemStats
-				libcommon.ReadMemStats(&m)
-				sizeEstimate := rs.SizeEstimate()
-				count = rs.DoneCount()
-				currentTime := time.Now()
-				interval := currentTime.Sub(prevTime)
-				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
-				speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
-				var repeatRatio float64
-				if count > prevCount {
-					repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
-				}
-				log.Info("Transaction replay",
-					//"workers", workerCount,
-					"at block", outputBlockNum,
-					"input block", atomic.LoadUint64(&inputBlockNum),
-					"blk/s", fmt.Sprintf("%.1f", speedBlock),
-					"tx/s", fmt.Sprintf("%.1f", speedTx),
-					"result queue", rws.Len(),
-					"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
-					"buffer", libcommon.ByteCount(sizeEstimate),
-					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-				)
-				prevTime = currentTime
-				prevCount = count
-				prevOutputBlockNum = outputBlockNum
-				prevRepeatCount = repeatCount
-				//prevTriggerCount = triggerCount
-				if sizeEstimate >= commitThreshold {
-					commitStart := time.Now()
-					log.Info("Committing...")
-					err := func() error {
-						if workerCount > 1 {
+			defer rs.Finish()
+			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
+				select {
+				case txTask := <-resultCh:
+					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+					func() {
+						rwsLock.Lock()
+						defer rwsLock.Unlock()
+						atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+						heap.Push(&rws, txTask)
+						processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+						rwsReceiveCond.Signal()
+					}()
+				case <-logEvery.C:
+					var m runtime.MemStats
+					libcommon.ReadMemStats(&m)
+					sizeEstimate := rs.SizeEstimate()
+					count = rs.DoneCount()
+					currentTime := time.Now()
+					interval := currentTime.Sub(prevTime)
+					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
+					var repeatRatio float64
+					if count > prevCount {
+						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
+					}
+					log.Info("Transaction replay",
+						//"workers", workerCount,
+						"at block", outputBlockNum,
+						"input block", atomic.LoadUint64(&inputBlockNum),
+						"blk/s", fmt.Sprintf("%.1f", speedBlock),
+						"tx/s", fmt.Sprintf("%.1f", speedTx),
+						"result queue", rws.Len(),
+						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
+						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+						"buffer", libcommon.ByteCount(sizeEstimate),
+						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+					)
+					prevTime = currentTime
+					prevCount = count
+					prevOutputBlockNum = outputBlockNum
+					prevRepeatCount = repeatCount
+					//prevTriggerCount = triggerCount
+					if sizeEstimate >= commitThreshold {
+						commitStart := time.Now()
+						log.Info("Committing...")
+						err := func() error {
 							rwsLock.Lock()
 							defer rwsLock.Unlock()
 							// Drain results (and process) channel because read sets do not carry over
@@ -557,41 +574,47 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							if err = applyTx.Commit(); err != nil {
 								return err
 							}
-						}
-						for i := 0; i < workerCount; i++ {
-							reconWorkers[i].ResetTx()
-						}
-						rwTx, err = db.BeginRw(ctx)
-						if err != nil {
-							return err
-						}
-						if err = rs.Flush(rwTx); err != nil {
-							return err
-						}
-						if err = rwTx.Commit(); err != nil {
-							return err
-						}
-						if workerCount > 1 {
+							for i := 0; i < workerCount; i++ {
+								reconWorkers[i].ResetTx(nil, nil)
+							}
+							rwTx, err = db.BeginRw(ctx)
+							if err != nil {
+								return err
+							}
+							if err = rs.Flush(rwTx); err != nil {
+								return err
+							}
+							if err = rwTx.Commit(); err != nil {
+								return err
+							}
 							if applyTx, err = db.BeginRw(ctx); err != nil {
 								return err
 							}
 							agg.SetTx(applyTx)
+							return nil
+						}()
+						if err != nil {
+							panic(err)
 						}
-						return nil
-					}()
-					if err != nil {
-						panic(err)
+						log.Info("Committed", "time", time.Since(commitStart))
 					}
-					log.Info("Committed", "time", time.Since(commitStart))
 				}
 			}
-		}
-		if workerCount > 1 {
 			if err = applyTx.Commit(); err != nil {
 				panic(err)
 			}
+		}()
+	} else {
+		defer func() {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}()
+		if applyTx, err = db.BeginRw(ctx); err != nil {
+			panic(err)
 		}
-	}()
+		agg.SetTx(applyTx)
+	}
 	var inputTxNum uint64
 	if block > 0 {
 		inputTxNum = txNums[block-1]
@@ -645,16 +668,80 @@ loop:
 			}
 			if workerCount == 1 {
 				reconWorkers[0].runTxTask(txTask)
-				if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
+				if txTask.Error == nil {
 					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].tx, txTask, agg); err != nil {
 						panic(err)
 					}
-					rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-					atomic.AddUint64(&outputTxNum, 1)
-					atomic.StoreUint64(&outputBlockNum, txTask.BlockNum)
+					outputTxNum++
+					outputBlockNum = txTask.BlockNum
 					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				} else {
-					return fmt.Errorf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+					return fmt.Errorf("Rolled back %d block %d txIndex %d, err = %v\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
+				}
+				select {
+				case <-logEvery.C:
+					var m runtime.MemStats
+					libcommon.ReadMemStats(&m)
+					sizeEstimate := rs.SizeEstimate()
+					count = rs.DoneCount()
+					currentTime := time.Now()
+					interval := currentTime.Sub(prevTime)
+					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
+					var repeatRatio float64
+					if count > prevCount {
+						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
+					}
+					log.Info("Transaction replay",
+						//"workers", workerCount,
+						"at block", outputBlockNum,
+						"input block", atomic.LoadUint64(&inputBlockNum),
+						"blk/s", fmt.Sprintf("%.1f", speedBlock),
+						"tx/s", fmt.Sprintf("%.1f", speedTx),
+						"result queue", rws.Len(),
+						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
+						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+						"buffer", libcommon.ByteCount(sizeEstimate),
+						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+					)
+					prevTime = currentTime
+					prevCount = count
+					prevOutputBlockNum = outputBlockNum
+					prevRepeatCount = repeatCount
+					//prevTriggerCount = triggerCount
+					if sizeEstimate >= commitThreshold {
+						commitStart := time.Now()
+						log.Info("Committing...")
+						if err = applyTx.Commit(); err != nil {
+							return err
+						}
+						reconWorkers[0].ResetTx(nil, nil)
+						rwTx, err = db.BeginRw(ctx)
+						if err != nil {
+							return err
+						}
+						if err = rs.Flush(rwTx); err != nil {
+							return err
+						}
+						if err = rwTx.Commit(); err != nil {
+							return err
+						}
+						if applyTx, err = db.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(applyTx)
+						tx, err := db.BeginRo(ctx)
+						if err != nil {
+							return err
+						}
+						chainTx, err := chainDb.BeginRo(ctx)
+						if err != nil {
+							return err
+						}
+						reconWorkers[0].ResetTx(tx, chainTx)
+						log.Info("Committed", "time", time.Since(commitStart))
+					}
+				default:
 				}
 			}
 			inputTxNum++
@@ -668,10 +755,15 @@ loop:
 		default:
 		}
 	}
-	close(workCh)
-	wg.Wait()
+	if workerCount > 1 {
+		close(workCh)
+		wg.Wait()
+	}
+	if err = applyTx.Commit(); err != nil {
+		return err
+	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i].ResetTx()
+		reconWorkers[i].ResetTx(nil, nil)
 	}
 	rwTx, err = db.BeginRw(ctx)
 	if err != nil {
