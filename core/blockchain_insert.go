@@ -16,14 +16,11 @@
 
 package core
 
-import (
-	"github.com/ledgerwatch/erigon/common/mclock"
-)
-
+// TODO: (leonard) commented out because not used. File as a whole not used too
 // InsertStats tracks and reports on block insertion.
-type InsertStats struct {
-	queued, lastIndex, ignored int
-	UsedGas                    uint64
-	Processed                  int
-	StartTime                  mclock.AbsTime
-}
+//type InsertStats struct {
+//	queued, lastIndex, ignored int
+//	UsedGas                    uint64
+//	Processed                  int
+//	StartTime                  mclock.AbsTime
+//}

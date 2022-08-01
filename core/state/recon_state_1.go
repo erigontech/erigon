@@ -234,7 +234,8 @@ func (rs *ReconState1) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask) error
 			}
 		}
 	}
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	for addr := range txTask.BalanceIncreaseSet {
+		increase := txTask.BalanceIncreaseSet[addr]
 		//if increase.IsZero() {
 		//	continue
 		//}
@@ -302,8 +303,6 @@ func (rs *ReconState1) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -413,14 +412,12 @@ func (w *StateReconWriter1) CreateContract(address common.Address) error {
 }
 
 type StateReconReader1 struct {
-	tx         kv.Tx
-	txNum      uint64
-	trace      bool
-	rs         *ReconState1
-	readError  bool
-	stateTxNum uint64
-	composite  []byte
-	readLists  map[string]*KvList
+	tx        kv.Tx
+	txNum     uint64
+	trace     bool
+	rs        *ReconState1
+	composite []byte
+	readLists map[string]*KvList
 }
 
 func NewStateReconReader1(rs *ReconState1) *StateReconReader1 {

@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	"io"
 	"os"
 	"os/exec"
@@ -206,7 +207,10 @@ func (tt *TestCmd) Interrupt() {
 // It will only return a valid value after the process has finished.
 func (tt *TestCmd) ExitStatus() int {
 	if tt.Err != nil {
-		exitErr := tt.Err.(*exec.ExitError)
+		exitErr, ok := tt.Err.(*exec.ExitError)
+		if !ok {
+			log.Warn("Failed to type convert testCmd.Error to exec.ExitError")
+		}
 		if exitErr != nil {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				return status.ExitStatus()

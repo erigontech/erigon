@@ -287,6 +287,7 @@ func RegisterLifecycles(lifecycles LifecycleConstructors) {
 	}
 }
 
+// TODO: (leonard) method not used, remove?
 // adds the host part to the configuration's ENR, signs it
 // creates and  the corresponding enode object to the configuration
 func (n *NodeConfig) initEnode(ip net.IP, tcpport int, udpport int) error {
@@ -310,6 +311,7 @@ func (n *NodeConfig) initEnode(ip net.IP, tcpport int, udpport int) error {
 	return nil
 }
 
+// TODO: (leonard) method not used, remove?
 func (n *NodeConfig) initDummyEnode() error {
 	return n.initEnode(net.IPv4(127, 0, 0, 1), int(n.Port), 0)
 }
