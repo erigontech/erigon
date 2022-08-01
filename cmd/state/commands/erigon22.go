@@ -636,13 +636,15 @@ loop:
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			func() {
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-					rwsReceiveCond.Wait()
-				}
-			}()
+			if workerCount > 1 {
+				func() {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+						rwsReceiveCond.Wait()
+					}
+				}()
+			}
 			txTask := &state.TxTask{
 				Header:    header,
 				BlockNum:  blockNum,
@@ -758,9 +760,10 @@ loop:
 	if workerCount > 1 {
 		close(workCh)
 		wg.Wait()
-	}
-	if err = applyTx.Commit(); err != nil {
-		return err
+	} else {
+		if err = applyTx.Commit(); err != nil {
+			return err
+		}
 	}
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i].ResetTx(nil, nil)
