@@ -335,7 +335,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
-				rpc.handleError(err, stream)
+				rpc.HandleError(err, stream)
 				continue
 			}
 			lastBlockNum = blockNum
@@ -351,7 +351,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
-				rpc.handleError(err, stream)
+				rpc.HandleError(err, stream)
 				continue
 			}
 			// Block reward section, handle specially
@@ -377,7 +377,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					} else {
 						stream.WriteMore()
 					}
-					rpc.handleError(err, stream)
+					rpc.HandleError(err, stream)
 					continue
 				}
 				if nSeen > after && nExported < count {
@@ -413,7 +413,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 							} else {
 								stream.WriteMore()
 							}
-							rpc.handleError(err, stream)
+							rpc.HandleError(err, stream)
 							continue
 						}
 						if nSeen > after && nExported < count {
@@ -449,7 +449,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(err, stream)
+			rpc.HandleError(err, stream)
 			continue
 		}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
@@ -481,7 +481,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(err, stream)
+			rpc.HandleError(err, stream)
 			continue
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
@@ -491,7 +491,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(err, stream)
+			rpc.HandleError(err, stream)
 			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
@@ -500,7 +500,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(err, stream)
+			rpc.HandleError(err, stream)
 			continue
 		}
 		for _, pt := range traceResult.Trace {
@@ -517,7 +517,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					} else {
 						stream.WriteMore()
 					}
-					rpc.handleError(err, stream)
+					rpc.HandleError(err, stream)
 					continue
 				}
 				if nSeen > after && nExported < count {
