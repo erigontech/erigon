@@ -453,6 +453,9 @@ Loop:
 		switch f.T {
 		case snap.Headers:
 			for _, sn := range s.Headers.segments {
+				if sn.seg == nil { // it's ok if some segment was not able to open
+					continue
+				}
 				_, name := filepath.Split(sn.seg.FilePath())
 				if fName == name {
 					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
@@ -487,6 +490,9 @@ Loop:
 			}
 		case snap.Bodies:
 			for _, sn := range s.Bodies.segments {
+				if sn.seg == nil {
+					continue
+				}
 				_, name := filepath.Split(sn.seg.FilePath())
 				if fName == name {
 					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
@@ -518,6 +524,9 @@ Loop:
 			}
 		case snap.Transactions:
 			for _, sn := range s.Txs.segments {
+				if sn.Seg == nil {
+					continue
+				}
 				_, name := filepath.Split(sn.Seg.FilePath())
 				if fName == name {
 					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
@@ -646,7 +655,7 @@ Loop3:
 		s.Txs.segments[i] = nil
 	}
 	var i int
-	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil; i++ {
+	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil && s.Headers.segments[i].seg != nil; i++ {
 	}
 	tail := s.Headers.segments[i:]
 	s.Headers.segments = s.Headers.segments[:i]
@@ -657,7 +666,7 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil; i++ {
+	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil && s.Bodies.segments[i].seg != nil; i++ {
 	}
 	tailB := s.Bodies.segments[i:]
 	s.Bodies.segments = s.Bodies.segments[:i]
@@ -668,7 +677,7 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil; i++ {
+	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil && s.Txs.segments[i].Seg != nil; i++ {
 	}
 	tailC := s.Txs.segments[i:]
 	s.Txs.segments = s.Txs.segments[:i]
@@ -687,7 +696,6 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	fmt.Printf("sn: %d, %d\n", s.segmentsMax.Load(), s.idxMax.Load())
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
 		fmt.Printf("%d,  %t\n", sn.ranges.from, sn.idxHeaderHash == nil)
@@ -885,7 +893,7 @@ func EnforceSnapshotsInvariant(db kv.RwDB, dir string, allSnapshots *RoSnapshots
 		return snList, err
 	}
 	if allSnapshots != nil {
-		if err := allSnapshots.ReopenList(snList, false); err != nil {
+		if err := allSnapshots.ReopenList(snList, true); err != nil {
 			return snList, err
 		}
 	}
