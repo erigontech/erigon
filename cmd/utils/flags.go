@@ -324,13 +324,13 @@ var (
 	}
 	AuthRpcAddr = cli.StringFlag{
 		Name:  "authrpc.addr",
-		Usage: "HTTP-RPC server listening interface for engineAPI",
+		Usage: "HTTP-RPC server listening interface for the Engine API",
 		Value: nodecfg.DefaultHTTPHost,
 	}
 	AuthRpcPort = cli.UintFlag{
 		Name:  "authrpc.port",
-		Usage: "HTTP-RPC server listening port for the engineAPI",
-		Value: nodecfg.DefaultEngineHTTPPort,
+		Usage: "HTTP-RPC server listening port for the Engine API",
+		Value: nodecfg.DefaultAuthRpcPort,
 	}
 
 	JWTSecretPath = cli.StringFlag{
