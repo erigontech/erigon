@@ -335,6 +335,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TraceRequests:            ctx.GlobalBool(utils.HTTPTraceFlag.Name),
 		HttpCORSDomain:           strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:          strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
+		AuthRpcVirtualHost:       strings.Split(ctx.GlobalString(utils.AuthRpcVirtualHostsFlag.Name), ","),
 		API:                      strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),

@@ -22,6 +22,7 @@ type HttpCfg struct {
 	AuthRpcPort              int
 	HttpCORSDomain           []string
 	HttpVirtualHost          []string
+	AuthRpcVirtualHost       []string
 	HttpCompression          bool
 	API                      []string
 	Gascap                   uint64

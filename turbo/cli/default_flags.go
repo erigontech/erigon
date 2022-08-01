@@ -55,6 +55,7 @@ var DefaultFlags = []cli.Flag{
 	utils.HttpCompressionFlag,
 	utils.HTTPCORSDomainFlag,
 	utils.HTTPVirtualHostsFlag,
+	utils.AuthRpcVirtualHostsFlag,
 	utils.HTTPApiFlag,
 	utils.WSEnabledFlag,
 	utils.WsCompressionFlag,

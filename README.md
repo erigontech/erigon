@@ -174,26 +174,25 @@ Windows users may run erigon in 3 possible ways:
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
-### Beacon Chain
+### Beacon Chain (Consensus Layer)
 
-Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
-relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
+Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
+relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
+ are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
 
-If beacon chain client is on a different device, add `--authrpc.addr 0.0.0.0`. (Engine API listens on localhost by default.)
+If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
+as well as `--authrpc.vhosts <CL host>`.
 
-Once the JSON-RPC is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC.
-
-Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
-
-### Authentication API
+[Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
 
 In order to establish a secure connection between the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
 
 The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
 
-This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
+This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md).
+
+Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
+where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT secret path created by Erigon.
 
 ### Multiple Instances / One Machine
 
@@ -423,7 +422,7 @@ internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 |  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically, 8551 (JWT authenticated) is exposed only internally for the Engine API JSON-RPC queries.
+Typically, 8551 (JWT authenticated) is exposed only internally for the [Engine API] JSON-RPC queries.
 
 #### `sentry` ports
 
