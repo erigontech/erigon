@@ -766,7 +766,6 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 				defer sem.Release(1)
 				defer wg.Done()
 
-				log.Log(log.LvlInfo, "[snapshots] Build missed indices", "type", t.String(), "from", sn.From, "to", sn.To)
 				if err := buildIdx(ctx, sn, chainID, tmpDir, lvl); err != nil {
 					errs <- err
 				}
