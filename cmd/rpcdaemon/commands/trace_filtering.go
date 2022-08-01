@@ -9,16 +9,16 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/dafky2000/erigon/common"
+	"github.com/dafky2000/erigon/common/hexutil"
+	"github.com/dafky2000/erigon/consensus/ethash"
+	"github.com/dafky2000/erigon/core/rawdb"
+	"github.com/dafky2000/erigon/core/types"
+	"github.com/dafky2000/erigon/ethdb"
+	"github.com/dafky2000/erigon/ethdb/bitmapdb"
+	"github.com/dafky2000/erigon/params"
+	"github.com/dafky2000/erigon/rpc"
+	"github.com/dafky2000/erigon/turbo/rpchelper"
 )
 
 // Transaction implements trace_transaction
@@ -326,7 +326,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(hashErr, stream)
+			handleError(hashErr, stream)
 			continue
 		}
 
@@ -337,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(bErr, stream)
+			handleError(bErr, stream)
 			continue
 		}
 		if block == nil {
@@ -346,7 +346,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			handleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
 			continue
 		}
 
@@ -360,7 +360,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
-			rpc.handleError(tErr, stream)
+			handleError(tErr, stream)
 			continue
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
@@ -382,7 +382,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
-						rpc.handleError(err, stream)
+						handleError(err, stream)
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -419,7 +419,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
-				rpc.handleError(err, stream)
+				handleError(err, stream)
 				continue
 			}
 			if nSeen > after && nExported < count {
@@ -455,7 +455,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
-						rpc.handleError(err, stream)
+						handleError(err, stream)
 						continue
 					}
 					if nSeen > after && nExported < count {
