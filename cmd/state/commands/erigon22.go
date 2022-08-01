@@ -434,21 +434,28 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 			reconWorkers[i].ResetTx(nil, nil)
 		}
 	}()
+	var applyTx kv.RwTx
 	if workerCount > 1 {
 		wg.Add(workerCount)
 		for i := 0; i < workerCount; i++ {
 			go reconWorkers[i].run()
 		}
 	} else {
-		tx, err := db.BeginRo(ctx)
+		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
+		defer func() {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}()
 		chainTx, err := chainDb.BeginRo(ctx)
 		if err != nil {
 			return err
 		}
-		reconWorkers[0].ResetTx(tx, chainTx)
+		reconWorkers[0].ResetTx(applyTx, chainTx)
+		agg.SetTx(applyTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
@@ -474,7 +481,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var prevOutputBlockNum uint64 = block
 	// Go-routine gathering results from the workers
 	var maxTxNum uint64 = txNums[len(txNums)-1]
-	var applyTx kv.RwTx
 	if workerCount > 1 {
 		go func() {
 			defer func() {
@@ -604,16 +610,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 				panic(err)
 			}
 		}()
-	} else {
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}()
-		if applyTx, err = db.BeginRw(ctx); err != nil {
-			panic(err)
-		}
-		agg.SetTx(applyTx)
 	}
 	var inputTxNum uint64
 	if block > 0 {
@@ -732,15 +728,11 @@ loop:
 							return err
 						}
 						agg.SetTx(applyTx)
-						tx, err := db.BeginRo(ctx)
-						if err != nil {
-							return err
-						}
 						chainTx, err := chainDb.BeginRo(ctx)
 						if err != nil {
 							return err
 						}
-						reconWorkers[0].ResetTx(tx, chainTx)
+						reconWorkers[0].ResetTx(applyTx, chainTx)
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
 				default:
