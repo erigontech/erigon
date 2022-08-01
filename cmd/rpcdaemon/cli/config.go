@@ -320,29 +320,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
 		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.UseSnapshots
-
-		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
-		if cc.TerminalTotalDifficulty != nil {
-			hasEthApiEnabled := false
-			hasEngineApiEnabled := false
-
-			for _, api := range cfg.API {
-				switch api {
-				case "eth":
-					hasEthApiEnabled = true
-				case "engine":
-					hasEngineApiEnabled = true
-				}
-			}
-
-			if !hasEthApiEnabled {
-				cfg.API = append(cfg.API, "eth")
-			}
-
-			if !hasEngineApiEnabled {
-				cfg.API = append(cfg.API, "engine")
-			}
-		}
 	}
 
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
