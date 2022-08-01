@@ -136,6 +136,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)

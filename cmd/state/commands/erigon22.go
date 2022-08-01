@@ -92,6 +92,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	resultCh chan *state.TxTask, engine consensus.Engine,
 ) *Worker22 {
+	ctx := context.Background()
 	return &Worker22{
 		lock:         lock,
 		db:           db,
@@ -100,7 +101,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 		rs:           rs,
 		blockReader:  blockReader,
 		allSnapshots: allSnapshots,
-		ctx:          context.Background(),
+		ctx:          ctx,
 		stateWriter:  state.NewStateWriter22(rs),
 		stateReader:  state.NewStateReader22(rs),
 		txNums:       txNums,
@@ -109,6 +110,13 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 		genesis:      genesis,
 		resultCh:     resultCh,
 		engine:       engine,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			h, err := blockReader.Header(ctx, nil, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
+		},
 	}
 }
 
@@ -125,13 +133,6 @@ func (rw *Worker22) ResetTx() {
 
 func (rw *Worker22) run() {
 	defer rw.wg.Done()
-	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
@@ -172,6 +173,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
@@ -280,8 +282,8 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 				panic(err)
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-			*outputTxNum++
-			*outputBlockNum = txTask.BlockNum
+			atomic.AddUint64(outputTxNum, 1)
+			atomic.StoreUint64(outputBlockNum, txTask.BlockNum)
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
@@ -423,9 +425,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 			reconWorkers[i].ResetTx()
 		}
 	}()
-	wg.Add(workerCount)
-	for i := 0; i < workerCount; i++ {
-		go reconWorkers[i].run()
+	if workerCount > 1 {
+		wg.Add(workerCount)
+		for i := 0; i < workerCount; i++ {
+			go reconWorkers[i].run()
+		}
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
@@ -451,19 +455,21 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var prevOutputBlockNum uint64 = block
 	// Go-routine gathering results from the workers
 	var maxTxNum uint64 = txNums[len(txNums)-1]
+	var applyTx kv.RwTx
 	go func() {
-		var applyTx kv.RwTx
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
+		if workerCount > 1 {
+			defer func() {
+				if applyTx != nil {
+					applyTx.Rollback()
+				}
+			}()
+			if applyTx, err = db.BeginRw(ctx); err != nil {
+				panic(err)
 			}
-		}()
-		if applyTx, err = db.BeginRw(ctx); err != nil {
-			panic(err)
+			agg.SetTx(applyTx)
 		}
-		agg.SetTx(applyTx)
 		defer rs.Finish()
-		for outputTxNum < atomic.LoadUint64(&maxTxNum) {
+		for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
 			select {
 			case txTask := <-resultCh:
 				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
@@ -509,46 +515,48 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
-						rwsLock.Lock()
-						defer rwsLock.Unlock()
-						// Drain results (and process) channel because read sets do not carry over
-						for {
+						if workerCount > 1 {
+							rwsLock.Lock()
+							defer rwsLock.Unlock()
+							// Drain results (and process) channel because read sets do not carry over
+							for {
+								var drained bool
+								for !drained {
+									select {
+									case txTask := <-resultCh:
+										atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+										heap.Push(&rws, txTask)
+									default:
+										drained = true
+									}
+								}
+								processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+								if rws.Len() == 0 {
+									break
+								}
+							}
+							rwsReceiveCond.Signal()
+							lock.Lock() // This is to prevent workers from starting work on any new txTask
+							defer lock.Unlock()
+							// Drain results channel because read sets do not carry over
 							var drained bool
 							for !drained {
 								select {
 								case txTask := <-resultCh:
-									atomic.AddInt64(&resultsSize, txTask.ResultsSize)
-									heap.Push(&rws, txTask)
+									rs.AddWork(txTask)
 								default:
 									drained = true
 								}
 							}
-							processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
-							if rws.Len() == 0 {
-								break
-							}
-						}
-						rwsReceiveCond.Signal()
-						lock.Lock() // This is to prevent workers from starting work on any new txTask
-						defer lock.Unlock()
-						// Drain results channel because read sets do not carry over
-						var drained bool
-						for !drained {
-							select {
-							case txTask := <-resultCh:
+							// Drain results queue as well
+							for rws.Len() > 0 {
+								txTask := heap.Pop(&rws).(*state.TxTask)
+								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
-							default:
-								drained = true
 							}
-						}
-						// Drain results queue as well
-						for rws.Len() > 0 {
-							txTask := heap.Pop(&rws).(*state.TxTask)
-							atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
-							rs.AddWork(txTask)
-						}
-						if err = applyTx.Commit(); err != nil {
-							return err
+							if err = applyTx.Commit(); err != nil {
+								return err
+							}
 						}
 						for i := 0; i < workerCount; i++ {
 							reconWorkers[i].ResetTx()
@@ -563,10 +571,12 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 						if err = rwTx.Commit(); err != nil {
 							return err
 						}
-						if applyTx, err = db.BeginRw(ctx); err != nil {
-							return err
+						if workerCount > 1 {
+							if applyTx, err = db.BeginRw(ctx); err != nil {
+								return err
+							}
+							agg.SetTx(applyTx)
 						}
-						agg.SetTx(applyTx)
 						return nil
 					}()
 					if err != nil {
@@ -576,8 +586,10 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 				}
 			}
 		}
-		if err = applyTx.Commit(); err != nil {
-			panic(err)
+		if workerCount > 1 {
+			if err = applyTx.Commit(); err != nil {
+				panic(err)
+			}
 		}
 	}()
 	var inputTxNum uint64
@@ -623,11 +635,27 @@ loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if ok := rs.RegisterSender(txTask); ok {
-					rs.AddWork(txTask)
+				if workerCount > 1 {
+					if ok := rs.RegisterSender(txTask); ok {
+						rs.AddWork(txTask)
+					}
 				}
-			} else {
+			} else if workerCount > 1 {
 				rs.AddWork(txTask)
+			}
+			if workerCount == 1 {
+				reconWorkers[0].runTxTask(txTask)
+				if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
+					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].tx, txTask, agg); err != nil {
+						panic(err)
+					}
+					rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+					atomic.AddUint64(&outputTxNum, 1)
+					atomic.StoreUint64(&outputBlockNum, txTask.BlockNum)
+					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+				} else {
+					return fmt.Errorf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+				}
 			}
 			inputTxNum++
 		}
