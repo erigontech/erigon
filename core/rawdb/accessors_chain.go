@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
-	"strings"
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -1627,11 +1627,14 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return strings.Split(string(v), ","), nil
+	var res []string
+	_ = json.Unmarshal(v, &res)
+	return res, nil
 }
 
 func WriteSnapshots(tx kv.RwTx, list []string) error {
-	return tx.Put(kv.DatabaseInfo, SapshotsKey, []byte(strings.Join(list, ",")))
+	res, _ := json.Marshal(list)
+	return tx.Put(kv.DatabaseInfo, SapshotsKey, res)
 }
 
 // EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
