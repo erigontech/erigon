@@ -336,15 +336,16 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 	defer tx.Rollback()
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
+	if err != nil {
+		return nil, err
+	}
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
-	if num == nil {
-		return nil, nil
+	blockBody, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
 	}
-	body, _, txAmount := rawdb.ReadBody(tx, blockHash, *num)
-	if body == nil {
-		return nil, nil
-	}
-	n := hexutil.Uint(txAmount)
-	return &n, nil
+
+	numOfTx := (uint)(len(blockBody.Transactions) - 2) // 1 system txn in the begining of block, and 1 at the end
+	return (*hexutil.Uint)(&numOfTx), nil
 }
