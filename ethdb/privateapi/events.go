@@ -28,7 +28,6 @@ type Events struct {
 	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
 	hasLogSubscriptions       bool
 	lock                      sync.RWMutex
-	onNewSnapshotsHappened    bool
 }
 
 func NewEvents() *Events {
@@ -105,16 +104,9 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
-func (e *Events) OnNewSnapshotHappened() bool {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
-	return e.onNewSnapshotsHappened
-}
-
 func (e *Events) OnNewSnapshot() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	e.onNewSnapshotsHappened = true
 	for _, ch := range e.newSnapshotSubscription {
 		common.PrioritizedSend(ch, struct{}{})
 	}

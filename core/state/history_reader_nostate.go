@@ -19,7 +19,7 @@ func (r *RequiredStateError) Error() string {
 }
 
 type HistoryReaderNoState struct {
-	ac         *libstate.AggregatorContext
+	ac         *libstate.Aggregator22Context
 	tx         kv.Tx
 	txNum      uint64
 	trace      bool
@@ -29,7 +29,7 @@ type HistoryReaderNoState struct {
 	composite  []byte
 }
 
-func NewHistoryReaderNoState(ac *libstate.AggregatorContext, rs *ReconState) *HistoryReaderNoState {
+func NewHistoryReaderNoState(ac *libstate.Aggregator22Context, rs *ReconState) *HistoryReaderNoState {
 	return &HistoryReaderNoState{ac: ac, rs: rs}
 }
 
@@ -58,6 +58,9 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 		}
 		enc = hr.rs.Get(kv.PlainStateR, address.Bytes(), nil, stateTxNum)
 		if enc == nil {
+			if hr.tx == nil {
+				return nil, fmt.Errorf("hr.tx is nil")
+			}
 			if cap(hr.composite) < 8+20 {
 				hr.composite = make([]byte, 8+20)
 			} else if len(hr.composite) != 8+20 {
@@ -134,6 +137,9 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 
 		enc = hr.rs.Get(kv.PlainStateR, address.Bytes(), key.Bytes(), stateTxNum)
 		if enc == nil {
+			if hr.tx == nil {
+				return nil, fmt.Errorf("hr.tx is nil")
+			}
 			if cap(hr.composite) < 8+20+8+32 {
 				hr.composite = make([]byte, 8+20+8+32)
 			} else if len(hr.composite) != 8+20+8+32 {
@@ -175,6 +181,10 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 		}
 		enc = hr.rs.Get(kv.CodeR, codeHash.Bytes(), nil, stateTxNum)
 		if enc == nil {
+			if hr.tx == nil {
+				fmt.Printf("ReadAccountCode [%x] %d\n", address, incarnation)
+				return nil, fmt.Errorf("hr.tx is nil")
+			}
 			if cap(hr.composite) < 8+32 {
 				hr.composite = make([]byte, 8+32)
 			} else if len(hr.composite) != 8+32 {

@@ -73,7 +73,7 @@ func TestMergeSnapshots(t *testing.T) {
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	require.NoError(s.Reopen())
+	require.NoError(s.ReopenFolder())
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
@@ -127,13 +127,13 @@ func TestCanRetire(t *testing.T) {
 }
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName)
+	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
 	createFile := func(from, to uint64, name snap.Type) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err := s.Reopen()
+	err := s.ReopenFolder()
 	require.NoError(err)
 	require.Equal(0, len(s.Headers.segments))
 	s.Close()
@@ -147,7 +147,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 1_000_000, snap.Headers)
 	createFile(500_000, 1_000_000, snap.Transactions)
 	s = NewRoSnapshots(cfg, dir)
-	err = s.Reopen()
+	err = s.ReopenFolder()
 	require.NoError(err)
 	require.Equal(0, len(s.Headers.segments))
 	s.Close()
@@ -158,7 +158,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
 
-	err = s.Reopen()
+	err = s.ReopenFolder()
 	require.NoError(err)
 	require.Equal(2, len(s.Headers.segments))
 
@@ -186,7 +186,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
 	s = NewRoSnapshots(cfg, dir)
-	err = s.Reopen()
+	err = s.ReopenFolder()
 	require.NoError(err)
 	defer s.Close()
 	require.Equal(2, len(s.Headers.segments))
@@ -197,7 +197,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err = s.Reopen()
+	err = s.ReopenFolder()
 	require.NoError(err)
 }
 

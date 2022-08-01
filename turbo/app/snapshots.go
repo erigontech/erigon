@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -237,7 +238,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := snapshots.Reopen(); err != nil {
+	if err := snapshots.ReopenWithDB(db); err != nil {
 		return err
 	}
 
@@ -250,6 +251,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
+				return err
+			}
 			if err := br.PruneAncientBlocks(tx); err != nil {
 				return err
 			}
@@ -257,6 +261,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}); err != nil {
 			return err
 		}
+	}
+
+	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, snapshots, nil)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -277,11 +286,16 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	dir.MustExist(filepath.Join(dirs.Snap, "db")) // this folder will be checked on existance - to understand that snapshots are ready
 	dir.MustExist(dirs.Tmp)
 
-	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).Readonly().MustOpen()
+	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
 		log.Error("Error", "err", err)
+	}
+
+	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, nil, nil)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -291,10 +305,10 @@ func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dir
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := allSnapshots.Reopen(); err != nil {
+	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, *chainID, dirs.Tmp, from, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
