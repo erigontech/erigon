@@ -214,7 +214,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 }
 
 func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
-	preverified := snapcfg.KnownCfg(chainName).Preverified
+	preverified := snapcfg.KnownCfg(chainName, nil).Preverified
 	keep := map[string]struct{}{}
 	for _, p := range preverified {
 		ext := filepath.Ext(p.Name)

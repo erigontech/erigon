@@ -229,7 +229,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	if useSnapshots {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
-		if err := allSnapshots.Reopen(); err != nil {
+		if err := allSnapshots.ReopenWithDB(db); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
@@ -629,16 +629,16 @@ func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, sna
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
 	case chainConfig.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
 	case chainConfig.Parlia != nil:
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots, true /* readonly */)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}

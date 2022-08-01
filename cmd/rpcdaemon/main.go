@@ -27,7 +27,8 @@ func main() {
 		}
 
 		apiList := commands.APIList(db, borDb, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg)
-		if err := cli.StartRpcServer(ctx, *cfg, apiList); err != nil {
+		authApiList := commands.AuthAPIList(db, backend, txPool, mining, ff, stateCache, blockReader, *cfg)
+		if err := cli.StartRpcServer(ctx, *cfg, apiList, authApiList); err != nil {
 			log.Error(err.Error())
 			return nil
 		}
