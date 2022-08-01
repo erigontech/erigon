@@ -633,12 +633,6 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true)
 
-	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	engineSrv.SetAllowList(allowListForRPC)
-
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
