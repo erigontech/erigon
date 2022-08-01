@@ -667,6 +667,7 @@ loop:
 				rs.AddWork(txTask)
 			}
 			if workerCount == 1 {
+				count++
 				reconWorkers[0].runTxTask(txTask)
 				if txTask.Error == nil {
 					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].tx, txTask, agg); err != nil {
@@ -683,7 +684,6 @@ loop:
 					var m runtime.MemStats
 					libcommon.ReadMemStats(&m)
 					sizeEstimate := rs.SizeEstimate()
-					count = rs.DoneCount()
 					currentTime := time.Now()
 					interval := currentTime.Sub(prevTime)
 					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
