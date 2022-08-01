@@ -26,6 +26,14 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, err
 	}
 
+	txnChainId := txn.GetChainID()
+	chainId := api._chainConfig.ChainID
+
+	// check if transaction has the right chain id
+	if chainId.Cmp(txnChainId.ToBig()) != 0 {
+		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
+	}
+
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
