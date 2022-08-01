@@ -44,11 +44,13 @@ import (
 )
 
 var (
-	reset bool
+	reset   bool
+	workers int
 )
 
 func init() {
 	erigon22Cmd.Flags().BoolVar(&reset, "reset", false, "Resets the state database and static files")
+	erigon22Cmd.Flags().IntVar(&workers, "workers", 1, "Number of workers")
 	withDataDir(erigon22Cmd)
 	rootCmd.AddCommand(erigon22Cmd)
 	withChain(erigon22Cmd)
@@ -357,7 +359,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	workerCount := 1
+	workerCount := workers
 	queueSize := workerCount * 4
 	workCh := make(chan state.TxTask, queueSize)
 
