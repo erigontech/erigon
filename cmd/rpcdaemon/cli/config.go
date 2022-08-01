@@ -531,25 +531,12 @@ type engineInfo struct {
 }
 
 func startAuthenticatedRpcServer(cfg httpcfg.HttpCfg, rpcAPI []rpc.API) (*engineInfo, error) {
-	var engineListener *http.Server
-	var engineSrv *rpc.Server
-	var engineHttpEndpoint string
-	var err error
-
 	log.Trace("TraceRequests = %t\n", cfg.TraceRequests)
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable)
 
-	var rpcAPIList []rpc.API
-
-	for _, api := range rpcAPI {
-		rpcAPIList = append(rpcAPIList, api)
-	}
-
-	if len(rpcAPIList) > 0 {
-		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, rpcAPIList)
-		if err != nil {
-			return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
-		}
+	engineListener, engineSrv, engineHttpEndpoint, err := createEngineListener(cfg, rpcAPI)
+	if err != nil {
+		return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 	}
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
 }
