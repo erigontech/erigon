@@ -126,7 +126,9 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 			bitLen:   bitLen,
 			patterns: make([]*codeword, tableSize),
 		}
-		buildPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth)
+		if _, err := buildPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
+			return nil, err
+		}
 	}
 
 	// read positions
@@ -174,9 +176,9 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 type word []byte // plain text word associated with code from dictionary
 
 // returns number of depth and patterns comsumed
-func buildPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) int {
+func buildPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
 	if len(depths) == 0 {
-		return 0
+		return 0, nil
 	}
 	if depth == depths[0] {
 		pattern := word(patterns[0])
@@ -196,7 +198,7 @@ func buildPatternTable(table *patternTable, depths []uint64, patterns [][]byte, 
 				p.pattern, p.len, p.ptr = &pattern, byte(bits), nil
 			}
 		}
-		return 1
+		return 1, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -214,8 +216,18 @@ func buildPatternTable(table *patternTable, depths []uint64, patterns [][]byte, 
 		table.patterns[code] = &codeword{pattern: nil, len: byte(0), ptr: newTable}
 		return buildPatternTable(newTable, depths, patterns, 0, 0, depth, maxDepth)
 	}
-	b0 := buildPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
-	return b0 + buildPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if maxDepth == 0 {
+		return 0, fmt.Errorf("invalid snapshot format. decompress.buildPatternTable faced maxDepth underflow")
+	}
+	b0, err := buildPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	b1, err := buildPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	return b0 + b1, nil
 }
 
 func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
