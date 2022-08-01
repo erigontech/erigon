@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -330,8 +331,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}))
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
-				stream.WriteNil()
-				return err
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				rpc.handleError(err, stream)
+				continue
 			}
 			lastBlockNum = blockNum
 			lastBlockHash = lastHeader.Hash()
@@ -341,8 +347,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		if txNum+1 == api._txNums[blockNum] {
 			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
-				stream.WriteNil()
-				return err
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				rpc.handleError(err, stream)
+				continue
 			}
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
@@ -362,8 +373,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
 				if err != nil {
-					stream.WriteNil()
-					return err
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					rpc.handleError(err, stream)
+					continue
 				}
 				if nSeen > after && nExported < count {
 					if first {
@@ -393,8 +409,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						tr.TraceAddress = []int{}
 						b, err := json.Marshal(tr)
 						if err != nil {
-							stream.WriteNil()
-							return err
+							if first {
+								first = false
+							} else {
+								stream.WriteMore()
+							}
+							rpc.handleError(err, stream)
+							continue
 						}
 						if nSeen > after && nExported < count {
 							if first {
@@ -424,8 +445,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			rpc.handleError(err, stream)
+			continue
 		}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, dbtx, contractHasTEVM, api._blockReader)
@@ -451,17 +477,32 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			rpc.handleError(err, stream)
+			continue
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			rpc.handleError(err, stream)
+			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			rpc.handleError(err, stream)
+			continue
 		}
 		for _, pt := range traceResult.Trace {
 			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
@@ -472,8 +513,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				pt.TransactionPosition = &txIndex
 				b, err := json.Marshal(pt)
 				if err != nil {
-					stream.WriteNil()
-					return err
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					rpc.handleError(err, stream)
+					continue
 				}
 				if nSeen > after && nExported < count {
 					if first {
