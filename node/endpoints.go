@@ -40,10 +40,11 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 	CheckTimeouts(&timeouts)
 	// Bundle and start the HTTP server
 	httpSrv := &http.Server{
-		Handler:      handler,
-		ReadTimeout:  timeouts.ReadTimeout,
-		WriteTimeout: timeouts.WriteTimeout,
-		IdleTimeout:  timeouts.IdleTimeout,
+		Handler:           handler,
+		ReadTimeout:       timeouts.ReadTimeout,
+		WriteTimeout:      timeouts.WriteTimeout,
+		IdleTimeout:       timeouts.IdleTimeout,
+		ReadHeaderTimeout: timeouts.ReadTimeout,
 	}
 	go func() {
 		serveErr := httpSrv.Serve(listener)
