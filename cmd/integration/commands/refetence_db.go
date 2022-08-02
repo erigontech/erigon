@@ -350,6 +350,7 @@ func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
 	dst := mdbx2.NewMDBX(logger).Path(to).WriteMap().
+		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit }).
 		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
@@ -366,7 +367,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	}
 	defer dstTx.Rollback()
 
-	commitEvery := time.NewTicker(20 * time.Second)
+	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
 	var total uint64
