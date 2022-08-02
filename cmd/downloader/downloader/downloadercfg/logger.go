@@ -47,7 +47,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 
 	switch lvl {
 	case lg.Debug:
-		log.Debug(r.String())
+		log.Info("[downloader] " + r.String())
 	case lg.Info:
 		str := r.String()
 		if strings.Contains(str, "EOF") ||
@@ -100,6 +100,6 @@ func (b adapterHandler) Handle(r lg.Record) {
 
 		log.Error(str)
 	default:
-		log.Debug(r.String(), "torrent_log_type", "unknown")
+		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
 }
