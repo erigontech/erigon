@@ -4,20 +4,20 @@ run:
 linters:
   disable-all: true
   enable:
-    - gofmt
-    - deadcode
-    - errcheck
+#    - gofmt
+#    - deadcode
+#    - errcheck
     - gosimple # 1.18
-    - govet
-    - ineffassign
-    - staticcheck # 1.18
-    - structcheck # 1.18
-    - unused # 1.18
-    - varcheck
-    - gocritic
-    - bodyclose # 1.18
-    - gosec
-    - forcetypeassert
+#    - govet
+#    - ineffassign
+#    - staticcheck # 1.18
+#    - structcheck # 1.18
+#    - unused # 1.18
+#    - varcheck
+#    - gocritic
+#    - bodyclose # 1.18
+#    - gosec
+#    - forcetypeassert
 
 linters-settings:
   gocritic:
