@@ -216,12 +216,13 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 			}
 		}
 	} else {
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		posa, isPoSA := rw.engine.(consensus.PoSA)
 		if isPoSA {
 			if isSystemTx, err := posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
 				panic(err)
 			} else if isSystemTx {
+				fmt.Printf("System tx\n")
 				return
 			}
 		}
@@ -241,7 +242,7 @@ func (rw *Worker22) runTxTask(txTask *state.TxTask) {
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
-			//fmt.Printf("error=%v\n", err)
+			fmt.Printf("error=%v\n", err)
 		} else {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
