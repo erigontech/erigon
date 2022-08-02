@@ -17,12 +17,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 )
 
 type (
@@ -400,14 +401,14 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
 	for addr := range ff.logsSubs.aggLogsFilter.addrs {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
 	for topic := range ff.logsSubs.aggLogsFilter.topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	loaded := ff.logsRequestor.Load()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
@@ -424,14 +425,14 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
 	for addr := range ff.logsSubs.aggLogsFilter.addrs {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
 	for topic := range ff.logsSubs.aggLogsFilter.topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	loaded := ff.logsRequestor.Load()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
