@@ -414,7 +414,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%dm/%dm", i/1_000_000, total/1_000_000), "key", fmt.Sprintf("%x", k))
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
