@@ -374,6 +374,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	commitEvery := time.NewTicker(20 * time.Second)
 	defer commitEvery.Stop()
 
+	var total uint64
 	for name, b := range src.AllBuckets() {
 		if b.IsDeprecated {
 			continue
@@ -388,7 +389,10 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		if err != nil {
 			return err
 		}
+		total, _ = srcC.Count()
+
 		casted, isDupsort := c.(kv.RwCursorDupSort)
+		i := uint64(0)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
@@ -405,11 +409,12 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 				}
 			}
 
+			i++
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%dk/%dk", i/1000, total/1000), "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
