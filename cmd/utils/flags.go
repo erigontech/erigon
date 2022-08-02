@@ -322,15 +322,15 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: nodecfg.DefaultHTTPPort,
 	}
-	EngineAddr = cli.StringFlag{
-		Name:  "engine.addr",
-		Usage: "HTTP-RPC server listening interface for engineAPI",
+	AuthRpcAddr = cli.StringFlag{
+		Name:  "authrpc.addr",
+		Usage: "HTTP-RPC server listening interface for the Engine API",
 		Value: nodecfg.DefaultHTTPHost,
 	}
-	EnginePort = cli.UintFlag{
-		Name:  "engine.port",
-		Usage: "HTTP-RPC server listening port for the engineAPI",
-		Value: nodecfg.DefaultEngineHTTPPort,
+	AuthRpcPort = cli.UintFlag{
+		Name:  "authrpc.port",
+		Usage: "HTTP-RPC server listening port for the Engine API",
+		Value: nodecfg.DefaultAuthRpcPort,
 	}
 
 	JWTSecretPath = cli.StringFlag{
@@ -355,6 +355,11 @@ var (
 	HTTPVirtualHostsFlag = cli.StringFlag{
 		Name:  "http.vhosts",
 		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
+	}
+	AuthRpcVirtualHostsFlag = cli.StringFlag{
+		Name:  "authrpc.vhosts",
+		Usage: "Comma separated list of virtual hostnames from which to accept Engine API requests (server enforced). Accepts '*' wildcard.",
 		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
 	}
 	HTTPApiFlag = cli.StringFlag{
