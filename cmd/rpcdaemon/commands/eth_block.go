@@ -318,14 +318,14 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if err != nil {
 		return nil, err
 	}
-	body, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if body == nil {
 		return nil, nil
 	}
-	txAmount := hexutil.Uint(len(body.Transactions) - 2) // 1 system txn in the begining of block, and 1 at the end
+	txAmount := hexutil.Uint(len(body.Transactions))
 	return &txAmount, nil
 }
 
@@ -340,12 +340,11 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if err != nil {
 		return nil, err
 	}
-
-	blockBody, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	blockBody, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	numOfTx := hexutil.Uint((len(blockBody.Transactions) - 2)) // 1 system txn in the begining of block, and 1 at the end
+	numOfTx := hexutil.Uint(len(blockBody.Transactions))
 	return &numOfTx, nil
 }
