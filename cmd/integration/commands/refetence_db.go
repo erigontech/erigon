@@ -353,8 +353,6 @@ func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	dst := mdbx2.NewMDBX(logger).Path(to).
 		PageSize(uint64(16 * datasize.KB)).
 		Exclusive().
-		Flags(func(f uint) uint { return f ^ mdbx.Durable | mdbx.SafeNoSync }).
-		SyncPeriod(60 * time.Second).
 		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
