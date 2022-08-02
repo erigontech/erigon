@@ -584,7 +584,7 @@ func (w *StateWriter22) ResetWriteSet() {
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
 	for _, list := range w.writeLists {
-		sort.Sort(list)
+		sort.Stable(list)
 	}
 	return w.writeLists
 }
@@ -692,7 +692,7 @@ func (r *StateReader22) ResetReadSet() {
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
 	for _, list := range r.readLists {
-		sort.Sort(list)
+		sort.Stable(list)
 	}
 	return r.readLists
 }
