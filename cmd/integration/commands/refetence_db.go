@@ -349,7 +349,8 @@ MainLoop:
 func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX(logger).Path(to).WriteMap().
+	dst := mdbx2.NewMDBX(logger).Path(to).
+		WriteMap().
 		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit }).
 		MustOpen()
 	return kv2kv(ctx, src, dst)
