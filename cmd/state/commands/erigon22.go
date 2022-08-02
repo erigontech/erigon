@@ -324,8 +324,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
