@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -349,7 +350,7 @@ MainLoop:
 func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).PageSize(uint64(16 * datasize.KB)).Exclusive().MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 
