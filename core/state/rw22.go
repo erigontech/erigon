@@ -513,8 +513,6 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
