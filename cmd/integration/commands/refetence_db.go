@@ -350,7 +350,12 @@ MainLoop:
 func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX(logger).Path(to).PageSize(uint64(16 * datasize.KB)).Exclusive().MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).
+		PageSize(uint64(16 * datasize.KB)).
+		Exclusive().
+		Flags(func(f uint) uint { return f ^ mdbx.Durable | mdbx.SafeNoSync }).
+		SyncPeriod(30 * time.Second).
+		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 
