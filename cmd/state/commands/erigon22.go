@@ -370,7 +370,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -554,6 +554,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							reconWorkers[i].ResetTx()
 						}
 						rwTx, err = db.BeginRw(ctx)
+						defer func() {
+							if rwTx != nil {
+								rwTx.Rollback()
+							}
+						}()
 						if err != nil {
 							return err
 						}
@@ -649,6 +654,11 @@ loop:
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 	if err = rs.Flush(rwTx); err != nil {
 		return err
 	}
