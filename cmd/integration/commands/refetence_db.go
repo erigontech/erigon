@@ -353,8 +353,8 @@ func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	dst := mdbx2.NewMDBX(logger).Path(to).
 		PageSize(uint64(16 * datasize.KB)).
 		Exclusive().
-		Flags(func(f uint) uint { return f ^ mdbx.Durable | mdbx.SafeNoSync }).
-		SyncPeriod(30 * time.Second).
+		//Flags(func(f uint) uint { return f ^ mdbx.Durable | mdbx.SafeNoSync }).
+		//SyncPeriod(30 * time.Second).
 		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
@@ -414,7 +414,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%dk/%dk", i/1000, total/1000), "key", fmt.Sprintf("%x", k))
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%dm/%dm", i/1_000_000, total/1_000_000), "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
