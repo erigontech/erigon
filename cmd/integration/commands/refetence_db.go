@@ -371,7 +371,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	}
 	defer dstTx.Rollback()
 
-	commitEvery := time.NewTicker(30 * time.Second)
+	commitEvery := time.NewTicker(20 * time.Second)
 	defer commitEvery.Stop()
 
 	for name, b := range src.AllBuckets() {
