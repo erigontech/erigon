@@ -350,7 +350,6 @@ func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
 	dst := mdbx2.NewMDBX(logger).Path(to).
-		Exclusive().
 		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
