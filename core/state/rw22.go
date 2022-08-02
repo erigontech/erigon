@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
-	"sort"
 	"sync"
 	"unsafe"
 
