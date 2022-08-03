@@ -3,7 +3,6 @@ package commands
 import (
 	"container/heap"
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -304,12 +303,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	var err error
 	ctx := context.Background()
 	reconDbPath := path.Join(datadir, "db22")
-	if reset {
-		if _, err = os.Stat(reconDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(reconDbPath); err != nil {
+	if reset && dir.Exist(reconDbPath) {
+		if err = os.RemoveAll(reconDbPath); err != nil {
 			return err
 		}
 	}
@@ -395,16 +390,12 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 
 	rs := state.NewState22()
 	aggDir := path.Join(datadir, "agg22")
-	if reset {
-		if _, err = os.Stat(aggDir); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(aggDir); err != nil {
+	if reset && dir.Exist(aggDir) {
+		if err = os.RemoveAll(aggDir); err != nil {
 			return err
 		}
 	}
-	dir.MustExist(reconDbPath)
+	dir.MustExist(aggDir)
 	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
 	if err != nil {
 		return err
