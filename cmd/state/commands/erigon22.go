@@ -17,6 +17,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -312,6 +313,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
+	dir.MustExist(reconDbPath)
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
 	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiter).Open()
 	if err != nil {
@@ -401,10 +403,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		} else if err = os.RemoveAll(aggDir); err != nil {
 			return err
 		}
-		if err = os.MkdirAll(aggDir, 0755); err != nil {
-			return err
-		}
 	}
+	dir.MustExist(reconDbPath)
 	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
 	if err != nil {
 		return err
