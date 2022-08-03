@@ -1,21 +1,4 @@
 //go:build tools
-// +build tools
-
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
 
 package tools
 
@@ -34,6 +17,14 @@ package tools
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
 
 import (
-	_ "github.com/matryer/moq"
-	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
+	_ "github.com/ledgerwatch/interfaces"
+	_ "github.com/ledgerwatch/interfaces/consensus_engine"
+	_ "github.com/ledgerwatch/interfaces/downloader"
+	_ "github.com/ledgerwatch/interfaces/p2psentry"
+	_ "github.com/ledgerwatch/interfaces/remote"
+	_ "github.com/ledgerwatch/interfaces/starknet"
+	_ "github.com/ledgerwatch/interfaces/testing"
+	_ "github.com/ledgerwatch/interfaces/txpool"
+	_ "github.com/ledgerwatch/interfaces/types"
+	_ "github.com/ledgerwatch/interfaces/web3"
 )

@@ -44,9 +44,10 @@ protoc-clean:
 	rm -rf "$(PROTOC_INCLUDE)"
 
 grpc: protoc-all
-	PATH="$(GOBIN):$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
+	go mod vendor
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		types/types.proto
-	PATH="$(GOBIN):$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=vendor/github.com/ledgerwatch/interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		p2psentry/sentry.proto \
@@ -56,6 +57,7 @@ grpc: protoc-all
 		starknet/cairo.proto \
 		testing/testing.proto \
 		txpool/txpool.proto txpool/mining.proto
+	rm -rf vendor
 
 $(GOBINREL)/moq: | $(GOBINREL)
 	$(GOBUILD) -o "$(GOBIN)/moq" github.com/matryer/moq
