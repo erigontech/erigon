@@ -156,7 +156,11 @@ type GenesisMismatchError struct {
 }
 
 func (e *GenesisMismatchError) Error() string {
-	return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	config := params.ChainConfigByGenesisHash(e.Stored)
+	if config == nil {
+		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	}
+	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
 }
 
 // CommitGenesisBlock writes or updates the genesis block in db.
