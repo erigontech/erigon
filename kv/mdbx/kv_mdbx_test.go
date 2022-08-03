@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -528,4 +529,25 @@ func TestCurrentDup(t *testing.T) {
 
 	require.Equal(t, []string{"key1", "key1"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3"}, values)
+}
+
+func TestDupDelete(t *testing.T) {
+	db, tx, c := BaseCase(t)
+	defer db.Close()
+	defer tx.Rollback()
+	defer c.Close()
+
+	k, _, err := c.Current()
+	require.Nil(t, err)
+	require.Equal(t, []byte("key3"), k)
+
+	err = c.DeleteCurrentDuplicates()
+	require.Nil(t, err)
+
+	err = c.Delete([]byte("key1"))
+	require.Nil(t, err)
+
+	count, err := c.Count()
+	require.Nil(t, err)
+	assert.Zero(t, count)
 }

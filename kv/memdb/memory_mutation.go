@@ -379,5 +379,5 @@ func (m *MemoryMutation) ViewID() uint64 {
 }
 
 func (m *MemoryMutation) Reset() error {
-	return nil
+	panic("MemoryMutation.Reset not implemented")
 }
