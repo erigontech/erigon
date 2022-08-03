@@ -511,7 +511,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		stream.WriteMore()
 	}
 	stream.WriteObjectField("result")
-	callb.call(ctx, msg.Method, args, stream)
+	_, err := callb.call(ctx, msg.Method, args, stream)
+	if err != nil {
+		HandleError(err, stream)
+	}
 	stream.WriteObjectEnd()
 	stream.Flush()
 	return nil

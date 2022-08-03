@@ -212,7 +212,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
-		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
@@ -233,7 +232,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if fromBlock > toBlock {
-		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -252,7 +250,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				stream.WriteNil()
 				return err
 			}
 			allBlocks.Or(b)
@@ -268,7 +265,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					continue
 				}
 
-				stream.WriteNil()
 				return err
 			}
 			blocksTo.Or(b)
@@ -295,7 +291,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 

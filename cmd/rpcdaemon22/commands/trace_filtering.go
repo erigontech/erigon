@@ -215,7 +215,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
-		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
@@ -242,7 +241,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	toTxNum = api._txNums[toBlock] // toBlock is an inclusive bound
 
 	if fromBlock > toBlock {
-		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -294,7 +292,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -438,8 +435,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			rpc.HandleError(err, stream)
+			continue
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
