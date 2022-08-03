@@ -263,7 +263,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_submitWork                             | Yes     |                                      |
 |                                            |         |                                      |
 | eth_subscribe                              | Limited | Websock Only - newHeads,             |
-|                                            |         | newPendingTransactions               |
+|                                            |         | newPendingTransactions,              |
+|                                            |         | newPendingBlock                      |
 | eth_unsubscribe                            | Yes     | Websock Only                         |
 |                                            |         |                                      |
 | engine_newPayloadV1                        | Yes     |                                      |

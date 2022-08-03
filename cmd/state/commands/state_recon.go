@@ -478,8 +478,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapAccounts()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -500,8 +499,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapStorage()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -522,8 +520,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapCode()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -776,8 +773,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillAccounts(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -798,8 +794,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillStorage(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -820,8 +815,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillCode(codeCollectors[i], plainContractCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
+		for range logEvery.C {
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64

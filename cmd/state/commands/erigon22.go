@@ -345,8 +345,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -391,7 +390,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
 	if err != nil {
 		return err
 	}

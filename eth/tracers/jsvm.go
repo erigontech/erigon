@@ -22,9 +22,7 @@ func (vm *JSVM) Pop() {
 }
 
 func (vm *JSVM) Swap(index1 int, index2 int) {
-	t := vm.stack[len(vm.stack)+index1]
-	vm.stack[len(vm.stack)+index1] = vm.stack[len(vm.stack)+index2]
-	vm.stack[len(vm.stack)+index2] = t
+	vm.stack[len(vm.stack)+index1], vm.stack[len(vm.stack)+index2] = vm.stack[len(vm.stack)+index2], vm.stack[len(vm.stack)+index1]
 }
 
 func (vm *JSVM) pushAny(val interface{}) {

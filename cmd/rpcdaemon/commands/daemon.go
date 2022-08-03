@@ -138,13 +138,12 @@ func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClien
 		Public:    true,
 		Service:   EthAPI(ethImpl),
 		Version:   "1.0",
-	})
-
-	list = append(list, rpc.API{
+	}, rpc.API{
 		Namespace: "engine",
 		Public:    true,
 		Service:   EngineAPI(engineImpl),
 		Version:   "1.0",
 	})
+
 	return list
 }

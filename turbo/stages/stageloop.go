@@ -330,7 +330,7 @@ func NewStagedSync(
 	logger log.Logger,
 	db kv.RwDB,
 	p2pCfg p2p.Config,
-	cfg ethconfig.Config,
+	cfg *ethconfig.Config,
 	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
@@ -415,7 +415,7 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)

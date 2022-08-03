@@ -155,8 +155,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -237,8 +236,6 @@ type stat23 struct {
 	hits         uint64
 	misses       uint64
 	prevBlock    uint64
-	prevMisses   uint64
-	prevHits     uint64
 	hitMissRatio float64
 	speed        float64
 	prevTime     time.Time

@@ -512,8 +512,6 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -650,14 +648,12 @@ func (w *StateWriter22) CreateContract(address common.Address) error {
 }
 
 type StateReader22 struct {
-	tx         kv.Tx
-	txNum      uint64
-	trace      bool
-	rs         *State22
-	readError  bool
-	stateTxNum uint64
-	composite  []byte
-	readLists  map[string]*KvList
+	tx        kv.Tx
+	txNum     uint64
+	trace     bool
+	rs        *State22
+	composite []byte
+	readLists map[string]*KvList
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
