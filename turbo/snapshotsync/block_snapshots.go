@@ -729,29 +729,29 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-type progress struct {
-	name        atomic.String
-	done, total atomic.Uint64
-	i           int
+type Progress struct {
+	Name             atomic.String
+	Processed, Total atomic.Uint64
+	i                int
 }
 
-func (p *progress) percent() int {
+func (p *Progress) percent() int {
 	return int(
-		(float64(p.done.Load()) / float64(p.total.Load())) * 100,
+		(float64(p.Processed.Load()) / float64(p.Total.Load())) * 100,
 	)
 }
 
-type progressSet struct {
+type ProgressSet struct {
 	lock sync.Mutex
 	i    int
-	b    *btree.BTreeG[*progress]
+	b    *btree.BTreeG[*Progress]
 }
 
-func newProgressSet() *progressSet {
-	return &progressSet{b: btree.NewG[*progress](32, func(i, j *progress) bool { return i.i < j.i })}
+func NewProgressSet() *ProgressSet {
+	return &ProgressSet{b: btree.NewG[*Progress](32, func(i, j *Progress) bool { return i.i < j.i })}
 }
 
-func (s *progressSet) Add(p *progress) {
+func (s *ProgressSet) Add(p *Progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.i++
@@ -759,19 +759,19 @@ func (s *progressSet) Add(p *progress) {
 	s.b.ReplaceOrInsert(p)
 }
 
-func (s *progressSet) Done(p *progress) {
+func (s *ProgressSet) Done(p *Progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.b.Delete(p)
 }
 
-func (s *progressSet) String() string {
+func (s *ProgressSet) String() string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	var sb strings.Builder
 	var i int
-	s.b.Ascend(func(p *progress) bool {
-		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
+	s.b.Ascend(func(p *Progress) bool {
+		sb.WriteString(fmt.Sprintf("%s=%d%%", p.Name.Load(), p.percent()))
 		i++
 		if i != s.b.Len() {
 			sb.WriteString(", ")
@@ -781,7 +781,7 @@ func (s *progressSet) String() string {
 	return sb.String()
 }
 
-func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *progress, lvl log.Lvl) error {
+func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *Progress, lvl log.Lvl) error {
 	switch sn.T {
 	case snap.Headers:
 		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
@@ -810,7 +810,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	}
 	errs := make(chan error, 1024)
 	wg := &sync.WaitGroup{}
-	ps := newProgressSet()
+	ps := NewProgressSet()
 	sem := semaphore.NewWeighted(int64(workers))
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
@@ -830,7 +830,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 					defer sem.Release(1)
 					defer wg.Done()
 
-					p := &progress{}
+					p := &Progress{}
 					ps.Add(p)
 					defer ps.Done(p)
 					if err := buildIdx(ctx, sn, chainID, tmpDir, p, lvl); err != nil {
@@ -1193,7 +1193,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	if err := DumpHeaders(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpHeaders: %w", err)
 	}
-	p := &progress{}
+	p := &Progress{}
 	if err := buildIdx(ctx, f, chainID, tmpDir, p, lvl); err != nil {
 		return err
 	}
@@ -1203,7 +1203,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	if err := DumpBodies(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBodies: %w", err)
 	}
-	p = &progress{}
+	p = &Progress{}
 	if err := buildIdx(ctx, f, chainID, tmpDir, p, lvl); err != nil {
 		return err
 	}
@@ -1213,7 +1213,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	if _, err := DumpTxs(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpTxs: %w", err)
 	}
-	p = &progress{}
+	p = &Progress{}
 	if err := buildIdx(ctx, f, chainID, tmpDir, p, lvl); err != nil {
 		return err
 	}
@@ -1592,7 +1592,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *progress, lvl log.Lvl) (err error) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *Progress, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -1620,8 +1620,8 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if uint64(d.Count()) != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
 	}
-	p.name.Store(segFileName)
-	p.total.Store(uint64(d.Count()))
+	p.Name.Store(segFileName)
+	p.Total.Store(uint64(d.Count()))
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    d.Count(),
@@ -1677,7 +1677,7 @@ RETRY:
 		}
 
 		for g.HasNext() {
-			p.done.Inc()
+			p.Processed.Inc()
 			word, nextPos = g.Next(word[:0])
 			select {
 			case <-ctx.Done():
@@ -1743,7 +1743,7 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *progress, lvl log.Lvl) (err error) {
+func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *Progress, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			_, fName := filepath.Split(segmentFilePath)
@@ -1758,13 +1758,13 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.name.Store(fname)
-	p.total.Store(uint64(d.Count()))
+	p.Name.Store(fname)
+	p.Total.Store(uint64(d.Count()))
 
 	hasher := crypto.NewKeccakState()
 	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.done.Inc()
+		p.Processed.Inc()
 		headerRlp := word[1:]
 		hasher.Reset()
 		hasher.Write(headerRlp)
@@ -1779,7 +1779,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *progress, lvl log.Lvl) (err error) {
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *Progress, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			_, fName := filepath.Split(segmentFilePath)
@@ -1796,11 +1796,11 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.name.Store(fname)
-	p.total.Store(uint64(d.Count()))
+	p.Name.Store(fname)
+	p.Total.Store(uint64(d.Count()))
 
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.done.Inc()
+		p.Processed.Inc()
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -2016,7 +2016,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
-				p := &progress{}
+				p := &Progress{}
 				if err := buildIdx(ctx, f, m.chainID, m.tmpDir, p, m.lvl); err != nil {
 					return err
 				}
