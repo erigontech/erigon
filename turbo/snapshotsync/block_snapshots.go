@@ -1597,7 +1597,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if err != nil {
 		return err
 	}
-	txnHashIdx.LogLvl(log.LvlDebug)
+	txnHashIdx.LogLvl(log.LvlInfo)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 	parseCtx := types2.NewTxParseContext(chainID)
