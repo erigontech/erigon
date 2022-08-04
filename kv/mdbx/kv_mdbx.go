@@ -419,12 +419,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, semErr
 	}
 
-	// if context cancelled as we acquire the sempahore, it may succeed without blocking
-	// in this case we should return
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-
 	defer func() {
 		if err == nil {
 			db.wg.Add(1)
