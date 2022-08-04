@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -73,6 +74,8 @@ type ReconWorker struct {
 	genesis      *core.Genesis
 	epoch        epochReader
 	chain        chainReader
+	isPoSA       bool
+	posa         consensus.PoSA
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
@@ -97,6 +100,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 	}
 	rw.epoch = epochReader{tx: chainTx}
 	rw.chain = chainReader{config: chainConfig, tx: chainTx, blockReader: blockReader}
+	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
 
@@ -136,6 +140,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		if err != nil {
 			panic(err)
 		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txNum, blockNum)
@@ -154,14 +159,16 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		if rw.isPoSA {
+			systemcontracts.UpgradeBuildInSystemContract(chainConfig, txTask.Header.Number, ibs)
+		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
-		posa, isPoSA := rw.engine.(consensus.PoSA)
-		if isPoSA {
-			if isSystemTx, err := posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+		if rw.isPoSA {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
@@ -477,7 +484,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapAccounts()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -498,7 +506,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapStorage()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -519,7 +528,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapCode()
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -772,7 +782,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillAccounts(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -793,7 +804,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillStorage(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
@@ -814,7 +826,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillCode(codeCollectors[i], plainContractCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		for range logEvery.C {
+		select {
+		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
 			var p float64
