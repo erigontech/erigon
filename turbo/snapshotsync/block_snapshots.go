@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -743,11 +744,11 @@ func (p *progress) percent() int {
 type progressSet struct {
 	lock sync.Mutex
 	i    int
-	a    map[int]*progress
+	b    *btree.BTreeG[*progress]
 }
 
 func newProgressSet() *progressSet {
-	return &progressSet{a: map[int]*progress{}}
+	return &progressSet{b: btree.NewG[*progress](32, func(i, j *progress) bool { return i.i < j.i })}
 }
 
 func (s *progressSet) Add(p *progress) {
@@ -755,13 +756,13 @@ func (s *progressSet) Add(p *progress) {
 	defer s.lock.Unlock()
 	s.i++
 	p.i = s.i
-	s.a[s.i] = p
+	s.b.ReplaceOrInsert(p)
 }
 
 func (s *progressSet) Done(p *progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	delete(s.a, p.i)
+	s.b.Delete(p)
 }
 
 func (s *progressSet) String() string {
@@ -769,13 +770,14 @@ func (s *progressSet) String() string {
 	defer s.lock.Unlock()
 	var sb strings.Builder
 	var i int
-	for _, p := range s.a {
+	s.b.Ascend(func(p *progress) bool {
 		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
 		i++
-		if i != len(s.a) {
+		if i != s.b.Len() {
 			sb.WriteString(", ")
 		}
-	}
+		return true
+	})
 	return sb.String()
 }
 
