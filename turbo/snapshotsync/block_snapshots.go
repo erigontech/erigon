@@ -757,30 +757,36 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	}
 	errs := make(chan error, 1024)
 	wg := &sync.WaitGroup{}
+	currentFile := atomic.NewString("")
 	sem := semaphore.NewWeighted(int64(workers))
 	progress := atomic.NewUint64(0)
-	for _, t := range snap.AllSnapshotTypes {
-		for _, sn := range segments {
-			if sn.T != t {
-				continue
-			}
-			if hasIdxFile(&sn) {
-				continue
-			}
-			wg.Add(1)
-			if err := sem.Acquire(ctx, 1); err != nil {
-				return err
-			}
-			go func(sn snap.FileInfo) {
-				defer sem.Release(1)
-				defer wg.Done()
-
-				if err := buildIdx(ctx, sn, chainID, tmpDir, progress, lvl); err != nil {
-					errs <- err
+	go func() {
+		for _, t := range snap.AllSnapshotTypes {
+			for _, sn := range segments {
+				if sn.T != t {
+					continue
 				}
-			}(sn)
+				if hasIdxFile(&sn) {
+					continue
+				}
+				wg.Add(1)
+				if err := sem.Acquire(ctx, 1); err != nil {
+					errs <- err
+					return
+				}
+				go func(sn snap.FileInfo) {
+					defer sem.Release(1)
+					defer wg.Done()
+
+					currentFile.Store(snap.SegmentFileName(sn.From, sn.To, sn.T))
+					if err := buildIdx(ctx, sn, chainID, tmpDir, progress, lvl); err != nil {
+						errs <- err
+					}
+				}(sn)
+			}
 		}
-	}
+	}()
+
 	go func() {
 		wg.Wait()
 		close(errs)
@@ -798,7 +804,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			if lvl >= log.LvlInfo {
 				common2.ReadMemStats(&m)
 			}
-			log.Log(lvl, "[snapshots] Indexing", "blockNum", progress.Load(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			log.Log(lvl, "[snapshots] Indexing", "file", currentFile.Load(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }
