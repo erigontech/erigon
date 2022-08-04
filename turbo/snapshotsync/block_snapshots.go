@@ -766,14 +766,17 @@ func (s *progressSet) Done(p *progress) {
 	delete(s.a, p.i)
 }
 
-func (s *progressSet) LogEntries() []string {
+func (s *progressSet) String() string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	var entries []string
-	for _, p := range s.a {
-		entries = append(entries, p.name.Load(), fmt.Sprintf("%d%%", p.percent()))
+	var sb strings.Builder
+	for i, p := range s.a {
+		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
+		if i != len(s.a)-1 {
+			sb.WriteString(", ")
+		}
 	}
-	return entries
+	return sb.String()
 }
 
 func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *progress, lvl log.Lvl) error {
