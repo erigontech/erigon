@@ -410,19 +410,19 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
+|  8551 |    TCP    | Engine API (JWT auth)  | Private |
 
 Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
+Port 8551 (JWT authenticated) should exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
 
 #### `RPC` ports
 
 |  Port |  Protocol |      Purpose       |  Expose |
 |:-----:|:---------:|:------------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets  | Private |
-|  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically, 8551 (JWT authenticated) is exposed only internally for the [Engine API] JSON-RPC queries.
 
 #### `sentry` ports
 
