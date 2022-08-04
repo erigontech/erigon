@@ -148,8 +148,10 @@ func executeBlock(
 	stateSyncReceipt = execRs.ReceiptForStorage
 
 	if writeReceipts {
-		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
-			return err
+		if params.Eth2DeployBlockNumber(cfg.chainConfig) >= blockNum {
+			if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+				return err
+			}
 		}
 
 		if stateSyncReceipt != nil {
@@ -612,10 +614,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-			return err
+		if s.ForwardProgress > params.Eth2DeployBlockNumber(cfg.chainConfig) {
+			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+				return err
+			}
 		}
 	}
+	// contains filtered or une
 	if cfg.prune.CallTraces.Enabled() {
 		if err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
