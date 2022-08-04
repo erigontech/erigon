@@ -764,8 +764,11 @@ func (s *progressSet) String() string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	var sb strings.Builder
-	for _, p := range s.a {
-		sb.WriteString(fmt.Sprintf("%s=%d%%, ", p.name, int((float64(p.done.Load())/float64(p.total.Load()))*100)))
+	for i, p := range s.a {
+		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name, int((float64(p.done.Load())/float64(p.total.Load()))*100)))
+		if i != len(s.a)-1 {
+			sb.WriteString(", ")
+		}
 	}
 	return sb.String()
 }
@@ -773,11 +776,11 @@ func (s *progressSet) String() string {
 func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *progress, lvl log.Lvl) error {
 	switch sn.T {
 	case snap.Headers:
-		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
+		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
 			return err
 		}
 	case snap.Bodies:
-		if err := BodiesIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
+		if err := BodiesIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
 			return err
 		}
 	case snap.Transactions:
@@ -810,11 +813,11 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 				if hasIdxFile(&sn) {
 					continue
 				}
-				wg.Add(1)
 				if err := sem.Acquire(ctx, 1); err != nil {
 					errs <- err
 					return
 				}
+				wg.Add(1)
 				go func(sn snap.FileInfo) {
 					defer sem.Release(1)
 					defer wg.Done()
@@ -828,12 +831,10 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 				}(sn)
 			}
 		}
-	}()
-
-	go func() {
 		wg.Wait()
 		close(errs)
 	}()
+
 	for {
 		select {
 		case err := <-errs:
@@ -1610,6 +1611,8 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if uint64(d.Count()) != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
 	}
+	idxFName := snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())
+	p.name.Store(idxFName)
 	p.total.Store(uint64(d.Count()))
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1618,7 +1621,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		BucketSize:  2000,
 		LeafSize:    8,
 		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())),
+		IndexFile:   filepath.Join(snapDir, idxFName),
 		BaseDataID:  firstTxID,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	})
@@ -1732,7 +1735,7 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) (err error) {
+func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *progress, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			_, fName := filepath.Split(segmentFilePath)
@@ -1746,9 +1749,14 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	}
 	defer d.Close()
 
+	_, fname := filepath.Split(segmentFilePath)
+	p.name.Store(fname)
+	p.total.Store(uint64(d.Count()))
+
 	hasher := crypto.NewKeccakState()
 	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		p.done.Inc()
 		headerRlp := word[1:]
 		hasher.Reset()
 		hasher.Write(headerRlp)
@@ -1763,7 +1771,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) (err error) {
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *progress, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			_, fName := filepath.Split(segmentFilePath)
@@ -1779,7 +1787,12 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	}
 	defer d.Close()
 
+	_, fname := filepath.Split(segmentFilePath)
+	p.name.Store(fname)
+	p.total.Store(uint64(d.Count()))
+
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		p.done.Inc()
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
