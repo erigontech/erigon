@@ -41,7 +41,7 @@ func (req *RequestGenerator) Get() rpctest.CallResult {
 		RequestID: req.reqID,
 	}
 
-	resp, err := http.Get(erigonUrl)
+	resp, err := http.Get(erigonUrl) //nolint
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
@@ -50,7 +50,7 @@ func (req *RequestGenerator) Get() rpctest.CallResult {
 	defer func(Body io.ReadCloser) {
 		closeErr := Body.Close()
 		if closeErr != nil {
-			log.Warn("body close", "err", closeErr)
+			log.Warn("Failed to close readCloser", "err", closeErr)
 		}
 	}(resp.Body)
 
