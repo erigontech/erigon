@@ -1569,7 +1569,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
 	}
 	p.Name.Store(segFileName)
-	p.Total.Store(uint64(d.Count()))
+	p.Total.Store(uint64(d.Count() * 2))
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    d.Count(),
@@ -1690,6 +1690,7 @@ RETRY:
 		}
 		return err
 	}
+	p.Processed.Store(p.Total.Load())
 
 	return nil
 }
