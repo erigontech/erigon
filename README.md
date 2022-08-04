@@ -414,7 +414,7 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
-Port 8551 (JWT authenticated) should exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
+Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
 
 #### `RPC` ports
 
