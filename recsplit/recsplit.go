@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -68,6 +69,7 @@ type RecSplit struct {
 	bucketCount       uint64          // Number of buckets
 	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	etlBufLimit       datasize.ByteSize
+	lvl               log.Lvl
 	bucketCollector   *etl.Collector // Collector that sorts by buckets
 	enums             bool           // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	offsetCollector   *etl.Collector // Collector that sorts by offsets
@@ -95,6 +97,7 @@ type RecSplit struct {
 	collision          bool
 	tmpDir             string
 	indexFile          string
+	indexFileName      string
 	indexF             *os.File
 	indexW             *bufio.Writer
 	bytesPerRec        int
@@ -141,15 +144,19 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
+	_, fname := filepath.Split(rs.indexFile)
+	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		rs.etlBufLimit = etl.BufferOptimalSize
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+	rs.bucketCollector.LogLvl(log.LvlDebug)
 	rs.enums = args.Enums
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -183,14 +190,7 @@ func (rs *RecSplit) Close() {
 	}
 }
 
-func (rs *RecSplit) LogLvl(lvl log.Lvl) {
-	if rs.bucketCollector != nil {
-		rs.bucketCollector.LogLvl(lvl)
-	}
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.LogLvl(lvl)
-	}
-}
+func (rs *RecSplit) LogLvl(lvl log.Lvl) { rs.lvl = lvl }
 
 func (rs *RecSplit) SetTrace(trace bool) {
 	rs.trace = trace
@@ -559,6 +559,7 @@ func (rs *RecSplit) Build() error {
 
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
+	log.Log(rs.lvl, "[index] calculating", "file", rs.indexFileName)
 	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -577,6 +578,7 @@ func (rs *RecSplit) Build() error {
 		}
 	}
 
+	log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	if rs.enums {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()

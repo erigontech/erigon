@@ -29,6 +29,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -65,11 +66,11 @@ func NewInvertedIndex(
 	ii.files = btree.NewG[*filesItem](32, filesItemLess)
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	ii.scanStateFiles(files)
 	if err = ii.openFiles(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	return &ii, nil
 }
@@ -123,6 +124,11 @@ func (ii *InvertedIndex) openFiles() error {
 			return false
 		}
 		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep))
+		if !dir.Exist(idxPath) {
+			if _, err = buildIndex(item.decompressor, idxPath, ii.dir, item.decompressor.Count()/2, false /* values */); err != nil {
+				return false
+			}
+		}
 		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return false
 		}

@@ -18,7 +18,6 @@ package state
 
 import (
 	"fmt"
-
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"

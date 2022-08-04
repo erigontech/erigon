@@ -59,7 +59,7 @@ func NewHistory(
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
 	h.historyValsTable = historyValsTable
 	h.settingsTable = settingsTable
@@ -70,7 +70,7 @@ func NewHistory(
 	}
 	h.scanStateFiles(files)
 	if err = h.openFiles(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
 	h.compressVals = compressVals
 	return &h, nil
