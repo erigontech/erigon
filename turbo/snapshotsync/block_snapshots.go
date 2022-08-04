@@ -734,6 +734,12 @@ type progress struct {
 	i           int
 }
 
+func (p *progress) percent() int {
+	return int(
+		(float64(p.done.Load()) / float64(p.total.Load())) * 100,
+	)
+}
+
 type progressSet struct {
 	lock *sync.Mutex
 	i    int
@@ -765,12 +771,22 @@ func (s *progressSet) String() string {
 	defer s.lock.Unlock()
 	var sb strings.Builder
 	for i, p := range s.a {
-		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name, int((float64(p.done.Load())/float64(p.total.Load()))*100)))
+		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
 		if i != len(s.a)-1 {
 			sb.WriteString(", ")
 		}
 	}
 	return sb.String()
+}
+
+func (s *progressSet) LogEntries() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	var entries []string
+	for _, p := range s.a {
+		entries = append(entries, p.name.Load(), fmt.Sprintf("%d%%", p.percent()))
+	}
+	return entries
 }
 
 func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *progress, lvl log.Lvl) error {
