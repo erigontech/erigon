@@ -321,7 +321,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(hashErr, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 
@@ -332,7 +334,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(bErr, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		if block == nil {
@@ -341,7 +345,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 
@@ -355,7 +361,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(tErr, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
@@ -377,7 +385,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
+						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
+						stream.WriteObjectEnd()
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -414,7 +424,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
+				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
 				continue
 			}
 			if nSeen > after && nExported < count {
@@ -450,7 +462,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						} else {
 							stream.WriteMore()
 						}
+						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
+						stream.WriteObjectEnd()
 						continue
 					}
 					if nSeen > after && nExported < count {

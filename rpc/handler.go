@@ -82,7 +82,6 @@ type callProc struct {
 func HandleError(err error, stream *jsoniter.Stream) error {
 	if err != nil {
 		//return msg.errorResponse(err)
-		stream.WriteObjectStart()
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
@@ -106,7 +105,6 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 				stream.WriteString(fmt.Sprintf("%v", derr))
 			}
 		}
-		stream.WriteObjectEnd()
 		stream.WriteObjectEnd()
 	}
 
@@ -513,6 +511,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteObjectField("result")
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
+		stream.WriteNil();
+		stream.WriteMore();
 		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()

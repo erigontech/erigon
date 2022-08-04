@@ -332,7 +332,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
+				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
 				continue
 			}
 			lastBlockNum = blockNum
@@ -348,7 +350,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				} else {
 					stream.WriteMore()
 				}
+				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
 				continue
 			}
 			// Block reward section, handle specially
@@ -374,7 +378,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					} else {
 						stream.WriteMore()
 					}
+					stream.WriteObjectStart()
 					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
 					continue
 				}
 				if nSeen > after && nExported < count {
@@ -410,7 +416,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 							} else {
 								stream.WriteMore()
 							}
+							stream.WriteObjectStart()
 							rpc.HandleError(err, stream)
+							stream.WriteObjectEnd()
 							continue
 						}
 						if nSeen > after && nExported < count {
@@ -440,7 +448,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		txHash := txn.Hash()
@@ -451,7 +461,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
@@ -483,7 +495,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
@@ -493,7 +507,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
@@ -502,7 +518,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			} else {
 				stream.WriteMore()
 			}
+			stream.WriteObjectStart()
 			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		for _, pt := range traceResult.Trace {
@@ -519,7 +537,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					} else {
 						stream.WriteMore()
 					}
+					stream.WriteObjectStart()
 					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
 					continue
 				}
 				if nSeen > after && nExported < count {
