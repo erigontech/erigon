@@ -34,9 +34,9 @@ func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.H
 	return h, nil
 }
 
-func (back *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-	body, _, _ = rawdb.ReadBody(tx, hash, blockHeight)
-	return body, nil
+func (back *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
+	body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
+	return body, txAmount, nil
 }
 
 func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
@@ -44,7 +44,7 @@ func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter,
 }
 
 func (back *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
-	body, err := back.Body(ctx, tx, hash, blockHeight)
+	body, _, err := back.Body(ctx, tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -195,15 +195,15 @@ func (back *RemoteBlockReader) Header(ctx context.Context, tx kv.Getter, hash co
 	}
 	return block.Header(), nil
 }
-func (back *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+func (back *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	block, _, err := back.BlockWithSenders(ctx, tx, hash, blockHeight)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if block == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
-	return block.Body(), nil
+	return block.Body(), uint32(len(block.Body().Transactions)), nil
 }
 func (back *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	block, _, err := back.BlockWithSenders(ctx, tx, hash, blockHeight)
@@ -398,22 +398,22 @@ func (back *BlockReaderWithSnapshots) BodyRlp(ctx context.Context, tx kv.Getter,
 	return bodyRlp, nil
 }
 
-func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	ok, err := back.sn.ViewBodies(blockHeight, func(seg *BodySegment) error {
-		body, _, _, _, err = back.bodyFromSnapshot(blockHeight, seg, nil)
+		body, _, txAmount, _, err = back.bodyFromSnapshot(blockHeight, seg, nil)
 		if err != nil {
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if ok {
-		return body, nil
+		return body, txAmount, nil
 	}
-	body, _, _ = rawdb.ReadBody(tx, hash, blockHeight)
-	return body, nil
+	body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
+	return body, txAmount, nil
 }
 
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
