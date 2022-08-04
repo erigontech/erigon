@@ -12,23 +12,14 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 const BlockBufferSize = 128
-
-// VerifyUnclesFunc validates the given block's uncles and verifies the block
-// header's transaction and uncle roots. The headers are assumed to be already
-// validated at this point.
-// It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
-// bodies), second is internal runtime error (like network error or db error)
-type VerifyUnclesFunc func(peerID [64]byte, header *types.Header, uncles []*types.Header) error
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -222,7 +213,7 @@ func (rt RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 			w.Write(rt[i][1:]) //nolint:errcheck
 			return
 		} else if firstByte >= 184 && firstByte < 192 {
-			// RLP striong >= 56 bytes long, firstByte-183 is the length of encoded size
+			// RLP string >= 56 bytes long, firstByte-183 is the length of encoded size
 			w.Write(rt[i][1+firstByte-183:]) //nolint:errcheck
 			return
 		}
@@ -263,7 +254,7 @@ Loop:
 			copy(doubleHash[:], uncleHash.Bytes())
 			copy(doubleHash[common.HashLength:], txHash.Bytes())
 
-			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requesredMap
+			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
 			blockNum, ok := bd.requestedMap[doubleHash]
 			if !ok {
@@ -300,27 +291,6 @@ Loop:
 func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 	bd.deliveredCount += delivered
 	bd.wastedCount += wasted
-}
-
-// ValidateBody validates the given block's uncles and verifies the block
-// header's transaction and uncle roots. The headers are assumed to be already
-// validated at this point.
-// It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
-// bodies), second is internal runtime error (like network error or db error)
-func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Header, r consensus.ChainReader) (headerdownload.Penalty, error) {
-
-	// Header validity is known at this point, check the uncles and transactions
-	//header := block.Header()
-	if err := bd.Engine.VerifyUncles(r, header, uncles); err != nil {
-		return headerdownload.BadBlockPenalty, err
-	}
-	//if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
-	//	return headerdownload.BadBlockPenalty, fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash), nil
-	//}
-	//if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
-	//	return headerdownload.BadBlockPenalty, fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash), nil
-	//}
-	return headerdownload.NoPenalty, nil
 }
 
 func (bd *BodyDownload) GetDeliveries() ([]*types.Header, []*types.RawBody, error) {
