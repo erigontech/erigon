@@ -1026,7 +1026,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
-	if !br.snapshots.cfg.KeepBlocks {
+	if br.snapshots.cfg.KeepBlocks {
 		return nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
