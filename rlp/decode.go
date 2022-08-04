@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	"io"
 	"math/big"
 	"reflect"
@@ -103,7 +104,10 @@ type Decoder interface {
 //
 //     NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, 0)
@@ -115,7 +119,10 @@ func Decode(r io.Reader, val interface{}) error {
 func DecodeBytes(b []byte, val interface{}) error {
 	r := bytes.NewReader(b)
 
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, uint64(len(b)))

@@ -3,18 +3,16 @@ package requests
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var (
-	erigonUrl = "http://localhost:8545"
-)
+const erigonUrl string = "http://localhost:8545"
 
 type RequestGenerator struct {
 	reqID  int

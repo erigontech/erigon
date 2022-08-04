@@ -248,7 +248,12 @@ func (s *Service) loop() {
 // unknown packets.
 func (s *Service) readLoop(conn *connWrapper) {
 	// If the read loop exists, close the connection
-	defer conn.Close()
+	defer func(conn *connWrapper) {
+		closeErr := conn.Close()
+		if closeErr != nil {
+			log.Warn("Failed to close connection", "err", closeErr)
+		}
+	}(conn)
 
 	for {
 		// Retrieve the next generic network packet and bail out on error

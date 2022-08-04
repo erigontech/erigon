@@ -146,19 +146,19 @@ func abigen(c *cli.Context) error {
 	if c.GlobalString(abiFlag.Name) != "" {
 		// Load up the ABI, optional bytecode and type name from the parameters
 		var (
-			abi []byte
-			err error
+			abiBytes []byte
+			err      error
 		)
 		input := c.GlobalString(abiFlag.Name)
 		if input == "-" {
-			abi, err = io.ReadAll(os.Stdin)
+			abiBytes, err = io.ReadAll(os.Stdin)
 		} else {
-			abi, err = os.ReadFile(input)
+			abiBytes, err = os.ReadFile(input)
 		}
 		if err != nil {
 			utils.Fatalf("Failed to read input ABI: %v", err)
 		}
-		abis = append(abis, string(abi))
+		abis = append(abis, string(abiBytes))
 
 		var bin []byte
 		if binFile := c.GlobalString(binFlag.Name); binFile != "" {
