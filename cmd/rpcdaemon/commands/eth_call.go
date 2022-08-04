@@ -371,8 +371,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+
+		var msg types.Message
+
+		var baseFee *uint256.Int = nil
+		// check if EIP-1559
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+
+		msg, err = args.ToMessage(api.GasCap, baseFee)
 		if err != nil {
 			return nil, err
 		}
