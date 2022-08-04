@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -131,20 +132,34 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	rpcSub := notifier.CreateSubscription()
 
-	go func() {
+	go func(ctx context.Context) {
 		defer debug.LogPanic()
 		headers := make(chan *types.Header, 1)
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
 
+		tx, err := api.db.BeginRo(ctx)
+		if err != nil {
+			log.Error("couldn't begin read only transaction")
+			return
+		}
+		defer tx.Rollback()
+
 		for {
 			select {
 			case h, ok := <-headers:
 				if h != nil {
-					err := notifier.Notify(rpcSub.ID, h)
+					isCannonical, err := rawdb.IsCanonicalHash(tx, h.Hash())
 					if err != nil {
-						log.Warn("error while notifying subscription", "err", err)
+						log.Warn("error checking if cannonical")
 						return
+					}
+					if isCannonical {
+						err := notifier.Notify(rpcSub.ID, h)
+						if err != nil {
+							log.Warn("error while notifying subscription", "err", err)
+							return
+						}
 					}
 				}
 				if !ok {
@@ -155,7 +170,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 				return
 			}
 		}
-	}()
+	}(ctx)
 
 	return rpcSub, nil
 }
