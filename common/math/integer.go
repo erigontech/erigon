@@ -108,10 +108,10 @@ func AbsoluteDifference(x, y uint64) uint64 {
 	return y - x
 }
 
-func GetRandInt() (uint64, error) {
+func GetRandInt64() (int64, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
 		return 0, err
 	}
-	return uint64(n.Int64()), nil
+	return n.Int64(), nil
 }

@@ -136,7 +136,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, nil, nil, err
 	}
-	suffix, err := cmath.GetRandInt()
+	suffix, err := cmath.GetRandInt64()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to get random integer: %v", err)
 	}
