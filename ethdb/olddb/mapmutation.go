@@ -285,5 +285,9 @@ func (m *mapmutation) panicOnEmptyDB() {
 }
 
 func (m *mapmutation) SetRwKV(kv kv.RwDB) {
-	m.db.(ethdb.HasRwKV).SetRwKV(kv)
+	hasRwKV, ok := m.db.(ethdb.HasRwKV)
+	if !ok {
+		log.Warn("Failed to convert mapmutation type to HasRwKV interface")
+	}
+	hasRwKV.SetRwKV(kv)
 }

@@ -32,7 +32,10 @@ func main() {
 
 	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("Fprintln error", "err", printErr)
+		}
 		os.Exit(1)
 	}
 }

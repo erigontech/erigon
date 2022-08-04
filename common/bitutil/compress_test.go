@@ -18,6 +18,7 @@ package bitutil
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/log/v3"
 	"math/rand"
 	"testing"
 
@@ -176,6 +177,9 @@ func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
+		_, decodeErr := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
+		if decodeErr != nil {
+			log.Warn("Failed to decode bitset bytes", "err", decodeErr)
+		}
 	}
 }

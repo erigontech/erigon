@@ -624,6 +624,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 						if err != nil {
 							return err
 						}
+						defer func() {
+							if rwTx != nil {
+								rwTx.Rollback()
+							}
+						}()
 						if err = rs.Flush(rwTx); err != nil {
 							return err
 						}
@@ -867,6 +872,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
 	if err = plainStateCollector.Load(rwTx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}

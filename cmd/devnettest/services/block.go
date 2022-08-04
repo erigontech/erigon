@@ -179,7 +179,6 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
-	// TODO: Mining does not happen because node is stuck in StageSync
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)

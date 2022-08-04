@@ -1310,8 +1310,8 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 	}
 	// builds missing snapshots request
-	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
+	for idx := range missingSnapshots {
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[idx], "", ""))
 	}
 
 	log.Info("[Snapshots] Fetching torrent files metadata")

@@ -1114,8 +1114,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 
 	var downloadRequest []DownloadRequest
-	for _, r := range rangesToMerge {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
+	for idx := range rangesToMerge {
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[idx], "", ""))
 	}
 
 	return RequestSnapshotsDownload(ctx, downloadRequest, downloader)
