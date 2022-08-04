@@ -17,7 +17,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
-    + [Beacon Chain](#beacon-chain)
+    + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
 
 - [Key features](#key-features)
