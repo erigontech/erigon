@@ -21,7 +21,7 @@ func (p *Parlia) delayForRamanujanFork(snap *Snapshot, header *types.Header) tim
 	if header.Difficulty.Cmp(diffNoTurn) == 0 {
 		// It's not our turn explicitly to sign, delay it a bit
 		wiggle := time.Duration(len(snap.Validators)/2+1) * wiggleTimeBeforeFork
-		delay += fixedBackOffTimeBeforeFork + time.Duration(rand.Int63n(int64(wiggle)))
+		delay += fixedBackOffTimeBeforeFork + time.Duration(rand.Int63n(int64(wiggle))) // nolint
 	}
 	return delay
 }
