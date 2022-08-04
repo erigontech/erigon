@@ -728,7 +728,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, progress *atomic.Uint64, lvl log.Lvl) error {
+func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, lvl log.Lvl) error {
 	switch sn.T {
 	case snap.Headers:
 		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, lvl); err != nil {
@@ -740,7 +740,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 		}
 	case snap.Transactions:
 		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, progress, lvl); err != nil {
+		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, lvl); err != nil {
 			return err
 		}
 	}
@@ -759,7 +759,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	wg := &sync.WaitGroup{}
 	currentFile := atomic.NewString("")
 	sem := semaphore.NewWeighted(int64(workers))
-	progress := atomic.NewUint64(0)
+	fmt.Printf("alex1\n")
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
 			for _, sn := range segments {
@@ -779,18 +779,20 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 					defer wg.Done()
 
 					currentFile.Store(snap.SegmentFileName(sn.From, sn.To, sn.T))
-					if err := buildIdx(ctx, sn, chainID, tmpDir, progress, lvl); err != nil {
+					if err := buildIdx(ctx, sn, chainID, tmpDir, lvl); err != nil {
 						errs <- err
 					}
 				}(sn)
 			}
 		}
 	}()
+	fmt.Printf("alex2\n")
 
 	go func() {
 		wg.Wait()
 		close(errs)
 	}()
+	fmt.Printf("alex3\n")
 	for {
 		select {
 		case err := <-errs:
@@ -804,6 +806,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			if lvl >= log.LvlInfo {
 				common2.ReadMemStats(&m)
 			}
+			fmt.Printf("alex4\n")
 			log.Log(lvl, "[snapshots] Indexing", "file", currentFile.Load(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
@@ -1136,12 +1139,11 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 }
 
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainID uint256.Int, workers int, lvl log.Lvl) error {
-	progress := atomic.NewUint64(0)
 	f, _ := snap.ParseFileName(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
 	if err := DumpHeaders(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpHeaders: %w", err)
 	}
-	if err := buildIdx(ctx, f, chainID, tmpDir, progress, lvl); err != nil {
+	if err := buildIdx(ctx, f, chainID, tmpDir, lvl); err != nil {
 		return err
 	}
 
@@ -1149,7 +1151,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	if err := DumpBodies(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBodies: %w", err)
 	}
-	if err := buildIdx(ctx, f, chainID, tmpDir, progress, lvl); err != nil {
+	if err := buildIdx(ctx, f, chainID, tmpDir, lvl); err != nil {
 		return err
 	}
 
@@ -1157,7 +1159,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	if _, err := DumpTxs(ctx, chainDB, f.Path, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
 		return fmt.Errorf("DumpTxs: %w", err)
 	}
-	if err := buildIdx(ctx, f, chainID, tmpDir, progress, lvl); err != nil {
+	if err := buildIdx(ctx, f, chainID, tmpDir, lvl); err != nil {
 		return err
 	}
 
@@ -1535,7 +1537,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, progress *atomic.Uint64, lvl log.Lvl) (err error) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -1623,7 +1625,6 @@ RETRY:
 				return ctx.Err()
 			default:
 			}
-			progress.Store(blockNum)
 
 			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
 				if !bodyGetter.HasNext() {
@@ -1944,8 +1945,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
-				progress := atomic.NewUint64(0)
-				if err := buildIdx(ctx, f, m.chainID, m.tmpDir, progress, m.lvl); err != nil {
+				if err := buildIdx(ctx, f, m.chainID, m.tmpDir, m.lvl); err != nil {
 					return err
 				}
 			}
