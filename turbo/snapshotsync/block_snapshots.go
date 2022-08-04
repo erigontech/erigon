@@ -766,23 +766,10 @@ func (s *progressSet) Done(p *progress) {
 	delete(s.a, p.i)
 }
 
-func (s *progressSet) String() string {
+func (s *progressSet) LogEntries() []string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	var sb strings.Builder
-	for i, p := range s.a {
-		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
-		if i != len(s.a)-1 {
-			sb.WriteString(", ")
-		}
-	}
-	return sb.String()
-}
-
-func (s *progressSet) LogEntries() []interface{} {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	var entries []interface{}
+	var entries []string
 	for _, p := range s.a {
 		entries = append(entries, p.name.Load(), fmt.Sprintf("%d%%", p.percent()))
 	}
@@ -864,7 +851,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			if lvl >= log.LvlInfo {
 				common2.ReadMemStats(&m)
 			}
-			log.Log(lvl, "[snapshots] Indexing", "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys), ps.LogEntries()...)
+			log.Log(lvl, "[snapshots] Indexing", "progress", ps.String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }
