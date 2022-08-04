@@ -741,13 +741,13 @@ func (p *progress) percent() int {
 }
 
 type progressSet struct {
-	lock *sync.Mutex
+	lock sync.Mutex
 	i    int
 	a    map[int]*progress
 }
 
 func newProgressSet() *progressSet {
-	return &progressSet{lock: &sync.Mutex{}, a: map[int]*progress{}}
+	return &progressSet{a: map[int]*progress{}}
 }
 
 func (s *progressSet) Add(p *progress) {
