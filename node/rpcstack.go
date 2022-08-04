@@ -311,19 +311,6 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	return nil
 }
 
-// TODO: (leonard) this function is not used, and is also redundant
-// stopWS disables JSON-RPC over WebSocket and also stops the server if it only serves WebSocket.
-func (h *httpServer) stopWS() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.disableWS() {
-		if !h.rpcAllowed() {
-			h.doStop()
-		}
-	}
-}
-
 // disableWS disables the WebSocket handler. This is internal, the caller must hold h.mu.
 func (h *httpServer) disableWS() bool {
 	ws := h.wsHandler.Load().(*rpcHandler)

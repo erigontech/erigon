@@ -236,8 +236,6 @@ type stat23 struct {
 	hits         uint64
 	misses       uint64
 	prevBlock    uint64
-	prevMisses   uint64
-	prevHits     uint64
 	hitMissRatio float64
 	speed        float64
 	prevTime     time.Time

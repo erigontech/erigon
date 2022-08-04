@@ -10,6 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -24,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -129,7 +130,20 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 			return 0, err
 		}
 		if h == nil {
-			return 0, nil
+			// if a block number was supplied and there is no header return 0
+			if blockNrOrHash != nil {
+				return 0, nil
+			}
+
+			// block number not supplied, so we haven't found a pending block, read the latest block instead
+			bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+			h, err = headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
+			if err != nil {
+				return 0, err
+			}
+			if h == nil {
+				return 0, nil
+			}
 		}
 		hi = h.GasLimit
 	}
@@ -371,8 +385,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+
+		var msg types.Message
+
+		var baseFee *uint256.Int = nil
+		// check if EIP-1559
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+
+		msg, err = args.ToMessage(api.GasCap, baseFee)
 		if err != nil {
 			return nil, err
 		}
