@@ -768,9 +768,11 @@ func (s *progressSet) String() string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	var sb strings.Builder
-	for i, p := range s.a {
+	var i int
+	for _, p := range s.a {
 		sb.WriteString(fmt.Sprintf("%s=%d%%", p.name.Load(), p.percent()))
-		if i != len(s.a)-1 {
+		i++
+		if i != len(s.a) {
 			sb.WriteString(", ")
 		}
 	}
