@@ -778,6 +778,17 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 				if err := buildIdx(ctx, sn, chainID, tmpDir, progress, lvl); err != nil {
 					errs <- err
 				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-logEvery.C:
+					var m runtime.MemStats
+					if lvl >= log.LvlInfo {
+						common2.ReadMemStats(&m)
+					}
+					log.Log(lvl, "[snapshots] Indexing", "type", t.String(), "blockNum", progress.Load(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				}
 			}(sn)
 		}
 	}
