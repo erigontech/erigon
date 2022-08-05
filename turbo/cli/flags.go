@@ -169,17 +169,17 @@ var (
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
-	EngineReadTimeoutFlag = cli.DurationFlag{
+	AuthRpcReadTimeoutFlag = cli.DurationFlag{
 		Name:  "authrpc.timeouts.read",
 		Usage: "Maximum duration for reading the entire request, including the body.",
 		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
 	}
-	EngineWriteTimeoutFlag = cli.DurationFlag{
+	AuthRpcWriteTimeoutFlag = cli.DurationFlag{
 		Name:  "authrpc.timeouts.write",
 		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
 		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
 	}
-	EngineIdleTimeoutFlag = cli.DurationFlag{
+	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
 		Name:  "authrpc.timeouts.idle",
 		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
@@ -343,8 +343,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
 		},
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
-			ReadTimeout:  ctx.GlobalDuration(EngineReadTimeoutFlag.Name),
-			WriteTimeout: ctx.GlobalDuration(EngineWriteTimeoutFlag.Name),
+			ReadTimeout:  ctx.GlobalDuration(AuthRpcReadTimeoutFlag.Name),
+			WriteTimeout: ctx.GlobalDuration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
 		},
 

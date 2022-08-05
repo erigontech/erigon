@@ -339,7 +339,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastRules = chainConfig.Rules(blockNum)
 		}
 		if txNum+1 == api._txNums[blockNum] {
-			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
+			body, _, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
 				stream.WriteNil()
 				return err

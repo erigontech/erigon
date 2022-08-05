@@ -30,7 +30,10 @@ func RunNode() {
 	app := erigonapp.MakeApp(runDevnet, erigoncli.DefaultFlags) // change to erigoncli.DefaultFlags later on
 	customArgs := []string{"./build/bin/devnettest", "--datadir=./dev", "--chain=dev", "--mine", fmt.Sprintf("--dev.period=%d", DevPeriod), "--verbosity=0"}
 	if err := app.Run(customArgs); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("Fprintln error", "err", printErr)
+		}
 		os.Exit(1)
 	}
 }

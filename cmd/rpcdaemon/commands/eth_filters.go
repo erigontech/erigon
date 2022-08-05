@@ -53,7 +53,6 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 		for lg := range logs {
 			api.filters.AddLogs(id, lg)
 		}
-
 	}()
 	return hexutil.EncodeUint64(uint64(id)), nil
 }

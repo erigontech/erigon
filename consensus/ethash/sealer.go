@@ -60,7 +60,7 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 			ethash.lock.Unlock()
 			return err
 		}
-		ethash.rand = rand.New(rand.NewSource(seed.Int64()))
+		ethash.rand = rand.New(rand.NewSource(seed.Int64())) // nolint
 	}
 	ethash.lock.Unlock()
 	// Push new work to remote sealer

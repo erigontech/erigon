@@ -28,8 +28,8 @@ import (
 )
 
 func TestBytesConversion(t *testing.T) {
-	bytes := []byte{5}
-	hash := BytesToHash(bytes)
+	byteSlice := []byte{5}
+	hash := BytesToHash(byteSlice)
 
 	var exp Hash
 	exp[31] = 5

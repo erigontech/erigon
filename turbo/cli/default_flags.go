@@ -75,9 +75,9 @@ var DefaultFlags = []cli.Flag{
 	HTTPReadTimeoutFlag,
 	HTTPWriteTimeoutFlag,
 	HTTPIdleTimeoutFlag,
-	EngineReadTimeoutFlag,
-	EngineWriteTimeoutFlag,
-	EngineIdleTimeoutFlag,
+	AuthRpcReadTimeoutFlag,
+	AuthRpcWriteTimeoutFlag,
+	AuthRpcIdleTimeoutFlag,
 
 	utils.SnapKeepBlocksFlag,
 	utils.SnapStopFlag,
