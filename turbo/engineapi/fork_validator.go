@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -179,6 +180,16 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		headersChain = append([]*types.Header{sb.header}, headersChain...)
 		bodiesChain = append([]*types.RawBody{sb.body}, bodiesChain...)
+		has, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(sb.header.Number.Uint64(), sb.header.Hash()))
+		if err != nil {
+			criticalError = err
+			return
+		}
+		// MakesBodyCanonical do not support PoS.
+		if has {
+			status = remote.EngineStatus_ACCEPTED
+			return
+		}
 		currentHash = sb.header.ParentHash
 		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 		if criticalError != nil {
