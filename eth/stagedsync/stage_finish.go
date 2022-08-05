@@ -164,8 +164,18 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		log.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
-	notifier.OnNewHeader(headersRlp)
+
+	newHeader := rawdb.ReadHeaderByNumber(tx, notifyTo)
+	isCannonical, err := rawdb.IsCanonicalHash(tx, newHeader.Hash())
+	if err != nil {
+		log.Warn("[Finish] failed checking if header is cannonical")
+	}
+
+	if isCannonical {
+		notifier.OnNewHeader(headersRlp)
+	}
 	headerTiming := time.Since(t)
+
 	t = time.Now()
 	if notifier.HasLogSubsriptions() {
 		logs, err := ReadLogs(tx, notifyFrom, isUnwind)
