@@ -218,7 +218,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	//limiter := make(chan struct{}, kv.ReadersLimit)
