@@ -154,7 +154,6 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 	var notifyTo uint64 = notifyFrom
 	var headersRlp [][]byte
-	var headerHash common.Hash
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
@@ -164,8 +163,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		if err != nil {
 			log.Warn("[Finish] failed checking if header is cannonical")
 		}
-		headerHash = common.BytesToHash(k[8:])
 
+		headerHash := common.BytesToHash(k[8:])
 		if canonicalHash == headerHash {
 			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
 		}
