@@ -148,20 +148,5 @@ jobs:
         uses: actions/upload-artifact@v3
         if: always()
         with:
-          name: hive-ci-output
+          name: test-results
           path: results/*.xml
-
-  event_file:
-    needs:
-      - tests
-      - tests-windows
-      - docker
-    name: archive event file
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    steps:
-      - name: upload
-        uses: actions/upload-artifact@v2
-        with:
-          name: event file
-          path: ${{ github.event_path }}
