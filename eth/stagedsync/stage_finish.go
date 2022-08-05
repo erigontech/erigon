@@ -160,22 +160,23 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			return nil
 		}
 		notifyTo = binary.BigEndian.Uint64(k)
-		headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, notifyTo)
+		if err != nil {
+			log.Warn("[Finish] failed checking if header is cannonical")
+		}
 		headerHash = common.BytesToHash(k[8:])
+
+		if canonicalHash == headerHash {
+			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		}
+
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		log.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
 
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, notifyTo)
-	if err != nil {
-		log.Warn("[Finish] failed checking if header is cannonical")
-	}
-
-	if headerHash == canonicalHash {
-		notifier.OnNewHeader(headersRlp)
-	}
+	notifier.OnNewHeader(headersRlp)
 	headerTiming := time.Since(t)
 
 	t = time.Now()
