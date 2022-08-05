@@ -794,7 +794,10 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 
 	for {
 		select {
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
