@@ -186,7 +186,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			return
 		}
 		// MakesBodyCanonical do not support PoS.
-		if has {
+		if has && len(sb.body.Transactions) > 0 {
 			status = remote.EngineStatus_ACCEPTED
 			return
 		}
@@ -237,7 +237,7 @@ func (fv *ForkValidator) Clear() {
 	}
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingFork = nil
-	fv.sideForksBlock = map[common.Hash]forkSegment{}
+	//fv.sideForksBlock = map[common.Hash]forkSegment{}
 }
 
 // Clear wipes out current extending fork data and notify txpool.
