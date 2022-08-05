@@ -63,7 +63,7 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	// and App only work with <datadir>/snapshot s folder
 	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
 		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
-		if err := copyFromTmp(cfg.DataDir); err != nil {
+		if err := moveFromTmp(cfg.DataDir); err != nil {
 			return nil, err
 		}
 	}
@@ -157,7 +157,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
-func copyFromTmp(snapDir string) error {
+func moveFromTmp(snapDir string) error {
 	tmpDir := filepath.Join(snapDir, "tmp")
 	if !common.FileExist(tmpDir) {
 		return nil
