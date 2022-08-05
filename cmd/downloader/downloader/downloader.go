@@ -190,33 +190,8 @@ func copyFromTmp(snapDir string) error {
 // - removing _tmp suffix from snapDir
 // - open new torrentClient and db
 func (d *Downloader) onComplete() {
-	snapDir, lastPart := filepath.Split(d.cfg.DataDir)
-	if lastPart != "tmp" {
-		return
-	}
-
 	d.clientLock.Lock()
 	defer d.clientLock.Unlock()
-
-	d.torrentClient.Close()
-	d.folder.Close()
-	d.pieceCompletionDB.Close()
-	d.db.Close()
-
-	if err := copyFromTmp(snapDir); err != nil {
-		panic(err)
-	}
-	d.cfg.DataDir = snapDir
-
-	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
-	if err != nil {
-		panic(err)
-	}
-	d.db = db
-	d.pieceCompletionDB = c
-	d.folder = m
-	d.torrentClient = torrentClient
-	_ = d.addSegments()
 }
 
 func (d *Downloader) verify() error {
