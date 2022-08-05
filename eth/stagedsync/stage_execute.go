@@ -148,7 +148,7 @@ func executeBlock(
 	stateSyncReceipt = execRs.ReceiptForStorage
 
 	if writeReceipts {
-		if params.Eth2DeployBlockNumber(cfg.chainConfig) >= blockNum {
+		if blockNum >= params.Eth2DeployBlockNumber(cfg.chainConfig) {
 			if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 				return err
 			}
@@ -588,6 +588,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
+	depositeAddress := params.Eth2DeployBlockNumber(cfg.chainConfig)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -614,7 +615,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if s.ForwardProgress > params.Eth2DeployBlockNumber(cfg.chainConfig) {
+		if depositeAddress > s.ForwardProgress {
 			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 				return err
 			}
