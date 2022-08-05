@@ -150,10 +150,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
-	if !prevStats.Completed && stats.Completed {
-		d.onComplete()
-	}
-
 	d.stats = stats
 }
 
@@ -183,15 +179,6 @@ func moveFromTmp(snapDir string) error {
 	}
 	_ = os.Remove(tmpDir)
 	return nil
-}
-
-// onComplete - only once - after download of all files fully done:
-// - closing torrent client, closing downloader db
-// - removing _tmp suffix from snapDir
-// - open new torrentClient and db
-func (d *Downloader) onComplete() {
-	d.clientLock.Lock()
-	defer d.clientLock.Unlock()
 }
 
 func (d *Downloader) verify() error {
