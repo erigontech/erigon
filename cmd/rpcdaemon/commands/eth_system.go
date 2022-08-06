@@ -117,6 +117,8 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	gasResult := big.NewInt(0)
+
+	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
