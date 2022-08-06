@@ -205,12 +205,8 @@ func (w *StateReconWriter) SetTxNum(txNum uint64) {
 }
 
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	found, txNum := w.ac.MaxAccountsTxNum(address.Bytes())
+	found := w.ac.IsMaxAccountsTxNum(address.Bytes(), w.txNum)
 	if !found {
-		return nil
-	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change account [%x] txNum = %d\n", address, txNum)
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -224,12 +220,8 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	found, txNum := w.ac.MaxCodeTxNum(address.Bytes())
+	found := w.ac.IsMaxCodeTxNum(address.Bytes(), w.txNum)
 	if !found {
-		return nil
-	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change code [%x] %d %x txNum = %d\n", address, incarnation, codeHash, txNum)
 		return nil
 	}
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
@@ -245,13 +237,9 @@ func (w *StateReconWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	found, txNum := w.ac.MaxStorageTxNum(address.Bytes(), key.Bytes())
+	found := w.ac.IsMaxStorageTxNum(address.Bytes(), key.Bytes(), w.txNum)
 	if !found {
 		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
-		return nil
-	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change storage [%x] [%x] txNum = %d\n", address, *key, txNum)
 		return nil
 	}
 	if !value.IsZero() {
