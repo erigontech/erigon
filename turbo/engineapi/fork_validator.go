@@ -186,7 +186,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			return
 		}
 		// MakesBodyCanonical do not support PoS.
-		if has && len(sb.body.Transactions) > 0 {
+		if has {
 			status = remote.EngineStatus_ACCEPTED
 			return
 		}
