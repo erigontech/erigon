@@ -67,6 +67,8 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
+		case rpc.LatestExecutedBlockNumber:
+			blockNumber = plainStateBlockNumber
 		default:
 			blockNumber = uint64(number.Int64())
 		}
