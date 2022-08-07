@@ -560,7 +560,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			if op.batch {
 				conn.handler.handleBatch(op.msgs)
 			} else {
-				conn.handler.handleMsg(op.msgs[0])
+				conn.handler.handleMsg(op.msgs[0], nil)
 			}
 
 		case err := <-c.readErr:

@@ -62,7 +62,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx.Done()); err != nil {
+		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx); err != nil {
 			return err
 		}
 	} else {
@@ -125,34 +125,34 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	return nil
 }
 
-func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	if err := readPlainStateOnce(
+func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
+	if err := promotePlainState(
 		logPrefix,
-		db,
+		tx,
 		cfg.tmpDir,
 		etl.IdentityLoadFunc,
-		quit,
+		ctx.Done(),
 	); err != nil {
 		return err
 	}
 
 	return etl.Transform(
 		logPrefix,
-		db,
+		tx,
 		kv.PlainContractCode,
 		kv.ContractCode,
 		cfg.tmpDir,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
-			Quit: quit,
+			Quit: ctx.Done(),
 		},
 	)
 }
 
-func readPlainStateOnce(
+func promotePlainState(
 	logPrefix string,
-	db kv.RwTx,
+	tx kv.RwTx,
 	tmpdir string,
 	loadFunc etl.LoadFunc,
 	quit <-chan struct{},
@@ -169,7 +169,7 @@ func readPlainStateOnce(
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	c, err := db.Cursor(kv.PlainState)
+	c, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
@@ -240,11 +240,11 @@ func readPlainStateOnce(
 		Quit: quit,
 	}
 
-	if err := accCollector.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
+	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
 		return err
 	}
 
-	if err := storageCollector.Load(db, kv.HashedStorage, loadFunc, args); err != nil {
+	if err := storageCollector.Load(tx, kv.HashedStorage, loadFunc, args); err != nil {
 		return err
 	}
 
@@ -487,9 +487,6 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 	}
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
-
-	var l OldestAppearedLoad
-	l.innerLoadFunc = etl.IdentityLoadFunc
 
 	var loadBucket string
 	var extract etl.ExtractFunc

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -178,19 +179,26 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+		needWriteStream := false
+		if stream == nil {
+			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+			needWriteStream = true
+		}
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			h.conn.writeJSON(cp.ctx, answer)
-		} else {
-			_ = stream.Flush()
+			buffer, _ := json.Marshal(answer)
+			stream.Write(json.RawMessage(buffer))
+		}
+		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+		} else {
+			stream.Write([]byte("\n"))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -376,10 +384,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 	_, isForbidden := h.forbiddenList[method]
 	if len(h.allowList) == 0 {
-		if isForbidden {
-			return false
-		}
-		return true
+		return !isForbidden
 	}
 
 	_, ok := h.allowList[method]
@@ -454,58 +459,57 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
-	if callb.streamable {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("jsonrpc")
-		stream.WriteString("2.0")
-		stream.WriteMore()
-		if msg.ID != nil {
-			stream.WriteObjectField("id")
-			stream.Write(msg.ID)
-			stream.WriteMore()
-		}
-		stream.WriteObjectField("result")
-		_, err := callb.call(ctx, msg.Method, args, stream)
-		if err != nil {
-			return msg.errorResponse(err)
-			/*
-				stream.WriteMore()
-				stream.WriteObjectField("error")
-				stream.WriteObjectStart()
-				stream.WriteObjectField("code")
-				ec, ok := err.(Error)
-				if ok {
-					stream.WriteInt(ec.ErrorCode())
-				} else {
-					stream.WriteInt(defaultErrorCode)
-				}
-				stream.WriteMore()
-				stream.WriteObjectField("message")
-				stream.WriteString(fmt.Sprintf("%v", err))
-				de, ok := err.(DataError)
-				if ok {
-					stream.WriteMore()
-					stream.WriteObjectField("data")
-					data, derr := json.Marshal(de.ErrorData())
-					if derr == nil {
-						stream.Write(data)
-					} else {
-						stream.WriteString(fmt.Sprintf("%v", derr))
-					}
-				}
-				stream.WriteObjectEnd()
-			*/
-		}
-		stream.WriteObjectEnd()
-		stream.Flush()
-		return nil
-	} else {
+	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
 			return msg.errorResponse(err)
 		}
 		return msg.response(result)
 	}
+
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	if msg.ID != nil {
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+	}
+	stream.WriteObjectField("result")
+	_, err := callb.call(ctx, msg.Method, args, stream)
+	if err != nil {
+		//return msg.errorResponse(err)
+
+		stream.WriteMore()
+		stream.WriteObjectField("error")
+		stream.WriteObjectStart()
+		stream.WriteObjectField("code")
+		ec, ok := err.(Error)
+		if ok {
+			stream.WriteInt(ec.ErrorCode())
+		} else {
+			stream.WriteInt(defaultErrorCode)
+		}
+		stream.WriteMore()
+		stream.WriteObjectField("message")
+		stream.WriteString(fmt.Sprintf("%v", err))
+		de, ok := err.(DataError)
+		if ok {
+			stream.WriteMore()
+			stream.WriteObjectField("data")
+			data, derr := json.Marshal(de.ErrorData())
+			if derr == nil {
+				stream.Write(data)
+			} else {
+				stream.WriteString(fmt.Sprintf("%v", derr))
+			}
+		}
+		stream.WriteObjectEnd()
+	}
+	stream.WriteObjectEnd()
+	stream.Flush()
+	return nil
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

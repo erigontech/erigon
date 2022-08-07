@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -65,13 +69,54 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := filepath.Join(datadir, "erigon22")
-	h, err3 := libstate.NewAggregator(aggPath, AggregationStep)
-	//h, err3 := aggregator.NewHistory(aggPath, uint64(blockTo), aggregationStep)
-	if err3 != nil {
-		return fmt.Errorf("create history: %w", err3)
+	aggPath := filepath.Join(datadir, "erigon23")
+	h, err := libstate.NewAggregator(aggPath, AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
 	}
 	defer h.Close()
+	readDbPath := path.Join(datadir, "readdb")
+	if block == 0 {
+		if _, err = os.Stat(readDbPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(readDbPath); err != nil {
+			return err
+		}
+	}
+	db, err := kv2.NewMDBX(logger).Path(readDbPath).WriteMap().Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	readPath := filepath.Join(datadir, "reads")
+	if block == 0 {
+		if _, err = os.Stat(readPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(readPath); err != nil {
+			return err
+		}
+		if err = os.Mkdir(readPath, os.ModePerm); err != nil {
+			return err
+		}
+	}
+	ri, err := libstate.NewReadIndices(readPath, AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create read indices: %w", err)
+	}
+	var rwTx kv.RwTx
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	ri.SetTx(rwTx)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -85,13 +130,13 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	prevTime := time.Now()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
-	if err := allSnapshots.Reopen(); err != nil {
+	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	readWrapper := state.NewHistoryReader22(h.MakeContext(), ri)
 
 	for !interrupt {
 		select {
@@ -125,12 +170,10 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
 			continue
 		}
-		readWrapper := state.NewHistoryReader22(h)
 		if traceBlock != 0 {
 			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}
 		writeWrapper := state.NewNoopWriter()
-		txNum++ // Pre block transaction
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, historyTx, hash, number)
 			if err != nil {
@@ -148,6 +191,29 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
+		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+		commit := interrupt
+		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
+			var spaceDirty uint64
+			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+				return fmt.Errorf("retrieving spaceDirty: %w", err)
+			}
+			if spaceDirty >= dirtySpaceThreshold {
+				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				commit = true
+			}
+		}
+		if commit {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+			if !interrupt {
+				if rwTx, err = db.BeginRw(ctx); err != nil {
+					return err
+				}
+			}
+			ri.SetTx(rwTx)
+		}
 	}
 	return nil
 }
@@ -159,17 +225,26 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
+	hw.SetTxNum(txNum)
+	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	if daoFork {
+		ibs := state.New(hw)
+		misc.ApplyDAOHardFork(ibs)
+		if err := ibs.FinalizeTx(rules, ww); err != nil {
+			return 0, nil, err
+		}
+		if err := hw.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish dao fork failed: %w", err)
+		}
+	}
+	txNum++ // Pre block transaction
 	for i, tx := range block.Transactions() {
 		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
-		if daoBlock {
-			misc.ApplyDAOHardFork(ibs)
-			daoBlock = false
-		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
@@ -177,6 +252,9 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 			fmt.Printf("tx idx %d, num %d, gas used %d\n", i, txNum, receipt.GasUsed)
 		}
 		receipts = append(receipts, receipt)
+		if err = hw.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
 		txNum++
 		hw.SetTxNum(txNum)
 	}

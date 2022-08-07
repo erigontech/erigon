@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	"github.com/ledgerwatch/erigon/common"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 )
@@ -81,6 +82,8 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 }
 
 func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
 	a.aggLogsFilter.allAddrs += f.allAddrs
 	for addr, count := range f.addrs {
 		a.aggLogsFilter.addrs[addr] += count
@@ -94,7 +97,6 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
-	filtersToDelete := make(map[LogsSubID]*LogsFilter)
 	for _, filter := range a.logsFilters {
 		if filter.allAddrs == 0 {
 			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(eventLog.Address)]
@@ -123,11 +125,6 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 			Removed:     eventLog.Removed,
 		}
 		filter.sender <- lg
-	}
-	// remove malfunctioned filters
-	for filterId, filter := range filtersToDelete {
-		a.subtractLogFilters(filter)
-		delete(a.logsFilters, filterId)
 	}
 
 	return nil

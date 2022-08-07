@@ -74,6 +74,7 @@ var (
 	MumbaiGenesisHash     = common.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
+	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 )
 
 var (
@@ -165,6 +166,8 @@ var (
 
 	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
 
+	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
@@ -243,6 +246,7 @@ type ChainConfig struct {
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // EIP-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
+	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
 	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
 	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
@@ -277,6 +281,11 @@ type CliqueConfig struct {
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
 }
 
+// String implements the stringer interface, returning the consensus engine details.
+func (c *CliqueConfig) String() string {
+	return "clique"
+}
+
 // AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
 type AuRaConfig struct {
 	DBPath    string
@@ -285,8 +294,8 @@ type AuRaConfig struct {
 }
 
 // String implements the stringer interface, returning the consensus engine details.
-func (c *CliqueConfig) String() string {
-	return "clique"
+func (c *AuRaConfig) String() string {
+	return "aura"
 }
 
 type ParliaConfig struct {
@@ -377,6 +386,8 @@ func (c *ChainConfig) String() string {
 		engine = c.Parlia
 	case c.Bor != nil:
 		engine = c.Bor
+	case c.Aura != nil:
+		engine = c.Aura
 	default:
 		engine = "unknown"
 	}
@@ -394,7 +405,7 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -411,6 +422,7 @@ func (c *ChainConfig) String() string {
 		c.ArrowGlacierBlock,
 		c.GrayGlacierBlock,
 		c.TerminalTotalDifficulty,
+		c.MergeNetsplitBlock,
 		engine,
 	)
 }
@@ -604,6 +616,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "londonBlock", block: c.LondonBlock},
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
+		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -627,6 +640,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 }
 
 func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigCompatError {
+	// Ethereum mainnet forks
 	if isForkIncompatible(c.HomesteadBlock, newcfg.HomesteadBlock, head) {
 		return newCompatError("Homestead fork block", c.HomesteadBlock, newcfg.HomesteadBlock)
 	}
@@ -675,6 +689,23 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.GrayGlacierBlock, newcfg.GrayGlacierBlock, head) {
 		return newCompatError("Gray Glacier fork block", c.GrayGlacierBlock, newcfg.GrayGlacierBlock)
+	}
+	if isForkIncompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
+		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
+	}
+
+	// Parlia forks
+	if isForkIncompatible(c.RamanujanBlock, newcfg.RamanujanBlock, head) {
+		return newCompatError("Ramanujan fork block", c.RamanujanBlock, newcfg.RamanujanBlock)
+	}
+	if isForkIncompatible(c.NielsBlock, newcfg.NielsBlock, head) {
+		return newCompatError("Niels fork block", c.NielsBlock, newcfg.NielsBlock)
+	}
+	if isForkIncompatible(c.MirrorSyncBlock, newcfg.MirrorSyncBlock, head) {
+		return newCompatError("MirrorSync fork block", c.MirrorSyncBlock, newcfg.MirrorSyncBlock)
+	}
+	if isForkIncompatible(c.BrunoBlock, newcfg.BrunoBlock, head) {
+		return newCompatError("Bruno fork block", c.BrunoBlock, newcfg.BrunoBlock)
 	}
 	if isForkIncompatible(c.EulerBlock, newcfg.EulerBlock, head) {
 		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
@@ -801,6 +832,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return BorMainnetChainConfig
 	case networkname.BorDevnetChainName:
 		return BorDevnetChainConfig
+	case networkname.GnosisChainName:
+		return GnosisChainConfig
 	default:
 		return nil
 	}
@@ -836,6 +869,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &BorMainnetGenesisHash
 	case networkname.BorDevnetChainName:
 		return &BorDevnetGenesisHash
+	case networkname.GnosisChainName:
+		return &GnosisGenesisHash
 	default:
 		return nil
 	}
@@ -869,6 +904,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return MumbaiChainConfig
 	case genesisHash == BorMainnetGenesisHash:
 		return BorMainnetChainConfig
+	case genesisHash == GnosisGenesisHash:
+		return GnosisChainConfig
 	default:
 		return nil
 	}

@@ -54,7 +54,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 		switch sentry.Protocol() {
 
-		case eth.ETH66:
+		case eth.ETH66, eth.ETH67:
 			if req66 == nil {
 				req66 = &proto_sentry.OutboundMessageData{
 					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
@@ -95,7 +95,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block
 
 		switch sentry.Protocol() {
 
-		case eth.ETH66:
+		case eth.ETH66, eth.ETH67:
 			if req66 == nil {
 				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
@@ -153,7 +153,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 			}
 
 			switch sentry.Protocol() {
-			case eth.ETH66:
+			case eth.ETH66, eth.ETH67:
 				if req66 == nil {
 					req66 = &proto_sentry.OutboundMessageData{
 						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
@@ -213,7 +213,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 
 			switch sentry.Protocol() {
 
-			case eth.ETH66:
+			case eth.ETH66, eth.ETH67:
 				if req66 == nil {
 					req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 						MaxPeers: 1024,
@@ -264,7 +264,7 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 			for _, peer := range peers {
 				switch sentry.Protocol() {
 
-				case eth.ETH66:
+				case eth.ETH66, eth.ETH67:
 					req66 := &proto_sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &proto_sentry.OutboundMessageData{

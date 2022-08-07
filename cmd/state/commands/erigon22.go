@@ -1,63 +1,318 @@
 package commands
 
 import (
+	"container/heap"
 	"context"
-	"errors"
 	"fmt"
-	"math/bits"
+	"math/big"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
 )
 
-const (
-	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+var (
+	reset   bool
+	workers int
 )
 
 func init() {
-	withBlock(erigon22Cmd)
+	erigon22Cmd.Flags().BoolVar(&reset, "reset", false, "Resets the state database and static files")
+	erigon22Cmd.Flags().IntVar(&workers, "workers", 1, "Number of workers")
 	withDataDir(erigon22Cmd)
-	withChain(erigon22Cmd)
-
 	rootCmd.AddCommand(erigon22Cmd)
+	withChain(erigon22Cmd)
 }
 
 var erigon22Cmd = &cobra.Command{
 	Use:   "erigon22",
-	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 2)",
+	Short: "Exerimental command to re-execute blocks from beginning using erigon2 histoty (ugrade 2)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return Erigon22(genesis, chainConfig, logger)
+		return Erigon22(genesis, logger)
 	},
 }
 
-func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
+type Worker22 struct {
+	lock         sync.Locker
+	chainDb      kv.RoDB
+	chainTx      kv.Tx
+	db           kv.RoDB
+	tx           kv.Tx
+	wg           *sync.WaitGroup
+	rs           *state.State22
+	blockReader  services.FullBlockReader
+	allSnapshots *snapshotsync.RoSnapshots
+	stateWriter  *state.StateWriter22
+	stateReader  *state.StateReader22
+	getHeader    func(hash common.Hash, number uint64) *types.Header
+	ctx          context.Context
+	engine       consensus.Engine
+	txNums       []uint64
+	chainConfig  *params.ChainConfig
+	logger       log.Logger
+	genesis      *core.Genesis
+	resultCh     chan *state.TxTask
+	epoch        epochReader
+	chain        chainReader
+	isPoSA       bool
+	posa         consensus.PoSA
+}
+
+func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
+	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
+	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
+	resultCh chan *state.TxTask, engine consensus.Engine,
+) *Worker22 {
+	ctx := context.Background()
+	w := &Worker22{
+		lock:         lock,
+		db:           db,
+		chainDb:      chainDb,
+		wg:           wg,
+		rs:           rs,
+		blockReader:  blockReader,
+		allSnapshots: allSnapshots,
+		ctx:          ctx,
+		stateWriter:  state.NewStateWriter22(rs),
+		stateReader:  state.NewStateReader22(rs),
+		txNums:       txNums,
+		chainConfig:  chainConfig,
+		logger:       logger,
+		genesis:      genesis,
+		resultCh:     resultCh,
+		engine:       engine,
+		getHeader: func(hash common.Hash, number uint64) *types.Header {
+			h, err := blockReader.Header(ctx, nil, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
+		},
+	}
+	w.posa, w.isPoSA = engine.(consensus.PoSA)
+	return w
+}
+
+func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
+	if rw.tx != nil {
+		rw.tx.Rollback()
+		rw.tx = nil
+	}
+	if rw.chainTx != nil {
+		rw.chainTx.Rollback()
+		rw.chainTx = nil
+	}
+	if tx != nil {
+		rw.tx = tx
+		rw.stateReader.SetTx(rw.tx)
+	}
+	if chainTx != nil {
+		rw.chainTx = chainTx
+		rw.epoch = epochReader{tx: rw.chainTx}
+		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+	}
+}
+
+func (rw *Worker22) run() {
+	defer rw.wg.Done()
+	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
+		rw.runTxTask(txTask)
+		rw.resultCh <- txTask // Needs to have outside of the lock
+	}
+}
+
+func (rw *Worker22) runTxTask(txTask *state.TxTask) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	if rw.tx == nil {
+		var err error
+		if rw.tx, err = rw.db.BeginRo(rw.ctx); err != nil {
+			panic(err)
+		}
+		rw.stateReader.SetTx(rw.tx)
+	}
+	if rw.chainTx == nil {
+		var err error
+		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
+			panic(err)
+		}
+		rw.epoch = epochReader{tx: rw.chainTx}
+		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+	}
+	txTask.Error = nil
+	rw.stateReader.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.stateReader.ResetReadSet()
+	rw.stateWriter.ResetWriteSet()
+	ibs := state.New(rw.stateReader)
+	rules := txTask.Rules
+	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
+	var err error
+	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
+		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+		// Genesis block
+		_, ibs, err = rw.genesis.ToBlock()
+		if err != nil {
+			panic(err)
+		}
+		// For Genesis, rules should be empty, so that empty accounts can be included
+		rules = &params.Rules{}
+	} else if daoForkTx {
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
+		misc.ApplyDAOHardFork(ibs)
+		ibs.SoftFinalise()
+	} else if txTask.TxIndex == -1 {
+		// Block initialisation
+		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		if rw.isPoSA {
+			systemcontracts.UpgradeBuildInSystemContract(chainConfig, txTask.Header.Number, ibs)
+		}
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+		}
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+	} else if txTask.Final {
+		if txTask.BlockNum > 0 {
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			// End of block transaction in a block
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+			}
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+				//fmt.Printf("error=%v\n", err)
+				txTask.Error = err
+			} else {
+				txTask.TraceTos = map[common.Address]struct{}{}
+				txTask.TraceTos[txTask.Block.Coinbase()] = struct{}{}
+				for _, uncle := range txTask.Block.Uncles() {
+					txTask.TraceTos[uncle.Coinbase] = struct{}{}
+				}
+			}
+		}
+	} else {
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		if rw.isPoSA {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+				panic(err)
+			} else if isSystemTx {
+				//fmt.Printf("System tx\n")
+				return
+			}
+		}
+		txHash := txTask.Tx.Hash()
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
+		ct := NewCallTracer()
+		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
+		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
+		blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */, contractHasTEVM)
+		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, txTask.Rules)
+		if err != nil {
+			panic(err)
+		}
+		txContext := core.NewEVMTxContext(msg)
+		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
+			txTask.Error = err
+			//fmt.Printf("error=%v\n", err)
+		} else {
+			// Update the state with pending changes
+			ibs.SoftFinalise()
+			txTask.Logs = ibs.GetLogs(txHash)
+			txTask.TraceFroms = ct.froms
+			txTask.TraceTos = ct.tos
+		}
+	}
+	// Prepare read set, write set and balanceIncrease set and send for serialisation
+	if txTask.Error == nil {
+		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+		//for addr, bal := range txTask.BalanceIncreaseSet {
+		//	fmt.Printf("[%x]=>[%d]\n", addr, &bal)
+		//}
+		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+			panic(err)
+		}
+		txTask.ReadLists = rw.stateReader.ReadSet()
+		txTask.WriteLists = rw.stateWriter.WriteSet()
+		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
+		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
+		for _, list := range txTask.ReadLists {
+			for _, b := range list.Keys {
+				size += len(b)
+			}
+			for _, b := range list.Vals {
+				size += len(b)
+			}
+		}
+		for _, list := range txTask.WriteLists {
+			for _, b := range list.Keys {
+				size += len(b)
+			}
+			for _, b := range list.Vals {
+				size += len(b)
+			}
+		}
+		txTask.ResultsSize = int64(size)
+	}
+}
+
+func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *libstate.Aggregator22, applyTx kv.Tx,
+	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
+	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
+		txTask := heap.Pop(rws).(*state.TxTask)
+		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
+		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
+			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
+				panic(err)
+			}
+			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+			atomic.AddUint64(outputTxNum, 1)
+			atomic.StoreUint64(outputBlockNum, txTask.BlockNum)
+			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		} else {
+			rs.AddWork(txTask)
+			*repeatCount++
+			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		}
+	}
+}
+
+func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -66,487 +321,554 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		<-sigs
 		interruptCh <- true
 	}()
-
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
-	if err != nil {
-		return fmt.Errorf("opening chaindata as read only: %v", err)
-	}
-	defer historyDb.Close()
-
+	var err error
 	ctx := context.Background()
-	historyTx, err1 := historyDb.BeginRo(ctx)
-	if err1 != nil {
-		return err1
+	reconDbPath := path.Join(datadir, "db22")
+	if reset && dir.Exist(reconDbPath) {
+		if err = os.RemoveAll(reconDbPath); err != nil {
+			return err
+		}
 	}
-	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "statedb")
-	if block == 0 {
-		if _, err = os.Stat(stateDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
+	dir.MustExist(reconDbPath)
+	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiter).Open()
+	if err != nil {
+		return err
+	}
+	chainDbPath := path.Join(datadir, "chaindata")
+	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
+	if err != nil {
+		return err
+	}
+	startTime := time.Now()
+	var blockReader services.FullBlockReader
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
+	}
+	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	// Compute mapping blockNum -> last TxNum in that block
+	maxBlockNum := allSnapshots.BlocksAvailable() + 1
+	txNums := make([]uint64, maxBlockNum)
+	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+		for _, b := range bs {
+			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+				txNums[blockNum] = baseTxNum + txAmount
+			}); err != nil {
 				return err
 			}
-		} else if err = os.RemoveAll(stateDbPath); err != nil {
-			return err
 		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).WriteMap().Open()
-	if err2 != nil {
-		return err2
-	}
-	defer db.Close()
+	workerCount := workers
+	queueSize := workerCount * 4
+	workCh := make(chan state.TxTask, queueSize)
 
-	aggPath := filepath.Join(datadir, "erigon22")
-	if block == 0 {
-		if _, err = os.Stat(aggPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(aggPath); err != nil {
-			return err
-		}
-		if err = os.Mkdir(aggPath, os.ModePerm); err != nil {
-			return err
-		}
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	sentryControlServer, err := sentry.NewMultiClient(
+		db,
+		"",
+		chainConfig,
+		common.Hash{},
+		engine,
+		1,
+		nil,
+		ethconfig.Defaults.Sync,
+		blockReader,
+		false,
+	)
+	if err != nil {
+		return err
 	}
-
-	var rwTx kv.RwTx
+	cfg := ethconfig.Defaults
+	cfg.DeprecatedTxPool.Disable = true
+	cfg.Dirs = datadir2.New(datadir)
+	cfg.Snapshot = allSnapshots.Cfg()
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
+	if err != nil {
+		return err
+	}
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		if rwTx != nil {
 			rwTx.Rollback()
 		}
 	}()
+	execStage, err := stagedSync.StageState(stages.Execution, rwTx, db)
+	if err != nil {
+		return err
+	}
+	if !reset {
+		block = execStage.BlockNumber + 1
+	}
+	rwTx.Rollback()
+
+	rs := state.NewState22()
+	aggDir := path.Join(datadir, "agg22")
+	if reset && dir.Exist(aggDir) {
+		if err = os.RemoveAll(aggDir); err != nil {
+			return err
+		}
+	}
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	var lock sync.RWMutex
+	reconWorkers := make([]*Worker22, workerCount)
+	var wg sync.WaitGroup
+	resultCh := make(chan *state.TxTask, queueSize)
+	for i := 0; i < workerCount; i++ {
+		reconWorkers[i] = NewWorker22(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
+	}
+	defer func() {
+		for i := 0; i < workerCount; i++ {
+			reconWorkers[i].ResetTx(nil, nil)
+		}
+	}()
+	var applyTx kv.RwTx
+	if workerCount > 1 {
+		wg.Add(workerCount)
+		for i := 0; i < workerCount; i++ {
+			go reconWorkers[i].run()
+		}
+	} else {
+		applyTx, err = db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}()
+		chainTx, err := chainDb.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		reconWorkers[0].ResetTx(applyTx, chainTx)
+		agg.SetTx(applyTx)
+	}
+	commitThreshold := uint64(1024 * 1024 * 1024)
+	resultsThreshold := int64(1024 * 1024 * 1024)
+	count := uint64(0)
+	repeatCount := uint64(0)
+	triggerCount := uint64(0)
+	prevCount := uint64(0)
+	prevRepeatCount := uint64(0)
+	//prevTriggerCount := uint64(0)
+	resultsSize := int64(0)
+	prevTime := time.Now()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	var rws state.TxTaskQueue
+	var rwsLock sync.Mutex
+	rwsReceiveCond := sync.NewCond(&rwsLock)
+	heap.Init(&rws)
+	var outputTxNum uint64
+	if block > 0 {
+		outputTxNum = txNums[block-1]
+	}
+	var inputBlockNum, outputBlockNum uint64
+	var prevOutputBlockNum uint64 = block
+	// Go-routine gathering results from the workers
+	var maxTxNum uint64 = txNums[len(txNums)-1]
+	if workerCount > 1 {
+		go func() {
+			defer func() {
+				if applyTx != nil {
+					applyTx.Rollback()
+				}
+			}()
+			if applyTx, err = db.BeginRw(ctx); err != nil {
+				panic(err)
+			}
+			agg.SetTx(applyTx)
+			defer rs.Finish()
+			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
+				select {
+				case txTask := <-resultCh:
+					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+					func() {
+						rwsLock.Lock()
+						defer rwsLock.Unlock()
+						atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+						heap.Push(&rws, txTask)
+						processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+						rwsReceiveCond.Signal()
+					}()
+				case <-logEvery.C:
+					var m runtime.MemStats
+					libcommon.ReadMemStats(&m)
+					sizeEstimate := rs.SizeEstimate()
+					count = rs.DoneCount()
+					currentTime := time.Now()
+					interval := currentTime.Sub(prevTime)
+					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
+					var repeatRatio float64
+					if count > prevCount {
+						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
+					}
+					log.Info("Transaction replay",
+						//"workers", workerCount,
+						"at block", outputBlockNum,
+						"input block", atomic.LoadUint64(&inputBlockNum),
+						"blk/s", fmt.Sprintf("%.1f", speedBlock),
+						"tx/s", fmt.Sprintf("%.1f", speedTx),
+						"result queue", rws.Len(),
+						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
+						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+						"buffer", libcommon.ByteCount(sizeEstimate),
+						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+					)
+					prevTime = currentTime
+					prevCount = count
+					prevOutputBlockNum = outputBlockNum
+					prevRepeatCount = repeatCount
+					//prevTriggerCount = triggerCount
+					if sizeEstimate >= commitThreshold {
+						commitStart := time.Now()
+						log.Info("Committing...")
+						err := func() error {
+							rwsLock.Lock()
+							defer rwsLock.Unlock()
+							// Drain results (and process) channel because read sets do not carry over
+							for {
+								var drained bool
+								for !drained {
+									select {
+									case txTask := <-resultCh:
+										atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+										heap.Push(&rws, txTask)
+									default:
+										drained = true
+									}
+								}
+								processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+								if rws.Len() == 0 {
+									break
+								}
+							}
+							rwsReceiveCond.Signal()
+							lock.Lock() // This is to prevent workers from starting work on any new txTask
+							defer lock.Unlock()
+							// Drain results channel because read sets do not carry over
+							var drained bool
+							for !drained {
+								select {
+								case txTask := <-resultCh:
+									rs.AddWork(txTask)
+								default:
+									drained = true
+								}
+							}
+							// Drain results queue as well
+							for rws.Len() > 0 {
+								txTask := heap.Pop(&rws).(*state.TxTask)
+								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
+								rs.AddWork(txTask)
+							}
+							if err = applyTx.Commit(); err != nil {
+								return err
+							}
+							for i := 0; i < workerCount; i++ {
+								reconWorkers[i].ResetTx(nil, nil)
+							}
+							rwTx, err = db.BeginRw(ctx)
+							if err != nil {
+								return err
+							}
+							if err = rs.Flush(rwTx); err != nil {
+								return err
+							}
+							if err = rwTx.Commit(); err != nil {
+								return err
+							}
+							if applyTx, err = db.BeginRw(ctx); err != nil {
+								return err
+							}
+							agg.SetTx(applyTx)
+							return nil
+						}()
+						if err != nil {
+							panic(err)
+						}
+						log.Info("Committed", "time", time.Since(commitStart))
+					}
+				}
+			}
+			if err = applyTx.Commit(); err != nil {
+				panic(err)
+			}
+		}()
+	}
+	var inputTxNum uint64
+	if block > 0 {
+		inputTxNum = txNums[block-1]
+	}
+	var header *types.Header
+	var blockNum uint64
+loop:
+	for blockNum = block; blockNum < maxBlockNum; blockNum++ {
+		atomic.StoreUint64(&inputBlockNum, blockNum)
+		rules := chainConfig.Rules(blockNum)
+		if header, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+			return err
+		}
+		blockHash := header.Hash()
+		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
+		txs := b.Transactions()
+		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			// Do not oversend, wait for the result heap to go under certain size
+			if workerCount > 1 {
+				func() {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+						rwsReceiveCond.Wait()
+					}
+				}()
+			}
+			txTask := &state.TxTask{
+				Header:    header,
+				BlockNum:  blockNum,
+				Rules:     rules,
+				Block:     b,
+				TxNum:     inputTxNum,
+				TxIndex:   txIndex,
+				BlockHash: blockHash,
+				Final:     txIndex == len(txs),
+			}
+			if txIndex >= 0 && txIndex < len(txs) {
+				txTask.Tx = txs[txIndex]
+				if sender, ok := txs[txIndex].GetSender(); ok {
+					txTask.Sender = &sender
+				}
+				if workerCount > 1 {
+					if ok := rs.RegisterSender(txTask); ok {
+						rs.AddWork(txTask)
+					}
+				}
+			} else if workerCount > 1 {
+				rs.AddWork(txTask)
+			}
+			if workerCount == 1 {
+				count++
+				reconWorkers[0].runTxTask(txTask)
+				if txTask.Error == nil {
+					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].tx, txTask, agg); err != nil {
+						panic(err)
+					}
+					outputTxNum++
+					outputBlockNum = txTask.BlockNum
+					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+				} else {
+					return fmt.Errorf("Rolled back %d block %d txIndex %d, err = %v\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
+				}
+				select {
+				case <-logEvery.C:
+					var m runtime.MemStats
+					libcommon.ReadMemStats(&m)
+					sizeEstimate := rs.SizeEstimate()
+					currentTime := time.Now()
+					interval := currentTime.Sub(prevTime)
+					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
+					var repeatRatio float64
+					if count > prevCount {
+						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
+					}
+					log.Info("Transaction replay",
+						//"workers", workerCount,
+						"at block", outputBlockNum,
+						"input block", atomic.LoadUint64(&inputBlockNum),
+						"blk/s", fmt.Sprintf("%.1f", speedBlock),
+						"tx/s", fmt.Sprintf("%.1f", speedTx),
+						"result queue", rws.Len(),
+						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
+						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+						"buffer", libcommon.ByteCount(sizeEstimate),
+						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+					)
+					prevTime = currentTime
+					prevCount = count
+					prevOutputBlockNum = outputBlockNum
+					prevRepeatCount = repeatCount
+					//prevTriggerCount = triggerCount
+					if sizeEstimate >= commitThreshold {
+						commitStart := time.Now()
+						log.Info("Committing...")
+						if err = applyTx.Commit(); err != nil {
+							return err
+						}
+						reconWorkers[0].ResetTx(nil, nil)
+						rwTx, err = db.BeginRw(ctx)
+						if err != nil {
+							return err
+						}
+						if err = rs.Flush(rwTx); err != nil {
+							return err
+						}
+						if err = rwTx.Commit(); err != nil {
+							return err
+						}
+						if applyTx, err = db.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(applyTx)
+						chainTx, err := chainDb.BeginRo(ctx)
+						if err != nil {
+							return err
+						}
+						reconWorkers[0].ResetTx(applyTx, chainTx)
+						log.Info("Committed", "time", time.Since(commitStart))
+					}
+				default:
+				}
+			}
+			inputTxNum++
+		}
+		// Check for interrupts
+		select {
+		case <-interruptCh:
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum+1))
+			atomic.StoreUint64(&maxTxNum, inputTxNum)
+			break loop
+		default:
+		}
+	}
+	if workerCount > 1 {
+		close(workCh)
+		wg.Wait()
+	} else {
+		if err = applyTx.Commit(); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < workerCount; i++ {
+		reconWorkers[i].ResetTx(nil, nil)
+	}
+	rwTx, err = db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	if err = rs.Flush(rwTx); err != nil {
+		return err
+	}
+	if err = execStage.Update(rwTx, blockNum); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-
-	agg, err3 := libstate.NewAggregator(aggPath, AggregationStep)
-	if err3 != nil {
-		return fmt.Errorf("create aggregator: %w", err3)
+	log.Info("Transaction replay complete", "duration", time.Since(startTime))
+	log.Info("Computing hashed state")
+	tmpDir := filepath.Join(datadir, "tmp")
+	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
+		return err
 	}
-	defer agg.Close()
-
-	interrupt := false
-	if block == 0 {
-		_, genesisIbs, err := genesis.ToBlock()
-		if err != nil {
-			return err
-		}
-		agg.SetTx(rwTx)
-		agg.SetTxNum(0)
-		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper22{w: agg}); err != nil {
-			return fmt.Errorf("cannot write state: %w", err)
-		}
-		if err = agg.FinishTx(); err != nil {
-			return err
-		}
+	if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
+		return err
 	}
-
-	logger.Info("Initialised chain configuration", "config", chainConfig)
-
-	var (
-		blockNum uint64
-		trace    bool
-		vmConfig vm.Config
-
-		txNum uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
-	)
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	statx := &stat22{
-		prevBlock: blockNum,
-		prevTime:  time.Now(),
+	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
+		return err
 	}
-
-	go func() {
-		for range logEvery.C {
-			aStats := agg.Stats()
-			statx.delta(aStats, blockNum).print(aStats, logger)
-		}
-	}()
-
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
-	defer allSnapshots.Close()
-	if err := allSnapshots.Reopen(); err != nil {
-		return fmt.Errorf("reopen snapshot segments: %w", err)
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+		return err
 	}
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
-
-	for !interrupt {
-		blockNum++
-		trace = traceBlock > 0 && blockNum == uint64(traceBlock)
-		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
-		if err != nil {
-			return err
-		}
-
-		b, _, err := blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
-		if b == nil {
-			log.Info("history: block is nil", "block", blockNum)
-			break
-		}
-		if blockNum <= block {
-			// Skip that block, but increase txNum
-			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
-			continue
-		}
-		agg.SetTx(rwTx)
-		agg.SetTxNum(txNum)
-
-		readWrapper := &ReaderWrapper22{r: agg, roTx: rwTx, blockNum: blockNum}
-		writeWrapper := &WriterWrapper22{w: agg, blockNum: blockNum}
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
-			h, err := blockReader.Header(ctx, historyTx, hash, number)
-			if err != nil {
-				panic(err)
-			}
-			return h
-		}
-
-		txNum++ // Pre-block transaction
-		agg.SetTxNum(txNum)
-
-		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
-			return fmt.Errorf("processing block %d: %w", blockNum, err)
-		}
-		agg.SetTxNum(txNum)
-		if err := agg.FinishTx(); err != nil {
-			return fmt.Errorf("failed to finish tx: %w", err)
-		}
-		if trace {
-			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
-		}
-
-		txNum++ // Post-block transaction
-		agg.SetTxNum(txNum)
-
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
-		default:
-		}
-		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		commit := interrupt
-		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
-			var spaceDirty uint64
-			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-				return fmt.Errorf("retrieving spaceDirty: %w", err)
-			}
-			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-				commit = true
-			}
-		}
-		if commit {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if !interrupt {
-				if rwTx, err = db.BeginRw(ctx); err != nil {
-					return err
-				}
-			}
-			agg.SetTx(rwTx)
-		}
+	if err = rwTx.Commit(); err != nil {
+		return err
 	}
-
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
+	var rootHash common.Hash
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		return err
+	}
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
+	if rootHash != header.Root {
+		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
+	}
 	return nil
 }
 
-type stat22 struct {
-	blockNum     uint64
-	hits         uint64
-	misses       uint64
-	prevBlock    uint64
-	prevMisses   uint64
-	prevHits     uint64
-	hitMissRatio float64
-	speed        float64
-	prevTime     time.Time
-	mem          runtime.MemStats
+type chainReader struct {
+	config      *params.ChainConfig
+	tx          kv.Tx
+	blockReader services.FullBlockReader
 }
 
-func (s *stat22) print(aStats libstate.FilesStats, logger log.Logger) {
-	totalFiles := 0
-	totalDatSize := 0
-	totalIdxSize := 0
-
-	logger.Info("Progress", "block", s.blockNum, "blk/s", s.speed, "state files", totalFiles,
-		"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
-		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
-		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
-	)
+func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
+func (cr chainReader) CurrentHeader() *types.Header { panic("") }
+func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		return h
+	}
+	return rawdb.ReadHeader(cr.tx, hash, number)
 }
-
-func (s *stat22) delta(aStats libstate.FilesStats, blockNum uint64) *stat22 {
-	currentTime := time.Now()
-	libcommon.ReadMemStats(&s.mem)
-
-	interval := currentTime.Sub(s.prevTime).Seconds()
-	s.blockNum = blockNum
-	s.speed = float64(s.blockNum-s.prevBlock) / interval
-	s.prevBlock = blockNum
-	s.prevTime = currentTime
-
-	total := s.hits + s.misses
-	if total > 0 {
-		s.hitMissRatio = float64(s.hits) / float64(total)
+func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		return h
 	}
-	return s
+	return rawdb.ReadHeaderByNumber(cr.tx, number)
+
 }
-
-func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *WriterWrapper22, chainConfig *params.ChainConfig,
-	engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
-) (uint64, types.Receipts, error) {
-	defer blockExecutionTimer.UpdateDuration(time.Now())
-
-	header := block.Header()
-	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
-	usedGas := new(uint64)
-	var receipts types.Receipts
-	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
-	rules := chainConfig.Rules(block.NumberU64())
-	txNum := txNumStart
-	ww.w.SetTxNum(txNum)
-
-	for i, tx := range block.Transactions() {
-		ibs := state.New(rw)
-		if daoBlock {
-			misc.ApplyDAOHardFork(ibs)
-			daoBlock = false
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	if cr.blockReader != nil {
+		number := rawdb.ReadHeaderNumber(cr.tx, hash)
+		if number == nil {
+			return nil
 		}
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		ct := NewCallTracer()
-		vmConfig.Tracer = ct
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
-		if err != nil {
-			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
-		}
-		for from := range ct.froms {
-			if err := ww.w.AddTraceFrom(from[:]); err != nil {
-				return 0, nil, err
-			}
-		}
-		for to := range ct.tos {
-			if err := ww.w.AddTraceTo(to[:]); err != nil {
-				return 0, nil, err
-			}
-		}
-		receipts = append(receipts, receipt)
-		for _, log := range receipt.Logs {
-			if err = ww.w.AddLogAddr(log.Address[:]); err != nil {
-				return 0, nil, fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
-			}
-			for _, topic := range log.Topics {
-				if err = ww.w.AddLogTopic(topic[:]); err != nil {
-					return 0, nil, fmt.Errorf("adding event log for topic %x: %w", topic, err)
-				}
-			}
-		}
-		if err = ww.w.FinishTx(); err != nil {
-			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
-		}
-		if trace {
-			fmt.Printf("FinishTx called for blockNum=%d, txIndex=%d, txNum=%d txHash=[%x]\n", block.NumberU64(), i, txNum, tx.Hash())
-		}
-		txNum++
-		ww.w.SetTxNum(txNum)
+		return cr.GetHeader(hash, *number)
 	}
-
-	ibs := state.New(rw)
-	if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
-		return 0, nil, fmt.Errorf("adding coinbase trace: %w", err)
-	}
-	for _, uncle := range block.Uncles() {
-		if err := ww.w.AddTraceTo(uncle.Coinbase.Bytes()); err != nil {
-			return 0, nil, fmt.Errorf("adding uncle trace: %w", err)
-		}
-	}
-
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-		return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
-	}
-
-	if err := ibs.CommitBlock(rules, ww); err != nil {
-		return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
-	}
-
-	return txNum, receipts, nil
+	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
+	return h
 }
-
-// Implements StateReader and StateWriter
-type ReaderWrapper22 struct {
-	blockNum uint64
-	roTx     kv.Tx
-	r        *libstate.Aggregator
-}
-
-type WriterWrapper22 struct {
-	blockNum uint64
-	w        *libstate.Aggregator
-}
-
-func (rw *ReaderWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes(), rw.roTx)
+func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
-		return nil, err
+		log.Error("ReadTd failed", "err", err)
+		return nil
 	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-
-	var a accounts.Account
-	a.Reset()
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
-		pos += codeHashBytes
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
-	}
-	return &a, nil
+	return td
 }
 
-func (rw *ReaderWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
-	if err != nil {
-		return nil, err
-	}
-	if enc == nil {
-		return nil, nil
-	}
-	return enc, nil
+type epochReader struct {
+	tx kv.Tx
 }
 
-func (rw *ReaderWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return rw.r.ReadAccountCode(address.Bytes(), rw.roTx)
+func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
-
-func (rw *ReaderWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return rw.r.ReadAccountCodeSize(address.Bytes(), rw.roTx)
+func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+	panic("")
 }
-
-func (rw *ReaderWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
+func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
 }
-
-func (ww *WriterWrapper22) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	var l int
-	l++
-	if account.Nonce > 0 {
-		l += (bits.Len64(account.Nonce) + 7) / 8
-	}
-	l++
-	if !account.Balance.IsZero() {
-		l += account.Balance.ByteLen()
-	}
-	l++
-	if !account.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if account.Incarnation > 0 {
-		l += (bits.Len64(account.Incarnation) + 7) / 8
-	}
-	value := make([]byte, l)
-	pos := 0
-	if account.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := (bits.Len64(account.Nonce) + 7) / 8
-		value[pos] = byte(nonceBytes)
-		var nonce = account.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if account.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := account.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		account.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if account.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		copy(value[pos:pos+32], account.CodeHash[:])
-		pos += 32
-	}
-	if account.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
-		value[pos] = byte(incBytes)
-		var inc = account.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
-	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
-		return err
-	}
-	return nil
+func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+	panic("")
 }
-
-func (ww *WriterWrapper22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper22) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (ww *WriterWrapper22) CreateContract(address common.Address) error {
-	return nil
+func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }

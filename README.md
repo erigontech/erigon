@@ -4,6 +4,10 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
+![Coverage](https://gist.githubusercontent.com/revittm/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+
+![Hive](https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
+
 <!--ts-->
 
 - [System Requirements](#system-requirements)
@@ -13,7 +17,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
-    + [Beacon Chain](#beacon-chain)
+    + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
 
 - [Key features](#key-features)
@@ -22,6 +26,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+- [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
     + [Erigon Discord Server](#erigon-discord-server)
@@ -48,11 +53,11 @@ System Requirements
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* BSC Archive: 7TB. BSC Full: 1TB. 
+* BSC Archive: 7TB. BSC Full: 1TB.
 
 * Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
 
-SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
+SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
@@ -71,11 +76,13 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots=true` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
+Default `--snapshots` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+
+Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile)
 
 ### Modularity
 
@@ -100,7 +107,7 @@ of the public testnets, Görli. It syncs much quicker, and does not take so much
 git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir goerli --chain goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=goerli
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
@@ -167,41 +174,37 @@ Windows users may run erigon in 3 possible ways:
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
-### Beacon Chain
+### Beacon Chain (Consensus Layer)
 
-Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
-relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
+Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
+relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
+ are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
 
-You must enable JSON-RPC by `--http` and add `engine` to `--http.api` list. (Or run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon)
+If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
+as well as `--authrpc.vhosts <CL host>`.
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC listen on localhost by default)
-.
-
-Once the JSON-RPC is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC.
-
-Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
-
-### Authentication API
+[Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
 
 In order to establish a secure connection between the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
 
 The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
 
-This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
-    
+This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md).
+
+Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
+where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT secret path created by Erigon.
+
 ### Multiple Instances / One Machine
 
 Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
 
 ```
 # mainnet
-./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
 # rinkeby
-./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
+./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
@@ -210,7 +213,7 @@ Quote your path if it has spaces.
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
 Key features
-============ 
+============
 
 <code>🔬 See more
 detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
@@ -261,11 +264,11 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process. 
+Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
-Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code> 
+Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 #### **For remote DB**
 
@@ -274,7 +277,7 @@ socket connection to pass data between them. To use this mode, run Erigon in one
 
 ```sh
 make erigon
-./build/bin/erigon --private.api.addr=localhost:9090
+./build/bin/erigon --private.api.addr=localhost:9090 --http=false
 make rpcdaemon
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
@@ -290,13 +293,71 @@ For a details on the implementation status of each
 command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 ### Run all components by docker-compose
+Docker allows for building and running Erigon via containers. This alleviates the need for installing build dependencies onto the host OS.
 
+#### Optional: Setup dedicated user
+User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
+
+You may wish to setup a dedicated user/group on the host OS, in which case the following `make` targets are available.
+```sh
+# create "erigon" user
+make user_linux
+# or
+make user_macos
+```
+
+#### Environment Variables
+There is a `.env.example` file in the root of the repo.
+* `DOCKER_UID` - The UID of the docker user
+* `DOCKER_GID` - The GID of the docker user
+* `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
+
+If not specified, the UID/GID will use the current user.
+
+A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper targets `make user_linux` or `make user_macos`.
+
+#### Check: Permissions
+In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
+
+If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
+
+#### Run
 Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
 
 ```sh
+#
+# Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
+#
 make docker-compose
+
+#
 # or
-XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+#
+# if you want to use a custom data directory
+# or, if you want to use different uid/gid for a dedicated user
+#
+# To solve this, pass in the uid/gid parameters into the container.
+#
+# DOCKER_UID: the user id
+# DOCKER_GID: the group id
+# XDG_DATA_HOME: the data directory (default: ~/.local/share)
+#
+# Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
+#       if you followed above instructions
+#
+# Note: uid/gid syntax below will automatically use uid/gid of running user so this syntax
+#       is intended to be ran via the dedicated user setup earlier
+#
+DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+
+#
+# if you want to run the docker, but you are not logged in as the $ERIGON_USER
+# then you'll need to adjust the syntax above to grab the correct uid/gid
+#
+# To run the command via another user, use
+#
+ERIGON_USER=erigon
+sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
@@ -318,6 +379,16 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 
+Documentation
+==============
+
+The `./docs` directory includes a lot of useful but outdated documentation. For code located
+in the `./cmd` directory, their respective documentation can be found in `./cmd/*/README.md`.
+A more recent collation of developments and happenings in Erigon can be found in the
+[Erigon Blog](https://erigon.substack.com/).
+
+
+
 FAQ
 ================
 
@@ -335,23 +406,23 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 |  Port |  Protocol |      Purpose           |  Expose |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP | eth/66 peering         |  Public |
+| 30303 | TCP & UDP | eth/66 or 67 peering   |  Public |
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
+|  8551 |    TCP    | Engine API (JWT auth)  | Private |
 
-Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
+Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
 
 #### `RPC` ports
 
 |  Port |  Protocol |      Purpose       |  Expose |
 |:-----:|:---------:|:------------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets  | Private |
-|  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically, 8551 (JWT authenticated) is exposed only internally for the Engine API JSON-RPC queries.
 
 #### `sentry` ports
 
@@ -382,7 +453,7 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
   run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
   run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
-    
+
 ### How to run local devnet?
 <code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
@@ -455,7 +526,7 @@ Application
 
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
 because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
-because most of that `90%` is "OS pages cache".  
+because most of that `90%` is "OS pages cache".
 OS automatically free this cache any time it needs memory. Smaller "page cache size" may not impact performance of
 Erigon at all.
 
@@ -489,3 +560,10 @@ For example: btrfs's autodefrag option - may increase write IO 100x times
 ### Gnome Tracker can kill Erigon
 
 [Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.
+
+### the --mount option requires BuildKit error
+
+For anyone else that was getting the BuildKit error when trying to start Erigon the old way you can use the below...
+```
+XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+```

@@ -53,9 +53,9 @@ type EthAPI interface {
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
-	NewPendingTransactionFilter(_ context.Context) (common.Hash, error)
-	NewBlockFilter(_ context.Context) (common.Hash, error)
-	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (common.Hash, error)
+	NewPendingTransactionFilter(_ context.Context) (string, error)
+	NewBlockFilter(_ context.Context) (string, error)
+	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]interface{}, error)
 
@@ -213,10 +213,6 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil
-	}
-
 	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
@@ -224,6 +220,14 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 
 	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
+}
+
+func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	return api._blockReader.Header(context.Background(), tx, h, n)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -327,6 +331,30 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	signer := types.LatestSignerForChainID(chainId)
 	result.From, _ = tx.Sender(*signer)
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+// newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+	tx := opaqueTx.(*types.LegacyTx)
+	result := &RPCTransaction{
+		Type:     hexutil.Uint64(tx.Type()),
+		ChainID:  (*hexutil.Big)(new(big.Int)),
+		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
+		Gas:      hexutil.Uint64(tx.GetGas()),
+		Hash:     txHash,
+		Input:    hexutil.Bytes(tx.GetData()),
+		Nonce:    hexutil.Uint64(tx.GetNonce()),
+		From:     common.Address{},
+		To:       tx.GetTo(),
+		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
+	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))

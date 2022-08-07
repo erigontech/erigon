@@ -222,7 +222,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string) error {
 				return err
 			}
 
-			err = tx.Delete(kv.Migrations, []byte("_progress_"+v.Name), nil)
+			err = tx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
 			if err != nil {
 				return err
 			}

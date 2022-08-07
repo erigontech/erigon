@@ -1,19 +1,26 @@
-GO = go
+GO = go # if using docker, should not need to be installed/linked
 GOBIN = $(CURDIR)/build/bin
+UNAME = $(shell uname) # Supported: Darwin, Linux
+DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-DOCKER_UID ?= 1000
-DOCKER_PID ?= 1000
+ERIGON_USER ?= erigon
+# if using volume-mounting data dir, then must exist on host OS
+DOCKER_UID ?= $(shell id -u)
+DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= thorax/erigon:latest
 
-CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
+# Variables below for building on host OS, and are ignored for docker
+#
+# Pipe error below to /dev/null since Makefile structure kind of expects
+# Go to be available, but with docker it's not strictly necessary
+CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-GO_MINOR_VERSION = $(shell $(GO) version | cut -c 16-17)
 BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
@@ -26,19 +33,34 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
+## go-version:                        print and verify go version
 go-version:
-	@if [ $(GO_MINOR_VERSION) -lt 18 ]; then \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
 		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
 
-docker: git-submodules
-	DOCKER_BUILDKIT=1 docker build -t ${DOCKER_TAG} \
+## validate_docker_build_args:        ensure docker build args are valid
+validate_docker_build_args:
+	@echo "Docker build args:"
+	@echo "    DOCKER_UID: $(DOCKER_UID)"
+	@echo "    DOCKER_GID: $(DOCKER_GID)\n"
+	@echo "Ensuring host OS user exists with specified UID/GID..."
+	@if [ "$(UNAME)" = "Darwin" ]; then \
+		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
+	elif [ "$(UNAME)" = "Linux" ]; then \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
+	fi
+	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
+
+## docker:                            validate, update submodules and build with docker
+docker: validate_docker_build_args git-submodules
+	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
-		--build-arg PUID=${DOCKER_UID} \
-		--build-arg PGID=${DOCKER_PID} \
+		--build-arg UID=${DOCKER_UID} \
+		--build-arg GID=${DOCKER_GID} \
 		${DOCKER_FLAGS} \
 		.
 
@@ -46,22 +68,33 @@ xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
 	xdg_data_home = $(XDG_DATA_HOME)
 endif
-docker-compose:
-	mkdir -p $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus; \
+xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
+
+## setup_xdg_data_home:               TODO
+setup_xdg_data_home:
+	mkdir -p $(xdg_data_home_subdirs)
+	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || chown -R 472:0 $(xdg_data_home)/erigon-grafana
+	@echo "✔️ xdg_data_home setup"
+	@ls -al $(xdg_data_home)
+
+## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
+docker-compose: validate_docker_build_args setup_xdg_data_home
 	docker-compose up
 
-# debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-%.cmd: git-submodules
+%.cmd:
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
+## geth:                              run erigon (TODO: remove?)
 geth: erigon
 
+## erigon:                            build erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
@@ -82,12 +115,14 @@ COMMANDS += txpool
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
 
+## all:                               run erigon with all commands
 all: erigon $(COMMANDS)
 
+## db-tools:                          build db tools
 db-tools: git-submodules
 	@echo "Building db-tools"
 
-	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	@# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
 	rm -rf libmdbx
 	git submodule update --init --recursive --force libmdbx
 
@@ -100,23 +135,29 @@ db-tools: git-submodules
 	cp libmdbx/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
+## test:                              run unit tests with a 50s timeout
 test:
-	$(GOTEST) --timeout 30s
+	$(GOTEST) --timeout 50s
 
+## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
+## lint:                              run golangci-lint with .golangci.yml config file
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
+## lintci:                            run golangci-lint (additionally outputs message before run)
 lintci:
 	@echo "--> Running linter for code"
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
+## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.47.2
 
+## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
@@ -125,6 +166,7 @@ clean:
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
+## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
@@ -139,20 +181,63 @@ devtools:
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
+## bindings:                          generate test contracts and core contracts
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
 	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
+## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
 	docker-compose up prometheus grafana
 
-
+## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
+## git-submodules:                    update git submodules
 git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule sync --quiet --recursive
+	@# these lines will also fail if ran as root in a non-root user's checked out repository
+	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
+
+# since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
+# we need separate envvars to facilitate creation of the erigon user on the host OS.
+ERIGON_USER_UID ?= 3473
+ERIGON_USER_GID ?= 3473
+ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
+
+## user_linux:                        create "erigon" user (Linux)
+user_linux:
+ifdef DOCKER
+	sudo groupadd -f docker
+endif
+	sudo addgroup --gid $(ERIGON_USER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo adduser --disabled-password --gecos '' --uid $(ERIGON_USER_UID) --gid $(ERIGON_USER_GID) $(ERIGON_USER) 2> /dev/null || true
+	sudo mkhomedir_helper $(ERIGON_USER)
+	echo 'export PATH=$$PATH:/usr/local/go/bin' | sudo -u $(ERIGON_USER) tee /home/$(ERIGON_USER)/.bash_aliases >/dev/null
+ifdef DOCKER
+	sudo usermod -aG docker $(ERIGON_USER)
+endif
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+
+## user_macos:                        create "erigon" user (MacOS)
+user_macos:
+	sudo dscl . -create /Users/$(ERIGON_USER)
+	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
+	sudo dscl . -list /Users UniqueID | grep $(ERIGON_USER) | grep $(ERIGON_USER_UID) || sudo dscl . -create /Users/$(ERIGON_USER) UniqueID $(ERIGON_USER_UID)
+	sudo dscl . -create /Users/$(ERIGON_USER) PrimaryGroupID $(ERIGON_USER_GID)
+	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
+	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
+	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
+
+## coverage:                          run code coverage report and output total coverage %
+coverage:
+	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+
+## help:                              print commands help
+help	:	Makefile
+	@sed -n 's/^##//p' $<
+

@@ -14,8 +14,8 @@ const MaxBodiesInRequest = 1024
 
 type Delivery struct {
 	peerID          [64]byte
-	txs             [][][]byte
-	uncles          [][]*types.Header
+	txs             *[][][]byte
+	uncles          *[][]*types.Header
 	lenOfP2PMessage uint64
 }
 

@@ -9,6 +9,7 @@ import (
 	"encoding"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
 	"hash"
 	"io"
 	"testing"
@@ -83,7 +84,11 @@ func TestMarshal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("size=%d, len(input)=%d: could not marshal: %v", size, i, err)
 			}
-			err = h2.(encoding.BinaryUnmarshaler).UnmarshalBinary(halfstate)
+			binUnmarshaler, ok := h2.(encoding.BinaryUnmarshaler)
+			if !ok {
+				log.Warn("Failed to type convert h2 to encoding.BinaryUnmarshaler")
+			}
+			err = binUnmarshaler.UnmarshalBinary(halfstate)
 			if err != nil {
 				t.Fatalf("size=%d, len(input)=%d: could not unmarshal: %v", size, i, err)
 			}

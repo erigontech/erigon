@@ -90,8 +90,8 @@ func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[common.Address]ui
 	return expectAddrs, expectTopics
 }
 
-func TestLogIndex(t *testing.T) {
-	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
+func TestPromoteLogIndex(t *testing.T) {
+	require, ctx := require.New(t), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 100)
@@ -100,7 +100,8 @@ func TestLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, cfgCopy, ctx)
+
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -114,6 +115,20 @@ func TestLogIndex(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expect, m.GetCardinality())
 	}
+}
+
+func TestPruneLogIndex(t *testing.T) {
+	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
+	_, tx := memdb.NewTestTx(t)
+
+	_, _ = genReceipts(t, tx, 100)
+
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfgCopy := cfg
+	cfgCopy.bufLimit = 10
+	cfgCopy.flushEvery = time.Nanosecond
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
+	require.NoError(err)
 
 	// Mode test
 	err = pruneLogIndex("", tx, tmpDir, 50, ctx)
@@ -122,23 +137,41 @@ func TestLogIndex(t *testing.T) {
 	{
 		total := 0
 		err = tx.ForEach(kv.LogAddressIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[length.Addr:]) >= 50)
+			require.True(binary.BigEndian.Uint32(k[length.Addr:]) == 4294967295)
 			total++
 			return nil
 		})
 		require.NoError(err)
-		require.True(total > 0)
+		require.True(total == 3)
 	}
 	{
 		total := 0
 		err = tx.ForEach(kv.LogTopicIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[length.Hash:]) >= 50)
+			require.True(binary.BigEndian.Uint32(k[length.Hash:]) == 4294967295)
 			total++
 			return nil
 		})
 		require.NoError(err)
-		require.True(total > 0)
+		require.True(total == 3)
 	}
+}
+
+func TestUnwindLogIndex(t *testing.T) {
+	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
+	_, tx := memdb.NewTestTx(t)
+
+	expectAddrs, expectTopics := genReceipts(t, tx, 100)
+
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfgCopy := cfg
+	cfgCopy.bufLimit = 10
+	cfgCopy.flushEvery = time.Nanosecond
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
+	require.NoError(err)
+
+	// Mode test
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx)
+	require.NoError(err)
 
 	// Unwind test
 	err = unwindLogIndex("logPrefix", tx, 70, cfg, nil)

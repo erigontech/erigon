@@ -1,6 +1,7 @@
 package bor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,9 +25,9 @@ type ResponseWithHeight struct {
 }
 
 type IHeimdallClient interface {
-	Fetch(path string, query string) (*ResponseWithHeight, error)
-	FetchWithRetry(path string, query string) (*ResponseWithHeight, error)
-	FetchStateSyncEvents(fromID uint64, to int64) ([]*EventRecordWithTime, error)
+	Fetch(ctx context.Context, path string, query string) (*ResponseWithHeight, error)
+	FetchWithRetry(ctx context.Context, path string, query string) (*ResponseWithHeight, error)
+	FetchStateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error)
 }
 
 type HeimdallClient struct {
@@ -44,12 +45,12 @@ func NewHeimdallClient(urlString string) (*HeimdallClient, error) {
 	return h, nil
 }
 
-func (h *HeimdallClient) FetchStateSyncEvents(fromID uint64, to int64) ([]*EventRecordWithTime, error) {
+func (h *HeimdallClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 	for {
 		queryParams := fmt.Sprintf("from-id=%d&to-time=%d&limit=%d", fromID, to, stateFetchLimit)
 		log.Trace("Fetching state sync events", "queryParams", queryParams)
-		response, err := h.FetchWithRetry("clerk/event-record/list", queryParams)
+		response, err := h.FetchWithRetry(ctx, "clerk/event-record/list", queryParams)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +75,7 @@ func (h *HeimdallClient) FetchStateSyncEvents(fromID uint64, to int64) ([]*Event
 }
 
 // Fetch fetches response from heimdall
-func (h *HeimdallClient) Fetch(rawPath string, rawQuery string) (*ResponseWithHeight, error) {
+func (h *HeimdallClient) Fetch(ctx context.Context, rawPath string, rawQuery string) (*ResponseWithHeight, error) {
 	u, err := url.Parse(h.urlString)
 	if err != nil {
 		return nil, err
@@ -83,11 +84,11 @@ func (h *HeimdallClient) Fetch(rawPath string, rawQuery string) (*ResponseWithHe
 	u.Path = rawPath
 	u.RawQuery = rawQuery
 
-	return h.internalFetch(u)
+	return h.internalFetch(ctx, u)
 }
 
 // FetchWithRetry returns data from heimdall with retry
-func (h *HeimdallClient) FetchWithRetry(rawPath string, rawQuery string) (*ResponseWithHeight, error) {
+func (h *HeimdallClient) FetchWithRetry(ctx context.Context, rawPath string, rawQuery string) (*ResponseWithHeight, error) {
 	u, err := url.Parse(h.urlString)
 	if err != nil {
 		return nil, err
@@ -97,18 +98,26 @@ func (h *HeimdallClient) FetchWithRetry(rawPath string, rawQuery string) (*Respo
 	u.RawQuery = rawQuery
 
 	for {
-		res, err := h.internalFetch(u)
+		res, err := h.internalFetch(ctx, u)
 		if err == nil && res != nil {
 			return res, nil
 		}
 		log.Info("Retrying again in 5 seconds for next Heimdall span", "path", u.Path)
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 	}
 }
 
 // internal fetch method
-func (h *HeimdallClient) internalFetch(u *url.URL) (*ResponseWithHeight, error) {
-	res, err := h.client.Get(u.String())
+func (h *HeimdallClient) internalFetch(ctx context.Context, u *url.URL) (*ResponseWithHeight, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := h.client.Do(req)
 	if err != nil {
 		return nil, err
 	}

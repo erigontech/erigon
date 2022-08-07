@@ -17,7 +17,10 @@
 package math
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math"
+	"math/big"
 	"math/bits"
 	"strconv"
 )
@@ -95,4 +98,20 @@ func SafeAdd(x, y uint64) (uint64, bool) {
 func SafeMul(x, y uint64) (uint64, bool) {
 	hi, lo := bits.Mul64(x, y)
 	return lo, hi != 0
+}
+
+// AbsoluteDifference is a utility method that given 2 int64, it returns the absolute value of their difference in uint64 format.
+func AbsoluteDifference(x, y uint64) uint64 {
+	if x > y {
+		return x - y
+	}
+	return y - x
+}
+
+func RandInt64() (int64, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64(), nil
 }

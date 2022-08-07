@@ -9,11 +9,10 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var (
-	erigonUrl = "http://localhost:8545"
-)
+const erigonUrl string = "http://localhost:8545"
 
 type RequestGenerator struct {
 	reqID  int
@@ -42,13 +41,18 @@ func (req *RequestGenerator) Get() rpctest.CallResult {
 		RequestID: req.reqID,
 	}
 
-	resp, err := http.Get(erigonUrl)
+	resp, err := http.Get(erigonUrl) //nolint
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
 		return res
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		closeErr := Body.Close()
+		if closeErr != nil {
+			log.Warn("Failed to close readCloser", "err", closeErr)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode != 200 {
 		res.Took = time.Since(start)

@@ -114,8 +114,14 @@ func makeHasher(h hash.Hash) hasher {
 	outputLen := rh.Size()
 	return func(dest []byte, data []byte) {
 		rh.Reset()
-		rh.Write(data)
-		rh.Read(dest[:outputLen])
+		_, writeErr := rh.Write(data)
+		if writeErr != nil {
+			log.Warn("Failed to write data", "err", writeErr)
+		}
+		_, readErr := rh.Read(dest[:outputLen])
+		if readErr != nil {
+			log.Warn("Failed to read data", "err", readErr)
+		}
 	}
 }
 
@@ -132,9 +138,15 @@ func seedHash(block uint64) []byte {
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
 		//nolint:errcheck
-		h.Sha.Write(seed)
+		_, writeErr := h.Sha.Write(seed)
+		if writeErr != nil {
+			log.Warn("Failed to write data", "err", writeErr)
+		}
 		//nolint:errcheck
-		h.Sha.Read(seed)
+		_, readErr := h.Sha.Read(seed)
+		if readErr != nil {
+			log.Warn("Failed to read data", "err", readErr)
+		}
 	}
 
 	common.ReturnHasherToPool(h)

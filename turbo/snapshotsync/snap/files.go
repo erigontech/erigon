@@ -9,7 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"golang.org/x/exp/slices"
 )
 
@@ -140,6 +141,10 @@ type FileInfo struct {
 	T         Type
 }
 
+func (f FileInfo) TorrentFileExists() bool { return common.FileExist(f.Path + ".torrent") }
+func (f FileInfo) Seedable() bool          { return f.To-f.From == DEFAULT_SEGMENT_SIZE }
+func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
 func TmpFiles(dir string) (res []string, err error) {
@@ -161,8 +166,6 @@ func TmpFiles(dir string) (res []string, err error) {
 	}
 	return res, nil
 }
-
-var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
 
 // ParseDir - reading dir (
 func ParseDir(dir string) (res []FileInfo, err error) {
@@ -211,7 +214,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 }
 
 func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
-	preverified := snapshothashes.KnownConfig(chainName).Preverified
+	preverified := snapcfg.KnownCfg(chainName, nil).Preverified
 	keep := map[string]struct{}{}
 	for _, p := range preverified {
 		ext := filepath.Ext(p.Name)

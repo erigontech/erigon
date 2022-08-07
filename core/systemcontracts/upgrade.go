@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type UpgradeConfig struct {
@@ -35,7 +36,6 @@ const (
 )
 
 var (
-	GenesisHash common.Hash
 	//upgrade config
 	ramanujanUpgrade = make(map[string]*Upgrade)
 
@@ -368,13 +368,12 @@ func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 		return
 	}
 	var network string
-	switch GenesisHash {
-	/* Add mainnet genesis hash */
-	case params.BSCGenesisHash:
+	switch config.ChainName {
+	case networkname.BSCChainName:
 		network = mainNet
-	case params.ChapelGenesisHash:
+	case networkname.ChapelChainName:
 		network = chapelNet
-	case params.RialtoGenesisHash:
+	case networkname.RialtoChainName:
 		network = rialtoNet
 	default:
 		network = defaultNet

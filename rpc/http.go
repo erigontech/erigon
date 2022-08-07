@@ -31,12 +31,13 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
+	jsoniter "github.com/json-iterator/go"
 )
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 5
 	contentType             = "application/json"
-	jwtTokenExpiry          = 5 * time.Second
+	jwtTokenExpiry          = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -222,7 +223,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.close()
-	s.serveSingleRequest(ctx, codec)
+	var stream *jsoniter.Stream
+	if !s.disableStreaming {
+		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+	}
+	s.serveSingleRequest(ctx, codec, stream)
 }
 
 // validateRequest returns a non-zero response code and error message if the

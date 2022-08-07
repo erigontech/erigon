@@ -13,10 +13,8 @@ import (
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime/pprof"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -175,7 +173,23 @@ func readAccount(chaindata string, account common.Address) error {
 	if err != nil {
 		return err
 	}
-	for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+	defer c.Close()
+	for k, v, e := c.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, account.Bytes()) {
+			break
+		}
+		fmt.Printf("%x => %x\n", k, v)
+	}
+	cc, err := tx.Cursor(kv.PlainContractCode)
+	if err != nil {
+		return err
+	}
+	defer cc.Close()
+	fmt.Printf("code hashes\n")
+	for k, v, e := cc.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
 		if e != nil {
 			return e
 		}
@@ -823,7 +837,7 @@ func trimTxs(chaindata string) error {
 			txId := iter.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
-			if err = txs.Delete(key[:], nil); err != nil {
+			if err = txs.Delete(key[:]); err != nil {
 				return err
 			}
 			deleted++
@@ -994,180 +1008,6 @@ func devTx(chaindata string) error {
 	return nil
 }
 
-func mainnetGenesis() error {
-	g := core.DefaultGenesisBlock()
-	_, _, err := g.ToBlock()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func junkdb() error {
-	dir, err := os.MkdirTemp(".", "junk")
-	if err != nil {
-		return fmt.Errorf("creating temp dir for db size test: %w", err)
-	}
-	//defer os.RemoveAll(dir)
-	oneBucketCfg := make(kv.TableCfg)
-	oneBucketCfg["t"] = kv.TableCfgItem{}
-	var db kv.RwDB
-	db, err = mdbx.NewMDBX(log.New()).Path(dir).WithTablessCfg(func(kv.TableCfg) kv.TableCfg {
-		return oneBucketCfg
-	}).Open()
-	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
-	}
-	defer db.Close()
-	for i := 0; i < 1_000_000; i++ {
-		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-			c, e := tx.RwCursor("t")
-			if e != nil {
-				return e
-			}
-			defer c.Close()
-			for j := 0; j < 1_000_000_000; j++ {
-				var b [8]byte
-				binary.BigEndian.PutUint64(b[:], uint64(i*1_000_000_000+j))
-				if e = c.Append(b[:], b[:]); e != nil {
-					return e
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		log.Info("Appended records", "bln", i+1)
-	}
-	return nil
-}
-
-func histStats() error {
-	files, err := os.ReadDir(".")
-	if err != nil {
-		return err
-	}
-	endBlockMap := map[uint64]struct{}{}
-	pageMap := map[string]map[uint64]uint64{}
-	keys := []string{"ahistory", "shistory", "abitmap", "sbitmap"}
-	for _, k := range keys {
-		pageMap[k] = map[uint64]uint64{}
-	}
-	re := regexp.MustCompile(`(ahistory|shistory|abitmap|sbitmap).([0-9]+).txt`)
-	for _, f := range files {
-		name := f.Name()
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 3 {
-			if len(subs) != 0 {
-				log.Warn("File ignored by changes scan, more than 3 submatches", "name", name, "submatches", len(subs))
-			}
-			continue
-		}
-		var endBlock uint64
-		if endBlock, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			return err
-		}
-		endBlockMap[endBlock] = struct{}{}
-		var ff *os.File
-		if ff, err = os.Open(name); err != nil {
-			return err
-		}
-		scanner := bufio.NewScanner(ff)
-		// Skip 5 lines
-		for i := 0; i < 5; i++ {
-			scanner.Scan()
-		}
-		var totalPages uint64
-		for i := 0; i < 3; i++ {
-			scanner.Scan()
-			line := scanner.Text()
-			p := strings.Index(line, ": ")
-			var pages uint64
-			if pages, err = strconv.ParseUint(line[p+2:], 10, 64); err != nil {
-				return err
-			}
-			totalPages += pages
-		}
-		pageMap[subs[1]][endBlock] = totalPages
-		ff.Close()
-	}
-	var endBlocks []uint64
-	for endBlock := range endBlockMap {
-		endBlocks = append(endBlocks, endBlock)
-	}
-	slices.Sort(endBlocks)
-	var lastEndBlock uint64
-	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
-	for _, endBlock := range endBlocks {
-		fmt.Printf("%d", endBlock)
-		for _, k := range keys {
-			if lastEndBlock == 0 {
-				fmt.Printf(",%.3f", float64(pageMap[k][endBlock])/256.0/1024.0)
-			} else {
-				fmt.Printf(",%.3f", float64(pageMap[k][endBlock]-pageMap[k][lastEndBlock])/256.0/1024.0)
-			}
-		}
-		fmt.Printf("\n")
-		lastEndBlock = endBlock
-	}
-	return nil
-}
-
-func histStat1(chaindata string) error {
-	files, err := os.ReadDir(chaindata)
-	if err != nil {
-		return err
-	}
-	endBlockMap := map[uint64]struct{}{}
-	sizeMap := map[string]map[uint64]uint64{}
-	keys := []string{"ahistory", "shistory", "chistory", "abitmap", "sbitmap", "cbitmap"}
-	for _, k := range keys {
-		sizeMap[k] = map[uint64]uint64{}
-	}
-	re := regexp.MustCompile(fmt.Sprintf("(%s).([0-9]+)-([0-9]+).(dat|idx)", strings.Join(keys, "|")))
-	for _, f := range files {
-		name := f.Name()
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 5 {
-			if len(subs) != 0 {
-				log.Warn("File ignored by changes scan, more than 5 submatches", "name", name, "submatches", len(subs))
-			}
-			continue
-		}
-		var startBlock uint64
-		if startBlock, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			return err
-		}
-		var endBlock uint64
-		if endBlock, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
-			return err
-		}
-		if endBlock-startBlock < 499_999 {
-			continue
-		}
-		endBlockMap[endBlock] = struct{}{}
-		if fileInfo, err1 := os.Stat(filepath.Join(chaindata, name)); err1 == nil {
-			sizeMap[subs[1]][endBlock] += uint64(fileInfo.Size())
-		} else {
-			return err1
-		}
-	}
-	var endBlocks []uint64
-	for endBlock := range endBlockMap {
-		endBlocks = append(endBlocks, endBlock)
-	}
-	slices.Sort(endBlocks)
-	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
-	for _, endBlock := range endBlocks {
-		fmt.Printf("%d", endBlock)
-		for _, k := range keys {
-			fmt.Printf(",%.3f", float64(sizeMap[k][endBlock])/1024.0/1024.0/1024.0)
-		}
-		fmt.Printf("\n")
-	}
-	return nil
-}
-
 func chainConfig(name string) error {
 	var chainConfig *params.ChainConfig
 	switch name {
@@ -1197,6 +1037,8 @@ func chainConfig(name string) error {
 		chainConfig = params.MumbaiChainConfig
 	case "bor-mainnet":
 		chainConfig = params.BorMainnetChainConfig
+	case "gnosis":
+		chainConfig = params.GnosisChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}
@@ -1267,81 +1109,6 @@ func findPrefix(chaindata string) error {
 	if e != nil {
 		return e
 	}
-	return nil
-}
-
-func readEf(file string, addr []byte) error {
-	datPath := file + ".dat"
-	idxPath := file + ".idx"
-	index, err := recsplit.OpenIndex(idxPath)
-	if err != nil {
-		return err
-	}
-	defer index.Close()
-	decomp, err := compress.NewDecompressor(datPath)
-	if err != nil {
-		return err
-	}
-	defer decomp.Close()
-	indexReader := recsplit.NewIndexReader(index)
-	offset := indexReader.Lookup(addr)
-	g := decomp.MakeGetter()
-	g.Reset(offset)
-	word, _ := g.Next(nil)
-	fmt.Printf("%x\n", word)
-	word, _ = g.NextUncompressed()
-	ef, _ := eliasfano32.ReadEliasFano(word)
-	it := ef.Iterator()
-	line := 0
-	for it.HasNext() {
-		fmt.Printf("%d ", it.Next())
-		line++
-		if line%20 == 0 {
-			fmt.Printf("\n")
-		}
-	}
-	fmt.Printf("\n")
-	return nil
-}
-
-func readBodies(file string) error {
-	decomp, err := compress.NewDecompressor(file)
-	if err != nil {
-		return err
-	}
-	defer decomp.Close()
-	gg := decomp.MakeGetter()
-	buf, _ := gg.Next(nil)
-	firstBody := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
-		return err
-	}
-	//var blockFrom uint64 = 12300000
-	//var blockTo uint64 = 12400000
-	firstTxID := firstBody.BaseTxId
-
-	lastBody := new(types.BodyForStorage)
-	i := uint64(0)
-	for gg.HasNext() {
-		i++
-		//if i == blockTo-blockFrom-1 {
-		//fmt.Printf("lastBody\n")
-		buf, _ = gg.Next(buf[:0])
-		if err = rlp.DecodeBytes(buf, lastBody); err != nil {
-			return err
-		}
-		//if gg.HasNext() {
-		//	panic(1)
-		//}
-		//} else {
-		if gg.HasNext() {
-			gg.Skip()
-		}
-		//}
-	}
-	expectedCount := lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
-	fmt.Printf("i=%d, firstBody=%v, lastBody=%v, firstTxID=%d, expectedCount=%d\n", i, firstBody, lastBody, firstTxID, expectedCount)
-
 	return nil
 }
 
@@ -1416,106 +1183,56 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
-func decompress(chaindata string) error {
-	dir := filepath.Join(chaindata, "erigon22")
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		name := f.Name()
-		if !strings.HasSuffix(name, ".dat") {
-			continue
-		}
-		if err = decompressAll(dir, filepath.Join(dir, name), strings.Contains(name, "code")); err != nil {
-			return err
-		}
-	}
-	// Re-read directory
-	files, err = os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		name := f.Name()
-		if !strings.HasSuffix(name, ".d") {
-			continue
-		}
-		if err = os.Rename(filepath.Join(dir, name), filepath.Join(dir, name[:len(name)-2])); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+const (
+	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+)
 
-func decompressAll(dir string, filename string, onlyKeys bool) error {
-	fmt.Printf("decompress file %s, onlyKeys=%t\n", filename, onlyKeys)
-	d, err := compress.NewDecompressor(filename)
+func iterate(filename string, prefix string) error {
+	pBytes := common.FromHex(prefix)
+	efFilename := filename + ".ef"
+	viFilename := filename + ".vi"
+	vFilename := filename + ".v"
+	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
-	defer d.Close()
-	newDatPath := filename + ".d"
-	comp, err := compress.NewCompressor(context.Background(), "comp", newDatPath, dir, compress.MinPatternScore, 1, log.LvlInfo)
+	defer efDecomp.Close()
+	viIndex, err := recsplit.OpenIndex(viFilename)
 	if err != nil {
 		return err
 	}
-	defer comp.Close()
-	idxPath := filename[:len(filename)-3] + "idx"
-	idx, err := recsplit.OpenIndex(idxPath)
+	defer viIndex.Close()
+	r := recsplit.NewIndexReader(viIndex)
+	vDecomp, err := compress.NewDecompressor(vFilename)
 	if err != nil {
 		return err
 	}
-	defer idx.Close()
-	g := d.MakeGetter()
-	var isKey bool
-	var word []byte
+	defer vDecomp.Close()
+	gv := vDecomp.MakeGetter()
+	g := efDecomp.MakeGetter()
 	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		if onlyKeys && !isKey {
-			if err := comp.AddWord(word); err != nil {
-				return err
+		key, _ := g.NextUncompressed()
+		if bytes.HasPrefix(key, pBytes) {
+			val, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(val)
+			efIt := ef.Iterator()
+			fmt.Printf("[%x] =>", key)
+			for efIt.HasNext() {
+				txNum := efIt.Next()
+				var txKey [8]byte
+				binary.BigEndian.PutUint64(txKey[:], txNum)
+				offset := r.Lookup2(txKey[:], key)
+				gv.Reset(offset)
+				v, _ := gv.Next(nil)
+				fmt.Printf(" %d", txNum)
+				if len(v) == 0 {
+					fmt.Printf("*")
+				}
 			}
+			fmt.Printf("\n")
 		} else {
-			if err := comp.AddUncompressedWord(word); err != nil {
-				return err
-			}
+			g.SkipUncompressed()
 		}
-		isKey = !isKey
-	}
-	if err = comp.Compress(); err != nil {
-		return err
-	}
-	comp.Close()
-	offsets := idx.ExtractOffsets()
-	newD, err := compress.NewDecompressor(newDatPath)
-	if err != nil {
-		return err
-	}
-	defer newD.Close()
-	newG := newD.MakeGetter()
-	g.Reset(0)
-	offset := uint64(0)
-	newOffset := uint64(0)
-	for g.HasNext() {
-		offsets[offset] = newOffset
-		offset = g.Skip()
-		newOffset = newG.Skip()
-	}
-	newIdxPath := idxPath + ".d"
-	f, err := os.Create(newIdxPath)
-	if err != nil {
-		return err
-	}
-	w := bufio.NewWriter(f)
-	if err = idx.RewriteWithOffsets(w, offsets); err != nil {
-		return err
-	}
-	if err = w.Flush(); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1636,26 +1353,14 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "mainnetGenesis":
-		err = mainnetGenesis()
-	case "junkdb":
-		err = junkdb()
-	case "histStats":
-		err = histStats()
-	case "histStat1":
-		err = histStat1(*chaindata)
 	case "chainConfig":
 		err = chainConfig(*name)
 	case "findPrefix":
 		err = findPrefix(*chaindata)
-	case "readEf":
-		err = readEf(*chaindata, common.FromHex(*account))
-	case "readBodies":
-		err = readBodies(*chaindata)
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
-	case "decompress":
-		err = decompress(*chaindata)
+	case "iterate":
+		err = iterate(*chaindata, *account)
 	}
 
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -719,8 +718,8 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
-			log.Error("[parlia] init contract failed: %+v", err)
-			os.Exit(1)
+			log.Error("[parlia] init contract failed", "err", err)
+			return nil, nil, fmt.Errorf("init contract failed: %v", err)
 		}
 	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
@@ -1218,7 +1217,7 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := core.NewEVMBlockContext(header, nil, p, &from, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from, nil)
 	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),

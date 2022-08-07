@@ -74,6 +74,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -81,7 +82,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 		accountChange.Action = remote.Action_UPSERT
 	case remote.Action_CODE:
 		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_DELETE:
+	case remote.Action_REMOVE:
 		panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -104,7 +105,8 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	accountChange.Data = nil
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
-	accountChange.Action = remote.Action_DELETE
+	accountChange.Action = remote.Action_REMOVE
+	delete(a.storageChangeIndex, address)
 }
 
 // ChangeCode adds code to the latest change
@@ -115,6 +117,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_CODE})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -122,7 +125,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		accountChange.Action = remote.Action_CODE
 	case remote.Action_UPSERT:
 		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_DELETE:
+	case remote.Action_REMOVE:
 		panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -136,9 +139,10 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_STORAGE})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	if accountChange.Action == remote.Action_DELETE {
+	if accountChange.Action == remote.Action_REMOVE {
 		panic("")
 	}
 	accountChange.Incarnation = incarnation

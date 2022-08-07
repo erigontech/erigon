@@ -1,4 +1,4 @@
-package torrentcfg
+package downloadercfg
 
 import (
 	"fmt"
@@ -20,8 +20,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-// TODO: can we increase this value together with --torrent.upload.rate ?
-const DefaultNetworkChunkSize = DefaultPieceSize
+const DefaultNetworkChunkSize = 1 * 1024 * 1024
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -54,7 +53,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, downloadSlots int) (*Cfg, error) {
+func New(snapDir string, verbosity lg.Level, dbg bool, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -114,9 +113,7 @@ func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, 
 	}
 
 	// debug
-	//if lg.Debug == verbosity {
-	//	torrentConfig.Debug = true
-	//}
+	//	torrentConfig.Debug = false
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
