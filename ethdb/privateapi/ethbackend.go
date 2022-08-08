@@ -313,23 +313,14 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
 
-	possibleStatus, err := s.getPayloadStatusFromHashIfPossible(blockHash, req.BlockNumber, header.ParentHash, true)
+	possibleStatus, err := s.getPayloadStatusFromHashIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
 	}
 	if possibleStatus != nil {
 		return convertPayloadStatus(possibleStatus), nil
 	}
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		// We are still syncing a commissioned payload
-		// TODO(yperbasis): not entirely correct since per the spec:
-		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
-		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
-		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
-		log.Debug("[NewPayload] stage loop is busy")
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
-	}
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -347,7 +338,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 }
 
 // Check if we can make out a status from the payload hash/head hash.
-func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, newPayload bool) (*engineapi.PayloadStatus, error) {
+func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -361,7 +352,7 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 
 	if s.hd == nil {
-		return nil, nil
+		return nil, fmt.Errorf("headerdownload is nil")
 	}
 
 	tx, err := s.db.BeginRo(s.ctx)
@@ -369,6 +360,14 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Some Consensus layer clients sometimes sends us repeated FCUs and make Erigon print a gazillion logs.
+	// E.G teku sometimes will end up spamming fcu on the terminal block if it has not synced to that point.
+	if forkchoiceMessage != nil &&
+		forkchoiceMessage.FinalizedBlockHash == rawdb.ReadForkchoiceFinalized(tx) &&
+		forkchoiceMessage.HeadBlockHash == rawdb.ReadForkchoiceHead(tx) &&
+		forkchoiceMessage.SafeBlockHash == rawdb.ReadForkchoiceSafe(tx) {
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
+	}
 
 	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
@@ -437,28 +436,31 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
-
-		return nil, nil
-	}
-
-	if header == nil {
-		if s.hd.PosStatus() == headerdownload.Syncing {
-			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
-
+	} else {
+		if header == nil {
+			if s.hd.PosStatus() == headerdownload.Syncing {
+				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+			}
+			return nil, nil
 		}
-		return nil, nil
+
+		headHash := rawdb.ReadHeadBlockHash(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
+		// because otherwise (when FCU points to the head) we want go to stage headers
+		// so that it calls writeForkChoiceHashes.
+		if blockHash != headHash && canonicalHash == blockHash {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
+		}
 	}
 
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
-	// because otherwise (when FCU points to the head) we want go to stage headers
-	// so that it calls writeForkChoiceHashes.
-	if blockHash != headHash && canonicalHash == blockHash {
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
+	// If another payload is already commissioned then we just reply with syncing
+	if s.stageLoopIsBusy() {
+		log.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
 	return nil, nil
@@ -526,16 +528,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	status, err := s.getPayloadStatusFromHashIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, false)
+	status, err := s.getPayloadStatusFromHashIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
 	if err != nil {
 		return nil, err
-	}
-
-	if status == nil && s.stageLoopIsBusy() {
-		log.Debug("[ForkChoiceUpdated] stage loop is busy")
-		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
-		}, nil
 	}
 
 	s.lock.Lock()

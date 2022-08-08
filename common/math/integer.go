@@ -17,7 +17,10 @@
 package math
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math"
+	"math/big"
 	"math/bits"
 	"strconv"
 )
@@ -103,4 +106,12 @@ func AbsoluteDifference(x, y uint64) uint64 {
 		return x - y
 	}
 	return y - x
+}
+
+func RandInt64() (int64, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64(), nil
 }

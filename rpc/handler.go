@@ -79,6 +79,38 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
+func HandleError(err error, stream *jsoniter.Stream) error {
+	if err != nil {
+		//return msg.errorResponse(err)
+		stream.WriteObjectField("error")
+		stream.WriteObjectStart()
+		stream.WriteObjectField("code")
+		ec, ok := err.(Error)
+		if ok {
+			stream.WriteInt(ec.ErrorCode())
+		} else {
+			stream.WriteInt(defaultErrorCode)
+		}
+		stream.WriteMore()
+		stream.WriteObjectField("message")
+		stream.WriteString(fmt.Sprintf("%v", err))
+		de, ok := err.(DataError)
+		if ok {
+			stream.WriteMore()
+			stream.WriteObjectField("data")
+			data, derr := json.Marshal(de.ErrorData())
+			if derr == nil {
+				stream.Write(data)
+			} else {
+				stream.WriteString(fmt.Sprintf("%v", derr))
+			}
+		}
+		stream.WriteObjectEnd()
+	}
+
+	return nil
+}
+
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
@@ -479,33 +511,9 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteObjectField("result")
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
-		//return msg.errorResponse(err)
-
+		stream.WriteNil()
 		stream.WriteMore()
-		stream.WriteObjectField("error")
-		stream.WriteObjectStart()
-		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
-			stream.WriteInt(ec.ErrorCode())
-		} else {
-			stream.WriteInt(defaultErrorCode)
-		}
-		stream.WriteMore()
-		stream.WriteObjectField("message")
-		stream.WriteString(fmt.Sprintf("%v", err))
-		de, ok := err.(DataError)
-		if ok {
-			stream.WriteMore()
-			stream.WriteObjectField("data")
-			data, derr := json.Marshal(de.ErrorData())
-			if derr == nil {
-				stream.Write(data)
-			} else {
-				stream.WriteString(fmt.Sprintf("%v", derr))
-			}
-		}
-		stream.WriteObjectEnd()
+		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()
 	stream.Flush()

@@ -1,75 +1,60 @@
-name: Hive results
+# name: Hive results
 
-on:
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
+# on:
+#   workflow_run:
+#     workflows: ["CI"]
+#     types:
+#       - completed
 
-jobs:
-  hive-results:
-    name: Hive results
-    runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion != 'skipped'
+# jobs:
+#   hive-results:
+#     name: Hive results
+#     runs-on: ubuntu-latest
+#     if: github.event.workflow_run.conclusion != 'skipped'
 
-    permissions:
-      checks: write
-      pull-requests: write
-      actions: read
+#     permissions:
+#       checks: write
+#       pull-requests: write
+#       actions: read
 
-    steps:
-      - name: download and extract artifacts
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-        run: |
-          mkdir -p artifacts && cd artifacts
-          
-          artifacts_url=${{ github.event.workflow_run.artifacts_url }}
-          
-          gh api "$artifacts_url" -q '.artifacts[] | [.name, .archive_download_url] | @tsv' | while read artifact
-          do
-            IFS=$'\t' read name url <<< "$artifact"
-            gh api $url > "$name.zip"
-            unzip -d "$name" "$name.zip"
-          done
+#     steps:
+#     - name: parse hive results
+#       uses: phoenix-actions/test-reporting@v8
+#       with:
+#         artifact: test-results
+#         name: Tests
+#         path: '*.xml'
+#         reporter: java-junit
 
-      - name: publish hive test results
-        uses: EnricoMi/publish-unit-test-result-action@v1
-        with:
-          commit: ${{ github.event.workflow_run.head_sha }}
-          event_file: artifacts/Event File/event.json
-          event_name: ${{ github.event.workflow_run.event }}
-          files: "artifacts/**/*.xml"
+#     - name: set badge color
+#       shell: bash
+#       run: |
+#         case ${{ fromJSON( steps.test-results.outputs.json ).conclusion }} in
+#           success)
+#             echo "BADGE_COLOR=31c653" >> $GITHUB_ENV
+#             ;;
+#           failure)
+#             echo "BADGE_COLOR=800000" >> $GITHUB_ENV
+#             ;;
+#           neutral)
+#             echo "BADGE_COLOR=696969" >> $GITHUB_ENV
+#             ;;
+#         esac
 
-      - name: set badge color
-        shell: bash
-        run: |
-          case ${{ fromJSON( steps.test-results.outputs.json ).conclusion }} in
-            success)
-              echo "BADGE_COLOR=31c653" >> $GITHUB_ENV
-              ;;
-            failure)
-              echo "BADGE_COLOR=800000" >> $GITHUB_ENV
-              ;;
-            neutral)
-              echo "BADGE_COLOR=696969" >> $GITHUB_ENV
-              ;;
-          esac
+#     - name: create badge
+#       uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+#       with:
+#         label: Hive
+#         status: '${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.tests }} tests, ${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.runs }} runs: ${{ fromJSON( steps.test-results.outputs.json ).conclusion }}'
+#         color: ${{ env.BADGE_COLOR }}
+#         path: badge.svg
 
-      - name: create badge
-        uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
-        with:
-          label: Hive
-          status: '${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.tests }} tests, ${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.runs }} runs: ${{ fromJSON( steps.test-results.outputs.json ).conclusion }}'
-          color: ${{ env.BADGE_COLOR }}
-          path: badge.svg
-
-      - name: upload badge to gist
-        if: >
-          github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'devel' ||
-          github.event_name != 'workflow_run' && github.ref == 'refs/heads/devel'
-        uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
-        with:
-          token: ${{ secrets.GIST_TOKEN }}
-          gistURL: https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20
-          file: badge.svg
+#     - name: upload badge to gist
+#       if: >
+#         github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'devel' ||
+#         github.event_name != 'workflow_run' && github.ref == 'refs/heads/devel'
+#       uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+#       with:
+#         token: ${{ secrets.GIST_TOKEN }}
+#         gistURL: https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20
+#         file: badge.svg

@@ -488,9 +488,6 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
-	var l OldestAppearedLoad
-	l.innerLoadFunc = etl.IdentityLoadFunc
-
 	var loadBucket string
 	var extract etl.ExtractFunc
 	if codes {

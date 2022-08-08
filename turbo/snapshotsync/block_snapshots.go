@@ -762,11 +762,12 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	sem := semaphore.NewWeighted(int64(workers))
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
-			for _, sn := range segments {
-				if sn.T != t {
+			for index := range segments {
+				segment := segments[index]
+				if segment.T != t {
 					continue
 				}
-				if hasIdxFile(&sn) {
+				if hasIdxFile(&segment) {
 					continue
 				}
 				if err := sem.Acquire(ctx, 1); err != nil {
@@ -784,7 +785,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 					if err := buildIdx(ctx, sn, chainID, tmpDir, p, lvl); err != nil {
 						errs <- err
 					}
-				}(sn)
+				}(segment)
 			}
 		}
 		wg.Wait()
@@ -793,7 +794,10 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 
 	for {
 		select {
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -1114,8 +1118,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 
 	var downloadRequest []DownloadRequest
-	for _, r := range rangesToMerge {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
+	for i := range rangesToMerge {
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
 	}
 
 	return RequestSnapshotsDownload(ctx, downloadRequest, downloader)

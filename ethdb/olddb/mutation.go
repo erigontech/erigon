@@ -57,7 +57,10 @@ func NewBatch(tx kv.RwTx, quit <-chan struct{}) *mutation {
 }
 
 func (mi *MutationItem) Less(than btree.Item) bool {
-	i := than.(*MutationItem)
+	i, ok := than.(*MutationItem)
+	if !ok {
+		log.Warn("Failed to convert btree.Item to MutationItem pointer")
+	}
 	c := strings.Compare(mi.table, i.table)
 	if c != 0 {
 		return c < 0

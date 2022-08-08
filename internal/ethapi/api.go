@@ -459,6 +459,9 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockH
 		From:     common.Address{},
 		To:       tx.GetTo(),
 		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
+		V:        (*hexutil.Big)(big.NewInt(0)),
+		R:        (*hexutil.Big)(big.NewInt(0)),
+		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
