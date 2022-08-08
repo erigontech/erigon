@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -201,31 +200,9 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	// Use the current tx to simulate validation and then Reset it, we are not using MemoryMutation due to its instability with deletions.
-	// TODO(Giulio2002): fix memory mutation.
-	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(tx, header, body, unwindPoint, headersChain, bodiesChain)
-	if criticalError != nil {
-		return
-	}
-
-	if criticalError = tx.Reset(); criticalError != nil {
-		return
-	}
-	// We do this, in case we previously saved blocks and deleted them.
-	for _, currentHeader := range headersChain {
-		var parentTd *big.Int
-		parentTd, criticalError = rawdb.ReadTd(tx, currentHeader.ParentHash, currentHeader.Number.Uint64()-1)
-		if criticalError != nil || parentTd == nil {
-			criticalError = fmt.Errorf("parent's total difficulty not found with error: %v", criticalError)
-			return
-		}
-		td := new(big.Int).Add(parentTd, currentHeader.Difficulty)
-		if criticalError = rawdb.WriteTd(tx, currentHeader.Hash(), currentHeader.Number.Uint64(), td); criticalError != nil {
-			return
-		}
-		rawdb.WriteHeader(tx, currentHeader)
-	}
-	return
+	batch := memdb.NewMemoryBatch(tx)
+	defer batch.Rollback()
+	return fv.validateAndStorePayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
 }
 
 // Clear wipes out current extending fork data, this method is called after fcu is called,
