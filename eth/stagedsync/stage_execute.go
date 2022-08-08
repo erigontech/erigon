@@ -588,7 +588,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
-	depositeAddress := params.Eth2DeployBlockNumber(cfg.chainConfig)
+	DA := params.Eth2DeployBlockNumber(cfg.chainConfig)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -610,7 +610,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	if cfg.prune.Receipts.Enabled() && depositeAddress > s.ForwardProgress {
+	if cfg.prune.Receipts.Enabled() && DA > s.ForwardProgress {
 		if err = rawdb.PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
