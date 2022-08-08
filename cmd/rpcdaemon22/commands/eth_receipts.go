@@ -81,15 +81,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
+		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
+		if number == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		begin = *number
+		end = *number
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, err := getLatestBlockNumber(tx)
