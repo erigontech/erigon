@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -63,10 +64,13 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
+				log.Warn("no pending block found returning latest executed block")
 				blockNumber = plainStateBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
+		case rpc.LatestExecutedBlockNumber:
+			blockNumber = plainStateBlockNumber
 		default:
 			blockNumber = uint64(number.Int64())
 		}
