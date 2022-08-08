@@ -610,15 +610,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	if cfg.prune.Receipts.Enabled() {
+	if cfg.prune.Receipts.Enabled() && depositeAddress > s.ForwardProgress {
 		if err = rawdb.PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if depositeAddress > s.ForwardProgress {
-			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-				return err
-			}
+		if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+			return err
 		}
 	}
 	// contains filtered or une
