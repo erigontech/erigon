@@ -565,8 +565,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, ui
 		return true
 	})
 	if found {
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		var historyItem *ctxItem
 		var ok bool
 		var search ctxItem
@@ -575,6 +573,8 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, ui
 		if historyItem, ok = hc.historyFiles.Get(&search); !ok {
 			return nil, false, 0, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
 		}
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		offset := historyItem.reader.Lookup2(txKey[:], key)
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := historyItem.getter
