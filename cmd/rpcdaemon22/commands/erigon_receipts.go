@@ -3,6 +3,18 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
+	"sort"
+	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -37,6 +49,164 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	for i, receipt := range receipts {
 		logs[i] = receipt.Logs
 	}
+	return logs, nil
+}
+
+// GetLogs implements erigon_getLogs. Return an array of logs that matches the filter conditions
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+	start := time.Now()
+	var begin, end uint64
+	logs := []*types.Log{}
+
+	tx, beginErr := api.db.BeginRo(ctx)
+	if beginErr != nil {
+		return logs, beginErr
+	}
+	defer tx.Rollback()
+
+	if crit.BlockHash != nil {
+		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
+		if number == nil {
+			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+		begin = *number
+		end = *number
+	} else {
+		// Convert the RPC block numbers into internal representations
+		latest, err := getLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		begin = latest
+		if crit.FromBlock != nil {
+			if crit.FromBlock.Sign() >= 0 {
+				begin = crit.FromBlock.Uint64()
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+			}
+		}
+		end = latest
+		if crit.ToBlock != nil {
+			if crit.ToBlock.Sign() >= 0 {
+				end = crit.ToBlock.Uint64()
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+			}
+		}
+	}
+	if end < begin {
+		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	var fromTxNum, toTxNum uint64
+	if begin > 0 {
+		fromTxNum = api._txNums[begin-1]
+	}
+	toTxNum = api._txNums[end] // end is an inclusive bound
+
+	txNumbers := roaring64.New()
+	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
+
+	ac := api._agg.MakeContext()
+
+	topicsBitmap, err := getTopicsBitmap(ac, tx, crit.Topics, fromTxNum, toTxNum)
+	if err != nil {
+		return nil, err
+	}
+	if topicsBitmap != nil {
+		txNumbers.And(topicsBitmap)
+	}
+
+	var addrBitmap *roaring64.Bitmap
+	for _, addr := range crit.Addresses {
+		var bitmapForORing roaring64.Bitmap
+		it := ac.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+		for it.HasNext() {
+			bitmapForORing.Add(it.Next())
+		}
+		if addrBitmap == nil {
+			addrBitmap = &bitmapForORing
+			continue
+		}
+		addrBitmap = roaring64.Or(addrBitmap, &bitmapForORing)
+	}
+
+	if addrBitmap != nil {
+		txNumbers.And(addrBitmap)
+	}
+
+	if txNumbers.GetCardinality() == 0 {
+		return logs, nil
+	}
+	var lastBlockNum uint64
+	var lastBlockHash common.Hash
+	var lastHeader *types.Header
+	var lastSigner *types.Signer
+	var lastRules *params.Rules
+	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
+	iter := txNumbers.Iterator()
+	for iter.HasNext() {
+		txNum := iter.Next()
+		// Find block number
+		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
+			return api._txNums[i] > txNum
+		}))
+		if blockNum > lastBlockNum {
+			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+				return nil, err
+			}
+			lastBlockNum = blockNum
+			lastBlockHash = lastHeader.Hash()
+			lastSigner = types.MakeSigner(chainConfig, blockNum)
+			lastRules = chainConfig.Rules(blockNum)
+		}
+		var startTxNum uint64
+		if blockNum > 0 {
+			startTxNum = api._txNums[blockNum-1]
+		}
+		txIndex := txNum - startTxNum - 1
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
+		if err != nil {
+			return nil, err
+		}
+		timestamp := uint64(txn.Time().Unix())
+		txHash := txn.Hash()
+		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		if err != nil {
+			return nil, err
+		}
+		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, contractHasTEVM, api._blockReader)
+		stateReader.SetTxNum(txNum)
+		vmConfig := vm.Config{}
+		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+		ibs := state.New(stateReader)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			return nil, err
+		}
+		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
+		for _, log := range filtered {
+			log.BlockNumber = blockNum
+			log.Timestamp = timestamp
+			log.BlockHash = lastBlockHash
+			log.TxHash = txHash
+			log.Index = 0
+		}
+		logs = append(logs, filtered...)
+	}
+	stats := api._agg.GetAndResetStats()
+	log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
