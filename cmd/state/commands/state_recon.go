@@ -73,8 +73,8 @@ type ReconWorker struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
-	epoch        state22.epochReader
-	chain        state22.chainReader
+	epoch        state22.EpochReader
+	chain        state22.ChainReader
 	isPoSA       bool
 	posa         consensus.PoSA
 }

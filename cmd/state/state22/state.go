@@ -41,8 +41,8 @@ type Worker22 struct {
 	logger       log.Logger
 	genesis      *core.Genesis
 	resultCh     chan *state.TxTask
-	epoch        epochReader
-	chain        chainReader
+	epoch        EpochReader
+	chain        ChainReader
 	isPoSA       bool
 	posa         consensus.PoSA
 }
@@ -98,8 +98,8 @@ func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
 	}
 	if chainTx != nil {
 		rw.chainTx = chainTx
-		rw.epoch = epochReader{tx: rw.chainTx}
-		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+		rw.epoch = EpochReader{tx: rw.chainTx}
+		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 }
 
@@ -126,8 +126,8 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
 			panic(err)
 		}
-		rw.epoch = epochReader{tx: rw.chainTx}
-		rw.chain = chainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
+		rw.epoch = EpochReader{tx: rw.chainTx}
+		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 	txTask.Error = nil
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -247,22 +247,22 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 	}
 }
 
-type chainReader struct {
+type ChainReader struct {
 	config      *params.ChainConfig
 	tx          kv.Tx
 	blockReader services.FullBlockReader
 }
 
-func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
-func (cr chainReader) CurrentHeader() *types.Header { panic("") }
-func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+func (cr ChainReader) Config() *params.ChainConfig  { return cr.config }
+func (cr ChainReader) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 		return h
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
-func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 		return h
@@ -270,7 +270,7 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 
 }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
 		number := rawdb.ReadHeaderNumber(cr.tx, hash)
 		if number == nil {
@@ -281,7 +281,7 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		log.Error("ReadTd failed", "err", err)
@@ -290,22 +290,22 @@ func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	return td
 }
 
-type epochReader struct {
+type EpochReader struct {
 	tx kv.Tx
 }
 
-func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	panic("")
 }
-func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
 	panic("")
 }
-func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
