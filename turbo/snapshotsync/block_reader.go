@@ -276,6 +276,9 @@ func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Ge
 			if err != nil {
 				return err
 			}
+			if h != nil {
+				break
+			}
 		}
 		return nil
 	}); err != nil {
