@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20220808031639-342fb2579c49
-	github.com/ledgerwatch/erigon-snapshot v1.0.0
+	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
