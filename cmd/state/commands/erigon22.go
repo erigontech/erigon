@@ -71,6 +71,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}()
 	var err error
 	ctx := context.Background()
+	tmpDir := filepath.Join(datadir, "tmp")
 	reconDbPath := path.Join(datadir, "db22")
 	if reset && dir.Exist(reconDbPath) {
 		if err = os.RemoveAll(reconDbPath); err != nil {
@@ -136,23 +137,19 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	rwTx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
+	var execStage *stagedsync.StageState
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
+		if err != nil {
+			return err
 		}
-	}()
-	execStage, err := stagedSync.StageState(stages.Execution, rwTx, db)
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	if !reset {
 		block = execStage.BlockNumber + 1
 	}
-	rwTx.Rollback()
 
 	rs := state.NewState22()
 	aggDir := path.Join(datadir, "agg22")
@@ -171,25 +168,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 
 	workerCount := workers
 	queueSize := workerCount * 4
-	workCh := make(chan state.TxTask, queueSize)
-	reconWorkers := make([]*state22.Worker22, workerCount)
-	var wg sync.WaitGroup
-	resultCh := make(chan *state.TxTask, queueSize)
-	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = state22.NewWorker22(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
-	}
-	defer func() {
-		for i := 0; i < workerCount; i++ {
-			reconWorkers[i].ResetTx(nil, nil)
-		}
-	}()
 	var applyTx kv.RwTx
-	if workerCount > 1 {
-		wg.Add(workerCount)
-		for i := 0; i < workerCount; i++ {
-			go reconWorkers[i].Run()
-		}
-	} else {
+	var wg sync.WaitGroup
+	reconWorkers, resultCh, clear := state22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
+	defer clear()
+	if workerCount <= 1 {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -199,11 +182,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 				applyTx.Rollback()
 			}
 		}()
-		chainTx, err := chainDb.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		reconWorkers[0].ResetTx(applyTx, chainTx)
+		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
@@ -211,11 +190,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	count := uint64(0)
 	repeatCount := uint64(0)
 	triggerCount := uint64(0)
-	prevCount := uint64(0)
-	prevRepeatCount := uint64(0)
-	//prevTriggerCount := uint64(0)
 	resultsSize := int64(0)
-	prevTime := time.Now()
+	progress := newProgress(block)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var rws state.TxTaskQueue
@@ -227,7 +203,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		outputTxNum = txNums[block-1]
 	}
 	var inputBlockNum, outputBlockNum uint64
-	var prevOutputBlockNum uint64 = block
 	// Go-routine gathering results from the workers
 	var maxTxNum uint64 = txNums[len(txNums)-1]
 	if workerCount > 1 {
@@ -255,34 +230,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					var m runtime.MemStats
-					libcommon.ReadMemStats(&m)
+					progress.log(rs, rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
-					count = rs.DoneCount()
-					currentTime := time.Now()
-					interval := currentTime.Sub(prevTime)
-					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
-					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
-					var repeatRatio float64
-					if count > prevCount {
-						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
-					}
-					log.Info("Transaction replay",
-						//"workers", workerCount,
-						"at block", outputBlockNum,
-						"input block", atomic.LoadUint64(&inputBlockNum),
-						"blk/s", fmt.Sprintf("%.1f", speedBlock),
-						"tx/s", fmt.Sprintf("%.1f", speedTx),
-						"result queue", rws.Len(),
-						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
-						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
-						"buffer", libcommon.ByteCount(sizeEstimate),
-						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-					)
-					prevTime = currentTime
-					prevCount = count
-					prevOutputBlockNum = outputBlockNum
-					prevRepeatCount = repeatCount
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
 						commitStart := time.Now()
@@ -332,14 +281,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							for i := 0; i < workerCount; i++ {
 								reconWorkers[i].ResetTx(nil, nil)
 							}
-							rwTx, err = db.BeginRw(ctx)
-							if err != nil {
-								return err
-							}
-							if err = rs.Flush(rwTx); err != nil {
-								return err
-							}
-							if err = rwTx.Commit(); err != nil {
+							if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
 								return err
 							}
 							if applyTx, err = db.BeginRw(ctx); err != nil {
@@ -428,33 +370,8 @@ loop:
 				}
 				select {
 				case <-logEvery.C:
-					var m runtime.MemStats
-					libcommon.ReadMemStats(&m)
+					progress.log(rs, rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
-					currentTime := time.Now()
-					interval := currentTime.Sub(prevTime)
-					speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
-					speedBlock := float64(outputBlockNum-prevOutputBlockNum) / (float64(interval) / float64(time.Second))
-					var repeatRatio float64
-					if count > prevCount {
-						repeatRatio = 100.0 * float64(repeatCount-prevRepeatCount) / float64(count-prevCount)
-					}
-					log.Info("Transaction replay",
-						//"workers", workerCount,
-						"at block", outputBlockNum,
-						"input block", atomic.LoadUint64(&inputBlockNum),
-						"blk/s", fmt.Sprintf("%.1f", speedBlock),
-						"tx/s", fmt.Sprintf("%.1f", speedTx),
-						"result queue", rws.Len(),
-						"results size", libcommon.ByteCount(uint64(atomic.LoadInt64(&resultsSize))),
-						"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
-						"buffer", libcommon.ByteCount(sizeEstimate),
-						"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-					)
-					prevTime = currentTime
-					prevCount = count
-					prevOutputBlockNum = outputBlockNum
-					prevRepeatCount = repeatCount
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
 						commitStart := time.Now()
@@ -463,25 +380,14 @@ loop:
 							return err
 						}
 						reconWorkers[0].ResetTx(nil, nil)
-						rwTx, err = db.BeginRw(ctx)
-						if err != nil {
-							return err
-						}
-						if err = rs.Flush(rwTx); err != nil {
-							return err
-						}
-						if err = rwTx.Commit(); err != nil {
+						if err = db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
 							return err
 						}
 						if applyTx, err = db.BeginRw(ctx); err != nil {
 							return err
 						}
 						agg.SetTx(applyTx)
-						chainTx, err := chainDb.BeginRo(ctx)
-						if err != nil {
-							return err
-						}
-						reconWorkers[0].ResetTx(applyTx, chainTx)
+						reconWorkers[0].ResetTx(applyTx, nil)
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
 				default:
@@ -499,7 +405,6 @@ loop:
 		}
 	}
 	if workerCount > 1 {
-		close(workCh)
 		wg.Wait()
 	} else {
 		if err = applyTx.Commit(); err != nil {
@@ -509,48 +414,44 @@ loop:
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i].ResetTx(nil, nil)
 	}
-	rwTx, err = db.BeginRw(ctx)
-	if err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = rs.Flush(tx); err != nil {
+			return err
+		}
+		if err = execStage.Update(tx, blockNum); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	if err = rs.Flush(rwTx); err != nil {
-		return err
-	}
-	if err = execStage.Update(rwTx, blockNum); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	log.Info("Transaction replay complete", "duration", time.Since(startTime))
-	log.Info("Computing hashed state")
-	tmpDir := filepath.Join(datadir, "tmp")
-	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		log.Info("Transaction replay complete", "duration", time.Since(startTime))
+		log.Info("Computing hashed state")
+		tmpDir := filepath.Join(datadir, "tmp")
+		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.HashedStorage); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.ContractCode); err != nil {
+			return err
+		}
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	var rootHash common.Hash
-	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	if rootHash != header.Root {
@@ -578,4 +479,45 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}
+}
+
+type progress struct {
+	prevTime           time.Time
+	prevCount          uint64
+	prevOutputBlockNum uint64
+	prevRepeatCount    uint64
+}
+
+func newProgress(prevOutputBlockNum uint64) *progress {
+	return &progress{prevTime: time.Now(), prevOutputBlockNum: block}
+}
+func (p *progress) log(rs *state.State22, rws state.TxTaskQueue, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+	var m runtime.MemStats
+	libcommon.ReadMemStats(&m)
+	sizeEstimate := rs.SizeEstimate()
+	count := rs.DoneCount()
+	currentTime := time.Now()
+	interval := currentTime.Sub(p.prevTime)
+	speedTx := float64(count-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
+	var repeatRatio float64
+	if count > p.prevCount {
+		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
+	}
+	log.Info("Transaction replay",
+		//"workers", workerCount,
+		"at block", outputBlockNum,
+		"input block", atomic.LoadUint64(&inputBlockNum),
+		"blk/s", fmt.Sprintf("%.1f", speedBlock),
+		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"result queue", rws.Len(),
+		"results size", libcommon.ByteCount(resultsSize),
+		"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+		"buffer", libcommon.ByteCount(sizeEstimate),
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+	)
+	p.prevTime = currentTime
+	p.prevCount = count
+	p.prevOutputBlockNum = outputBlockNum
+	p.prevRepeatCount = repeatCount
 }
