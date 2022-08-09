@@ -14,10 +14,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )
@@ -56,6 +58,17 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 		defer tx.Rollback()
 	}
 
+	hash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return err
+	}
+
+	chainConfig, err := rawdb.ReadChainConfig(tx, hash)
+	if err != nil {
+		return err
+	}
+
+	blockNum := params.Eth2DeployBlockNumber(chainConfig)
 	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
@@ -75,7 +88,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 
 	startBlock := s.BlockNumber
 	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
-	if startBlock < pruneTo {
+	if pruneTo >= blockNum && startBlock < pruneTo {
 		startBlock = pruneTo
 	}
 	if startBlock > 0 {
@@ -398,9 +411,22 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 		defer tx.Rollback()
 	}
 
-	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
+	hash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
 		return err
+	}
+
+	chainConfig, err := rawdb.ReadChainConfig(tx, hash)
+	if err != nil {
+		return err
+	}
+
+	blockNum := params.Eth2DeployBlockNumber(chainConfig)
+	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
+	if pruneTo >= blockNum {
+		if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
+			return err
+		}
 	}
 	if err = s.Done(tx); err != nil {
 		return err
