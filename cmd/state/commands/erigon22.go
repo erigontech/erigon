@@ -111,9 +111,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	workerCount := workers
-	queueSize := workerCount * 4
-	workCh := make(chan state.TxTask, queueSize)
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -171,6 +168,10 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer agg.Close()
 	var lock sync.RWMutex
+
+	workerCount := workers
+	queueSize := workerCount * 4
+	workCh := make(chan state.TxTask, queueSize)
 	reconWorkers := make([]*state22.Worker22, workerCount)
 	var wg sync.WaitGroup
 	resultCh := make(chan *state.TxTask, queueSize)
