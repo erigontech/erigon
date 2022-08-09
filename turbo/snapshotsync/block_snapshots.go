@@ -332,10 +332,10 @@ type RoSnapshots struct {
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
-//  - it opens snapshots only on App start and immutable after
-//  - all snapshots of given blocks range must exist - to make this blocks range available
-//  - gaps are not allowed
-//  - segment have [from:to) semantic
+//   - it opens snapshots only on App start and immutable after
+//   - all snapshots of given blocks range must exist - to make this blocks range available
+//   - gaps are not allowed
+//   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.Snapshot, snapDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
