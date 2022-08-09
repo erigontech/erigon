@@ -127,6 +127,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if err != nil {
 		return nil, err
 	}
+
+	log.Info("test", "topics bitmap", "blockNumbers bitmap", topicsBitmap.String(), blockNumbers.String())
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
