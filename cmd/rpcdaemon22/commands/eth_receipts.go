@@ -191,7 +191,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if err != nil {
 			return nil, err
 		}
-		timestamp := uint64(txn.Time().Unix())
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
@@ -214,7 +213,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
-			log.Timestamp = timestamp
 			log.BlockHash = lastBlockHash
 			log.TxHash = txHash
 			log.Index = 0
