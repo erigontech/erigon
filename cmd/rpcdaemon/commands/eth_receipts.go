@@ -239,6 +239,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
+			log.Info("test", "getting topic", topic[:])
 			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
 			if err != nil {
 				return nil, err
