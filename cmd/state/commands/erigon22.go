@@ -169,11 +169,6 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	workerCount := workers
 	queueSize := workerCount * 4
 	var applyTx kv.RwTx
-	defer func() {
-		if applyTx != nil {
-			applyTx.Rollback()
-		}
-	}()
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := state22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
@@ -182,6 +177,11 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
+		defer func() {
+			if applyTx != nil {
+				applyTx.Rollback()
+			}
+		}()
 		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
