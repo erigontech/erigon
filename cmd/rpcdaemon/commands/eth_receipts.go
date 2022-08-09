@@ -128,8 +128,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return nil, err
 	}
 
-	log.Info("test", "topics bitmap", topicsBitmap.String(), "blockNumbers bitmap", blockNumbers.String())
 	if topicsBitmap != nil {
+		log.Info("test", "topics bitmap", topicsBitmap.String(), "blockNumbers bitmap", blockNumbers.String())
 		blockNumbers.And(topicsBitmap)
 	}
 
@@ -260,7 +260,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			continue
 		}
 
-		log.Info("test", "current or bitmap:", "current result bitmap:", bitmapForORing.String(), result.String())
+		log.Info("test", "current or bitmap:", bitmapForORing.String(), "current result bitmap:", result.String())
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
