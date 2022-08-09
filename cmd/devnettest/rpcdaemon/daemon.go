@@ -1,12 +1,12 @@
 package rpcdaemon
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -31,7 +31,7 @@ func RunDaemon() {
 		}
 
 		apiList := commands.APIList(db, borDb, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg)
-		if err := cli.StartRpcServer(ctx, *cfg, apiList); err != nil {
+		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil
 		}

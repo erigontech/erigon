@@ -218,7 +218,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	//limiter := make(chan struct{}, kv.ReadersLimit)
@@ -317,7 +316,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -398,7 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, *config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
 		if err != nil {
 			return err
 		}
@@ -509,7 +508,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		headCh = make(chan *types.Block, 1)
 	}
 	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
 	if err != nil {
 		return nil, err
 	}
@@ -546,29 +545,28 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	if httpRpcCfg.Enabled {
-		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-			ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots,
-			ethBackendRPC,
-			backend.txPool2GrpcServer,
-			miningRPC,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		var borDb kv.RoDB
-		if casted, ok := backend.engine.(*bor.Bor); ok {
-			borDb = casted.DB
-		}
-		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
-		go func() {
-			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
-				log.Error(err.Error())
-				return
-			}
-		}()
+	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
+		ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots,
+		ethBackendRPC,
+		backend.txPool2GrpcServer,
+		miningRPC,
+	)
+	if err != nil {
+		return nil, err
 	}
+
+	var borDb kv.RoDB
+	if casted, ok := backend.engine.(*bor.Bor); ok {
+		borDb = casted.DB
+	}
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+	go func() {
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
+			log.Error(err.Error())
+			return
+		}
+	}()
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(backend)

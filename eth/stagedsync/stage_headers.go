@@ -317,8 +317,7 @@ func startHandlingForkChoice(
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			cfg.hd.SetPoSDownloaderTip(headerHash)
-			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, s, cfg)
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, headerHash, s, cfg)
 		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
@@ -449,8 +448,9 @@ func handleNewPayload(
 			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
-		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, s, cfg)
+		if !schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, headerHash /* downloaderTip */, s, cfg) {
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 		currentHeadNumber := rawdb.ReadCurrentBlockNumber(tx)
 		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
@@ -503,9 +503,8 @@ func verifyAndSaveNewPoSHeader(
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
 
-	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
 	if bad {
-		cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: lastValidHash}, false, nil
 	}
 
@@ -590,19 +589,21 @@ func schedulePoSDownload(
 	requestId int,
 	hashToDownload common.Hash,
 	heightToDownload uint64,
+	downloaderTip common.Hash,
 	s *StageState,
 	cfg HeadersCfg,
-) {
+) bool {
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
 		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
-		return
+		return false
 	}
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
+	cfg.hd.SetPoSDownloaderTip(downloaderTip)
 	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 	cfg.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
@@ -613,11 +614,11 @@ func schedulePoSDownload(
 	cfg.hd.SetHeadersCollector(headerCollector)
 
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
+
+	return true
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
-	defer cfg.forkValidator.Clear()
-
 	var lastValidHash common.Hash
 	var badChainError error
 	var foundPow bool
@@ -657,6 +658,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
 			return nil
 		}
+
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
 
@@ -1308,8 +1310,8 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 	}
 	// builds missing snapshots request
-	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&r, "", ""))
+	for i := range missingSnapshots {
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
 	}
 
 	log.Info("[Snapshots] Fetching torrent files metadata")

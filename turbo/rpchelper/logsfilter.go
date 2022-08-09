@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	"github.com/ledgerwatch/erigon/common"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 )
@@ -81,6 +82,8 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 }
 
 func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
 	a.aggLogsFilter.allAddrs += f.allAddrs
 	for addr, count := range f.addrs {
 		a.aggLogsFilter.addrs[addr] += count

@@ -1,4 +1,4 @@
-package commands
+package state22
 
 import (
 	"math/big"
@@ -19,6 +19,8 @@ func NewCallTracer() *CallTracer {
 		tos:   map[common.Address]struct{}{},
 	}
 }
+func (ct *CallTracer) Froms() map[common.Address]struct{} { return ct.froms }
+func (ct *CallTracer) Tos() map[common.Address]struct{}   { return ct.tos }
 
 func (ct *CallTracer) CaptureStart(evm *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 	ct.froms[from] = struct{}{}

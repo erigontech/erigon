@@ -17,7 +17,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
-    + [Beacon Chain](#beacon-chain)
+    + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
 
 - [Key features](#key-features)
@@ -174,29 +174,25 @@ Windows users may run erigon in 3 possible ways:
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
-### Beacon Chain
+### Beacon Chain (Consensus Layer)
 
-Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
-relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
+Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
+relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
+ are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
 
-You must enable JSON-RPC by `--http` and add `engine` to `--http.api` list. (Or run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon)
+If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
+as well as `--authrpc.vhosts <CL host>`.
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC listen on localhost by default)
-.
-
-Once the JSON-RPC is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC.
-
-Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
-
-### Authentication API
+[Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
 
 In order to establish a secure connection between the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
 
 The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
 
-This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
+This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md).
+
+Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
+where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT secret path created by Erigon.
 
 ### Multiple Instances / One Machine
 
@@ -414,19 +410,19 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
+|  8551 |    TCP    | Engine API (JWT auth)  | Private |
 
 Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
+Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
 
 #### `RPC` ports
 
 |  Port |  Protocol |      Purpose       |  Expose |
 |:-----:|:---------:|:------------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets  | Private |
-|  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically, 8551 (JWT authenticated) is exposed only internally for the Engine API JSON-RPC queries.
 
 #### `sentry` ports
 

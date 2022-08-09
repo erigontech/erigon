@@ -349,7 +349,10 @@ MainLoop:
 func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).
+		WriteMap().
+		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit }).
+		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 
@@ -368,6 +371,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
+	var total uint64
 	for name, b := range src.AllBuckets() {
 		if b.IsDeprecated {
 			continue
@@ -382,7 +386,10 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		if err != nil {
 			return err
 		}
+		total, _ = srcC.Count()
+
 		casted, isDupsort := c.(kv.RwCursorDupSort)
+		i := uint64(0)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
@@ -399,11 +406,12 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 				}
 			}
 
+			i++
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}

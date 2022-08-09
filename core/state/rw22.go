@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
-	"sort"
 	"sync"
 	"unsafe"
 
@@ -42,12 +41,15 @@ type TxTask struct {
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
-	CodePrevs          map[string][]byte
+	CodePrevs          map[string]uint64
 	ResultsSize        int64
 	Error              error
+	Logs               []*types.Log
+	TraceFroms         map[common.Address]struct{}
+	TraceTos           map[common.Address]struct{}
 }
 
-type TxTaskQueue []TxTask
+type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
 	return len(h)
@@ -62,7 +64,7 @@ func (h TxTaskQueue) Swap(i, j int) {
 }
 
 func (h *TxTaskQueue) Push(a interface{}) {
-	*h = append(*h, a.(TxTask))
+	*h = append(*h, a.(*TxTask))
 }
 
 func (h *TxTaskQueue) Pop() interface{} {
@@ -76,7 +78,7 @@ const CodeSizeTable = "CodeSize"
 type State22 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
-	triggers     map[uint64]TxTask
+	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
@@ -98,7 +100,7 @@ func stateItemLess(i, j StateItem) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]TxTask{},
+		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[StateItem]{},
 	}
@@ -162,19 +164,19 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *State22) Schedule() (TxTask, bool) {
+func (rs *State22) Schedule() (*TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(TxTask), true
+		return heap.Pop(&rs.queue).(*TxTask), true
 	}
-	return TxTask{}, false
+	return nil, false
 }
 
-func (rs *State22) RegisterSender(txTask TxTask) bool {
+func (rs *State22) RegisterSender(txTask *TxTask) bool {
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
@@ -211,11 +213,14 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *State22) AddWork(txTask TxTask) {
+func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	txTask.ReadLists = nil
 	txTask.WriteLists = nil
 	txTask.ResultsSize = 0
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
@@ -295,11 +300,12 @@ func serialise2(a *accounts.Account) []byte {
 	return value
 }
 
-func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	for addr := range txTask.BalanceIncreaseSet {
+		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
 			var err error
@@ -368,11 +374,9 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 			if !bytes.HasPrefix(item.key, addr1) {
 				return false
 			}
-			for ; e == nil && k != nil && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.HasPrefix(k, addr1) {
-					k = nil
-				}
+			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
 				if !bytes.Equal(k, item.key) {
+					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
 					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
 						return false
 					}
@@ -406,21 +410,65 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 			return err
 		}
 	}
-	for addrS, val := range txTask.CodePrevs {
-		if err := agg.AddCodePrev([]byte(addrS), val); err != nil {
+	for addrS, incarnation := range txTask.CodePrevs {
+		addr := []byte(addrS)
+		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
+		codeHash := rs.get(kv.PlainContractCode, k)
+		if codeHash == nil {
+			var err error
+			codeHash, err = roTx.GetOne(kv.PlainContractCode, k)
+			if err != nil {
+				return err
+			}
+		}
+		var codePrev []byte
+		if codeHash != nil {
+			codePrev = rs.get(kv.Code, codeHash)
+			if codePrev == nil {
+				var err error
+				codePrev, err = roTx.GetOne(kv.Code, codeHash)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
 			return err
+		}
+	}
+	if txTask.TraceFroms != nil {
+		for addr := range txTask.TraceFroms {
+			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	if txTask.TraceTos != nil {
+		for addr := range txTask.TraceTos {
+			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	for _, log := range txTask.Logs {
+		if err := agg.AddLogAddr(log.Address[:]); err != nil {
+			return fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+		}
+		for _, topic := range log.Topics {
+			if err := agg.AddLogTopic(topic[:]); err != nil {
+				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
+			}
 		}
 	}
 	if err := agg.FinishTx(); err != nil {
 		return err
 	}
-	if txTask.WriteLists == nil {
-		return nil
-	}
-	for table, list := range txTask.WriteLists {
-		for i, key := range list.Keys {
-			val := list.Vals[i]
-			rs.put(table, key, val)
+	if txTask.WriteLists != nil {
+		for table, list := range txTask.WriteLists {
+			for i, key := range list.Keys {
+				val := list.Vals[i]
+				rs.put(table, key, val)
+			}
 		}
 	}
 	return nil
@@ -465,8 +513,6 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -498,7 +544,7 @@ type StateWriter22 struct {
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
-	codePrevs    map[string][]byte
+	codePrevs    map[string]uint64
 }
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
@@ -513,7 +559,7 @@ func NewStateWriter22(rs *State22) *StateWriter22 {
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
-		codePrevs:    map[string][]byte{},
+		codePrevs:    map[string]uint64{},
 	}
 }
 
@@ -531,17 +577,14 @@ func (w *StateWriter22) ResetWriteSet() {
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string][]byte{}
+	w.codePrevs = map[string]uint64{}
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
-	for _, list := range w.writeLists {
-		sort.Sort(list)
-	}
 	return w.writeLists
 }
 
-func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
+func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
@@ -567,7 +610,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
-	w.codePrevs[string(address.Bytes())] = nil
+	w.codePrevs[string(address.Bytes())] = incarnation
 	return nil
 }
 
@@ -603,14 +646,12 @@ func (w *StateWriter22) CreateContract(address common.Address) error {
 }
 
 type StateReader22 struct {
-	tx         kv.Tx
-	txNum      uint64
-	trace      bool
-	rs         *State22
-	readError  bool
-	stateTxNum uint64
-	composite  []byte
-	readLists  map[string]*KvList
+	tx        kv.Tx
+	txNum     uint64
+	trace     bool
+	rs        *State22
+	composite []byte
+	readLists map[string]*KvList
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
@@ -643,9 +684,6 @@ func (r *StateReader22) ResetReadSet() {
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
-	for _, list := range r.readLists {
-		sort.Sort(list)
-	}
 	return r.readLists
 }
 

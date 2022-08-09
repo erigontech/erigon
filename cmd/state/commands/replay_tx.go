@@ -41,8 +41,7 @@ var replayTxCmd = &cobra.Command{
 
 func ReplayTx(genesis *core.Genesis) error {
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -110,7 +109,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	defer agg.Close()
 	ac := agg.MakeContext()
-	workCh := make(chan state.TxTask)
+	workCh := make(chan *state.TxTask)
 	rs := state.NewReconState(workCh)
 	if err = replayTxNum(ctx, allSnapshots, blockReader, txNum, txNums, rs, ac); err != nil {
 		return err

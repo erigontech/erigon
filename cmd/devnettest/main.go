@@ -10,6 +10,8 @@ import (
 )
 
 func main() {
+	defer services.ClearDevDB()
+
 	erigon.StartProcess()
 
 	time.Sleep(10 * time.Second)
@@ -19,6 +21,4 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	defer services.ClearDevDB()
 }

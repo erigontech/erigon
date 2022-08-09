@@ -35,6 +35,7 @@ import (
 	"github.com/hashicorp/golang-lru/simplelru"
 
 	"github.com/ledgerwatch/erigon/common/debug"
+	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -135,8 +136,12 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, nil, nil, err
 	}
+	suffix, err := cmath.RandInt64()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to get random integer: %v", err)
+	}
 	// Create a huge temporary empty file to fill with data
-	temp := path + "." + strconv.Itoa(rand.Int())
+	temp := path + "." + strconv.Itoa(int(suffix))
 
 	dump, err := os.Create(temp)
 	if err != nil {

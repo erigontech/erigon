@@ -277,6 +277,11 @@ func Main(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()

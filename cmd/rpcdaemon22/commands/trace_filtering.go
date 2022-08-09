@@ -215,7 +215,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
-		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
@@ -242,7 +241,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	toTxNum = api._txNums[toBlock] // toBlock is an inclusive bound
 
 	if fromBlock > toBlock {
-		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -294,7 +292,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -330,8 +327,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}))
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
-				stream.WriteNil()
-				return err
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
 			}
 			lastBlockNum = blockNum
 			lastBlockHash = lastHeader.Hash()
@@ -339,10 +343,17 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastRules = chainConfig.Rules(blockNum)
 		}
 		if txNum+1 == api._txNums[blockNum] {
-			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
+			body, _, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
-				stream.WriteNil()
-				return err
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
 			}
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
@@ -362,8 +373,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
 				if err != nil {
-					stream.WriteNil()
-					return err
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.WriteObjectStart()
+					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
+					continue
 				}
 				if nSeen > after && nExported < count {
 					if first {
@@ -393,8 +411,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						tr.TraceAddress = []int{}
 						b, err := json.Marshal(tr)
 						if err != nil {
-							stream.WriteNil()
-							return err
+							if first {
+								first = false
+							} else {
+								stream.WriteMore()
+							}
+							stream.WriteObjectStart()
+							rpc.HandleError(err, stream)
+							stream.WriteObjectEnd()
+							continue
 						}
 						if nSeen > after && nExported < count {
 							if first {
@@ -418,14 +443,28 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, dbtx, contractHasTEVM, api._blockReader)
@@ -451,17 +490,38 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
-			stream.WriteNil()
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		for _, pt := range traceResult.Trace {
 			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
@@ -472,8 +532,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				pt.TransactionPosition = &txIndex
 				b, err := json.Marshal(pt)
 				if err != nil {
-					stream.WriteNil()
-					return err
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.WriteObjectStart()
+					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
+					continue
 				}
 				if nSeen > after && nExported < count {
 					if first {

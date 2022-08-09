@@ -29,7 +29,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
-	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(db)
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
@@ -99,13 +98,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Service:   StarknetAPI(starknetImpl),
 				Version:   "1.0",
 			})
-		case "engine":
-			list = append(list, rpc.API{
-				Namespace: "engine",
-				Public:    true,
-				Service:   EngineAPI(engineImpl),
-				Version:   "1.0",
-			})
 		case "bor":
 			list = append(list, rpc.API{
 				Namespace: "bor",
@@ -129,6 +121,29 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 			})
 		}
 	}
+
+	return list
+}
+
+func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
+	cfg httpcfg.HttpCfg) (list []rpc.API) {
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
+
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
+	engineImpl := NewEngineAPI(base, db, eth)
+
+	list = append(list, rpc.API{
+		Namespace: "eth",
+		Public:    true,
+		Service:   EthAPI(ethImpl),
+		Version:   "1.0",
+	}, rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   EngineAPI(engineImpl),
+		Version:   "1.0",
+	})
 
 	return list
 }

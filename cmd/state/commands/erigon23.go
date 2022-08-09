@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/state22"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -155,8 +156,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -237,8 +237,6 @@ type stat23 struct {
 	hits         uint64
 	misses       uint64
 	prevBlock    uint64
-	prevMisses   uint64
-	prevHits     uint64
 	hitMissRatio float64
 	speed        float64
 	prevTime     time.Time
@@ -311,18 +309,18 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
-			ct := NewCallTracer()
+			ct := state22.NewCallTracer()
 			vmConfig.Tracer = ct
 			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
-			for from := range ct.froms {
+			for from := range ct.Froms() {
 				if err := ww.w.AddTraceFrom(from[:]); err != nil {
 					return 0, nil, err
 				}
 			}
-			for to := range ct.tos {
+			for to := range ct.Tos() {
 				if err := ww.w.AddTraceTo(to[:]); err != nil {
 					return 0, nil, err
 				}
