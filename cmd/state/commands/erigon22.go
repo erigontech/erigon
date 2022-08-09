@@ -71,6 +71,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}()
 	var err error
 	ctx := context.Background()
+	tmpDir := filepath.Join(datadir, "tmp")
 	reconDbPath := path.Join(datadir, "db22")
 	if reset && dir.Exist(reconDbPath) {
 		if err = os.RemoveAll(reconDbPath); err != nil {
@@ -136,23 +137,19 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	rwTx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
+	var execStage *stagedsync.StageState
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
+		if err != nil {
+			return err
 		}
-	}()
-	execStage, err := stagedSync.StageState(stages.Execution, rwTx, db)
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	if !reset {
 		block = execStage.BlockNumber + 1
 	}
-	rwTx.Rollback()
 
 	rs := state.NewState22()
 	aggDir := path.Join(datadir, "agg22")
@@ -288,14 +285,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							for i := 0; i < workerCount; i++ {
 								reconWorkers[i].ResetTx(nil, nil)
 							}
-							rwTx, err = db.BeginRw(ctx)
-							if err != nil {
-								return err
-							}
-							if err = rs.Flush(rwTx); err != nil {
-								return err
-							}
-							if err = rwTx.Commit(); err != nil {
+							if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
 								return err
 							}
 							if applyTx, err = db.BeginRw(ctx); err != nil {
@@ -394,14 +384,7 @@ loop:
 							return err
 						}
 						reconWorkers[0].ResetTx(nil, nil)
-						rwTx, err = db.BeginRw(ctx)
-						if err != nil {
-							return err
-						}
-						if err = rs.Flush(rwTx); err != nil {
-							return err
-						}
-						if err = rwTx.Commit(); err != nil {
+						if err = db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
 							return err
 						}
 						if applyTx, err = db.BeginRw(ctx); err != nil {
@@ -439,48 +422,44 @@ loop:
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i].ResetTx(nil, nil)
 	}
-	rwTx, err = db.BeginRw(ctx)
-	if err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = rs.Flush(tx); err != nil {
+			return err
+		}
+		if err = execStage.Update(tx, blockNum); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	if err = rs.Flush(rwTx); err != nil {
-		return err
-	}
-	if err = execStage.Update(rwTx, blockNum); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	log.Info("Transaction replay complete", "duration", time.Since(startTime))
-	log.Info("Computing hashed state")
-	tmpDir := filepath.Join(datadir, "tmp")
-	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		log.Info("Transaction replay complete", "duration", time.Since(startTime))
+		log.Info("Computing hashed state")
+		tmpDir := filepath.Join(datadir, "tmp")
+		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.HashedStorage); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.ContractCode); err != nil {
+			return err
+		}
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	var rootHash common.Hash
-	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	if rootHash != header.Root {
