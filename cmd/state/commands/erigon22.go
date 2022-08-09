@@ -182,11 +182,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 				applyTx.Rollback()
 			}
 		}()
-		chainTx, err := chainDb.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		reconWorkers[0].ResetTx(applyTx, chainTx)
+		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
@@ -391,11 +387,7 @@ loop:
 							return err
 						}
 						agg.SetTx(applyTx)
-						chainTx, err := chainDb.BeginRo(ctx)
-						if err != nil {
-							return err
-						}
-						reconWorkers[0].ResetTx(applyTx, chainTx)
+						reconWorkers[0].ResetTx(applyTx, nil)
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
 				default:
