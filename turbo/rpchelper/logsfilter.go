@@ -94,6 +94,23 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 	}
 }
 
+func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.Hash]int) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
+	addresses := make(map[common.Address]int)
+	for k, v := range a.aggLogsFilter.addrs {
+		addresses[k] = v
+	}
+
+	topics := make(map[common.Hash]int)
+	for k, v := range a.aggLogsFilter.topics {
+		topics[k] = v
+	}
+
+	return addresses, topics
+}
+
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()

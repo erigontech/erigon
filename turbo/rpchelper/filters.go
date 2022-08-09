@@ -401,14 +401,17 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+
+	addresses, topics := ff.logsSubs.getAggMaps()
+
+	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
-	for topic := range ff.logsSubs.aggLogsFilter.topics {
+	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
 	loaded := ff.logsRequestor.Load()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
@@ -425,14 +428,17 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+
+	addresses, topics := ff.logsSubs.getAggMaps()
+
+	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
-	for topic := range ff.logsSubs.aggLogsFilter.topics {
+	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
 	loaded := ff.logsRequestor.Load()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
