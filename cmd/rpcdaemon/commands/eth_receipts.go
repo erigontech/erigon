@@ -256,7 +256,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			continue
 		}
 
-		fmt.Printf("current or bitmap: %s\ncurrent result bitmap: %s", bitmapForORing.String(), result.String())
+		log.Info("test", "current or bitmap:", "current result bitmap:", bitmapForORing.String(), result.String())
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
