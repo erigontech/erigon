@@ -315,12 +315,12 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
-			for from := range ct.froms {
+			for from := range ct.Froms() {
 				if err := ww.w.AddTraceFrom(from[:]); err != nil {
 					return 0, nil, err
 				}
 			}
-			for to := range ct.tos {
+			for to := range ct.Tos() {
 				if err := ww.w.AddTraceTo(to[:]); err != nil {
 					return 0, nil, err
 				}
