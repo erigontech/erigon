@@ -347,7 +347,7 @@ func (fw *FillWorker) bitmapAccounts() {
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		txNum, progress := it.Next()
+		_, txNum, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
@@ -360,7 +360,7 @@ func (fw *FillWorker) bitmapStorage() {
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		txNum, progress := it.Next()
+		_, txNum, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
@@ -373,7 +373,7 @@ func (fw *FillWorker) bitmapCode() {
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
 	for it.HasNext() {
-		txNum, progress := it.Next()
+		_, txNum, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
