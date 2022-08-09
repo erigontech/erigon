@@ -246,11 +246,13 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 				continue
 			}
 			bitmapForORing.Or(m)
+			log.Info("test", "current or bitmap inside inner loop:", bitmapForORing.String())
 		}
 
 		if bitmapForORing == nil {
 			continue
 		}
+		log.Info("test", "current or bitmap outside inner loop:", bitmapForORing.String())
 		if result == nil {
 			result = bitmapForORing
 			continue
