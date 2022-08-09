@@ -99,8 +99,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		genesis:      genesis,
 		engine:       engine,
 	}
-	rw.epoch = state22.epochReader{tx: chainTx}
-	rw.chain = state22.chainReader{config: chainConfig, tx: chainTx, blockReader: blockReader}
+	rw.epoch = state22.NewEpochReader(chainTx)
+	rw.chain = state22.NewChainReader(chainConfig, chainTx, blockReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }

@@ -253,6 +253,10 @@ type ChainReader struct {
 	blockReader services.FullBlockReader
 }
 
+func NewChainReader(config *params.ChainConfig, tx kv.Tx, blockReader services.FullBlockReader) ChainReader {
+	return ChainReader{config: config, tx: tx, blockReader: blockReader}
+}
+
 func (cr ChainReader) Config() *params.ChainConfig  { return cr.config }
 func (cr ChainReader) CurrentHeader() *types.Header { panic("") }
 func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -293,6 +297,8 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 type EpochReader struct {
 	tx kv.Tx
 }
+
+func NewEpochReader(tx kv.Tx) EpochReader { return EpochReader{tx: tx} }
 
 func (cr EpochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
