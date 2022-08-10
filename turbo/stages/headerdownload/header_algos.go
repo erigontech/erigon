@@ -1007,6 +1007,10 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 		if hd.ProcessHeader(sh, newBlock, peerID) {
 			requestMore = true
 		}
+		// Gossip small amount of blocks
+		if len(csHeaders) <= 15 {
+			hd.SaveExternalAnnounce(sh.Hash)
+		}
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
