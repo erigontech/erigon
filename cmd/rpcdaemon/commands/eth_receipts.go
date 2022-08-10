@@ -121,6 +121,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if err != nil {
 			return nil, err
 		}
+		if begin > latest {
+			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
+		}
 		end = latest
 	}
 	blockNumbers := roaring.New()
