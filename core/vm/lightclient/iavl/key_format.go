@@ -18,15 +18,15 @@ type KeyFormat struct {
 // For example, to store keys that could index some objects by a version number and their SHA256 hash using the form:
 // 'c<version uint64><hash [32]byte>' then you would define the KeyFormat with:
 //
-//  var keyFormat = NewKeyFormat('c', 8, 32)
+//	var keyFormat = NewKeyFormat('c', 8, 32)
 //
 // Then you can create a key with:
 //
-//  func ObjectKey(version uint64, objectBytes []byte) []byte {
-//  	hasher := sha256.New()
-//  	hasher.Sum(nil)
-//  	return keyFormat.Key(version, hasher.Sum(nil))
-//  }
+//	func ObjectKey(version uint64, objectBytes []byte) []byte {
+//		hasher := sha256.New()
+//		hasher.Sum(nil)
+//		return keyFormat.Key(version, hasher.Sum(nil))
+//	}
 func NewKeyFormat(prefix byte, layout ...int) *KeyFormat {
 	// For prefix byte
 	length := 1

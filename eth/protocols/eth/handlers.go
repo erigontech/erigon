@@ -85,7 +85,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				unknown = true
 			} else {
 				query.Origin.Hash, query.Origin.Number = rawdb.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical, blockReader)
-				unknown = (query.Origin.Hash == common.Hash{})
+				unknown = query.Origin.Hash == common.Hash{}
 			}
 		case hashMode && !query.Reverse:
 			// Hash based traversal towards the leaf block

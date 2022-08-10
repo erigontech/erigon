@@ -149,7 +149,7 @@ func (s *Snapshot) copy() *Snapshot {
 	return cpy
 }
 
-//nolint
+// nolint
 func (s *Snapshot) isMajorityFork(forkHash string) bool {
 	ally := 0
 	for _, h := range s.RecentForkHashes {

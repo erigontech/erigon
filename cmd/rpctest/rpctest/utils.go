@@ -40,7 +40,7 @@ func compareBlocks(b, bg *EthBlockByNumber) bool {
 			return false
 		}
 		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
-			fmt.Printf("Tx %d different To nilness: %t %t\n", i, (tx.To == nil), (txg.To == nil))
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
 			return false
 		}
 		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
@@ -89,8 +89,8 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 }
 
 func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
-	var vType fastjson.Type = fastjson.TypeNull
-	var vgType fastjson.Type = fastjson.TypeNull
+	var vType = fastjson.TypeNull
+	var vgType = fastjson.TypeNull
 	if v != nil {
 		vType = v.Type()
 	}
@@ -205,8 +205,8 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 			return fmt.Errorf("different result (Erigon) returns OK, while G/OE returns error code=%d message=%s", errValg.GetInt("code"), errValg.GetStringBytes("message"))
 		}
 	} else {
-		s1 := strings.ToUpper(string((errVal.GetStringBytes("message"))))
-		s2 := strings.ToUpper(string((errValg.GetStringBytes("message"))))
+		s1 := strings.ToUpper(string(errVal.GetStringBytes("message")))
+		s2 := strings.ToUpper(string(errValg.GetStringBytes("message")))
 		if strings.Compare(s1, s2) != 0 {
 			if errs != nil {
 				fmt.Printf("different error-message for method %s, errCtx: %s\n", methodName, errCtx)

@@ -57,8 +57,8 @@ var opcodeTracerCmd = &cobra.Command{
 	},
 }
 
-//const MaxUint = ^uint(0)
-//const MaxUint64 = ^uint64(0)
+// const MaxUint = ^uint(0)
+// const MaxUint64 = ^uint64(0)
 const MaxUint16 = ^uint16(0)
 
 type opcode struct {

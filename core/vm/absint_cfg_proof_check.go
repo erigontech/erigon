@@ -2,9 +2,10 @@ package vm
 
 import (
 	"errors"
-	"github.com/holiman/uint256"
 	"log"
 	"reflect"
+
+	"github.com/holiman/uint256"
 )
 
 type CfgOpSem struct {

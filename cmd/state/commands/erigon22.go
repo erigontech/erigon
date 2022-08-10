@@ -204,7 +204,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
-	var maxTxNum uint64 = txNums[len(txNums)-1]
+	var maxTxNum = txNums[len(txNums)-1]
 	if workerCount > 1 {
 		go func() {
 			defer func() {
@@ -278,7 +278,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 							if err = applyTx.Commit(); err != nil {
 								return err
 							}
-							for i := 0; i < workerCount; i++ {
+							for i := 0; i < len(reconWorkers); i++ {
 								reconWorkers[i].ResetTx(nil, nil)
 							}
 							if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
@@ -411,7 +411,7 @@ loop:
 			return err
 		}
 	}
-	for i := 0; i < workerCount; i++ {
+	for i := 0; i < len(reconWorkers); i++ {
 		reconWorkers[i].ResetTx(nil, nil)
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {

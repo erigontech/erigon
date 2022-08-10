@@ -14,7 +14,6 @@ func AccountIndexChunkKey(key []byte, blockNumber uint64) []byte {
 	return blockNumBytes
 }
 
-//
 func StorageIndexChunkKey(key []byte, blockNumber uint64) []byte {
 	//remove incarnation and add block number
 	blockNumBytes := make([]byte, common.AddressLength+common.HashLength+8)

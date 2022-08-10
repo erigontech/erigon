@@ -166,10 +166,10 @@ func (e *GenesisMismatchError) Error() string {
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
 //
-//                          genesis == nil       genesis != nil
-//                       +------------------------------------------
-//     db has no genesis |  main-net default  |  genesis
-//     db has genesis    |  from DB           |  genesis (if compatible)
+//	                     genesis == nil       genesis != nil
+//	                  +------------------------------------------
+//	db has no genesis |  main-net default  |  genesis
+//	db has genesis    |  from DB           |  genesis (if compatible)
 //
 // The stored chain configuration will be updated if it is compatible (i.e. does not
 // specify a fork block below the local head block). In case of a conflict, the
@@ -695,7 +695,7 @@ func DefaultMumbaiGenesisBlock() *Genesis {
 	}
 }
 
-//DefaultBorMainnet returns the Bor Mainnet network gensis block.
+// DefaultBorMainnet returns the Bor Mainnet network gensis block.
 func DefaultBorMainnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.BorMainnetChainConfig,
@@ -743,8 +743,9 @@ func DefaultGnosisGenesisBlock() *Genesis {
 }
 
 // Pre-calculated version of:
-//    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
-//    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+//
+//	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
+//	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
