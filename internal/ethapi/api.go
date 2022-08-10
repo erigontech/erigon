@@ -289,6 +289,7 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) (map[string]i
 func RPCMarshalBlockEx(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
+	fields["transactions"] = make([]interface{}, 1)
 
 	if inclTx {
 		formatTx := func(tx types.Transaction, index int) (interface{}, error) {
