@@ -116,7 +116,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
-
+	if end > roaring.MaxUint32 {
+		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
+	}
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
