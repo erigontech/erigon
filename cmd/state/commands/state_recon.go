@@ -110,6 +110,10 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 	rw.stateReader.SetTx(tx)
 }
 
+func (rw *ReconWorker) SetBroTx(tx kv.Tx) {
+	rw.stateReader.SetBroTx(tx)
+}
+
 func (rw *ReconWorker) run() {
 	defer rw.wg.Done()
 	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
@@ -345,7 +349,7 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress = 0
 }
 
-func (fw *FillWorker) bitmapAccounts(accountCollector *etl.Collector) {
+func (fw *FillWorker) bitmapAccounts(accountCollector, accountCollectorX *etl.Collector) {
 	defer func() {
 		atomic.AddUint64(fw.doneCount, 1)
 	}()
@@ -361,13 +365,18 @@ func (fw *FillWorker) bitmapAccounts(accountCollector *etl.Collector) {
 		}
 		binary.BigEndian.PutUint64(composite, txNum)
 		copy(composite[8:], key)
-		accountCollector.Collect(composite, nil)
+		if err := accountCollector.Collect(composite, nil); err != nil {
+			panic(err)
+		}
+		if err := accountCollectorX.Collect(key, composite[:8]); err != nil {
+			panic(err)
+		}
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
 }
 
-func (fw *FillWorker) bitmapStorage(storageCollector *etl.Collector) {
+func (fw *FillWorker) bitmapStorage(storageCollector, storageCollectorX *etl.Collector) {
 	defer func() {
 		atomic.AddUint64(fw.doneCount, 1)
 	}()
@@ -383,13 +392,18 @@ func (fw *FillWorker) bitmapStorage(storageCollector *etl.Collector) {
 		}
 		binary.BigEndian.PutUint64(composite, txNum)
 		copy(composite[8:], key)
-		storageCollector.Collect(composite, nil)
+		if err := storageCollector.Collect(composite, nil); err != nil {
+			panic(err)
+		}
+		if err := storageCollectorX.Collect(key, composite[:8]); err != nil {
+			panic(err)
+		}
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
 }
 
-func (fw *FillWorker) bitmapCode(codeCollector *etl.Collector) {
+func (fw *FillWorker) bitmapCode(codeCollector, codeCollectorX *etl.Collector) {
 	defer func() {
 		atomic.AddUint64(fw.doneCount, 1)
 	}()
@@ -405,7 +419,12 @@ func (fw *FillWorker) bitmapCode(codeCollector *etl.Collector) {
 		}
 		binary.BigEndian.PutUint64(composite, txNum)
 		copy(composite[8:], key)
-		codeCollector.Collect(composite, nil)
+		if err := codeCollector.Collect(composite, nil); err != nil {
+			panic(err)
+		}
+		if err := codeCollectorX.Collect(key, composite[:8]); err != nil {
+			panic(err)
+		}
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.bitmap.Add(txNum)
 	}
@@ -448,7 +467,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	bdb, err := kv2.NewMDBX(logger).Path(bmapPath).WriteMap().Open()
+	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	bdb, err := kv2.NewMDBX(logger).Path(bmapPath).RoTxsLimiter(limiterB).WriteMap().Open()
 	if err != nil {
 		return err
 	}
@@ -524,10 +544,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	defer logEvery.Stop()
 	doneCount = 0
 	accountCollectors := make([]*etl.Collector, workerCount)
+	accountCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		accountCollectors[i] = etl.NewCollector("account scan", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		go fillWorkers[i].bitmapAccounts(accountCollectors[i])
+		accountCollectorsX[i] = etl.NewCollector("account scan X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].bitmapAccounts(accountCollectors[i], accountCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		select {
@@ -548,10 +570,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	doneCount = 0
 	storageCollectors := make([]*etl.Collector, workerCount)
+	storageCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		storageCollectors[i] = etl.NewCollector("storage scan", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		go fillWorkers[i].bitmapStorage(storageCollectors[i])
+		storageCollectorsX[i] = etl.NewCollector("storage scan X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].bitmapStorage(storageCollectors[i], storageCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		select {
@@ -572,10 +596,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	doneCount = 0
 	codeCollectors := make([]*etl.Collector, workerCount)
+	codeCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		codeCollectors[i] = etl.NewCollector("code scan", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		go fillWorkers[i].bitmapCode(codeCollectors[i])
+		codeCollectorsX[i] = etl.NewCollector("code scan X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].bitmapCode(codeCollectors[i], codeCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		select {
@@ -595,8 +621,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 	}
 	accountCollector := etl.NewCollector("account scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	storageCollector := etl.NewCollector("storage scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollector := etl.NewCollector("code scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	codeCollectorX := etl.NewCollector("code scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(&fillWorkers[i].bitmap)
@@ -606,18 +635,36 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 		accountCollectors[i].Close()
+		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return accountCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		accountCollectorsX[i].Close()
 		if err = storageCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return storageCollector.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		storageCollectors[i].Close()
+		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return storageCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		storageCollectorsX[i].Close()
 		if err = codeCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return codeCollector.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollectors[i].Close()
+		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return codeCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		codeCollectorsX[i].Close()
 	}
 	brwTx, err := bdb.BeginRw(ctx)
 	if err != nil {
@@ -634,18 +681,36 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	accountCollector.Close()
+	if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.XAccount, k, v)
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	accountCollectorX.Close()
 	if err = storageCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return brwTx.Put(kv.BStorage, k[:8], k[8:])
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	storageCollector.Close()
+	if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.XStorage, k, v)
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	storageCollectorX.Close()
 	if err = codeCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return brwTx.Put(kv.BCode, k[:8], k[8:])
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	codeCollector.Close()
+	if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.XCode, k, v)
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	codeCollectorX.Close()
 	if err = brwTx.Commit(); err != nil {
 		return err
 	}
@@ -653,11 +718,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
+	broTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
 		for i := 0; i < workerCount; i++ {
 			if roTxs[i] != nil {
 				roTxs[i].Rollback()
+			}
+			if broTxs[i] != nil {
+				broTxs[i].Rollback()
 			}
 			if chainTxs[i] != nil {
 				chainTxs[i].Rollback()
@@ -668,6 +737,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
+		if broTxs[i], err = db.BeginRo(ctx); err != nil {
+			return err
+		}
 		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
 			return err
 		}
@@ -676,6 +748,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
+		reconWorkers[i].SetBroTx(broTxs[i])
 	}
 	wg.Add(workerCount)
 	count := uint64(0)
