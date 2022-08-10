@@ -63,7 +63,7 @@ func PrintArrays(str []byte, sa []uint, lcp []int, da []int32) {
 	}
 }
 
-//nolint
+// nolint
 // SA2GSA - example func to convert SA+DA to GSA
 func SA2GSA(sa []uint, da []int32) []uint {
 	// remove terminator

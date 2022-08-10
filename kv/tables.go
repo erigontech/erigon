@@ -36,6 +36,7 @@ var DBSchemaVersion = types.VersionReply{Major: 6, Minor: 0, Patch: 0}
 
 /*
 PlainState logical layout:
+
 	Contains Accounts:
 	  key - address (unhashed)
 	  value - account encoded for storage
@@ -44,35 +45,46 @@ PlainState logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
+
 	PlainState and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
+
 -------------------------------------------------------------
-	   key              |            value
+
+	key              |            value
+
 -------------------------------------------------------------
 [acc_hash]              | [acc_value]
 [acc_hash]+[inc]        | [storage1_hash]+[storage1_value]
-                        | [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
-                        | [storage3_hash]+[storage3_value]
-                        | ...
+
+	| [storage2_hash]+[storage2_value] // this value has no own key. it's 2nd value of [acc_hash]+[inc] key.
+	| [storage3_hash]+[storage3_value]
+	| ...
+
 [acc_hash]+[old_inc]    | [storage1_hash]+[storage1_value]
-                        | ...
+
+	| ...
+
 [acc2_hash]             | [acc2_value]
-                        ...
+
+	...
 */
 const PlainState = "PlainState"
 
-//PlainContractCode -
-//key - address+incarnation
-//value - code hash
+// PlainContractCode -
+// key - address+incarnation
+// value - code hash
 const PlainContractCode = "PlainCodeHash"
 
 /*
 AccountChangeSet and StorageChangeSet - of block N store values of state before block N changed them.
 Because values "after" change stored in PlainState.
 Logical format:
+
 	key - blockNum_u64 + key_in_plain_state
 	value - value_in_plain_state_before_blockNum_changes
 
 Example: If block N changed account A from value X to Y. Then:
+
 	AccountChangeSet has record: bigEndian(N) + A -> X
 	PlainState has record: A -> Y
 
@@ -82,10 +94,12 @@ As you can see if block N changes much accounts - then all records have repetiti
 MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 Both buckets are DupSort-ed and have physical format:
 AccountChangeSet:
+
 	key - blockNum_u64
 	value - address + account(encoded)
 
 StorageChangeSet:
+
 	key - blockNum_u64 + address + incarnation_u64
 	value - plain_storage_key + value
 */
@@ -111,28 +125,34 @@ AccountsHistory and StorageHistory - indices designed to serve next 2 type of re
 
 Task 1. is part of "get historical state" operation (see `core/state:GetAsOf`):
 If `db.Seek(A+bigEndian(X))` returns non-last shard -
-		then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
-		and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
+
+	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
+	and with Y go to ChangeSets: db.Get(ChangeSets, Y+A)
+
 If `db.Seek(A+bigEndian(X))` returns last shard -
-		then we go to PlainState: db.Get(PlainState, A)
+
+	then we go to PlainState: db.Get(PlainState, A)
 
 Format:
-	- index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
-			(to avoid performance degradation of popular accounts or look deep into history.
-				Also 2Kb allows avoid Overflow pages inside DB.)
-	- if shard is not last - then key has suffix 8 bytes = bigEndian(max_block_num_in_this_shard)
-	- if shard is last - then key has suffix 8 bytes = 0xFF
+  - index split to shards by 2Kb - RoaringBitmap encoded sorted list of block numbers
+    (to avoid performance degradation of popular accounts or look deep into history.
+    Also 2Kb allows avoid Overflow pages inside DB.)
+  - if shard is not last - then key has suffix 8 bytes = bigEndian(max_block_num_in_this_shard)
+  - if shard is last - then key has suffix 8 bytes = 0xFF
 
 It allows:
-	- server task 1. by 1 db operation db.Seek(A+bigEndian(X))
-	- server task 2. by 1 db operation db.Get(A+0xFF)
+  - server task 1. by 1 db operation db.Seek(A+bigEndian(X))
+  - server task 2. by 1 db operation db.Get(A+0xFF)
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 AccountsHistory:
+
 	key - address + shard_id_u64
 	value - roaring bitmap  - list of block where it changed
+
 StorageHistory
+
 	key - address + storage_key + shard_id_u64
 	value - roaring bitmap - list of block where it changed
 */
@@ -160,7 +180,8 @@ const (
 	ContractTEVMCode = "TEVMCode"
 )
 
-/*TrieOfAccounts and TrieOfStorage
+/*
+TrieOfAccounts and TrieOfStorage
 hasState,groups - mark prefixes existing in hashed_account table
 hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
 hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
@@ -170,25 +191,31 @@ hasHash - mark prefixes which hashes are saved in current trie_account record (a
 +-----------------------------------------------------------------------------------------------------+
 | DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
 +-----------------------------------------------------------------------------------------------------+
-                |                                           |                               |
-                v                                           |                               v
+
+	|                                           |                               |
+	v                                           |                               v
+
 +---------------------------------------------+             |            +--------------------------------------+
 | DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
 | hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
 +---------------------------------------------+             |            +--------------------------------------+
-        |                    |                              |                         |                  |
-        v                    v                              v                         v                  v
+
+	|                    |                              |                         |                  |
+	v                    v                              v                         v                  v
+
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
 | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
 | 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
 | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
 +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-                           |                |
-                           v                v
-		           +---------------+  +---------------+
-		           | Account:      |  | Account:      |
-		           | 0x0B000400... |  | 0x0B000401... |
-		           +---------------+  +---------------+
+
+	                           |                |
+	                           v                v
+			           +---------------+  +---------------+
+			           | Account:      |  | Account:      |
+			           | 0x0B000400... |  | 0x0B000401... |
+			           +---------------+  +---------------+
+
 Invariants:
 - hasTree is subset of hasState
 - hasHash is subset of hasState

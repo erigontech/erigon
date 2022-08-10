@@ -172,13 +172,14 @@ type RoDB interface {
 //
 // Common pattern for short-living transactions:
 //
-//  if err := db.View(ctx, func(tx ethdb.Tx) error {
-//     ... code which uses database in transaction
-//  }); err != nil {
-//		return err
-// }
+//	 if err := db.View(ctx, func(tx ethdb.Tx) error {
+//	    ... code which uses database in transaction
+//	 }); err != nil {
+//			return err
+//	}
 //
 // Common pattern for long-living transactions:
+//
 //	tx, err := db.Begin()
 //	if err != nil {
 //		return err
@@ -191,7 +192,6 @@ type RoDB interface {
 //	if err != nil {
 //		return err
 //	}
-//
 type RwDB interface {
 	RoDB
 
@@ -282,12 +282,13 @@ type BucketMigrator interface {
 // If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
-// for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-//    if err != nil {
-//        return err
-//    }
-//    ... logic
-// }
+//
+//	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+//	   if err != nil {
+//	       return err
+//	   }
+//	   ... logic
+//	}
 type Cursor interface {
 	First() ([]byte, []byte, error)               // First - position at first key/data item
 	Seek(seek []byte) ([]byte, []byte, error)     // Seek - position at first key greater than or equal to specified key

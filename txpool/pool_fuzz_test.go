@@ -36,89 +36,89 @@ func init() {
 }
 
 /*
-func FuzzTwoQueue(f *testing.F) {
-	f.Add([]uint8{0b1000, 0b0101, 0b0111})
-	f.Add([]uint8{0b0101, 0b1110, 0b1101, 0b0001})
-	f.Fuzz(func(t *testing.T, in []uint8) {
-		t.Parallel()
-		assert := assert.New(t)
-		{
-			sub := NewPendingSubPool(PendingSubPool, 1024)
-			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
-			}
-			sub.EnforceWorstInvariants()
-			sub.EnforceBestInvariants()
-			assert.Equal(len(in), sub.best.Len())
-			assert.Equal(len(in), sub.worst.Len())
-			assert.Equal(len(in), sub.Len())
-
-			var prevBest *uint8
-			for i := range sub.best.ms {
-				current := uint8(sub.best.ms[i].subPool)
-				if prevBest != nil {
-					assert.LessOrEqual(current, *prevBest)
+	func FuzzTwoQueue(f *testing.F) {
+		f.Add([]uint8{0b1000, 0b0101, 0b0111})
+		f.Add([]uint8{0b0101, 0b1110, 0b1101, 0b0001})
+		f.Fuzz(func(t *testing.T, in []uint8) {
+			t.Parallel()
+			assert := assert.New(t)
+			{
+				sub := NewPendingSubPool(PendingSubPool, 1024)
+				for _, i := range in {
+					sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 				}
-				assert.Equal(i, sub.best.ms[i].bestIndex)
-				prevBest = &current
-			}
-		}
-		{
-			sub := NewSubPool(BaseFeeSubPool, 1024)
-			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
-			}
-			assert.Equal(len(in), sub.best.Len())
-			assert.Equal(len(in), sub.worst.Len())
-			assert.Equal(len(in), sub.Len())
+				sub.EnforceWorstInvariants()
+				sub.EnforceBestInvariants()
+				assert.Equal(len(in), sub.best.Len())
+				assert.Equal(len(in), sub.worst.Len())
+				assert.Equal(len(in), sub.Len())
 
-			for i := range sub.best.ms {
-				assert.Equal(i, (sub.best.ms)[i].bestIndex)
-			}
-			for i := range sub.worst.ms {
-				assert.Equal(i, (sub.worst.ms)[i].worstIndex)
-			}
-
-			var prevBest *uint8
-			i := sub.Len()
-			for sub.Len() > 0 {
-				best := uint8(sub.Best().subPool)
-				assert.Equal(best, uint8(sub.PopBest().subPool))
-				if prevBest != nil {
-					assert.LessOrEqual(best, *prevBest)
+				var prevBest *uint8
+				for i := range sub.best.ms {
+					current := uint8(sub.best.ms[i].subPool)
+					if prevBest != nil {
+						assert.LessOrEqual(current, *prevBest)
+					}
+					assert.Equal(i, sub.best.ms[i].bestIndex)
+					prevBest = &current
 				}
-				prevBest = &best
-				i--
 			}
-			assert.Zero(i)
-			assert.Zero(sub.Len())
-			assert.Zero(sub.best.Len())
-			assert.Zero(sub.worst.Len())
-		}
-
-		{
-			sub := NewSubPool(QueuedSubPool, 1024)
-			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
-			}
-			var prev *uint8
-			i := sub.Len()
-			for sub.Len() > 0 {
-				worst := uint8(sub.Worst().subPool)
-				assert.Equal(worst, uint8(sub.PopWorst().subPool))
-				if prev != nil {
-					assert.GreaterOrEqual(worst, *prev)
+			{
+				sub := NewSubPool(BaseFeeSubPool, 1024)
+				for _, i := range in {
+					sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 				}
-				prev = &worst
-				i--
+				assert.Equal(len(in), sub.best.Len())
+				assert.Equal(len(in), sub.worst.Len())
+				assert.Equal(len(in), sub.Len())
+
+				for i := range sub.best.ms {
+					assert.Equal(i, (sub.best.ms)[i].bestIndex)
+				}
+				for i := range sub.worst.ms {
+					assert.Equal(i, (sub.worst.ms)[i].worstIndex)
+				}
+
+				var prevBest *uint8
+				i := sub.Len()
+				for sub.Len() > 0 {
+					best := uint8(sub.Best().subPool)
+					assert.Equal(best, uint8(sub.PopBest().subPool))
+					if prevBest != nil {
+						assert.LessOrEqual(best, *prevBest)
+					}
+					prevBest = &best
+					i--
+				}
+				assert.Zero(i)
+				assert.Zero(sub.Len())
+				assert.Zero(sub.best.Len())
+				assert.Zero(sub.worst.Len())
 			}
-			assert.Zero(i)
-			assert.Zero(sub.Len())
-			assert.Zero(sub.best.Len())
-			assert.Zero(sub.worst.Len())
-		}
-	})
-}
+
+			{
+				sub := NewSubPool(QueuedSubPool, 1024)
+				for _, i := range in {
+					sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+				}
+				var prev *uint8
+				i := sub.Len()
+				for sub.Len() > 0 {
+					worst := uint8(sub.Worst().subPool)
+					assert.Equal(worst, uint8(sub.PopWorst().subPool))
+					if prev != nil {
+						assert.GreaterOrEqual(worst, *prev)
+					}
+					prev = &worst
+					i--
+				}
+				assert.Zero(i)
+				assert.Zero(sub.Len())
+				assert.Zero(sub.best.Len())
+				assert.Zero(sub.worst.Len())
+			}
+		})
+	}
 */
 func u64Slice(in []byte) ([]uint64, bool) {
 	if len(in) < 8 {
@@ -567,7 +567,7 @@ func copyHashes(p *PendingPool) (hashes types.Hashes) {
 	return hashes
 }
 
-//extractNewHashes - extract from h1 hashes which do not exist in h2
+// extractNewHashes - extract from h1 hashes which do not exist in h2
 func extractNewHashes(h1, h2 types.Hashes) (result types.Hashes) {
 	for i := 0; i < h1.Len(); i++ {
 		found := false

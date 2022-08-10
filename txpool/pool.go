@@ -1314,9 +1314,10 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 
 // MainLoop - does:
 // send pending byHash to p2p:
-//      - new byHash
-//      - all pooled byHash to recently connected peers
-//      - all local pooled byHash to random peers periodically
+//   - new byHash
+//   - all pooled byHash to recently connected peers
+//   - all local pooled byHash to random peers periodically
+//
 // promote/demote transactions
 // reorgs
 func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs chan types.Hashes, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
@@ -1659,7 +1660,7 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	return nil
 }
 
-//nolint
+// nolint
 func (p *TxPool) printDebug(prefix string) {
 	fmt.Printf("%s.pool.byHash\n", prefix)
 	for _, j := range p.byHash {
@@ -1704,7 +1705,7 @@ func (p *TxPool) logStats() {
 	queuedSubCounter.Set(uint64(p.queued.Len()))
 }
 
-//Deprecated need switch to streaming-like
+// Deprecated need switch to streaming-like
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -1793,7 +1794,7 @@ func (l *recentlyConnectedPeers) GetAndClean() []types.PeerID {
 	return peers
 }
 
-//nolint
+// nolint
 func (sc *sendersBatch) printDebug(prefix string) {
 	fmt.Printf("%s.sendersBatch.sender\n", prefix)
 	//for i, j := range sc.senderInfo {
@@ -1879,11 +1880,11 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 
 // BySenderAndNonce - designed to perform most expensive operation in TxPool:
 // "recalculate all ephemeral fields of all transactions" by algo
-//      - for all senders - iterate over all transactions in nonce growing order
+//   - for all senders - iterate over all transactions in nonce growing order
 //
 // Performane decisions:
-//  - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
-//  - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
+//   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
+//   - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
 type BySenderAndNonce struct {
 	tree             *btree.BTreeG[*metaTx]
 	search           *metaTx
@@ -1952,7 +1953,7 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTx {
 	return nil
 }
 
-//nolint
+// nolint
 func (b *BySenderAndNonce) has(mt *metaTx) bool {
 	return b.tree.Has(mt)
 }

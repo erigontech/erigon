@@ -230,7 +230,7 @@ const maxPatternLen = 128
 // Large values increase memory consumption of dictionary reduction phase
 const maxDictPatterns = 1 * 1024 * 1024
 
-//nolint
+// nolint
 const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {

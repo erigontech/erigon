@@ -62,7 +62,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	}
 }
 
-//nolint
+// nolint
 func checksum(file string) uint32 {
 	hasher := crc32.NewIEEE()
 	f, err := os.Open(file)

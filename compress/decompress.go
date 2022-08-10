@@ -292,7 +292,7 @@ func (d *Decompressor) Close() error {
 
 func (d *Decompressor) FilePath() string { return d.compressedFile }
 
-//WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
+// WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	defer mmap.MadviseRandom(d.mmapHandle1)
