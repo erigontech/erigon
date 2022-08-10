@@ -851,7 +851,7 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 }
 
 // NewP2PConfig
-//  - doesn't setup bootnodes - they will set when genesisHash will know
+//   - doesn't setup bootnodes - they will set when genesisHash will know
 func NewP2PConfig(
 	nodiscover bool,
 	dirs datadir.Dirs,
@@ -1182,7 +1182,7 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 	}
 }
 
-//nolint
+// nolint
 func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
