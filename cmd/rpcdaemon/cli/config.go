@@ -213,7 +213,12 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, err error,
 ) {
 	if stateCacheCfg.KeysLimit > 0 {
-		stateCache = kvcache.New(stateCacheCfg)
+		stateCache = kvcache.NewDummy()
+		// notification about new blocks (state stream) doesn't work now inside erigon - because
+		// erigon does send this stream to privateAPI (erigon with enabled rpc, still have enabled privateAPI).
+		// without this state stream kvcache can't work and only slow-down things
+		//
+		//stateCache = kvcache.New(stateCacheCfg)
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
@@ -279,6 +284,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		borDb = borKv
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
+			panic(1)
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
 			stateCache = kvcache.NewDummy()
