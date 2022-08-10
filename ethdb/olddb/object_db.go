@@ -33,7 +33,7 @@ type ObjectDatabase struct {
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
-//Deprecated
+// Deprecated
 func NewObjectDatabase(kv kv.RwDB) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,

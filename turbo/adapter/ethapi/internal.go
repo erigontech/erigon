@@ -26,12 +26,12 @@ type ExecutionResult struct {
 	*ethapi.ExecutionResult
 }
 
-//nolint
+// nolint
 func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	return ethapi.RPCMarshalHeader(head)
 }
 
-//nolint
+// nolint
 func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
 	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
 	if err != nil {
@@ -45,7 +45,7 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 	return fields, err
 }
 
-//nolint
+// nolint
 func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]interface{}) (map[string]interface{}, error) {
 	fields, err := ethapi.RPCMarshalBlockEx(b, inclTx, fullTx, borTx, borTxHash)
 	if err != nil {
@@ -59,7 +59,7 @@ func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Tra
 	return fields, err
 }
 
-//nolint
+// nolint
 type RPCTransaction struct {
 	*ethapi.RPCTransaction
 }

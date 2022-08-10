@@ -14,8 +14,8 @@ import (
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
 // you can put unlimited amount of data into this class
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
-//Deprecated
-//nolint
+// Deprecated
+// nolint
 type TxDb struct {
 	db      ethdb.Database
 	tx      kv.Tx
@@ -24,7 +24,7 @@ type TxDb struct {
 	len     uint64
 }
 
-//nolint
+// nolint
 func WrapIntoTxDB(tx kv.RwTx) *TxDb {
 	return &TxDb{tx: tx, cursors: map[string]kv.Cursor{}}
 }

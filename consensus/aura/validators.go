@@ -22,7 +22,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-//nolint
+// nolint
 type CallResults struct {
 	data      []byte
 	proof     [][]byte
@@ -192,7 +192,7 @@ func count(s ValidatorSet, h common.Hash, call consensus.Call) (uint64, error) {
 	return s.countWithCaller(h, call)
 }
 
-//nolint
+// nolint
 type MultiItem struct {
 	num  uint64
 	hash common.Hash
@@ -274,7 +274,7 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 }
 
 // TODO: do we need add `proof` argument?
-//nolint
+// nolint
 func (s *Multi) epochSet(firstInEpoch bool, num uint64, proof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
 	setBlock, set := s.correctSetByNumber(num)
 	firstInEpoch = setBlock == num
@@ -333,20 +333,20 @@ func NewSimpleList(validators []common.Address) *SimpleList {
 	return &SimpleList{validators: validators}
 }
 
-//nolint
+// nolint
 type ReportQueueItem struct {
 	addr     common.Address
 	blockNum uint64
 	data     []byte
 }
 
-//nolint
+// nolint
 type ReportQueue struct {
 	mu   sync.RWMutex
 	list *list.List
 }
 
-//nolint
+// nolint
 func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -354,7 +354,7 @@ func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
 }
 
 // Filters reports of validators that have already been reported or are banned.
-//nolint
+// nolint
 func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -384,7 +384,7 @@ func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, 
 }
 
 // Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
-//nolint
+// nolint
 func (q *ReportQueue) truncate() {
 	// The maximum number of reports to keep queued.
 	const MaxQueuedReports = 10
@@ -405,7 +405,7 @@ func (q *ReportQueue) truncate() {
 }
 
 // The validator contract should have the following interface:
-//nolint
+// nolint
 type ValidatorSafeContract struct {
 	contractAddress common.Address
 	validators      *lru.Cache  // RwLock<MemoryLruCache<H256, SimpleList>>,
@@ -439,7 +439,7 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 // but with the same parameters.
 //
 // Returns a list of contract calls to be pushed onto the new block.
-//func generateEngineTransactions(_firstInEpoch bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
+// func generateEngineTransactions(_firstInEpoch bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
 	if firstInEpoch {
 		var proof FirstValidatorSetProof
@@ -512,7 +512,7 @@ func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof
 }
 
 // check a first proof: fetch the validator set at the given block.
-//nolint
+// nolint
 func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *types.Header, dbItems [][]byte) ([]common.Address, error) {
 	/*
 		fn check_first_proof(
@@ -579,7 +579,7 @@ func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *typ
 // inter-contract proofs are a header and receipts.
 // checking will involve ensuring that the receipts match the header and
 // extracting the validator set from the receipts.
-//nolint
+// nolint
 func (s *ValidatorSafeContract) defaultCaller(blockHash common.Hash) (Call, error) {
 	return func(addr common.Address, data []byte) (CallResults, error) {
 		return s.client.CallAtBlockHash(blockHash, addr, data)

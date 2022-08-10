@@ -17,10 +17,11 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	"math/big"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM

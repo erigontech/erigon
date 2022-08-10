@@ -2,13 +2,14 @@ package commands
 
 import (
 	"context"
+	"reflect"
+	"strings"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
-	"reflect"
-	"strings"
 )
 
 type StarknetGrpcCallArgs struct {

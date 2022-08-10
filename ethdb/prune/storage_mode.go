@@ -160,7 +160,9 @@ type BlockAmount interface {
 // Distance amount of blocks to keep in DB
 // but manual manipulation with such distance is very unsafe
 // for example:
-//    deleteUntil := currentStageProgress - pruningDistance
+//
+//	deleteUntil := currentStageProgress - pruningDistance
+//
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
