@@ -3,7 +3,6 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sort"
 
 	"github.com/RoaringBitmap/roaring"
@@ -135,8 +134,6 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("key: %s\n", key)
-		fmt.Printf("k: %s\n", k)
 		if !bytes.HasPrefix(k, key) {
 			break
 		}

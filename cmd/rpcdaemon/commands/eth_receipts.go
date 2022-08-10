@@ -122,14 +122,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
-	log.Info("gettting topic bitmap")
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
 
 	if topicsBitmap != nil {
-		log.Info("test", "topics bitmap", topicsBitmap.String(), "blockNumbers bitmap", blockNumbers.String())
 		blockNumbers.And(topicsBitmap)
 	}
 
@@ -239,7 +237,6 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			log.Info("test", "getting topic", topic[:])
 			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
 			if err != nil {
 				return nil, err
@@ -249,19 +246,16 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 				continue
 			}
 			bitmapForORing.Or(m)
-			log.Info("test", "current or bitmap inside inner loop:", bitmapForORing.String())
 		}
 
 		if bitmapForORing == nil {
 			continue
 		}
-		log.Info("test", "current or bitmap outside inner loop:", bitmapForORing.String())
 		if result == nil {
 			result = bitmapForORing
 			continue
 		}
 
-		log.Info("test", "current or bitmap:", bitmapForORing.String(), "current result bitmap:", result.String())
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
