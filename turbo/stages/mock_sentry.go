@@ -294,6 +294,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		blockReader,
 		false,
 	)
+
+	mock.sentriesClient.IsMock = true
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)

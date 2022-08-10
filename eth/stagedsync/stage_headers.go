@@ -844,10 +844,13 @@ Loop:
 			return err
 		}
 
-		announces := cfg.hd.GrabAnnounces()
-		if len(announces) > 0 {
-			cfg.announceNewHashes(ctx, announces)
+		if test {
+			announces := cfg.hd.GrabAnnounces()
+			if len(announces) > 0 {
+				cfg.announceNewHashes(ctx, announces)
+			}
 		}
+
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
