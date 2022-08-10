@@ -13,7 +13,7 @@ import (
 type LogsFilterAggregator struct {
 	aggLogsFilter  LogsFilter                // Aggregation of all current log filters
 	logsFilters    map[LogsSubID]*LogsFilter // Filter for each subscriber, keyed by filterID
-	logsFilterLock sync.Mutex
+	logsFilterLock sync.RWMutex
 	nextFilterId   LogsSubID
 }
 
@@ -95,8 +95,8 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 }
 
 func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.Hash]int) {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
 
 	addresses := make(map[common.Address]int)
 	for k, v := range a.aggLogsFilter.addrs {
