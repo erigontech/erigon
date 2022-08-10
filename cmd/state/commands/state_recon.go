@@ -542,6 +542,12 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	var brwTx kv.RwTx
+	defer func() {
+		if brwTx != nil {
+			brwTx.Rollback()
+		}
+	}()
 	doneCount = 0
 	accountCollectors := make([]*etl.Collector, workerCount)
 	accountCollectorsX := make([]*etl.Collector, workerCount)
@@ -549,7 +555,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		fillWorkers[i].ResetProgress()
 		accountCollectors[i] = etl.NewCollector("account scan", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		accountCollectorsX[i] = etl.NewCollector("account scan X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		go fillWorkers[i].bitmapAccounts(accountCollectors[i], accountCollectors[i])
+		go fillWorkers[i].bitmapAccounts(accountCollectors[i], accountCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		select {
@@ -568,6 +574,50 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 	}
+	accountCollector := etl.NewCollector("account scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	for i := 0; i < workerCount; i++ {
+		if err = accountCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return accountCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		accountCollectors[i].Close()
+		accountCollectors[i] = nil
+		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return accountCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		accountCollectorsX[i].Close()
+		accountCollectorsX[i] = nil
+	}
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+		return err
+	}
+	if err = accountCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.BAccount, k[:8], k[8:])
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err = brwTx.Commit(); err != nil {
+		return err
+	}
+	accountCollector.Close()
+	accountCollector = nil
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+		return err
+	}
+	if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.XAccount, k, v)
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err = brwTx.Commit(); err != nil {
+		return err
+	}
+	accountCollectorX.Close()
+	accountCollectorX = nil
 	doneCount = 0
 	storageCollectors := make([]*etl.Collector, workerCount)
 	storageCollectorsX := make([]*etl.Collector, workerCount)
@@ -594,6 +644,50 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 	}
+	storageCollector := etl.NewCollector("storage scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	for i := 0; i < workerCount; i++ {
+		if err = storageCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return storageCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		storageCollectors[i].Close()
+		storageCollectors[i] = nil
+		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return storageCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		storageCollectorsX[i].Close()
+		storageCollectorsX[i] = nil
+	}
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+		return err
+	}
+	if err = storageCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.BStorage, k[:8], k[8:])
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err = brwTx.Commit(); err != nil {
+		return err
+	}
+	storageCollector.Close()
+	storageCollector = nil
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+		return err
+	}
+	if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return brwTx.Put(kv.XStorage, k, v)
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err = brwTx.Commit(); err != nil {
+		return err
+	}
+	storageCollectorX.Close()
+	storageCollectorX = nil
 	doneCount = 0
 	codeCollectors := make([]*etl.Collector, workerCount)
 	codeCollectorsX := make([]*etl.Collector, workerCount)
@@ -620,100 +714,52 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 	}
-	accountCollector := etl.NewCollector("account scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	storageCollector := etl.NewCollector("storage scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollector := etl.NewCollector("code scan total", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollectorX := etl.NewCollector("code scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(&fillWorkers[i].bitmap)
-		if err = accountCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return accountCollector.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		accountCollectors[i].Close()
-		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return accountCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		accountCollectorsX[i].Close()
-		if err = storageCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return storageCollector.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		storageCollectors[i].Close()
-		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return storageCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		storageCollectorsX[i].Close()
 		if err = codeCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return codeCollector.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollectors[i].Close()
+		codeCollectors[i] = nil
 		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return codeCollectorX.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollectorsX[i].Close()
+		codeCollectorsX[i] = nil
 	}
-	brwTx, err := bdb.BeginRw(ctx)
-	if err != nil {
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
 		return err
 	}
-	defer func() {
-		if brwTx != nil {
-			brwTx.Rollback()
-		}
-	}()
-	if err = accountCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.BAccount, k[:8], k[8:])
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	accountCollector.Close()
-	if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.XAccount, k, v)
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	accountCollectorX.Close()
-	if err = storageCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.BStorage, k[:8], k[8:])
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	storageCollector.Close()
-	if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.XStorage, k, v)
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	storageCollectorX.Close()
 	if err = codeCollector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return brwTx.Put(kv.BCode, k[:8], k[8:])
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
+	if err = brwTx.Commit(); err != nil {
+		return err
+	}
 	codeCollector.Close()
+	codeCollector = nil
+	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+		return err
+	}
 	if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		return brwTx.Put(kv.XCode, k, v)
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
-	codeCollectorX.Close()
 	if err = brwTx.Commit(); err != nil {
 		return err
 	}
+	codeCollectorX.Close()
+	codeCollectorX = nil
 	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker, workerCount)
