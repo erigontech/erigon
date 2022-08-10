@@ -401,22 +401,31 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+
+	addresses, topics := ff.logsSubs.getAggMaps()
+
+	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
-	for topic := range ff.logsSubs.aggLogsFilter.topics {
+	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	loaded := ff.logsRequestor.Load()
+
+	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
 			log.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
 		}
 	}
+
 	return id
+}
+
+func (ff *Filters) loadLogsRequester() any {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	return ff.logsRequestor.Load()
 }
 
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
@@ -425,25 +434,32 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
 	}
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+
+	addresses, topics := ff.logsSubs.getAggMaps()
+
+	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
-	for topic := range ff.logsSubs.aggLogsFilter.topics {
+	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	loaded := ff.logsRequestor.Load()
+	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
 			log.Warn("Could not update remote logs filter", "err", err)
 			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
 	}
+
+	ff.deleteLogStore(id)
+
+	return isDeleted
+}
+
+func (ff *Filters) deleteLogStore(id LogsSubID) {
 	ff.storeMu.Lock()
 	defer ff.storeMu.Unlock()
 	delete(ff.logsStores, id)
-	return isDeleted
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
