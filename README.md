@@ -196,7 +196,7 @@ where `<erigon address>` is either `localhost` or the IP address of the device r
 
 ### Multiple Instances / One Machine
 
-Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
+Define 6 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr --authrpc.port`. Example of multiple chains on the same machine:
 
 ```
 # mainnet
