@@ -83,15 +83,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
-		if number == nil {
+		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = *number
-		end = *number
+		begin = header.Number.Uint64()
+		end = header.Number.Uint64()
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -119,11 +122,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
-
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
+
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
@@ -252,6 +255,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			result = bitmapForORing
 			continue
 		}
+
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
