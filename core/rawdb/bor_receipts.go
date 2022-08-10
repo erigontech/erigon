@@ -98,19 +98,20 @@ func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txI
 // WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync recipt and log).
 func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage, idx uint32) error {
 	// Convert the bor receipt into their storage form and serialize them
+
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	bytes, err := rlp.EncodeToBytes(borReceipt)
+	cbor.Marshal(buf, borReceipt.Logs)
+	if err := tx.Append(kv.Log, dbutils.LogKey(number, idx), buf.Bytes()); err != nil {
+		return err
+	}
+
+	buf.Reset()
+	err := cbor.Marshal(buf, borReceipt)
 	if err != nil {
 		return err
 	}
-
 	// Store the flattened receipt slice
-	if err := tx.Append(kv.BorReceipts, borReceiptKey(number), bytes); err != nil {
-		return err
-	}
-
-	cbor.Marshal(buf, borReceipt.Logs)
-	if err := tx.Append(kv.Log, dbutils.LogKey(number, idx), buf.Bytes()); err != nil {
+	if err := tx.Append(kv.BorReceipts, borReceiptKey(number), buf.Bytes()); err != nil {
 		return err
 	}
 
