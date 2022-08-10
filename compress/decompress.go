@@ -237,7 +237,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	if depth == depths[0] {
 		p := poss[0]
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pos=%d\n", depth, maxDepth, code, bits, p)
-		if table.bitLen == int(bits) {
+		if table.bitLen == bits {
 			table.pos[code] = p
 			table.lens[code] = byte(bits)
 			table.ptrs[code] = nil

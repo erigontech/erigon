@@ -377,7 +377,7 @@ func FuzzDelete(f *testing.F) {
 		bytesReader2 := bytes.NewReader(input2)
 		keysToDelete := keyFactory.NewUniqueKeys(bufio.NewReader(bytesReader2))
 		//fmt.Printf("kvStatePairs=%v keysToDelete=%v\n", kvStatePairs, keysToDelete)
-		require.True(t, sort.IsSorted(Keys(keysToDelete)), "keysToDelete is not sorted")
+		require.True(t, sort.IsSorted(keysToDelete), "keysToDelete is not sorted")
 		tree1 := NewTree23(kvStatePairs)
 		//tree1.GraphAndPicture("fuzz_tree_delete1")
 		require23Tree(t, tree1, nil, input1, input2)
