@@ -200,11 +200,11 @@ Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port 
 
 ```
 # mainnet
-./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --authrpc.port=8551 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
 # rinkeby
-./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --authrpc.port=8552 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
