@@ -3,6 +3,7 @@ package bitmapdb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 
 	"github.com/RoaringBitmap/roaring"
