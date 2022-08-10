@@ -466,6 +466,12 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
+				{
+					Number: segments[0].Number,
+					Hash:   segments[0].Hash,
+				},
+			})
 			cs.Hd.ProcessHeaders(segments, true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
