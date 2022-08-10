@@ -651,6 +651,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	for _, sh := range csHeaders {
 		header := sh.Header
 		headerHash := sh.Hash
+
 		if headerHash != hd.posAnchor.parentHash {
 			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
 				log.Info("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
@@ -1006,10 +1007,6 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 		// Lock is acquired for every invocation of ProcessHeader
 		if hd.ProcessHeader(sh, newBlock, peerID) {
 			requestMore = true
-		}
-		// Gossip small amount of blocks
-		if len(csHeaders) <= 15 {
-			hd.SaveExternalAnnounce(sh.Hash)
 		}
 	}
 	hd.lock.Lock()
