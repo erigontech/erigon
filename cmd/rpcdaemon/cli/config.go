@@ -284,7 +284,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		borDb = borKv
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
-			panic(1)
 			stateCache = kvcache.New(cfg.StateCache)
 		} else {
 			stateCache = kvcache.NewDummy()
