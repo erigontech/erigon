@@ -467,12 +467,13 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	workerCount := runtime.NumCPU()
+	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
 	bdb, err := kv2.NewMDBX(logger).Path(bmapPath).RoTxsLimiter(limiterB).WriteMap().Open()
 	if err != nil {
 		return err
 	}
-	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	limiter := semaphore.NewWeighted(int64(workerCount + 1))
 	chainDbPath := path.Join(datadir, "chaindata")
 	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
 	if err != nil {
@@ -517,7 +518,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	blockNum = block + 1
 	txNum := txNums[blockNum-1]
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
-	workerCount := runtime.NumCPU()
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)
 	rs := state.NewReconState(workCh)
@@ -783,7 +783,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
-		if broTxs[i], err = db.BeginRo(ctx); err != nil {
+		if broTxs[i], err = bdb.BeginRo(ctx); err != nil {
 			return err
 		}
 		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
