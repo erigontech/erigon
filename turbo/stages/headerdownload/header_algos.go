@@ -159,7 +159,7 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
 	}
-	var toRemove []*Link = []*Link{link}
+	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
@@ -599,7 +599,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
 func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
-	var more bool = true
+	var more = true
 	var err error
 	var force bool
 	var blocksToTTD uint64
