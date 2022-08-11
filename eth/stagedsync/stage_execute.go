@@ -146,12 +146,15 @@ func executeBlock(
 	}
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.ReceiptForStorage
+	val := params.Eth2DeployBlockNumber(cfg.chainConfig)
 
-	if writeReceipts {
-		if blockNum >= params.Eth2DeployBlockNumber(cfg.chainConfig) {
-			if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
-				return err
-			}
+	if val == nil {
+		return nil
+	}
+
+	if writeReceipts || blockNum >= *val {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+			return err
 		}
 
 		if stateSyncReceipt != nil {
@@ -589,6 +592,9 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	blockNum := params.Eth2DeployBlockNumber(cfg.chainConfig)
+	if blockNum == nil {
+		return nil
+	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -602,6 +608,9 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
+		if s.ForwardProgress >= *blockNum {
+			s.ForwardProgress = *blockNum
+		}
 		if err = rawdb.PruneTableDupSort(tx, kv.AccountChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
@@ -610,7 +619,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	if cfg.prune.Receipts.Enabled() && blockNum > s.ForwardProgress {
+	if cfg.prune.Receipts.Enabled() {
+
 		if err = rawdb.PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}

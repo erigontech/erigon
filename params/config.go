@@ -926,21 +926,26 @@ func NetworkIDByChainName(chain string) uint64 {
 	}
 }
 
-func Eth2DeployBlockNumber(c *ChainConfig) uint64 {
+func Eth2DeployBlockNumber(c *ChainConfig) *uint64 {
 	ropsten := uint64(3)
 	sepolia := uint64(11155111)
 	mainnet := uint64(1)
 	goerli := uint64(5)
 
+	var ropNum *uint64 = new(uint64)
+	var blockNum uint64
 	switch c.ChainID.Uint64() {
 	case ropsten:
-		return 12269949
+		blockNum = uint64(12269949)
 	case sepolia:
-		return 1273020
+		blockNum = uint64(1273020)
 	case mainnet:
-		return 11052984
+		blockNum = uint64(11052984)
 	case goerli:
-		return 4367322
+		blockNum = uint64(4367322)
+	default:
+		return nil
 	}
-	return 0
+	ropNum = &blockNum
+	return ropNum
 }

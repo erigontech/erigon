@@ -69,6 +69,10 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	blockNum := params.Eth2DeployBlockNumber(chainConfig)
+	if blockNum == nil {
+		return nil
+	}
+
 	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
@@ -88,7 +92,10 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 
 	startBlock := s.BlockNumber
 	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
-	if pruneTo >= blockNum && startBlock < pruneTo {
+	if pruneTo > *blockNum {
+		pruneTo = *blockNum
+	}
+	if startBlock < pruneTo {
 		startBlock = pruneTo
 	}
 	if startBlock > 0 {
@@ -422,11 +429,17 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	blockNum := params.Eth2DeployBlockNumber(chainConfig)
+	if blockNum == nil {
+		return nil
+	}
+
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if pruneTo >= blockNum {
-		if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
-			return err
-		}
+	if pruneTo >= *blockNum {
+		pruneTo = *blockNum
+	}
+
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
 	}
 	if err = s.Done(tx); err != nil {
 		return err
