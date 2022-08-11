@@ -160,13 +160,30 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	}
 	defer agg.Close()
 
-	workerCount := workers
+	var blockNum uint64
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
+		workerCount := workers
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
 		if err != nil {
 			return err
 		}
 		if err := exec22.Exec22(ctx, execStage, block, workerCount, db, chainDb, tx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+			return err
+		}
+		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
+		if err != nil {
+			return err
+		}
+		blockNum = execStage.BlockNumber
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = rs.Flush(tx); err != nil {
+			return err
+		}
+		if err = execStage.Update(tx, blockNum); err != nil {
 			return err
 		}
 		return nil

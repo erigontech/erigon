@@ -282,12 +282,6 @@ loop:
 	for i := 0; i < len(reconWorkers); i++ {
 		reconWorkers[i].ResetTx(nil, nil)
 	}
-	if err = rs.Flush(tx); err != nil {
-		return err
-	}
-	if err = execStage.Update(tx, blockNum); err != nil {
-		return err
-	}
 	return nil
 }
 
