@@ -137,26 +137,29 @@ func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accoun
 }
 
 func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, noState, err := hr.ac.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
+	if cap(hr.composite) < 20+32 {
+		hr.composite = make([]byte, 20+32)
+	} else {
+		hr.composite = hr.composite[:20+32]
+	}
+	copy(hr.composite, address.Bytes())
+	copy(hr.composite[20:], key[:])
+	txKey, err := hr.broTx.GetOne(kv.XStorage, hr.composite[:])
 	if err != nil {
 		return nil, err
 	}
-	if !noState {
-		if cap(hr.composite) < 20+32 {
-			hr.composite = make([]byte, 20+32)
-		} else {
-			hr.composite = hr.composite[:20+32]
-		}
-		copy(hr.composite, address.Bytes())
-		copy(hr.composite[20:], key[:])
-		txKey, err := hr.broTx.GetOne(kv.XStorage, hr.composite[:])
-		if err != nil {
+	if txKey == nil {
+		return nil, nil
+	}
+	stateTxNum := binary.BigEndian.Uint64(txKey)
+	var enc []byte
+	noState := false
+	if stateTxNum >= hr.txNum {
+		if enc, noState, err = hr.ac.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum); err != nil {
 			return nil, err
 		}
-		if txKey == nil {
-			return nil, nil
-		}
-		stateTxNum := binary.BigEndian.Uint64(txKey)
+	}
+	if !noState {
 		if !hr.rs.Done(stateTxNum) {
 			hr.readError = true
 			hr.stateTxNum = stateTxNum
