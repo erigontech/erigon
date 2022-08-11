@@ -96,11 +96,11 @@ func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txI
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync recipt and log).
-func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage, idx uint32) error {
+func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage) error {
 	// Convert the bor receipt into their storage form and serialize them
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	cbor.Marshal(buf, borReceipt.Logs)
-	if err := tx.Append(kv.Log, dbutils.LogKey(number, idx), buf.Bytes()); err != nil {
+	if err := tx.Append(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex)), buf.Bytes()); err != nil {
 		return err
 	}
 
