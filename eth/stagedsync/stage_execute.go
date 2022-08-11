@@ -6,15 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -32,11 +37,14 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -49,6 +57,10 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
+type WithSnapshots interface {
+	Snapshots() *snapshotsync.RoSnapshots
+}
+
 type ExecuteBlockCfg struct {
 	db            kv.RwDB
 	batchSize     datasize.ByteSize
@@ -58,11 +70,14 @@ type ExecuteBlockCfg struct {
 	engine        consensus.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
-	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
+
+	dirs    datadir.Dirs
+	exec22  bool
+	genesis *core.Genesis
 }
 
 func StageExecuteBlocksCfg(
@@ -76,9 +91,10 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
-	tmpdir string,
+	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
+	genesis *core.Genesis,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -88,12 +104,13 @@ func StageExecuteBlocksCfg(
 		chainConfig:   chainConfig,
 		engine:        engine,
 		vmConfig:      vmConfig,
-		tmpdir:        tmpdir,
+		dirs:          dirs,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
 		badBlockHalt:  badBlockHalt,
 		blockReader:   blockReader,
 		hd:            hd,
+		genesis:       genesis,
 	}
 }
 
@@ -203,7 +220,60 @@ func newStateReaderWriter(
 	return stateReader, stateWriter, nil
 }
 
+func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
+
+	// Compute mapping blockNum -> last TxNum in that block
+	// TODO: support incremental mapping
+	maxBlockNum := allSnapshots.BlocksAvailable() + 1
+	txNums := make([]uint64, maxBlockNum)
+	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+		for _, b := range bs {
+			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+				txNums[blockNum] = baseTxNum + txAmount
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+	}
+
+	reconDbPath := path.Join(cfg.dirs.DataDir, "db22")
+	if dir.Exist(reconDbPath) {
+		if err = os.RemoveAll(reconDbPath); err != nil {
+			return err
+		}
+	}
+	dir.MustExist(reconDbPath)
+	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiter).Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	rs := state.NewState22()
+	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+
+	return Exec22(ctx, s, s.BlockNumber+1, 1, db, cfg.db, tx, rs,
+		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
+		toBlock,
+		cfg.chainConfig, cfg.genesis, initialCycle)
+}
+
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	if cfg.exec22 {
+		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
+	}
+
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -240,7 +310,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 
 	defer batch.Rollback()
 	// changes are stored through memory buffer
@@ -337,7 +407,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -461,7 +531,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	changes := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer changes.Close()
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {

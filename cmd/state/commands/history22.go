@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -70,7 +71,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -103,7 +104,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
