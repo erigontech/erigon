@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -148,10 +149,10 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	if err != nil {
 		return nil, err
 	}
-	if txKey == nil {
-		return nil, nil
+	var stateTxNum uint64 = math.MaxUint64
+	if txKey != nil {
+		stateTxNum = binary.BigEndian.Uint64(txKey)
 	}
-	stateTxNum := binary.BigEndian.Uint64(txKey)
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
