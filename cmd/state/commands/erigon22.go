@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -69,8 +68,8 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	var err error
+	dirs := datadir2.New(datadir)
 	ctx := context.Background()
-	tmpDir := filepath.Join(datadir, "tmp")
 	reconDbPath := path.Join(datadir, "db22")
 	if reset && dir.Exist(reconDbPath) {
 		if err = os.RemoveAll(reconDbPath); err != nil {
@@ -90,7 +89,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -151,7 +150,7 @@ func Erigon22(genesis *core.Genesis, logger log.Logger) error {
 	}
 
 	rs := state.NewState22()
-	aggDir := path.Join(datadir, "agg22")
+	aggDir := path.Join(dirs.DataDir, "agg22")
 	if reset && dir.Exist(aggDir) {
 		if err = os.RemoveAll(aggDir); err != nil {
 			return err
@@ -427,7 +426,6 @@ loop:
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		log.Info("Transaction replay complete", "duration", time.Since(startTime))
 		log.Info("Computing hashed state")
-		tmpDir := filepath.Join(datadir, "tmp")
 		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
 			return err
 		}
@@ -437,7 +435,7 @@ loop:
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs.Tmp), ctx); err != nil {
 			return err
 		}
 		return nil
@@ -446,7 +444,7 @@ loop:
 	}
 	var rootHash common.Hash
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
 		return nil
