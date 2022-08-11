@@ -822,7 +822,6 @@ func printBucket(chaindata string, bucket string) {
 
 		c, err := tx.Cursor(bucket)
 		if err != nil {
-			panic(err)
 			return err
 		}
 
