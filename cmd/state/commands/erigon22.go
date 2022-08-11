@@ -67,7 +67,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	}()
 	ctx = context.Background()
 	var err error
-	tmpDir := filepath.Join(datadir, "tmp")
+	dirs := datadir2.New(datadir)
 	reconDbPath := path.Join(datadir, "db22")
 	if reset && dir.Exist(reconDbPath) {
 		if err = os.RemoveAll(reconDbPath); err != nil {
@@ -87,7 +87,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -196,7 +196,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	}
 	var rootHash common.Hash
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
 		return nil
