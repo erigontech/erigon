@@ -174,11 +174,6 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		return err
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		log.Info("Transaction replay complete", "duration", time.Since(startTime))
 		log.Info("Computing hashed state")
 		tmpDir := filepath.Join(datadir, "tmp")
