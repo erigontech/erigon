@@ -638,7 +638,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
 	must(sync.SetCurrentStage(stages.Execution))
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
+	dirs := datadir.New(datadirCli)
 
 	if reset {
 		genesis, _ := genesisByChain(chain)
@@ -668,7 +668,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, tmpdir, getBlockReader(db), nil)
+		/*badBlockHalt=*/ false, dirs, getBlockReader(db), nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -1191,7 +1191,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, tmpdir, &stagedsync.Notifications{}, nil, allSn, nil, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, nil)
 	if err != nil {
 		panic(err)
 	}

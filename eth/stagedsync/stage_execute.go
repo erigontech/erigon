@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -58,11 +59,11 @@ type ExecuteBlockCfg struct {
 	engine        consensus.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
-	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
+	dirs          datadir.Dirs
 }
 
 func StageExecuteBlocksCfg(
@@ -76,7 +77,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
-	tmpdir string,
+	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 ) ExecuteBlockCfg {
@@ -88,7 +89,7 @@ func StageExecuteBlocksCfg(
 		chainConfig:   chainConfig,
 		engine:        engine,
 		vmConfig:      vmConfig,
-		tmpdir:        tmpdir,
+		dirs:          dirs,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
 		badBlockHalt:  badBlockHalt,
@@ -153,7 +154,8 @@ func executeBlock(
 		}
 
 		if stateSyncReceipt != nil {
-			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+			stateSyncIdx := uint32(len(receipts))
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt, stateSyncIdx); err != nil {
 				return err
 			}
 		}
@@ -240,7 +242,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 
 	defer batch.Rollback()
 	// changes are stored through memory buffer
@@ -337,7 +339,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -461,7 +463,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	changes := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer changes.Close()
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
