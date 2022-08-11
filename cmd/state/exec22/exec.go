@@ -50,6 +50,8 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 				applyTx.Rollback()
 			}
 		}()
+	}
+	if !parallel {
 		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
