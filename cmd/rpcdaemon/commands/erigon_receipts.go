@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -196,14 +197,6 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			log.TxHash = body.Transactions[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
-
-		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
-		if borLogs != nil {
-			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
-			if len(borLogs) > 0 {
-				logs = append(logs, borLogs...)
-			}
-		}
 	}
 
 	return logs, nil
