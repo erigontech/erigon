@@ -272,6 +272,12 @@ loop:
 		default:
 		}
 	}
+	if err = rs.Flush(applyTx); err != nil {
+		return err
+	}
+	if err = execStage.Update(applyTx, blockNum); err != nil {
+		return err
+	}
 	if parallel {
 		wg.Wait()
 	} else {
