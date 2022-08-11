@@ -79,29 +79,12 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 	return borReceipt
 }
 
-// ReadBorReceiptLogs retrieves all the bor block receipt logs belonging to a block.
-// If it is unable to populate these metadata fields then nil is returned.
-func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) []*types.Log {
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	borReceipt := ReadRawBorReceipt(db, blockHash, blockNumber)
-	if borReceipt == nil {
-		return nil
-	}
-
-	borLogs := borReceipt.Logs
-
-	types.DeriveFieldsForBorLogs(borLogs, blockHash, blockNumber, txIndex, logIndex)
-
-	return borLogs
-}
-
 // WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync recipt and log).
-func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage, idx uint32) error {
+func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage) error {
 	// Convert the bor receipt into their storage form and serialize them
-
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	cbor.Marshal(buf, borReceipt.Logs)
-	if err := tx.Append(kv.Log, dbutils.LogKey(number, idx), buf.Bytes()); err != nil {
+	if err := tx.Append(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex)), buf.Bytes()); err != nil {
 		return err
 	}
 

@@ -170,8 +170,7 @@ func executeBlock(
 		}
 
 		if stateSyncReceipt != nil {
-			stateSyncIdx := uint32(len(receipts))
-			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt, stateSyncIdx); err != nil {
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
 		}
