@@ -100,7 +100,7 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(rs, rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(rs, &rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -326,7 +326,7 @@ type Progress struct {
 func NewProgress(prevOutputBlockNum uint64) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum}
 }
-func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+func (p *Progress) Log(rs *state.State22, rws *state.TxTaskQueue, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
