@@ -144,7 +144,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 		hr.composite = hr.composite[:20+32]
 	}
 	copy(hr.composite, address.Bytes())
-	copy(hr.composite[20:], key[:])
+	copy(hr.composite[20:], key.Bytes())
 	txKey, err := hr.broTx.GetOne(kv.XStorage, hr.composite[:])
 	if err != nil {
 		return nil, err
@@ -161,6 +161,9 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 		}
 	}
 	if !noState {
+		if txKey == nil {
+			return nil, nil
+		}
 		if !hr.rs.Done(stateTxNum) {
 			hr.readError = true
 			hr.stateTxNum = stateTxNum
