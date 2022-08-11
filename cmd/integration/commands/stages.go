@@ -1187,6 +1187,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		ethconfig.Defaults.Sync,
 		br,
 		false,
+		nil,
 	)
 	if err != nil {
 		panic(err)
