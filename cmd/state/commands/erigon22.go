@@ -65,7 +65,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		<-sigs
 		cancel()
 	}()
-	ctx := context.Background()
+	ctx = context.Background()
 	var err error
 	tmpDir := filepath.Join(datadir, "tmp")
 	reconDbPath := path.Join(datadir, "db22")
