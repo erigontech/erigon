@@ -26,7 +26,7 @@ import (
 const logInterval = 30 * time.Second // time period to print aggregation stat to log
 
 func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64, workerCount int,
-	db kv.RwDB, chainDb kv.RwDB, tx kv.RwTx,
+	db kv.RwDB, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64,
@@ -36,11 +36,11 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	parallel := workerCount > 1 && initialCycle
 	var lock sync.RWMutex
 	queueSize := workerCount * 4
-	var applyTx kv.RwTx
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	if !parallel {
+	useExternalTx := applyTx != nil
+	if !parallel && !useExternalTx {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -73,7 +73,7 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums[len(txNums)-1]
-	if workerCount > 1 {
+	if parallel {
 		go func() {
 			defer func() {
 				if applyTx != nil {
@@ -275,8 +275,10 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
-		if err = applyTx.Commit(); err != nil {
-			return err
+		if !useExternalTx {
+			if err = applyTx.Commit(); err != nil {
+				return err
+			}
 		}
 	}
 	for i := 0; i < len(reconWorkers); i++ {

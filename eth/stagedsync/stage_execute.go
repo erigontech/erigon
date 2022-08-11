@@ -230,6 +230,10 @@ func executeBlocks22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx 
 	return nil
 }
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	if cfg.exec22 {
+		return executeBlocks22(s, u, tx, toBlock, ctx, cfg, initialCycle)
+	}
+
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -238,10 +242,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 			return err
 		}
 		defer tx.Rollback()
-	}
-
-	if cfg.exec22 {
-		return executeBlocks22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
 
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
