@@ -9,7 +9,7 @@ import (
 // registered services, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
-	DataDir         string
+	DataDir         string // usually is a root of all other dirs, but user may mount/symlink any sub-dir
 	RelativeDataDir string // like dataDir, but without filepath.Abs() resolution
 	Chaindata       string
 	Tmp             string

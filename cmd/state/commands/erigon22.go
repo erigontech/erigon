@@ -128,7 +128,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		if err != nil {
 			return err
 		}
-		if err := exec22.Exec22(ctx, execStage, block, workerCount, db, chainDb, tx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis); err != nil {
+		if err := exec22.Exec22(ctx, execStage, block, workerCount, db, chainDb, tx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 			return err
 		}
 		return nil

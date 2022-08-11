@@ -31,14 +31,16 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	txNums []uint64, logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64,
 	chainConfig *params.ChainConfig, genesis *core.Genesis,
+	initialCycle bool,
 ) (err error) {
+	parallel := workerCount > 1 && initialCycle
 	var lock sync.RWMutex
 	queueSize := workerCount * 4
 	var applyTx kv.RwTx
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	if workerCount <= 1 {
+	if !parallel {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -189,7 +191,7 @@ loop:
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			if workerCount > 1 {
+			if parallel {
 				func() {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -213,15 +215,15 @@ loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if workerCount > 1 {
+				if parallel {
 					if ok := rs.RegisterSender(txTask); ok {
 						rs.AddWork(txTask)
 					}
 				}
-			} else if workerCount > 1 {
+			} else if parallel {
 				rs.AddWork(txTask)
 			}
-			if workerCount == 1 {
+			if !parallel {
 				count++
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
@@ -270,10 +272,9 @@ loop:
 		default:
 		}
 	}
-	if workerCount > 1 {
+	if parallel {
 		wg.Wait()
-	}
-	if workerCount <= 0 {
+	} else {
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
