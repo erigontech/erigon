@@ -64,6 +64,7 @@ type ExecuteBlockCfg struct {
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
 	dirs          datadir.Dirs
+	genesis       *core.Genesis
 }
 
 func StageExecuteBlocksCfg(
@@ -80,6 +81,7 @@ func StageExecuteBlocksCfg(
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
+	genesis *core.Genesis,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -95,6 +97,7 @@ func StageExecuteBlocksCfg(
 		badBlockHalt:  badBlockHalt,
 		blockReader:   blockReader,
 		hd:            hd,
+		genesis:       genesis,
 	}
 }
 

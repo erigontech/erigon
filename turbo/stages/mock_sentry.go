@@ -58,6 +58,7 @@ type MockSentry struct {
 	DB             kv.RwDB
 	dirs           datadir.Dirs
 	Engine         consensus.Engine
+	gspec          *core.Genesis
 	ChainConfig    *params.ChainConfig
 	Sync           *stagedsync.Sync
 	MiningSync     *stagedsync.Sync
@@ -205,6 +206,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Log:         log.New(),
 		dirs:        dirs,
 		Engine:      engine,
+		gspec:       gspec,
 		ChainConfig: gspec.Config,
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
@@ -340,6 +342,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				dirs,
 				blockReader,
 				mock.sentriesClient.Hd,
+				mock.gspec,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
 			stagedsync.StageHashStateCfg(mock.DB, mock.dirs.Tmp),
