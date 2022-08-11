@@ -60,11 +60,12 @@ var erigon22Cmd = &cobra.Command{
 func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	ctx, cancel := context.WithCancel(ctx)
+	execCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		<-sigs
 		cancel()
 	}()
+	ctx := context.Background()
 	var err error
 	tmpDir := filepath.Join(datadir, "tmp")
 	reconDbPath := path.Join(datadir, "db22")
@@ -166,7 +167,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		if err != nil {
 			return err
 		}
-		if err := exec22.Exec22(ctx, execStage, block, workerCount, db, chainDb, tx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+		if err := exec22.Exec22(execCtx, execStage, block, workerCount, db, chainDb, tx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 			return err
 		}
 		return nil
