@@ -33,6 +33,12 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	chainConfig *params.ChainConfig, genesis *core.Genesis,
 	initialCycle bool,
 ) (err error) {
+	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
+	// too keep consistency
+	// will improve it in future versions
+	interruptCh := ctx.Done()
+	ctx = context.Background()
+
 	parallel := workerCount > 1 && initialCycle
 	var lock sync.RWMutex
 	queueSize := workerCount * 4
@@ -267,7 +273,7 @@ loop:
 		}
 		// Check for interrupts
 		select {
-		case <-ctx.Done():
+		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum+1))
 			atomic.StoreUint64(&maxTxNum, inputTxNum)
 			break loop
