@@ -1032,6 +1032,21 @@ func (hd *HeaderDownload) ExtractStats() Stats {
 	return s
 }
 
+func (hd *HeaderDownload) FirstPoSHeight() *uint64 {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.firstSeenHeightPoS
+}
+
+func (hd *HeaderDownload) SetFirstPoSHeight(blockHeight uint64) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	if hd.firstSeenHeightPoS == nil {
+		hd.firstSeenHeightPoS = new(uint64)
+		*hd.firstSeenHeightPoS = blockHeight
+	}
+}
+
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
