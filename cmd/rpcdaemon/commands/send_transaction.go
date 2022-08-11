@@ -61,7 +61,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	txnChainId := txn.GetChainID()
-	chainId := api._chainConfig.ChainID
+	chainId := cc.ChainID
 
 	if chainId.Cmp(txnChainId.ToBig()) != 0 {
 		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
