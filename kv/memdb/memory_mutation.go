@@ -14,8 +14,8 @@
 package memdb
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -24,12 +24,12 @@ import (
 )
 
 type MemoryMutation struct {
-	// Bucket => Key => Value
-	memTx          kv.RwTx
-	memDb          kv.RwDB
-	deletedEntries map[string]map[string]struct{}
-	clearedTables  map[string]struct{}
-	db             kv.Tx
+	memTx            kv.RwTx
+	memDb            kv.RwDB
+	deletedEntries   map[string]map[string]struct{}
+	clearedTables    map[string]struct{}
+	db               kv.Tx
+	statelessCursors map[string]kv.RwCursor
 }
 
 // NewBatch - starts in-mem batch
@@ -61,6 +61,7 @@ func NewMemoryBatch(tx kv.Tx) *MemoryMutation {
 
 func (m *MemoryMutation) UpdateTxn(tx kv.Tx) {
 	m.db = tx
+	m.statelessCursors = nil
 }
 
 func (m *MemoryMutation) isTableCleared(table string) bool {
@@ -77,17 +78,9 @@ func (m *MemoryMutation) isEntryDeleted(table string, key []byte) bool {
 	return ok
 }
 
-// getMem Retrieve database entry from memory (hashed storage will be left out for now because it is the only non auto-DupSorted table)
-func (m *MemoryMutation) getMem(table string, key []byte) ([]byte, bool) {
-	val, err := m.memTx.GetOne(table, key)
-	if err != nil {
-		panic(err)
-	}
-	return val, val != nil
+func (m *MemoryMutation) DBSize() (uint64, error) {
+	panic("not implemented")
 }
-
-func (m *MemoryMutation) DBSize() (uint64, error) { return 0, nil }
-func (m *MemoryMutation) PageSize() uint64        { return 0 }
 
 func initSequences(db kv.Tx, memTx kv.RwTx) error {
 	cursor, err := db.Cursor(kv.Sequence)
@@ -114,54 +107,51 @@ func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 }
 
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
-	cursor, err := m.Cursor(bucket)
+	if amount == 0 {
+		return nil
+	}
+	c, err := m.Cursor(bucket)
 	if err != nil {
 		return err
 	}
-	count := uint32(0)
-	for k, v, err := cursor.Seek(prefix); k != nil && count < amount; k, v, err = cursor.Next() {
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil && amount > 0; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		if err := walker(k, v); err != nil {
 			return err
 		}
-		count++
+		amount--
 	}
 	return nil
 }
 
-// Can only be called from the worker thread
-func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
-	if value, ok := m.getMem(table, key); ok {
-		if value == nil {
-			return nil, nil
-		}
-		return value, nil
+func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
+	if m.statelessCursors == nil {
+		m.statelessCursors = make(map[string]kv.RwCursor)
 	}
-	if m.db != nil && !m.isTableCleared(table) && !m.isEntryDeleted(table, key) {
-		// TODO: simplify when tx can no longer be parent of mutation
-		value, err := m.db.GetOne(table, key)
+	c, ok := m.statelessCursors[table]
+	if !ok {
+		var err error
+		c, err = m.RwCursor(table)
 		if err != nil {
 			return nil, err
 		}
-		return value, nil
+		m.statelessCursors[table] = c
 	}
-	return nil, nil
+	return c, nil
 }
 
 // Can only be called from the worker thread
-func (m *MemoryMutation) Get(table string, key []byte) ([]byte, error) {
-	value, err := m.GetOne(table, key)
+func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
+	c, err := m.statelessCursor(table)
 	if err != nil {
 		return nil, err
 	}
-
-	if value == nil {
-		return nil, fmt.Errorf("Get: key not found.")
-	}
-
-	return value, nil
+	_, v, err := c.SeekExact(key)
+	return v, err
 }
 
 func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
@@ -170,16 +160,17 @@ func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
 
 // Has return whether a key is present in a certain table.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
-	if _, ok := m.getMem(table, key); ok {
-		return ok, nil
+	c, err := m.statelessCursor(table)
+	if err != nil {
+		return false, err
 	}
-	if m.db != nil {
-		return m.db.Has(table, key)
+	k, _, err := c.Seek(key)
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	return bytes.Equal(key, k), nil
 }
 
-// Put insert a new entry in the database, if it is hashed storage it will add it to a slice instead of a map.
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
 	return m.memTx.Put(table, k, v)
 }
@@ -189,21 +180,50 @@ func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
 }
 
 func (m *MemoryMutation) AppendDup(table string, key []byte, value []byte) error {
-	return m.Put(table, key, value)
-}
-
-func (m *MemoryMutation) BatchSize() int {
-	return 0
+	c, err := m.statelessCursor(table)
+	if err != nil {
+		return err
+	}
+	return c.(*memoryMutationCursor).AppendDup(key, value)
 }
 
 func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.ForEach(bucket, fromPrefix, walker)
+	c, err := m.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.ForPrefix(bucket, prefix, walker)
+	c, err := m.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *MemoryMutation) Delete(table string, k []byte) error {
@@ -215,26 +235,22 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 }
 
 func (m *MemoryMutation) Commit() error {
+	m.statelessCursors = nil
 	return nil
 }
 
 func (m *MemoryMutation) Rollback() {
 	m.memTx.Rollback()
 	m.memDb.Close()
+	m.statelessCursors = nil
 }
 
 func (m *MemoryMutation) Close() {
 	m.Rollback()
 }
 
-func (m *MemoryMutation) panicOnEmptyDB() {
-	if m.db == nil {
-		panic("Not implemented")
-	}
-}
-
 func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
-	return 0, nil
+	return m.memTx.BucketSize(bucket)
 }
 
 func (m *MemoryMutation) DropBucket(bucket string) error {
@@ -338,18 +354,14 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c.table = bucket
 
 	var err error
-	// Initialize db cursors
-	c.dupCursor, err = m.db.CursorDupSort(bucket)
+	c.cursor, err = m.db.CursorDupSort(bucket)
 	if err != nil {
 		return nil, err
 	}
-	c.cursor = c.dupCursor
-	// Initialize memory cursors
-	c.memDupCursor, err = m.memTx.RwCursorDupSort(bucket)
+	c.memCursor, err = m.memTx.RwCursorDupSort(bucket)
 	if err != nil {
 		return nil, err
 	}
-	c.memCursor = c.memDupCursor
 	c.mutation = m
 	return c, err
 }
