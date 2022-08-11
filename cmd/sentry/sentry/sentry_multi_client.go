@@ -20,6 +20,12 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -31,11 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type sentryMessageStream grpc.ClientStream
@@ -243,6 +244,7 @@ type MultiClient struct {
 	lock        sync.RWMutex
 	Hd          *headerdownload.HeaderDownload
 	Bd          *bodydownload.BodyDownload
+	IsMock      bool
 	nodeName    string
 	sentries    []direct.SentryClient
 	headHeight  uint64
@@ -384,14 +386,15 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
+		hRaw := append([]byte{}, headerRaw...)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
 		}
 		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
 			Header:    header,
-			HeaderRaw: headerRaw,
-			Hash:      types.RawRlpHash(headerRaw),
+			HeaderRaw: hRaw,
+			Hash:      types.RawRlpHash(hRaw),
 			Number:    number,
 		})
 	}
@@ -464,6 +467,15 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			if !cs.IsMock {
+				cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
+					{
+						Number: segments[0].Number,
+						Hash:   segments[0].Hash,
+					},
+				})
+			}
+
 			cs.Hd.ProcessHeaders(segments, true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -500,7 +512,7 @@ func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direc
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

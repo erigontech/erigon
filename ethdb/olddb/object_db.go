@@ -33,7 +33,7 @@ type ObjectDatabase struct {
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
-//Deprecated
+// Deprecated
 func NewObjectDatabase(kv kv.RwDB) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
@@ -41,9 +41,9 @@ func NewObjectDatabase(kv kv.RwDB) *ObjectDatabase {
 }
 
 // Put inserts or updates a single entry.
-func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
+func (db *ObjectDatabase) Put(table string, k, v []byte) error {
 	err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(bucket, key, value)
+		return tx.Put(table, k, v)
 	})
 	return err
 }
@@ -161,10 +161,10 @@ func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k,
 }
 
 // Delete deletes the key from the queue and database
-func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
+func (db *ObjectDatabase) Delete(table string, k []byte) error {
 	// Execute the actual operation
 	err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Delete(bucket, k, v)
+		return tx.Delete(table, k)
 	})
 	return err
 }

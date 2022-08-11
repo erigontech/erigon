@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/holiman/uint256"
 )
 
@@ -101,9 +103,12 @@ type Decoder interface {
 // Note that Decode does not set an input limit for all readers and may be vulnerable to
 // panics cause by huge value sizes. If you need an input limit, use
 //
-//     NewStream(r, limit).Decode(val)
+//	NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, 0)
@@ -115,7 +120,10 @@ func Decode(r io.Reader, val interface{}) error {
 func DecodeBytes(b []byte, val interface{}) error {
 	r := bytes.NewReader(b)
 
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, uint64(len(b)))

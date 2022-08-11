@@ -283,14 +283,23 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
 	)
-	m := stages.MockWithGenesis(nil, gspec, key)
+	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-	transactOpts2 := bind.NewKeyedTransactor(key2)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	if err != nil {
+		panic(err)
+	}
+	transactOpts1, err := bind.NewKeyedTransactorWithChainID(key1, m.ChainConfig.ChainID)
+	if err != nil {
+		panic(err)
+	}
+	transactOpts2, err := bind.NewKeyedTransactorWithChainID(key2, m.ChainConfig.ChainID)
+	if err != nil {
+		panic(err)
+	}
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
@@ -403,7 +412,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	m2 := stages.MockWithGenesis(nil, gspec, key)
+	m2 := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {
@@ -418,7 +427,7 @@ func initialState1() error {
 
 	// BLOCKS
 
-	for i := 0; i < chain.Length; i++ {
+	for i := 0; i < chain.Length(); i++ {
 		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}

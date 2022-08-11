@@ -10,24 +10,20 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-// TenToTheFive - To be used while sorting bor logs
-//
-// Sorted using ( blockNumber * (10 ** 5) + logIndex )
-const TenToTheFive uint64 = 100000
-
-var (
-	// SystemAddress address for system sender
-	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
-)
+const BorTxKeyPrefix string = "matic-bor-receipt-"
 
 // BorReceiptKey =  num (uint64 big endian)
 func BorReceiptKey(number uint64) []byte {
 	return dbutils.EncodeBlockNumber(number)
 }
 
-// GetDerivedBorTxHash get derived tx hash from receipt key
-func GetDerivedBorTxHash(receiptKey []byte) common.Hash {
-	return common.BytesToHash(crypto.Keccak256(receiptKey))
+// ComputeBorTxHash get derived tx hash from block number and hash
+func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
+	txKeyPlain := make([]byte, 0, len(BorTxKeyPrefix)+8+32)
+	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
+	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
+	txKeyPlain = append(txKeyPlain, blockHash.Bytes()...)
+	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
@@ -37,18 +33,15 @@ func NewBorTransaction() *LegacyTx {
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64, receipts Receipts) error {
-	// get derived tx hash
-	borPrefix := []byte("matic-bor-receipt-")
-	// hashing using prefix + number + hash
-	txHash := GetDerivedBorTxHash((append(borPrefix, append(BorReceiptKey(number), hash.Bytes()...)...)))
+func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash common.Hash, blockNumber uint64, receipts Receipts) error {
+	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 
 	// set tx hash and tx index
 	receipt.TxHash = txHash
 	receipt.TransactionIndex = txIndex
-	receipt.BlockHash = hash
-	receipt.BlockNumber = big.NewInt(0).SetUint64(number)
+	receipt.BlockHash = blockHash
+	receipt.BlockNumber = big.NewInt(0).SetUint64(blockNumber)
 
 	logIndex := 0
 	for i := 0; i < len(receipts); i++ {
@@ -57,8 +50,8 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(receipt.Logs); j++ {
-		receipt.Logs[j].BlockNumber = number
-		receipt.Logs[j].BlockHash = hash
+		receipt.Logs[j].BlockNumber = blockNumber
+		receipt.Logs[j].BlockHash = blockHash
 		receipt.Logs[j].TxHash = txHash
 		receipt.Logs[j].TxIndex = txIndex
 		receipt.Logs[j].Index = uint(logIndex)
@@ -69,14 +62,13 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64
 
 // DeriveFieldsForBorLogs fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorLogs(logs []*Log, hash common.Hash, number uint64, txIndex uint, logIndex uint) {
-	// get derived tx hash
-	txHash := GetDerivedBorTxHash(BorReceiptKey(number))
+func DeriveFieldsForBorLogs(logs []*Log, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) {
+	txHash := ComputeBorTxHash(blockNumber, blockHash)
 
 	// the derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(logs); j++ {
-		logs[j].BlockNumber = number
-		logs[j].BlockHash = hash
+		logs[j].BlockNumber = blockNumber
+		logs[j].BlockHash = blockHash
 		logs[j].TxHash = txHash
 		logs[j].TxIndex = txIndex
 		logs[j].Index = logIndex

@@ -12,28 +12,32 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type FinishCfg struct {
-	db     kv.RwDB
-	tmpDir string
-	log    log.Logger
-	headCh chan *types.Block
+	db            kv.RwDB
+	tmpDir        string
+	log           log.Logger
+	headCh        chan *types.Block
+	forkValidator *engineapi.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block, forkValidator *engineapi.ForkValidator) FinishCfg {
 	return FinishCfg{
-		db:     db,
-		log:    logger,
-		tmpDir: tmpDir,
-		headCh: headCh,
+		db:            db,
+		log:           logger,
+		tmpDir:        tmpDir,
+		headCh:        headCh,
+		forkValidator: forkValidator,
 	}
 }
 
@@ -56,11 +60,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	if executionAt <= s.BlockNumber {
 		return nil
 	}
-
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.Update(tx, executionAt)
 	if err != nil {
 		return err
+	}
+	if cfg.forkValidator != nil {
+		cfg.forkValidator.NotifyCurrentHeight(executionAt)
 	}
 
 	if initialCycle {
@@ -146,21 +152,32 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	notifyFrom++
 
-	var notifyTo uint64 = notifyFrom
+	var notifyTo = notifyFrom
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
 		notifyTo = binary.BigEndian.Uint64(k)
-		headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, notifyTo)
+		if err != nil {
+			log.Warn("[Finish] failed checking if header is cannonical")
+		}
+
+		headerHash := common.BytesToHash(k[8:])
+		if canonicalHash == headerHash {
+			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		}
+
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		log.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
+
 	notifier.OnNewHeader(headersRlp)
 	headerTiming := time.Since(t)
+
 	t = time.Now()
 	if notifier.HasLogSubsriptions() {
 		logs, err := ReadLogs(tx, notifyFrom, isUnwind)

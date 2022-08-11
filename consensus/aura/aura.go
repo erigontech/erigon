@@ -140,7 +140,7 @@ type PermissionedStep struct {
 
 type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
 
-//nolint
+// nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
 	res, ok := r[step]
 	if !ok {
@@ -150,7 +150,7 @@ func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash
 	return result, ok
 }
 
-//nolint
+// nolint
 func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash common.Hash) {
 	res, ok := r[step]
 	if !ok {
@@ -160,7 +160,7 @@ func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash
 	res[author] = blockHash
 }
 
-//nolint
+// nolint
 func (r ReceivedStepHashes) dropAncient(step uint64) {
 	for i := range r {
 		if i < step {
@@ -169,7 +169,7 @@ func (r ReceivedStepHashes) dropAncient(step uint64) {
 	}
 }
 
-//nolint
+// nolint
 type EpochManager struct {
 	epochTransitionHash   common.Hash // H256,
 	epochTransitionNumber uint64      // BlockNumber
@@ -188,7 +188,7 @@ func (e *EpochManager) noteNewEpoch() { e.force = true }
 
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
-//nolint
+// nolint
 func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, hash common.Hash, call consensus.SystemCall) (*RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
@@ -246,12 +246,12 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 	return e.finalityChecker, e.epochTransitionNumber, true
 }
 
-/// Get the transition to the epoch the given parent hash is part of
-/// or transitions to.
-/// This will give the epoch that any children of this parent belong to.
-///
-/// The block corresponding the the parent hash must be stored already.
-//nolint
+// / Get the transition to the epoch the given parent hash is part of
+// / or transitions to.
+// / This will give the epoch that any children of this parent belong to.
+// /
+// / The block corresponding the the parent hash must be stored already.
+// nolint
 func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	//TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
@@ -268,7 +268,7 @@ func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochRea
 	return EpochTransition{BlockNumber: num, BlockHash: hash, ProofRlp: transitionProof}, true
 }
 
-//nolint
+// nolint
 func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	// slow path: loop back block by block
 	for {
@@ -321,7 +321,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochRead
 }
 
 // AuRa
-//nolint
+// nolint
 type AuRa struct {
 	db     kv.RwDB // Database to store and retrieve snapshot checkpoints
 	exitCh chan struct{}
@@ -522,7 +522,7 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
-//nolint
+// nolint
 func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
 	/*
 		self
@@ -534,7 +534,7 @@ func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash
 	return false
 }
 
-//nolint
+// nolint
 func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
 	/*
 	   	    self.received_step_hashes
@@ -543,7 +543,7 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newH
 	*/
 }
 
-//nolint
+// nolint
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
@@ -830,7 +830,7 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 
 }
 
-//word `signal epoch` == word `pending epoch`
+// word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
@@ -1200,7 +1200,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochRead
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-//nolint
+// nolint
 func headerStep(current *types.Header) (val uint64, err error) {
 	if len(current.Seal) < 1 {
 		panic("was either checked with verify_block_basic or is genesis; has 2 fields; qed (Make sure the spec file has a correct genesis seal)")
@@ -1235,7 +1235,8 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 }
 
 // calculateScore - analog of PoW difficulty:
-//    sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
+//
+//	sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
 func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
@@ -1268,7 +1269,7 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-//nolint
+// nolint
 func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
@@ -1376,7 +1377,7 @@ func blockRewardAbi() abi.ABI {
 // the `parent_hash` in order to save space. The included signature is of the original empty step
 // message, which can be reconstructed by using the parent hash of the block in which this sealed
 // empty message is inc    luded.
-//nolint
+// nolint
 type SealedEmptyStep struct {
 	signature []byte // H520
 	step      uint64
@@ -1423,12 +1424,12 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 //
 // An empty step message is created _instead of_ a block if there are no pending transactions.
 // It cannot itself be a parent, and `parent_hash` always points to the most recent block. E.g.:
-// * Validator A creates block `bA`.
-// * Validator B has no pending transactions, so it signs an empty step message `mB`
-//   instead whose hash points to block `bA`.
-// * Validator C also has no pending transactions, so it also signs an empty step message `mC`
-//   instead whose hash points to block `bA`.
-// * Validator D creates block `bD`. The parent is block `bA`, and the header includes `mB` and `mC`.
+//   - Validator A creates block `bA`.
+//   - Validator B has no pending transactions, so it signs an empty step message `mB`
+//     instead whose hash points to block `bA`.
+//   - Validator C also has no pending transactions, so it also signs an empty step message `mC`
+//     instead whose hash points to block `bA`.
+//   - Validator D creates block `bD`. The parent is block `bA`, and the header includes `mB` and `mC`.
 type EmptyStep struct {
 	// The signature of the other two fields, by the message's author.
 	signature []byte // H520
@@ -1480,7 +1481,7 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	return true, nil
 }
 
-//nolint
+// nolint
 func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
@@ -1538,7 +1539,7 @@ func EmptyStepRlp(step uint64, parentHash common.Hash) ([]byte, error) {
 	return rlp.EncodeToBytes(A{s: step, h: parentHash})
 }
 
-//nolint
+// nolint
 type unAssembledHeader struct {
 	hash    common.Hash
 	number  uint64
@@ -1568,7 +1569,7 @@ func (u unAssembledHeaders) Front() *unAssembledHeader {
 
 // RollingFinality checker for authority round consensus.
 // Stores a chain of unfinalized hashes that can be pushed onto.
-//nolint
+// nolint
 type RollingFinality struct {
 	headers    unAssembledHeaders //nolint
 	signers    *SimpleList

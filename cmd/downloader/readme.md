@@ -2,17 +2,17 @@
 
 Service to seed/download historical data (snapshots, immutable .seg files) by Bittorrent protocol
 
-## How to Start Erigon in snapshot sync mode
+## Start Erigon with snapshots support
 
 As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process.
 
 ```shell
-# 1. Downloader by default run inside Erigon, by `--syncmode=snap` flag:
-erigon --syncmode=snap --datadir=<your_datadir> 
+# 1. Downloader by default run inside Erigon, by `--snapshots` flag:
+erigon --snapshots --datadir=<your_datadir> 
 ```
 
 ```shell
-# 2. It's possible to start Downloader as independent process, by `--syncmode=snap --downloader.api.addr=127.0.0.1:9093` flags:
+# 2. It's possible to start Downloader as independent process, by `--snapshots --downloader.api.addr=127.0.0.1:9093` flags:
 make erigon downloader 
 
 # Start downloader (can limit network usage by 512mb/sec: --torrent.download.rate=512mb --torrent.upload.rate=512mb)
@@ -21,7 +21,7 @@ downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<
 # --torrent.port=42068  - is for public BitTorrent protocol listen 
 
 # Erigon on startup does send list of .torrent files to Downloader and wait for 100% download accomplishment
-erigon --syncmode=snap --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
+erigon --snapshots --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
 ```
 
 Use `--snap.keepblocks=true` to don't delete retired blocks from DB
@@ -32,7 +32,7 @@ Any network/chain can start with snapshot sync:
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
 
-Flag `--syncmode=snap` is compatible with `--prune` flag
+Flag `--snapshots` is compatible with `--prune` flag
 
 ## How to create new network or bootnode
 
@@ -50,14 +50,14 @@ downloader torrent_hashes --rebuild --datadir=<your_datadir>
 # Start downloader (seeds automatically)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 
-# Erigon is not required for snapshots seeding. But Erigon with --syncmode=snap also does seeding. 
+# Erigon is not required for snapshots seeding. But Erigon with --snapshots also does seeding. 
 ```
 
 Additional info:
 
 ```shell
 # Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:  
-STOP_BEFORE_STAGE=Execution ./build/bin/erigon --syncmode=full --datadir=<your_datadir> 
+STOP_BEFORE_STAGE=Execution ./build/bin/erigon --snapshots=false --datadir=<your_datadir> 
 # But for security - better have fully-synced Erigon
 
 
@@ -81,6 +81,8 @@ Erigon does:
 - wait for download of all snapshots
 - when .seg available - automatically create .idx files - secondary indices, for example to find block by hash
 - then switch to normal staged sync (which doesn't require connection to Downloader)
+- ensure that snapshot dwnloading happening only once: even if new Erigon version does include new pre-verified snapshot
+  hashes, Erigon will not download them (to avoid unpredictable downtime) - but Erigon may produce them by self.
 
 Downloader does:
 

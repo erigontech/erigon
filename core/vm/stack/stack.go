@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var stackPool = sync.Pool{
@@ -37,7 +38,11 @@ type Stack struct {
 }
 
 func New() *Stack {
-	return stackPool.Get().(*Stack)
+	stack, ok := stackPool.Get().(*Stack)
+	if !ok {
+		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
+	}
+	return stack
 }
 
 func (st *Stack) Push(d *uint256.Int) {
@@ -120,7 +125,11 @@ type ReturnStack struct {
 }
 
 func NewReturnStack() *ReturnStack {
-	return rStackPool.Get().(*ReturnStack)
+	rStack, ok := rStackPool.Get().(*ReturnStack)
+	if !ok {
+		log.Error("Type assertion failure", "err", "cannot get ReturnStack pointer from rStackPool")
+	}
+	return rStack
 }
 
 func (st *ReturnStack) Push(d uint32) {

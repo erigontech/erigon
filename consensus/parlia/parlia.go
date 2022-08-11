@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -719,8 +718,8 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
-			log.Error("[parlia] init contract failed: %+v", err)
-			os.Exit(1)
+			log.Error("[parlia] init contract failed", "err", err)
+			return nil, nil, fmt.Errorf("init contract failed: %v", err)
 		}
 	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
@@ -840,29 +839,27 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Wait until sealing is terminated or delay timeout.
 	//log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
+	select {
+	case <-stop:
+		return nil
+	case <-time.After(delay):
+	}
+	if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
+		log.Info("[parlia] Waiting for received in turn block to process")
 		select {
 		case <-stop:
-			return
-		case <-time.After(delay):
+			log.Info("[parlia] Received block process finished, abort block seal")
+			return nil
+		case <-time.After(time.Duration(processBackOffTime) * time.Second):
+			log.Info("[parlia] Process backoff time exhausted, start to seal block")
 		}
-		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
-			log.Info("[parlia] Waiting for received in turn block to process")
-			select {
-			case <-stop:
-				log.Info("[parlia] Received block process finished, abort block seal")
-				return
-			case <-time.After(time.Duration(processBackOffTime) * time.Second):
-				log.Info("[parlia] Process backoff time exhausted, start to seal block")
-			}
-		}
+	}
 
-		select {
-		case results <- block.WithSeal(header):
-		default:
-			log.Warn("[parlia] Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
-		}
-	}()
+	select {
+	case results <- block.WithSeal(header):
+	default:
+		log.Warn("[parlia] Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
+	}
 
 	return nil
 }
@@ -1218,7 +1215,7 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := core.NewEVMBlockContext(header, nil, p, &from, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from, nil)
 	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),

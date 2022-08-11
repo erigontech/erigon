@@ -2,8 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"

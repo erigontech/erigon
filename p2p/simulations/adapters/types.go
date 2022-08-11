@@ -41,7 +41,6 @@ import (
 // * SimNode    - An in-memory node
 // * ExecNode   - A child process node
 // * DockerNode - A Docker container node
-//
 type Node interface {
 	// Addr returns the node's address (e.g. an Enode URL)
 	Addr() []byte
@@ -285,31 +284,4 @@ func RegisterLifecycles(lifecycles LifecycleConstructors) {
 		}
 		lifecycleConstructorFuncs[name] = f
 	}
-}
-
-// adds the host part to the configuration's ENR, signs it
-// creates and  the corresponding enode object to the configuration
-func (n *NodeConfig) initEnode(ip net.IP, tcpport int, udpport int) error {
-	enrIp := enr.IP(ip)
-	n.Record.Set(&enrIp)
-	enrTcpPort := enr.TCP(tcpport)
-	n.Record.Set(&enrTcpPort)
-	enrUdpPort := enr.UDP(udpport)
-	n.Record.Set(&enrUdpPort)
-
-	err := enode.SignV4(&n.Record, n.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("unable to generate ENR: %v", err)
-	}
-	nod, err := enode.New(enode.V4ID{}, &n.Record)
-	if err != nil {
-		return fmt.Errorf("unable to create enode: %v", err)
-	}
-	log.Trace("simnode new", "record", n.Record)
-	n.node = nod
-	return nil
-}
-
-func (n *NodeConfig) initDummyEnode() error {
-	return n.initEnode(net.IPv4(127, 0, 0, 1), int(n.Port), 0)
 }

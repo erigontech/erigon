@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
@@ -22,7 +24,12 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	if err != nil {
 		return fmt.Errorf("client failed to make post request: %v", err)
 	}
-	defer r.Body.Close()
+	defer func(Body io.ReadCloser) {
+		closeErr := Body.Close()
+		if closeErr != nil {
+			log.Warn("body close", "err", closeErr)
+		}
+	}(r.Body)
 
 	if r.StatusCode != 200 {
 		return fmt.Errorf("status %s", r.Status)
@@ -83,9 +90,6 @@ func TxpoolContent(reqId int) error {
 	if res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b); res.Err != nil {
 		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
-
-	//fmt.Printf("Pending: %+v\n", b.Result.(map[string]interface{})["pending"].(map[string]interface{})["hash"])
-	//fmt.Printf("Type: %T\n", b.Result.(map[string]interface{})["pending"])
 
 	s, err := utils.ParseResponse(b)
 	if err != nil {

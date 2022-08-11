@@ -183,7 +183,8 @@ Loop:
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
-			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
+			// Txn & uncle roots are verified via bd.requestedMap
+			err := cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
 			if err != nil {
 				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
 				u.UnwindTo(blockHeight-1, header.Hash())

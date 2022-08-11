@@ -235,14 +235,14 @@ var printTorrentHashes = &cobra.Command{
 			log.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 			return nil
 		}
-		if err := os.WriteFile(targetFile, serialized, 0644); err != nil {
+		if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
 			return err
 		}
 		return nil
 	},
 }
 
-//nolint
+// nolint
 func removePieceCompletionStorage(snapDir string) {
 	_ = os.RemoveAll(filepath.Join(snapDir, "db"))
 	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db"))

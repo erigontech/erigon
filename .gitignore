@@ -71,9 +71,11 @@ libmdbx/build/*
 tests/testdata/*
 
 go.work
+go.work.sum
 
 /goerli
 
 docker-compose.*.yml
 .env
+coverage.out
 

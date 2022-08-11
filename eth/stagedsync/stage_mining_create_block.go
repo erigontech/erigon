@@ -89,7 +89,7 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 }
 
 // SpawnMiningCreateBlockStage
-//TODO:
+// TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
 	current := cfg.miner.MiningBlock
@@ -140,6 +140,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			}
 			if err != nil {
 				return err
+			}
+			if transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+				continue
 			}
 			txs = append(txs, transaction)
 		}

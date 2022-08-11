@@ -50,7 +50,7 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", "")
 	require.NoError(err)
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -66,7 +66,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", "")
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -110,7 +110,7 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -128,7 +128,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", "")
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -174,7 +174,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -192,7 +192,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", "")
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -258,7 +258,7 @@ func TestValidation(t *testing.T) {
 	}
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", "")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
@@ -284,7 +284,7 @@ func TestCommitCallRequired(t *testing.T) {
 	}
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	err := migrator.Apply(db, "", "")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte

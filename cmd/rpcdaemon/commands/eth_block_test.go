@@ -177,3 +177,71 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
 	assert.Equal(t, expectedHash, block["hash"])
 }
+
+func TestGetBlockTransactionCountByHash(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed reading block by hash: %s", err)
+	}
+	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed getting body with transactions: %s", err)
+	}
+	tx.Rollback()
+
+	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
+
+	txAmount, err := api.GetBlockTransactionCountByHash(ctx, blockHash)
+	if err != nil {
+		t.Errorf("failed getting the transaction count, err=%s", err)
+	}
+
+	assert.Equal(t, expectedAmount, *txAmount)
+}
+
+func TestGetBlockTransactionCountByNumber(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
+	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed reading block by hash: %s", err)
+	}
+	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed getting body with transactions: %s", err)
+	}
+	tx.Rollback()
+
+	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
+
+	txAmount, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(header.Number.Uint64()))
+	if err != nil {
+		t.Errorf("failed getting the transaction count, err=%s", err)
+	}
+
+	assert.Equal(t, expectedAmount, *txAmount)
+}

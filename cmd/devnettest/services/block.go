@@ -3,10 +3,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"math/big"
 	"os/exec"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -179,7 +180,6 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
-	// TODO: Mining does not happen because node is stuck in StageSync
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)

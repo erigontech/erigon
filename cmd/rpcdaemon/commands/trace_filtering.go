@@ -212,7 +212,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
-		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
@@ -233,7 +232,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if fromBlock > toBlock {
-		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -252,7 +250,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				stream.WriteNil()
 				return err
 			}
 			allBlocks.Or(b)
@@ -267,7 +264,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				stream.WriteNil()
+
 				return err
 			}
 			blocksTo.Or(b)
@@ -294,7 +291,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
-		stream.WriteNil()
 		return err
 	}
 
@@ -320,18 +316,39 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
-			stream.WriteNil()
-			return hashErr
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(hashErr, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 
 		block, bErr := api.blockWithSenders(dbtx, hash, b)
 		if bErr != nil {
-			stream.WriteNil()
-			return bErr
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(bErr, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		if block == nil {
-			stream.WriteNil()
-			return fmt.Errorf("could not find block %x %d", hash, b)
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 
 		blockHash := block.Hash()
@@ -339,8 +356,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
 		if tErr != nil {
-			stream.WriteNil()
-			return tErr
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(tErr, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
@@ -356,8 +380,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					pt.TransactionPosition = &txPosition
 					b, err := json.Marshal(pt)
 					if err != nil {
-						stream.WriteNil()
-						return err
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stream.WriteObjectStart()
+						rpc.HandleError(err, stream)
+						stream.WriteObjectEnd()
+						continue
 					}
 					if nSeen > after && nExported < count {
 						if first {
@@ -388,8 +419,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			tr.TraceAddress = []int{}
 			b, err := json.Marshal(tr)
 			if err != nil {
-				stream.WriteNil()
-				return err
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
 			}
 			if nSeen > after && nExported < count {
 				if first {
@@ -419,8 +457,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					tr.TraceAddress = []int{}
 					b, err := json.Marshal(tr)
 					if err != nil {
-						stream.WriteNil()
-						return err
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stream.WriteObjectStart()
+						rpc.HandleError(err, stream)
+						stream.WriteObjectEnd()
+						continue
 					}
 					if nSeen > after && nExported < count {
 						if first {

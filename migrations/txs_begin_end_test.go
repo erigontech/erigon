@@ -59,7 +59,7 @@ func TestTxsBeginEnd(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = []Migration{txsBeginEnd}
-	err = migrator.Apply(db, tmpDir)
+	err = migrator.Apply(db, tmpDir, "")
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {

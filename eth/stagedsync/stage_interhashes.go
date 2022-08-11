@@ -256,7 +256,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
 		for _, k := range deletedAccounts {
 			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
-				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
+				if err := p.db.Delete(kv.TrieOfStorage, k); err != nil {
 					return err
 				}
 				return nil
@@ -278,7 +278,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	} else {
 		changeSetBucket = kv.AccountChangeSet
 	}
-	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	log.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
@@ -345,7 +345,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
 		for _, k := range deletedAccounts {
 			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
-				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
+				if err := p.db.Delete(kv.TrieOfStorage, k); err != nil {
 					return err
 				}
 				return nil

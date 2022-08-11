@@ -6,14 +6,19 @@ import (
 
 	"github.com/emirpasic/gods/maps/treemap"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// The message we are going to send to the stage sync in NewPayload
-type PayloadMessage struct {
-	Header *types.Header
-	Body   *types.RawBody
+// This is the status of a newly execute block.
+// Hash: Block hash
+// Status: block's status
+type PayloadStatus struct {
+	Status          remote.EngineStatus
+	LatestValidHash common.Hash
+	ValidationError error
+	CriticalError   error
 }
 
 // The message we are going to send to the stage sync in ForkchoiceUpdated
@@ -31,7 +36,7 @@ const ( // RequestStatus values
 )
 
 type RequestWithStatus struct {
-	Message interface{} // *PayloadMessage or *ForkChoiceMessage
+	Message interface{} // *Block or *ForkChoiceMessage
 	Status  RequestStatus
 }
 
@@ -59,7 +64,7 @@ func NewRequestList() *RequestList {
 	return rl
 }
 
-func (rl *RequestList) AddPayloadRequest(message *PayloadMessage) {
+func (rl *RequestList) AddPayloadRequest(message *types.Block) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -108,7 +113,7 @@ func (rl *RequestList) firstRequest(onlyNew bool) (id int, request *RequestWithS
 	return 0, nil
 }
 
-func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int, request *RequestWithStatus) {
+func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Interrupt, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -125,7 +130,7 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int
 			return
 		}
 		id, request = rl.firstRequest(onlyNew)
-		if request != nil {
+		if request != nil || noWait {
 			return
 		}
 		rl.syncCond.Wait()
