@@ -240,7 +240,7 @@ loop:
 				}
 				select {
 				case <-logEvery.C:
-					progress.Log(rs, rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(rs, &rws, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
