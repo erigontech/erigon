@@ -483,7 +483,7 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 		changeSetBucket = kv.AccountChangeSet
 	}
 	if to > from+16 {
-		log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 	}
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)

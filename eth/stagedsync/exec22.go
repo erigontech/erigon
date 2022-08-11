@@ -1,4 +1,4 @@
-package exec22
+package stagedsync
 
 import (
 	"container/heap"
@@ -12,18 +12,21 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
-const logInterval = 30 * time.Second // time period to print aggregation stat to log
+const (
+	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+	//logInterval     = 30 * time.Second // time period to print aggregation stat to log
+)
 
 func NewProgress(prevOutputBlockNum uint64) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum}
@@ -66,7 +69,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64, workerCount int,
+func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCount int,
 	db kv.RwDB, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
@@ -83,7 +86,7 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	parallel := workerCount > 1 && initialCycle
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel && applyTx == nil {
 		applyTx, err = db.BeginRw(ctx)

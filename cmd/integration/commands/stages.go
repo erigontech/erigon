@@ -666,9 +666,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
+	genesis, _ := genesisByChain(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, dirs, getBlockReader(db), nil)
+		/*badBlockHalt=*/ false, dirs, getBlockReader(db), nil, genesis)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
