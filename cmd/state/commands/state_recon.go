@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/state22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -73,8 +72,8 @@ type ReconWorker struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
-	epoch        state22.EpochReader
-	chain        state22.ChainReader
+	epoch        exec22.EpochReader
+	chain        exec22.ChainReader
 	isPoSA       bool
 	posa         consensus.PoSA
 }
@@ -99,8 +98,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		genesis:      genesis,
 		engine:       engine,
 	}
-	rw.epoch = state22.NewEpochReader(chainTx)
-	rw.chain = state22.NewChainReader(chainConfig, chainTx, blockReader)
+	rw.epoch = exec22.NewEpochReader(chainTx)
+	rw.chain = exec22.NewChainReader(chainConfig, chainTx, blockReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
