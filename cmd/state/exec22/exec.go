@@ -80,11 +80,12 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	// will improve it in future versions
 	interruptCh := ctx.Done()
 	ctx = context.Background()
+	parallel := workerCount > 1 && initialCycle
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	if workerCount <= 1 {
+	if !parallel && applyTx == nil {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -94,6 +95,8 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 				applyTx.Rollback()
 			}
 		}()
+	}
+	if !parallel {
 		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
@@ -117,7 +120,7 @@ func Exec22(ctx context.Context, execStage *stagedsync.StageState, block uint64,
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums[len(txNums)-1]
-	if workerCount > 1 {
+	if parallel {
 		go func() {
 			defer func() {
 				if applyTx != nil {
@@ -235,7 +238,7 @@ loop:
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			if workerCount > 1 {
+			if parallel {
 				func() {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -259,15 +262,15 @@ loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if workerCount > 1 {
+				if parallel {
 					if ok := rs.RegisterSender(txTask); ok {
 						rs.AddWork(txTask)
 					}
 				}
-			} else if workerCount > 1 {
+			} else if parallel {
 				rs.AddWork(txTask)
 			}
-			if workerCount == 1 {
+			if !parallel {
 				count++
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
@@ -316,7 +319,7 @@ loop:
 		default:
 		}
 	}
-	if workerCount > 1 {
+	if parallel {
 		wg.Wait()
 	} else {
 		if err = applyTx.Commit(); err != nil {
