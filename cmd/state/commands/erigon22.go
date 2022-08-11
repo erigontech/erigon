@@ -15,7 +15,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -153,14 +152,14 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		}
 	}
 	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
+	agg, err := libstate.NewAggregator22(aggDir, stagedsync.AggregationStep)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
 
 	workerCount := workers
-	if err := exec22.Exec22(execCtx, execStage, block, workerCount, db, chainDb, nil, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+	if err := stagedsync.Exec22(execCtx, execStage, block, workerCount, db, chainDb, nil, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 		return err
 	}
 
