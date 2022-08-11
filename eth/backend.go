@@ -328,10 +328,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		return nil
 	}
-
+	currentBlockNumber := uint64(0)
+	if currentBlock != nil {
+		currentBlockNumber = currentBlock.NumberU64()
+	}
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */)
-	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
