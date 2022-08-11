@@ -161,7 +161,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	defer agg.Close()
 
 	workerCount := workers
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
+	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
 		if err != nil {
 			return err
