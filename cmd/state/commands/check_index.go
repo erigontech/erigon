@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/state/verify"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/spf13/cobra"
@@ -22,7 +23,7 @@ var checkIndexCMD = &cobra.Command{
 		ctx, _ := utils.RootContext()
 		err := verify.CheckIndex(ctx, chaindata, changeSetBucket, indexBucket, block)
 		if err != nil {
-				fmt.Println("Error in CheckIndex:", err);
+			fmt.Println("Error in CheckIndex:", err)
 		}
 		return err
 	},
