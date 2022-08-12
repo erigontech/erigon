@@ -557,9 +557,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 				lastD = link.header.Difficulty
 			}
 		}
-		if link.blockHeight == hd.latestMinedBlockNumber {
-			return false, true, 0, nil
-		}
 
 		if link.blockHeight > hd.highestInDb {
 			if hd.trace {
@@ -575,6 +572,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			if !child.persisted {
 				hd.moveLinkToQueue(child, InsertQueueID)
 			}
+		}
+		if link.blockHeight == hd.latestMinedBlockNumber {
+			return false, true, 0, nil
 		}
 	}
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
