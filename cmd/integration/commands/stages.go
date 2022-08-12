@@ -646,6 +646,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if historyV2 {
 			dir.Recreate(path.Join(dirs.DataDir, "agg22"))
 			dir.Recreate(path.Join(dirs.DataDir, "db22"))
+			genesis, _ := genesisByChain(chain)
+			if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
+				return err
+			}
 		} else {
 			genesis, _ := genesisByChain(chain)
 			if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {

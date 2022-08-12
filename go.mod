@@ -171,6 +171,5 @@ require (
 
 require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
-	github.com/ledgerwatch/interfaces v0.0.0-20220803041830-390c8d28c921 // indirect
 	gotest.tools/v3 v3.3.0 // indirect
 )
