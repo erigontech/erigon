@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -101,6 +102,7 @@ func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, 
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
+		GrowthStep(16 * datasize.MB).
 		SyncPeriod(30 * time.Second).
 		Open()
 	if err != nil {
