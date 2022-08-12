@@ -88,8 +88,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	useExternalTx := applyTx != nil
-	if !parallel {
+	if applyTx != nil {
 		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
 	}
@@ -110,6 +109,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	if block > 0 {
 		outputTxNum = txNums[block-1]
 	}
+
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums[len(txNums)-1]
@@ -314,12 +314,6 @@ loop:
 	}
 	if parallel {
 		wg.Wait()
-	} else {
-		if !useExternalTx {
-			if err = applyTx.Commit(); err != nil {
-				return err
-			}
-		}
 	}
 	for i := 0; i < len(reconWorkers); i++ {
 		reconWorkers[i].ResetTx(nil, nil)

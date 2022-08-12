@@ -253,6 +253,18 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return errStart
 	}
 
+	logPrefix := s.LogPrefix()
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = cmp.Min(prevStageProgress, toBlock)
+	}
+	if to <= s.BlockNumber {
+		return nil
+	}
+	if to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
+
 	// Compute mapping blockNum -> last TxNum in that block
 	txNums := make([]uint64, prevStageProgress)
 	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
@@ -283,9 +295,10 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
+	fmt.Printf("al: %d, %d\n", fromBlock, to)
 	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
-		toBlock,
+		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
