@@ -53,6 +53,7 @@ type MdbxOpts struct {
 	label         kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	verbosity     kv.DBVerbosityLvl
 	mapSize       datasize.ByteSize
+	growthStep    datasize.ByteSize
 	flags         uint
 	log           log.Logger
 	syncPeriod    time.Duration
@@ -75,6 +76,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
+		growthStep: 2 * datasize.GB,
 	}
 }
 
@@ -99,6 +101,11 @@ func (opts MdbxOpts) AugumentLimit(v uint64) MdbxOpts {
 
 func (opts MdbxOpts) PageSize(v uint64) MdbxOpts {
 	opts.pageSize = v
+	return opts
+}
+
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts {
+	opts.growthStep = v
 	return opts
 }
 
@@ -193,7 +200,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, int(opts.pageSize)); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), -1, int(opts.pageSize)); err != nil {
 				return nil, err
 			}
 		}
