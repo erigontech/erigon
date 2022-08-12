@@ -256,7 +256,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	// Compute mapping blockNum -> last TxNum in that block
 	txNums := make([]uint64, prevStageProgress)
 	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
-		if int(blockNum) > len(txNums) {
+		if blockNum >= prevStageProgress {
 			return nil
 		}
 		txNums[blockNum] = baseTxNum + txAmount
