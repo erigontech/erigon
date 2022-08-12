@@ -36,3 +36,17 @@ func ChainConfigFromDB(db kv.RoDB) (cc *params.ChainConfig) {
 	Check(err)
 	return cc
 }
+
+func HistoryV2FromDB(db kv.RoDB) (enabled bool) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		enabled, err = rawdb.HistoryV2.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	return
+}

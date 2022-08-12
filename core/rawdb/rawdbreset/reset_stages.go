@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, g *core.Genesis) error {
+func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	// don't reset senders here
 	if err := db.Update(ctx, stagedsync.ResetHashState); err != nil {
 		return err
@@ -36,7 +36,7 @@ func ResetState(db kv.RwDB, ctx context.Context, g *core.Genesis) error {
 		return err
 	}
 
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return ResetExec(tx, g) }); err != nil {
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return ResetExec(tx, chain) }); err != nil {
 		return err
 	}
 	return nil
@@ -101,7 +101,7 @@ func ResetSenders(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetExec(tx kv.RwTx, g *core.Genesis) error {
+func ResetExec(tx kv.RwTx, chain string) error {
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
@@ -154,8 +154,12 @@ func ResetExec(tx kv.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	if _, _, err := g.WriteGenesisState(tx); err != nil {
-		return err
+	genesis := core.DefaultGenesisBlockByChainName(chain)
+	historyV2, _ := rawdb.HistoryV2.Enabled(tx)
+	if !historyV2 {
+		if _, _, err := genesis.WriteGenesisState(tx); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -29,6 +29,8 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+
+	_forceSetHistoryV2 bool
 )
 
 func must(err error) {
@@ -123,7 +125,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
 }
 
 func withHeimdall(cmd *cobra.Command) {

@@ -81,7 +81,7 @@ type ExecuteBlockCfg struct {
 
 func StageExecuteBlocksCfg(
 	db kv.RwDB,
-	prune prune.Mode,
+	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
@@ -96,13 +96,19 @@ func StageExecuteBlocksCfg(
 	genesis *core.Genesis,
 ) ExecuteBlockCfg {
 	var exec22 bool
-	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		exec22, _ = rawdb.HisoryV2Enabled(tx)
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		exec22, err = rawdb.HistoryV2.Enabled(tx)
+		if err != nil {
+			return err
+		}
 		return nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 	return ExecuteBlockCfg{
 		db:            db,
-		prune:         prune,
+		prune:         pm,
 		batchSize:     batchSize,
 		changeSetHook: changeSetHook,
 		chainConfig:   chainConfig,
@@ -226,17 +232,40 @@ func newStateReaderWriter(
 }
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	workersCount := 1
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	fromBlock := s.BlockNumber + 1
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
+	fmt.Printf("alex: %d, %d\n", toBlock, prevStageProgress)
+
+	logPrefix := s.LogPrefix()
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = cmp.Min(prevStageProgress, toBlock)
+	}
+	if to <= s.BlockNumber {
+		return nil
+	}
+	if to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
 
 	// Compute mapping blockNum -> last TxNum in that block
 	txNums := make([]uint64, prevStageProgress)
 	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
-		if int(blockNum) > len(txNums) {
+		if blockNum >= prevStageProgress {
 			return nil
 		}
 		txNums[blockNum] = baseTxNum + txAmount
@@ -263,10 +292,18 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	return Exec22(ctx, s, fromBlock, 1, db, cfg.db, tx, rs,
+	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
-		toBlock,
-		cfg.chainConfig, cfg.genesis, initialCycle)
+		to,
+		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {

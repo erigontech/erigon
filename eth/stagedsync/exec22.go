@@ -70,25 +70,26 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 }
 
 func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCount int,
-	db kv.RwDB, chainDb kv.RwDB, applyTx kv.RwTx,
+	db kv.RwDB, chainDb kv.RwDB, chainTx kv.Tx,
 	rs *state.State22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64,
 	chainConfig *params.ChainConfig, genesis *core.Genesis,
 	initialCycle bool,
 ) (err error) {
+	var applyTx kv.RwTx
 	var lock sync.RWMutex
 	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
 	// too keep consistency
 	// will improve it in future versions
 	interruptCh := ctx.Done()
 	ctx = context.Background()
-	parallel := workerCount > 1 && initialCycle
+	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	if !parallel && applyTx == nil {
+	if !parallel {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -98,9 +99,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 				applyTx.Rollback()
 			}
 		}()
-	}
-	if !parallel {
-		reconWorkers[0].ResetTx(applyTx, nil)
+		reconWorkers[0].ResetTx(applyTx, chainTx)
 		agg.SetTx(applyTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
@@ -120,6 +119,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	if block > 0 {
 		outputTxNum = txNums[block-1]
 	}
+
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums[len(txNums)-1]
@@ -134,6 +134,11 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 				panic(err)
 			}
 			agg.SetTx(applyTx)
+			//defer func() {
+			//	if applyTx != nil {
+			//		applyTx.Rollback()
+			//	}
+			//}()
 			defer rs.Finish()
 			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
 				select {
@@ -224,6 +229,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	if block > 0 {
 		inputTxNum = txNums[block-1]
 	}
+
 	var header *types.Header
 	var blockNum uint64
 loop:
@@ -298,14 +304,14 @@ loop:
 							return err
 						}
 						reconWorkers[0].ResetTx(nil, nil)
-						if err = db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
+						if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
 							return err
 						}
 						if applyTx, err = db.BeginRw(ctx); err != nil {
 							return err
 						}
 						agg.SetTx(applyTx)
-						reconWorkers[0].ResetTx(applyTx, nil)
+						reconWorkers[0].ResetTx(applyTx, chainTx)
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
 				default:
@@ -325,9 +331,7 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
-		if err = applyTx.Commit(); err != nil {
-			return err
-		}
+		applyTx.Commit()
 	}
 	for i := 0; i < len(reconWorkers); i++ {
 		reconWorkers[i].ResetTx(nil, nil)
@@ -345,6 +349,7 @@ loop:
 	}
 	return nil
 }
+
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
 	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {

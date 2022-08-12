@@ -206,10 +206,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 
-		//config.HistoryV2, err = rawdb.WriteHisoryV2(tx, config.HistoryV2)
-		//if err != nil {
-		//	return err
-		//}
+		config.HistoryV2, err = rawdb.HistoryV2.WriteOnce(tx, config.HistoryV2)
+		if err != nil {
+			return err
+		}
 
 		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {

@@ -198,7 +198,7 @@ func (api *BaseAPI) historyV2(tx kv.Tx) bool {
 	if historyV2 != nil {
 		return *historyV2
 	}
-	enabled, err := rawdb.HisoryV2Enabled(tx)
+	enabled, err := rawdb.HistoryV2.Enabled(tx)
 	if err != nil {
 		log.Warn("HisoryV2Enabled: read", "err", err)
 		return false

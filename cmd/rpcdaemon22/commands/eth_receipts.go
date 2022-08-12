@@ -7,9 +7,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -114,9 +116,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
+	if end > roaring.MaxUint32 {
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		if begin > latest {
+			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
+		}
+		end = latest
 	}
 
 	var fromTxNum, toTxNum uint64
@@ -134,6 +142,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if err != nil {
 		return nil, err
 	}
+
 	if topicsBitmap != nil {
 		txNumbers.And(topicsBitmap)
 	}
@@ -166,6 +175,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var lastRules *params.Rules
 	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number

@@ -88,7 +88,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
-	if to <= s.BlockNumber {
+	if to < s.BlockNumber {
 		return nil
 	}
 	logPrefix := s.LogPrefix()
