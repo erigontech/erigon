@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 	"time"
 
@@ -303,7 +304,7 @@ func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeB
 }
 
 func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
-	if s.snapsthots == nil {
+	if s.snapsthots == nil || reflect.ValueOf(s.snapsthots).IsNil() { // nolint
 		return &remote.SnapshotsReply{Files: []string{}}, nil
 	}
 	return &remote.SnapshotsReply{Files: s.snapsthots.Files()}, nil
