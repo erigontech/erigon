@@ -232,6 +232,20 @@ func newStateReaderWriter(
 }
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	workersCount := 1
+	useExternalTx := tx != nil
+	if !useExternalTx && workersCount == 1 {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if tx != nil {
+				tx.Rollback()
+			}
+		}()
+	}
+
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	fromBlock := s.BlockNumber + 1
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
@@ -269,11 +283,16 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(ctx, s, fromBlock, 1, db, cfg.db, tx, rs,
+	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		toBlock,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
+	}
+	if !useExternalTx && workersCount == 1 {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

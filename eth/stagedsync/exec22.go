@@ -89,17 +89,6 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	useExternalTx := applyTx != nil
-	if !parallel && !useExternalTx {
-		applyTx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}()
-	}
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx, nil)
 		agg.SetTx(applyTx)
