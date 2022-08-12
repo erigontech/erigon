@@ -88,7 +88,8 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
-	if !parallel && applyTx == nil {
+	useExternalTx := applyTx != nil
+	if !parallel && !useExternalTx {
 		applyTx, err = db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -325,8 +326,10 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
-		if err = applyTx.Commit(); err != nil {
-			return err
+		if !useExternalTx {
+			if err = applyTx.Commit(); err != nil {
+				return err
+			}
 		}
 	}
 	for i := 0; i < len(reconWorkers); i++ {
@@ -345,6 +348,7 @@ loop:
 	}
 	return nil
 }
+
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
 	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {

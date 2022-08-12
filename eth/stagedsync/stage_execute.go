@@ -269,10 +269,13 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	return Exec22(ctx, s, fromBlock, 1, db, cfg.db, tx, rs,
+	if err := Exec22(ctx, s, fromBlock, 1, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		toBlock,
-		cfg.chainConfig, cfg.genesis, initialCycle)
+		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
+		return err
+	}
+	return nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
