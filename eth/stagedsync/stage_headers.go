@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -1271,6 +1272,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 			return err
 		}
+		_ = stages.SaveStageProgress(tx, stages.Bodies, cfg.snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Senders, cfg.snapshots.BlocksAvailable())
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
 

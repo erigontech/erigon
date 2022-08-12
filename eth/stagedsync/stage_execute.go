@@ -248,6 +248,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if errStart != nil {
 		return errStart
 	}
+	fmt.Printf("alex: %d, %d\n", toBlock, prevStageProgress)
 
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
