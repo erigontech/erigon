@@ -43,7 +43,7 @@ func TestGasPrice(t *testing.T) {
 			db := createGasPriceTestKV(t, testCase.chainSize)
 			defer db.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false)
+			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false)
 			eth := NewEthAPI(base, db, nil, nil, nil, 5000000)
 
 			ctx := context.Background()

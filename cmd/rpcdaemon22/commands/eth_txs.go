@@ -14,10 +14,11 @@ import (
 	types2 "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -29,7 +30,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		var txnIndex uint64
 		var txn types2.Transaction
 		for i, transaction := range block.Transactions() {
-			if transaction.Hash() == hash {
+			if transaction.Hash() == txnHash {
 				txn = transaction
 				txnIndex = uint64(i)
 				break
@@ -60,8 +61,14 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 
 		// if no transaction was found then we return nil
 		if txn == nil {
-			return nil, nil
-
+			if chainConfig.Bor == nil {
+				return nil, nil
+			}
+			borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+			if borTx == nil {
+				return nil, nil
+			}
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -73,7 +80,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
-	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
+	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(txnHash)}})
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +158,10 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(tx, blockHash)
@@ -162,8 +173,18 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 
 	txs := block.Transactions()
-	if uint64(txIndex) >= uint64(len(txs)) {
+	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
+	} else if uint64(txIndex) == uint64(len(txs)) {
+		if chainConfig.Bor == nil {
+			return nil, nil // not error
+		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx == nil {
+			return nil, nil // not error
+		}
+		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -196,9 +217,13 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +237,18 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	}
 
 	txs := block.Transactions()
-	if uint64(txIndex) >= uint64(len(txs)) {
+	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
+	} else if uint64(txIndex) == uint64(len(txs)) {
+		if chainConfig.Bor == nil {
+			return nil, nil // not error
+		}
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx == nil {
+			return nil, nil
+		}
+		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil

@@ -80,7 +80,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
-	kv kv.RwDB,
+	db kv.RwDB,
 	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
@@ -95,8 +95,13 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 ) ExecuteBlockCfg {
+	var exec22 bool
+	_ = db.View(context.Background(), func(tx kv.Tx) error {
+		exec22, _ = rawdb.HisoryV2Enabled(tx)
+		return nil
+	})
 	return ExecuteBlockCfg{
-		db:            kv,
+		db:            db,
 		prune:         prune,
 		batchSize:     batchSize,
 		changeSetHook: changeSetHook,
@@ -110,6 +115,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
+		exec22:        exec22,
 	}
 }
 
@@ -221,19 +227,19 @@ func newStateReaderWriter(
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
+	fromBlock := s.BlockNumber + 1
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
+	if errStart != nil {
+		return errStart
+	}
 
 	// Compute mapping blockNum -> last TxNum in that block
-	// TODO: support incremental mapping
-	maxBlockNum := allSnapshots.BlocksAvailable() + 1
-	txNums := make([]uint64, maxBlockNum)
-	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
-				txNums[blockNum] = baseTxNum + txAmount
-			}); err != nil {
-				return err
-			}
+	txNums := make([]uint64, prevStageProgress)
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
+		if int(blockNum) > len(txNums) {
+			return nil
 		}
+		txNums[blockNum] = baseTxNum + txAmount
 		return nil
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
@@ -257,7 +263,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	return Exec22(ctx, s, s.BlockNumber+1, 1, db, cfg.db, tx, rs,
+	return Exec22(ctx, s, fromBlock, 1, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		toBlock,
 		cfg.chainConfig, cfg.genesis, initialCycle)

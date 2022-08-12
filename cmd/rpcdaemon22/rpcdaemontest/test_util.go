@@ -9,8 +9,6 @@ import (
 	"net"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/consensus"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
@@ -20,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/commands/contracts"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"

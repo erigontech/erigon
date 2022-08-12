@@ -173,7 +173,7 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
 	var buf []byte
 	g := sn.seg.MakeGetter()
 	blockNum := sn.idxBodyNumber.BaseDataID()
@@ -183,7 +183,9 @@ func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) erro
 		if err := rlp.DecodeBytes(buf, &b); err != nil {
 			return err
 		}
-		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
+		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+			return err
+		}
 		blockNum++
 	}
 	return nil
@@ -2111,4 +2113,34 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 		}
 	}
 	return req
+}
+
+type BodiesIterator struct{}
+
+func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
+	if from < s.BlocksAvailable() {
+		if err := s.Bodies.View(func(bs []*BodySegment) error {
+			for _, b := range bs {
+				if err := b.Iterate(f); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	}
+	for i := s.BlocksAvailable(); ; i++ {
+		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			break
+		}
+		if err := f(i, baseTxId, uint64(txAmount)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
