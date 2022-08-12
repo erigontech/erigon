@@ -477,13 +477,7 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
-			c, err := db.Cursor(kv.EthTx)
-			if err != nil {
-				kk, _, _ := c.Last()
-				c.Close()
-				return fmt.Errorf("txId=%d, baseTxId=%d, lastInDb=%d, %w", txId, baseTxId, binary.BigEndian.Uint64(kk), err)
-			}
-			return err
+			return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 		}
 		txId++
 	}
