@@ -22,8 +22,7 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common.RootContext()
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
 			return err

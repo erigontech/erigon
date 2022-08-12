@@ -55,8 +55,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
@@ -78,8 +77,7 @@ var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 
 		if unwind == 0 {
@@ -98,8 +96,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		if unwind == 0 {
 			unwind = 1

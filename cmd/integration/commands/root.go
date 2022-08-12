@@ -35,8 +35,8 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
-	opts := kv2.NewMDBX(logger).Path(path).Label(label)
+func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
+	opts := kv2.NewMDBX(log.New()).Path(path).Label(label)
 	if label == kv.ChainDB {
 		opts = opts.MapSize(8 * datasize.TB)
 	}

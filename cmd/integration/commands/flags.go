@@ -29,6 +29,8 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+
+	_forceSetHistoryV2 bool
 )
 
 func must(err error) {
