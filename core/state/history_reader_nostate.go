@@ -52,19 +52,25 @@ func (hr *HistoryReaderNoState) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, noState, err := hr.ac.ReadAccountDataNoState(address.Bytes(), hr.txNum)
+	txKey, err := hr.broTx.GetOne(kv.XAccount, address.Bytes())
 	if err != nil {
 		return nil, err
 	}
-	if !noState {
-		txKey, err := hr.broTx.GetOne(kv.XAccount, address.Bytes())
-		if err != nil {
+	var stateTxNum uint64 = math.MaxUint64
+	if txKey != nil {
+		stateTxNum = binary.BigEndian.Uint64(txKey)
+	}
+	var enc []byte
+	noState := false
+	if stateTxNum >= hr.txNum {
+		if enc, noState, err = hr.ac.ReadAccountDataNoState(address.Bytes(), hr.txNum); err != nil {
 			return nil, err
 		}
+	}
+	if !noState {
 		if txKey == nil {
 			return nil, nil
 		}
-		stateTxNum := binary.BigEndian.Uint64(txKey)
 		if !hr.rs.Done(stateTxNum) {
 			hr.readError = true
 			hr.stateTxNum = stateTxNum
@@ -204,19 +210,25 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, noState, err := hr.ac.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
+	txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
 	if err != nil {
 		return nil, err
 	}
-	if !noState {
-		txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
-		if err != nil {
+	var stateTxNum uint64 = math.MaxUint64
+	if txKey != nil {
+		stateTxNum = binary.BigEndian.Uint64(txKey)
+	}
+	var enc []byte
+	noState := false
+	if stateTxNum >= hr.txNum {
+		if enc, noState, err = hr.ac.ReadAccountCodeNoState(address.Bytes(), hr.txNum); err != nil {
 			return nil, err
 		}
+	}
+	if !noState {
 		if txKey == nil {
 			return nil, nil
 		}
-		stateTxNum := binary.BigEndian.Uint64(txKey)
 		if !hr.rs.Done(stateTxNum) {
 			hr.readError = true
 			hr.stateTxNum = stateTxNum
@@ -248,19 +260,25 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	size, noState, err := hr.ac.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
+	txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
 	if err != nil {
 		return 0, err
 	}
-	if !noState {
-		txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
-		if err != nil {
+	var stateTxNum uint64 = math.MaxUint64
+	if txKey != nil {
+		stateTxNum = binary.BigEndian.Uint64(txKey)
+	}
+	var size int
+	noState := false
+	if stateTxNum >= hr.txNum {
+		if size, noState, err = hr.ac.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum); err != nil {
 			return 0, err
 		}
+	}
+	if !noState {
 		if txKey == nil {
 			return 0, nil
 		}
-		stateTxNum := binary.BigEndian.Uint64(txKey)
 		if !hr.rs.Done(stateTxNum) {
 			hr.readError = true
 			hr.stateTxNum = stateTxNum
