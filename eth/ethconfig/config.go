@@ -220,6 +220,9 @@ type Config struct {
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
 
+	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	HistoryV2 bool
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 

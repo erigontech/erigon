@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -22,6 +23,7 @@ type ErigonAPI interface {
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]interface{}, error)
+	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error)
 
 	// Receipt related (see ./erigon_receipts.go)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)

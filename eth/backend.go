@@ -205,13 +205,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
+
+		//config.HistoryV2, err = rawdb.WriteHisoryV2(tx, config.HistoryV2)
+		//if err != nil {
+		//	return err
+		//}
+
 		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
 		}
-		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
+		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v2", config.HistoryV2)
 
 		return nil
 	}); err != nil {
@@ -552,8 +558,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-		ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots,
+	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, agg, txNums, err := cli.EmbeddedServices(
+		ctx, config.Dirs, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots,
 		ethBackendRPC,
 		backend.txPool2GrpcServer,
 		miningRPC,
@@ -566,7 +572,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, agg, txNums, httpRpcCfg)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, httpRpcCfg)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {

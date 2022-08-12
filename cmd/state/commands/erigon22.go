@@ -95,8 +95,9 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	txNums := make([]uint64, maxBlockNum)
 	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 				txNums[blockNum] = baseTxNum + txAmount
+				return nil
 			}); err != nil {
 				return err
 			}

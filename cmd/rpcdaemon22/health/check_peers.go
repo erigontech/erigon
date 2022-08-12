@@ -2,7 +2,12 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
+)
+
+var (
+	errNotEnoughPeers = errors.New("not enough peers")
 )
 
 func checkMinPeers(minPeerCount uint, api NetAPI) error {
@@ -16,7 +21,7 @@ func checkMinPeers(minPeerCount uint, api NetAPI) error {
 	}
 
 	if uint64(peerCount) < uint64(minPeerCount) {
-		return fmt.Errorf("not enough peers: %d (minimum %d))", peerCount, minPeerCount)
+		return fmt.Errorf("%w: %d (minimum %d)", errNotEnoughPeers, peerCount, minPeerCount)
 	}
 
 	return nil

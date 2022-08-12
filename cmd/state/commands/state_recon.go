@@ -426,8 +426,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	txNums := make([]uint64, allSnapshots.BlocksAvailable()+1)
 	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 				txNums[blockNum] = baseTxNum + txAmount
+				return nil
 			}); err != nil {
 				return err
 			}

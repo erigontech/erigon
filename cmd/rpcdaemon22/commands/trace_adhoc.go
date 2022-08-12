@@ -365,26 +365,38 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
-		switch err {
-		case vm.ErrInvalidJump:
-			topTrace.Error = "Bad jump destination"
-		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
-			topTrace.Error = "Out of gas"
-		case vm.ErrExecutionReverted:
+		if err == vm.ErrExecutionReverted {
 			topTrace.Error = "Reverted"
-		case vm.ErrWriteProtection:
-			topTrace.Error = "Mutable Call In Static Context"
-		default:
-			switch err.(type) {
-			case *vm.ErrStackUnderflow:
-				topTrace.Error = "Stack underflow"
-			case *vm.ErrInvalidOpCode:
-				topTrace.Error = "Bad instruction"
+			switch topTrace.Type {
+			case CALL:
+				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+			case CREATE:
+				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
+			}
+		} else {
+			topTrace.Result = nil
+			switch err {
+			case vm.ErrInvalidJump:
+				topTrace.Error = "Bad jump destination"
+			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
+				topTrace.Error = "Out of gas"
+			case vm.ErrWriteProtection:
+				topTrace.Error = "Mutable Call In Static Context"
 			default:
-				topTrace.Error = err.Error()
+				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
+				case *vm.ErrInvalidOpCode:
+					topTrace.Error = "Bad instruction"
+				default:
+					topTrace.Error = err.Error()
+				}
 			}
 		}
-		topTrace.Result = nil
 	} else {
 		if len(output) > 0 {
 			switch topTrace.Type {
@@ -436,7 +448,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
-				vm.MSIZE, vm.EXTCODEHASH:
+				vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -867,7 +879,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber)
+		stateReader = state.NewPlainState(tx, blockNumber+1)
 	}
 	ibs := state.New(stateReader)
 
