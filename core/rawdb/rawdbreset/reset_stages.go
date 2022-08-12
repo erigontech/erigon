@@ -101,7 +101,7 @@ func ResetSenders(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetExec(tx kv.RwTx, g *core.Genesis) error {
+func ResetExec(tx kv.RwTx, g *core.Genesis, historyV2 bool) error {
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
@@ -154,8 +154,10 @@ func ResetExec(tx kv.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	if _, _, err := g.WriteGenesisState(tx); err != nil {
-		return err
+	if !historyV2 {
+		if _, _, err := g.WriteGenesisState(tx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
