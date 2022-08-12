@@ -243,12 +243,14 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	fromBlock := s.BlockNumber + 1
+	fromBlock := s.BlockNumber
+	if s.BlockNumber > 0 {
+		fromBlock = s.BlockNumber + 1
+	}
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
 	}
-	fmt.Printf("alex: %d, %d\n", toBlock, prevStageProgress)
 
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
