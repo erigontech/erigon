@@ -4,12 +4,29 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-var historyV2EnabledKey = []byte("history.v2")
+type ConfigKey []byte
 
-func HisoryV2Enabled(tx kv.Tx) (bool, error) {
-	return kv.GetBool(tx, kv.DatabaseInfo, historyV2EnabledKey)
-}
-func WriteHisoryV2(tx kv.RwTx, v bool) (bool, error) {
-	_, enabled, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, historyV2EnabledKey, v)
+var (
+	HistoryV2 = ConfigKey("history.v2")
+)
+
+func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.DatabaseInfo, k) }
+func (k ConfigKey) WriteOnce(tx kv.RwTx, v bool) (bool, error) {
+	_, enabled, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, v)
 	return enabled, err
+}
+func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (ok, enabled bool, err error) {
+	return kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, value)
+}
+func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {
+	if enabled {
+		if err := tx.Put(kv.DatabaseInfo, k, []byte{1}); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.Put(kv.DatabaseInfo, k, []byte{0}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

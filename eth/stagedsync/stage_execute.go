@@ -97,7 +97,7 @@ func StageExecuteBlocksCfg(
 ) ExecuteBlockCfg {
 	var exec22 bool
 	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		exec22, _ = rawdb.HisoryV2Enabled(tx)
+		exec22, _ = rawdb.HistoryV2.Enabled(tx)
 		return nil
 	})
 	return ExecuteBlockCfg{

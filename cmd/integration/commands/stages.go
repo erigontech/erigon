@@ -285,7 +285,7 @@ var cmdSetPrune = &cobra.Command{
 	},
 }
 
-var cmdSetSnapshto = &cobra.Command{
+var cmdSetSnap = &cobra.Command{
 	Use:   "force_set_snapshot",
 	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -421,9 +421,9 @@ func init() {
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
-	withDataDir2(cmdSetSnapshto)
-	withChain(cmdSetSnapshto)
-	rootCmd.AddCommand(cmdSetSnapshto)
+	withDataDir2(cmdSetSnap)
+	withChain(cmdSetSnap)
+	rootCmd.AddCommand(cmdSetSnap)
 
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
