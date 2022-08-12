@@ -295,7 +295,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	fmt.Printf("al: %d, %d\n", fromBlock, to)
 	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,

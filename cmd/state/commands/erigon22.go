@@ -161,25 +161,16 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 
 	workerCount := workers
 
-	var applyTx kv.RwTx
+	var chainTx kv.Tx
 	if workerCount == 1 {
-		applyTx, err = db.BeginRw(ctx)
+		chainTx, err = chainDb.BeginRo(ctx)
 		if err != nil {
 			return err
 		}
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}()
+		defer chainTx.Rollback()
 	}
-	if err := stagedsync.Exec22(execCtx, execStage, block, workerCount, db, chainDb, applyTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+	if err := stagedsync.Exec22(execCtx, execStage, block, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 		return err
-	}
-	if workerCount == 1 {
-		if err := applyTx.Commit(); err != nil {
-			panic(err)
-		}
 	}
 
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
