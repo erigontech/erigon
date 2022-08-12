@@ -119,6 +119,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		ethconfig.Defaults.Sync,
 		blockReader,
 		false,
+		nil,
 	)
 	if err != nil {
 		return err

@@ -293,6 +293,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		cfg.Sync,
 		blockReader,
 		false,
+		nil,
 	)
 
 	mock.sentriesClient.IsMock = true

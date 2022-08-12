@@ -322,8 +322,25 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		consensusConfig = &config.Ethash
 	}
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+			log.Warn("Could not validate block", "err", err)
+			return err
+		}
+		return nil
+	}
+	currentBlockNumber := uint64(0)
+	if currentBlock != nil {
+		currentBlockNumber = currentBlock.NumberU64()
+	}
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -336,6 +353,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.Sync,
 		blockReader,
 		stack.Config().SentryLogPeerInfo,
+		backend.forkValidator,
 	)
 	if err != nil {
 		return nil, err
@@ -401,19 +419,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		block := <-miningStatePos.MiningResultPOSCh
 		return block, nil
-	}
-
-	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
-		if err != nil {
-			return err
-		}
-		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
-			log.Warn("Could not validate block", "err", err)
-			return err
-		}
-		return nil
 	}
 
 	// Initialize ethbackend
@@ -520,7 +525,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.Ethstats != "" {
 		headCh = make(chan *types.Block, 1)
 	}
-	backend.forkValidator = engineapi.NewForkValidator(currentBlock.NumberU64(), inMemoryExecution)
+
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, headCh, backend.forkValidator)
 	if err != nil {
 		return nil, err
