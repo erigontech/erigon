@@ -1273,6 +1273,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Bodies, cfg.snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.BlockHashes, cfg.snapshots.BlocksAvailable())
 		_ = stages.SaveStageProgress(tx, stages.Senders, cfg.snapshots.BlocksAvailable())
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
