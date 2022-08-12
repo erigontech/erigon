@@ -188,12 +188,11 @@ func (rs *ReconState) SizeEstimate() uint64 {
 }
 
 type StateReconWriter struct {
-	ac            *libstate.Aggregator22Context
-	rs            *ReconState
-	txNum         uint64
-	AccountWrites map[string]struct{}
-	StorageWrites map[string]struct{}
-	CodeWrites    map[string]struct{}
+	ac        *libstate.Aggregator22Context
+	rs        *ReconState
+	txNum     uint64
+	broTx     kv.Tx
+	composite []byte
 }
 
 func NewStateReconWriter(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriter {
@@ -207,8 +206,19 @@ func (w *StateReconWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
+func (w *StateReconWriter) SetBroTx(tx kv.Tx) {
+	w.broTx = tx
+}
+
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	if _, ok := w.AccountWrites[string(address[:])]; !ok {
+	txKey, err := w.broTx.GetOne(kv.XAccount, address.Bytes())
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
+		return nil
+	}
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -222,7 +232,14 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if _, ok := w.CodeWrites[string(address[:])]; !ok {
+	txKey, err := w.broTx.GetOne(kv.XCode, address.Bytes())
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
+		return nil
+	}
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
@@ -238,10 +255,21 @@ func (w *StateReconWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	composite := make([]byte, len(address)+len(*key))
-	copy(composite, address[:])
-	copy(composite[len(address):], key[:])
-	if _, ok := w.StorageWrites[string(composite)]; !ok {
+	if cap(w.composite) < 20+32 {
+		w.composite = make([]byte, 20+32)
+	} else {
+		w.composite = w.composite[:20+32]
+	}
+	copy(w.composite, address.Bytes())
+	copy(w.composite[20:], key.Bytes())
+	txKey, err := w.broTx.GetOne(kv.XStorage, w.composite)
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
+		return nil
+	}
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
 	found := w.ac.IsMaxStorageTxNum(address.Bytes(), key.Bytes(), w.txNum)

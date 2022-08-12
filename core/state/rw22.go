@@ -47,9 +47,6 @@ type TxTask struct {
 	Logs               []*types.Log
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
-	AccountWrites map[string]struct{}
-	StorageWrites map[string]struct{}
-	CodeWrites map[string]struct{}
 }
 
 type TxTaskQueue []*TxTask
