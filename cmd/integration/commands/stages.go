@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -636,14 +638,19 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig, historyV2 := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db)
 	must(sync.SetCurrentStage(stages.Execution))
 	dirs := datadir.New(datadirCli)
 
 	if reset {
-		genesis, _ := genesisByChain(chain)
-		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
-			return err
+		if historyV2 {
+			dir.Recreate(path.Join(dirs.DataDir, "agg22"))
+			dir.Recreate(path.Join(dirs.DataDir, "db22"))
+		} else {
+			genesis, _ := genesisByChain(chain)
+			if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
