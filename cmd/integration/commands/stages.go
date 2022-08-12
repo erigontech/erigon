@@ -646,15 +646,9 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if historyV2 {
 			dir.Recreate(path.Join(dirs.DataDir, "agg22"))
 			dir.Recreate(path.Join(dirs.DataDir, "db22"))
-			genesis, _ := genesisByChain(chain)
-			if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
-				return err
-			}
-		} else {
-			genesis, _ := genesisByChain(chain)
-			if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
-				return err
-			}
+		}
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, chain) }); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -677,7 +671,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	genesis, _ := genesisByChain(chain)
+	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ false, dirs, getBlockReader(db), nil, genesis)
@@ -1143,7 +1137,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	events := privateapi.NewEvents()
 
-	genesis, _ := genesisByChain(chain)
+	genesis := core.DefaultGenesisBlockByChainName(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
@@ -1257,17 +1251,4 @@ func overrideStorageMode(db kv.RwDB) error {
 		log.Info("Storage mode in DB", "mode", pm.String())
 		return nil
 	})
-}
-
-func genesisByChain(chain string) (*core.Genesis, *params.ChainConfig) {
-	var chainConfig *params.ChainConfig
-	var genesis *core.Genesis
-	if chain == "" {
-		chainConfig = params.MainnetChainConfig
-		genesis = core.DefaultGenesisBlock()
-	} else {
-		chainConfig = params.ChainConfigByChainName(chain)
-		genesis = core.DefaultGenesisBlockByChainName(chain)
-	}
-	return genesis, chainConfig
 }

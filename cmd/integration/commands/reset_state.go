@@ -28,8 +28,7 @@ var cmdResetState = &cobra.Command{
 			return err
 		}
 
-		genesis, _ := genesisByChain(chain)
-		err := reset2.ResetState(db, ctx, genesis)
+		err := reset2.ResetState(db, ctx, chain)
 		if err != nil {
 			log.Error(err.Error())
 			return err

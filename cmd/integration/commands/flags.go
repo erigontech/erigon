@@ -125,7 +125,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
 }
 
 func withHeimdall(cmd *cobra.Command) {
