@@ -422,7 +422,7 @@ func init() {
 	rootCmd.AddCommand(cmdSetSnap)
 
 	withDataDir2(cmdForceSetHistoryV2)
-	cmdSetPrune.Flags().BoolVar(&_forceSetHistoryV2, "history.v2", false, "")
+	cmdForceSetHistoryV2.Flags().BoolVar(&_forceSetHistoryV2, "history.v2", false, "")
 	rootCmd.AddCommand(cmdForceSetHistoryV2)
 
 	withDataDir(cmdSetPrune)
