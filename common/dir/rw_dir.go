@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"syscall"
 
@@ -70,4 +71,12 @@ func Exist(path string) bool {
 		return false
 	}
 	return true
+}
+
+func Recreate(dir string) {
+	aggDir := path.Join(dir, "agg22")
+	if Exist(aggDir) {
+		_ = os.RemoveAll(aggDir)
+	}
+	MustExist(aggDir)
 }
