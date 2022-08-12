@@ -81,7 +81,7 @@ type ExecuteBlockCfg struct {
 
 func StageExecuteBlocksCfg(
 	db kv.RwDB,
-	prune prune.Mode,
+	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
@@ -99,13 +99,16 @@ func StageExecuteBlocksCfg(
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
 		exec22, err = rawdb.HistoryV2.Enabled(tx)
-		return err
+		if err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		panic(err)
 	}
 	return ExecuteBlockCfg{
 		db:            db,
-		prune:         prune,
+		prune:         pm,
 		batchSize:     batchSize,
 		changeSetHook: changeSetHook,
 		chainConfig:   chainConfig,
