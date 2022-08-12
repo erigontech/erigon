@@ -111,7 +111,7 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 
 func (rw *ReconWorker) SetBroTx(tx kv.Tx) {
 	rw.stateReader.SetBroTx(tx)
-	rw.stateReader.SetBroTx(tx)
+	rw.stateWriter.SetBroTx(tx)
 }
 
 func (rw *ReconWorker) run() {
