@@ -1259,9 +1259,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
 		}
-		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-			return err
-		}
 		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, cfg.snapshots.BlocksAvailable())
 		if err != nil {
 			return err
