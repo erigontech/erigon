@@ -1070,6 +1070,11 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 
 func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
+	if speed == 0 {
+		// Don't log "Wrote block ..." unless we're actually writing something
+		return now
+	}
+
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
