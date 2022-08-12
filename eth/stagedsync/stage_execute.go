@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
 	"runtime"
 	"time"
@@ -241,11 +240,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	reconDbPath := path.Join(cfg.dirs.DataDir, "db22")
-	if dir.Exist(reconDbPath) {
-		if err = os.RemoveAll(reconDbPath); err != nil {
-			return err
-		}
-	}
 	dir.MustExist(reconDbPath)
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiter).Open()
