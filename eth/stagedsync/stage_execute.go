@@ -96,10 +96,13 @@ func StageExecuteBlocksCfg(
 	genesis *core.Genesis,
 ) ExecuteBlockCfg {
 	var exec22 bool
-	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		exec22, _ = rawdb.HistoryV2.Enabled(tx)
-		return nil
-	})
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		exec22, err = rawdb.HistoryV2.Enabled(tx)
+		return err
+	}); err != nil {
+		panic(err)
+	}
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         prune,
