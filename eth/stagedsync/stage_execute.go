@@ -251,10 +251,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		if err != nil {
 			return err
 		}
-		defer func() {
-			fmt.Printf("rollback\n")
-			tx.Rollback()
-		}()
+		defer tx.Rollback()
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
