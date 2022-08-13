@@ -336,6 +336,7 @@ func NewStagedSync(
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
+	exec22 bool,
 	forkValidator *engineapi.ForkValidator,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
@@ -398,6 +399,7 @@ func NewStagedSync(
 				notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				exec22,
 				dirs,
 				blockReader,
 				controlServer.Hd,
@@ -417,7 +419,7 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, exec22 bool) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
@@ -467,6 +469,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				notifications.Accumulator,
 				cfg.StateStream,
 				true,
+				exec22,
 				cfg.Dirs,
 				blockReader,
 				controlServer.Hd,
