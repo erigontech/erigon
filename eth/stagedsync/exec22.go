@@ -333,7 +333,7 @@ loop:
 		// Check for interrupts
 		select {
 		case <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum+1))
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			atomic.StoreUint64(&maxTxNum, inputTxNum)
 			break loop
 		default:
