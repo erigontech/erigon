@@ -121,20 +121,12 @@ func Exec22(ctx context.Context,
 	var maxTxNum = txNums[len(txNums)-1]
 	if parallel {
 		go func() {
-			defer func() {
-				if applyTx != nil {
-					applyTx.Rollback()
-				}
-			}()
-			if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+			applyTx, err := chainDb.BeginRw(ctx)
+			if err != nil {
 				panic(err)
 			}
+			defer applyTx.Rollback()
 			agg.SetTx(applyTx)
-			//defer func() {
-			//	if applyTx != nil {
-			//		applyTx.Rollback()
-			//	}
-			//}()
 			defer rs.Finish()
 			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
 				select {
@@ -188,6 +180,7 @@ func Exec22(ctx context.Context,
 									drained = true
 								}
 							}
+
 							// Drain results queue as well
 							for rws.Len() > 0 {
 								txTask := heap.Pop(&rws).(*state.TxTask)
@@ -331,11 +324,25 @@ loop:
 	if parallel {
 		wg.Wait()
 	}
-	if err = rs.Flush(applyTx); err != nil {
-		return err
-	}
-	if err = execStage.Update(applyTx, blockNum); err != nil {
-		return err
+	if !parallel {
+		if err = rs.Flush(applyTx); err != nil {
+			return err
+		}
+		if err = execStage.Update(applyTx, blockNum); err != nil {
+			return err
+		}
+	} else {
+		if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
+			if err = rs.Flush(tx); err != nil {
+				return err
+			}
+			if err = execStage.Update(tx, blockNum); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil
