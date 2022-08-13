@@ -2130,7 +2130,7 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 		}
 	}
-	for i := s.BlocksAvailable(); ; i++ {
+	for i := s.BlocksAvailable() + 1; ; i++ {
 		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
 		if err != nil {
 			return err

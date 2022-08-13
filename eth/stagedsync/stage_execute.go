@@ -251,14 +251,13 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() {
+			fmt.Printf("rollback\n")
+			tx.Rollback()
+		}()
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	fromBlock := s.BlockNumber
-	if s.BlockNumber > 0 {
-		fromBlock = s.BlockNumber + 1
-	}
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -278,7 +277,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	// Compute mapping blockNum -> last TxNum in that block
 	txNums := make([]uint64, prevStageProgress)
-	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum >= prevStageProgress {
 			return nil
 		}
@@ -306,13 +305,14 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(execCtx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
+	if err := Exec22(execCtx, s, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
 	if !useExternalTx {
+		fmt.Printf("aex9999\n")
 		if err = tx.Commit(); err != nil {
 			return err
 		}

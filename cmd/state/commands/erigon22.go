@@ -77,8 +77,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	if err != nil {
 		return err
 	}
-	chainDbPath := path.Join(datadir, "chaindata")
-	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
+	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
 	}
@@ -162,15 +161,15 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 
 	workerCount := workers
 
-	var chainTx kv.Tx
+	var chainTx kv.RwTx
 	if workerCount == 1 {
-		chainTx, err = chainDb.BeginRo(ctx)
+		chainTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer chainTx.Rollback()
 	}
-	if err := stagedsync.Exec22(execCtx, execStage, block, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+	if err := stagedsync.Exec22(execCtx, execStage, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 		return err
 	}
 

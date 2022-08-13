@@ -27,6 +27,7 @@ type Worker22 struct {
 	chainTx      kv.Tx
 	db           kv.RoDB
 	tx           kv.Tx
+	background   bool
 	wg           *sync.WaitGroup
 	rs           *state.State22
 	blockReader  services.FullBlockReader
@@ -47,7 +48,7 @@ type Worker22 struct {
 	posa         consensus.PoSA
 }
 
-func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
+func NewWorker22(lock sync.Locker, background bool, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	resultCh chan *state.TxTask, engine consensus.Engine,
@@ -59,6 +60,7 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 		chainDb:      chainDb,
 		wg:           wg,
 		rs:           rs,
+		background:   background,
 		blockReader:  blockReader,
 		allSnapshots: allSnapshots,
 		ctx:          ctx,
@@ -84,11 +86,11 @@ func NewWorker22(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGro
 
 func (rw *Worker22) Tx() kv.Tx { return rw.tx }
 func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
-	if rw.tx != nil {
+	if rw.background && rw.tx != nil {
 		rw.tx.Rollback()
 		rw.tx = nil
 	}
-	if rw.chainTx != nil {
+	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
 	}
@@ -114,14 +116,14 @@ func (rw *Worker22) Run() {
 func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	if rw.tx == nil {
+	if rw.background && rw.tx == nil {
 		var err error
 		if rw.tx, err = rw.db.BeginRo(rw.ctx); err != nil {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.tx)
 	}
-	if rw.chainTx == nil {
+	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
 			panic(err)
@@ -316,7 +318,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
+func NewWorkersPool(lock sync.Locker, background bool, db kv.RoDB, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	txNums []uint64, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis,
 	engine consensus.Engine,
@@ -325,7 +327,7 @@ func NewWorkersPool(lock sync.Locker, db kv.RoDB, chainDb kv.RoDB, wg *sync.Wait
 	reconWorkers = make([]*Worker22, workerCount)
 	resultCh = make(chan *state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker22(lock, db, chainDb, wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker22(lock, background, db, chainDb, wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
 		for i := 0; i < workerCount; i++ {
