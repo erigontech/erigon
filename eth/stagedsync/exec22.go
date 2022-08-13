@@ -350,6 +350,9 @@ loop:
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
+		if err = execStage.Update(tx, blockNum); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return err

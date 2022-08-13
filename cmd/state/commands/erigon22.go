@@ -132,7 +132,7 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 		return err
 	}
 	var execStage *stagedsync.StageState
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+	if err := db.View(ctx, func(tx kv.Tx) error {
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
 		if err != nil {
 			return err
