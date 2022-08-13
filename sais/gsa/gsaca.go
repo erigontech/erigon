@@ -2,7 +2,7 @@ package gsa
 
 /*
 #include "gsacak.h"
-#cgo CFLAGS: -DTERMINATOR=0 -DM64=1 -Dm64=1
+#cgo CFLAGS: -DTERMINATOR=0 -DM64=1 -Dm64=1 -std=c99
 */
 import "C"
 import (
