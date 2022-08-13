@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -152,35 +151,27 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs.Tmp), ctx); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var rootHash common.Hash
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		var rootHash common.Hash
 		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var header *types.Header
-	if err := db.View(ctx, func(tx kv.Tx) error {
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
 		if err != nil {
 			return err
 		}
-		header, err = blockReader.HeaderByNumber(ctx, tx, execStage.BlockNumber)
+		header, err := blockReader.HeaderByNumber(ctx, tx, execStage.BlockNumber)
 		if err != nil {
 			return err
 		}
+		if rootHash != header.Root {
+			err := fmt.Errorf("incorrect root hash: expecteed %x", header.Root)
+			log.Error(err.Error())
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		return err
-	}
-	if rootHash != header.Root {
-		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }
