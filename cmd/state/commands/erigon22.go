@@ -126,8 +126,6 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	defer agg.Close()
 
 	workerCount := workers
-	_ = workerCount
-
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ false, dirs, blockReader, nil, genesis, workerCount)
