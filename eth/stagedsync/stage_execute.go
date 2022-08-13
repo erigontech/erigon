@@ -259,9 +259,45 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
-	if errStart != nil {
-		return errStart
+	var prevStageProgress uint64
+	// Compute mapping blockNum -> last TxNum in that block
+	var txNums []uint64
+
+	if tx != nil {
+		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		if err != nil {
+			return err
+		}
+		txNums = make([]uint64, prevStageProgress)
+		if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
+			if blockNum >= prevStageProgress {
+				return nil
+			}
+			txNums[blockNum] = baseTxNum + txAmount
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	} else {
+		if err = cfg.db.View(ctx, func(tx kv.Tx) error {
+			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			if err != nil {
+				return err
+			}
+			txNums = make([]uint64, prevStageProgress)
+			if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
+				if blockNum >= prevStageProgress {
+					return nil
+				}
+				txNums[blockNum] = baseTxNum + txAmount
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	logPrefix := s.LogPrefix()
@@ -274,18 +310,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
-	// Compute mapping blockNum -> last TxNum in that block
-	txNums := make([]uint64, prevStageProgress)
-	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-		if blockNum >= prevStageProgress {
-			return nil
-		}
-		txNums[blockNum] = baseTxNum + txAmount
-		return nil
-	}); err != nil {
-		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
 
 	rs := state.NewState22()

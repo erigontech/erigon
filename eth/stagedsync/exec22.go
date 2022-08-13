@@ -194,6 +194,9 @@ func Exec22(ctx context.Context,
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
 							}
+							if applyTx == nil {
+								panic("aa")
+							}
 							if err := rs.Flush(applyTx); err != nil {
 								return err
 							}

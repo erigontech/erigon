@@ -79,7 +79,7 @@ func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wa
 
 func (rw *Worker22) Tx() kv.Tx { return rw.chainTx }
 func (rw *Worker22) ResetTx(chainTx kv.Tx) {
-	if rw.background && rw.chainTx != nil {
+	if !rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
 	}
