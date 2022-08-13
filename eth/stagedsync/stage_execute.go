@@ -92,23 +92,13 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
+	exec22 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
 ) ExecuteBlockCfg {
-	var exec22 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		exec22, err = rawdb.HistoryV2.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,
