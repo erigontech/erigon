@@ -312,7 +312,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return err
 	}
 	if !useExternalTx {
-		fmt.Printf("aex9999\n")
 		if err = tx.Commit(); err != nil {
 			return err
 		}
