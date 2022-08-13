@@ -18,6 +18,7 @@ package state
 
 import (
 	"fmt"
+	math2 "math"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -274,6 +275,15 @@ func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo ui
 	a.logTopics.integrateFiles(sf.logTopics, txNumFrom, txNumTo)
 	a.tracesFrom.integrateFiles(sf.tracesFrom, txNumFrom, txNumTo)
 	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
+}
+
+func (a *Aggregator22) Unwind(txUnwindTo uint64) error {
+	step := a.txNum / a.aggregationStep
+	if step == 0 {
+		return nil
+	}
+
+	return a.prune(step, txUnwindTo, math2.MaxUint64)
 }
 
 func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {

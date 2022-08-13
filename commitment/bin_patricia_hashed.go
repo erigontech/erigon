@@ -493,7 +493,7 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
-			if _, err = hph.leafHashWithKeyVal(storageRootHash[:0], cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), true); err != nil {
+			if _, err = hph.leafHashWithKeyVal(storageRootHash[:0], cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
 				return nil, err
 			}
 			storageRootHashIsSet = true
@@ -501,7 +501,7 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x]\n", cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
-			return hph.leafHashWithKeyVal(buf, cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), false)
+			return hph.leafHashWithKeyVal(buf, cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
 		}
 	}
 	if cell.apl > 0 {
