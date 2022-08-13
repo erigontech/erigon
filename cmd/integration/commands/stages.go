@@ -1251,6 +1251,8 @@ func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, sna
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
 		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
 	case chainConfig.Parlia != nil:
+		// Apply special hacks for BSC params
+		params.ApplyBinanceSmartChainParams()
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
 		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
 	case chainConfig.Bor != nil:

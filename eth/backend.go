@@ -307,21 +307,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	var consensusConfig interface{}
-
-	if chainConfig.Clique != nil {
-		consensusConfig = &config.Clique
-	} else if chainConfig.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
-		consensusConfig = &config.Aura
-	} else if chainConfig.Parlia != nil {
-		consensusConfig = &config.Parlia
-	} else if chainConfig.Bor != nil {
-		consensusConfig = &config.Bor
-	} else {
-		consensusConfig = &config.Ethash
-	}
-
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.log, backend.chainDB, config, backend.sentriesClient, tmpdir, backend.notifications, allSnapshots)
 		if err != nil {
@@ -338,7 +323,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if currentBlock != nil {
 		currentBlockNumber = currentBlock.NumberU64()
 	}
+
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
+	var consensusConfig interface{}
+
+	if chainConfig.Clique != nil {
+		consensusConfig = &config.Clique
+	} else if chainConfig.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if chainConfig.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if chainConfig.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */)
 	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution)
 
