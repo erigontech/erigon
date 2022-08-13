@@ -222,7 +222,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 				value   uint256.Int
 			)
 			env.IntraBlockState().GetState(contract.Address(), &address, &value)
-			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+			l.storage[contract.Address()][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == SSTORE && stack.Len() >= 2 {

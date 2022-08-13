@@ -193,7 +193,7 @@ func (api *BorImpl) GetCurrentValidators() ([]*bor.Validator, error) {
 
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
-	length := uint64(end - start + 1)
+	length := end - start + 1
 	if length > bor.MaxCheckpointLength {
 		return "", &bor.MaxCheckpointLengthExceededError{Start: start, End: end}
 	}

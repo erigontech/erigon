@@ -371,7 +371,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(common.Address(slot.Bytes20()))))
+	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
 	return nil, nil
 }
 
@@ -869,7 +869,7 @@ func makeLog(size int) executionFunc {
 		mStart, mSize := stack.Pop(), stack.Pop()
 		for i := 0; i < size; i++ {
 			addr := stack.Pop()
-			topics[i] = common.Hash(addr.Bytes32())
+			topics[i] = addr.Bytes32()
 		}
 
 		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())

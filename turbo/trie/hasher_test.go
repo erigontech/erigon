@@ -12,7 +12,7 @@ func TestValue(t *testing.T) {
 
 	h := newHasher(false)
 	var hn common.Hash
-	h.hash(valueNode([]byte("BLAH")), false, hn[:])
+	h.hash(valueNode("BLAH"), false, hn[:])
 	expected := "0x0"
 	actual := fmt.Sprintf("0x%x", hn[:])
 	if actual != expected {

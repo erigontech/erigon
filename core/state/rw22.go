@@ -12,6 +12,7 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -109,6 +110,10 @@ func NewState22() *State22 {
 }
 
 func (rs *State22) put(table string, key, val []byte) {
+	if table == kv.PlainState {
+		fmt.Printf("table: %s, %s\n", table, dbg.Stack())
+	}
+
 	t, ok := rs.changes[table]
 	if !ok {
 		t = btree.NewG[StateItem](32, stateItemLess)

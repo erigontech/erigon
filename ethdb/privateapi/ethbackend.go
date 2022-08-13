@@ -391,7 +391,7 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 	// Check if we already reached TTD.
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", common.Hash(blockHash))
+		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
 	}
 

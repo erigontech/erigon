@@ -394,7 +394,7 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 // DecodeRLP decodes LegacyTx but with the list token already consumed and encodingSize being presented
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	var err error
-	s.NewList(uint64(encodingSize))
+	s.NewList(encodingSize)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}

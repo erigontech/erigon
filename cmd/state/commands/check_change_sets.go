@@ -166,7 +166,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			return h
 		}
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
-		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig, blockNum == uint64(block))
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig, blockNum == block)
 		if err1 != nil {
 			return err1
 		}

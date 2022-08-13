@@ -31,7 +31,7 @@ func NewKeyFormat(prefix byte, layout ...int) *KeyFormat {
 	// For prefix byte
 	length := 1
 	for _, l := range layout {
-		length += int(l)
+		length += l
 	}
 	return &KeyFormat{
 		prefix: prefix,
