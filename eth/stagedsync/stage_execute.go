@@ -288,8 +288,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
 
-	db := cfg.db
-
 	rs := state.NewState22()
 	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
 	dir.MustExist(aggDir)
@@ -299,7 +297,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(execCtx, s, workersCount, db, cfg.db, tx, rs,
+	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {

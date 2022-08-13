@@ -58,13 +58,12 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	dirs := datadir2.New(datadir)
 
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
-	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
+	db, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
 	}
-	db := chainDb
 	if reset {
-		if err := chainDb.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chainConfig.ChainName) }); err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chainConfig.ChainName) }); err != nil {
 			return err
 		}
 	}
@@ -130,7 +129,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	workerCount := workers
 	_ = workerCount
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(chainDb, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ false, dirs, blockReader, nil, genesis, workerCount)
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
