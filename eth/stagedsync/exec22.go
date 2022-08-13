@@ -70,25 +70,19 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 }
 
 func Exec22(ctx context.Context,
-	execStage *StageState,
-	workerCount int,
-	db kv.RwDB,
-	chainDb kv.RwDB,
-	chainTx kv.RwTx,
-	rs *state.State22,
-	blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots,
-	txNums []uint64,
-	logger log.Logger,
-	agg *state2.Aggregator22, engine consensus.Engine,
-	maxBlockNum uint64, chainConfig *params.ChainConfig, genesis *core.Genesis,
-	initialCycle bool) (err error) {
+	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
+	rs *state.State22, blockReader services.FullBlockReader,
+	allSnapshots *snapshotsync.RoSnapshots, txNums []uint64,
+	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
+	maxBlockNum uint64, chainConfig *params.ChainConfig,
+	genesis *core.Genesis, initialCycle bool,
+) (err error) {
+
 	var block uint64
 	if execStage.BlockNumber > 0 {
 		block = execStage.BlockNumber + 1
 	}
 
-	var applyTx kv.RwTx
 	var lock sync.RWMutex
 	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
 	// too keep consistency
@@ -98,19 +92,10 @@ func Exec22(ctx context.Context,
 	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
-		applyTx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}()
-		reconWorkers[0].ResetTx(applyTx, chainTx)
+		reconWorkers[0].ResetTx(applyTx)
 		agg.SetTx(applyTx)
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
@@ -141,7 +126,7 @@ func Exec22(ctx context.Context,
 					applyTx.Rollback()
 				}
 			}()
-			if applyTx, err = db.BeginRw(ctx); err != nil {
+			if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 				panic(err)
 			}
 			agg.SetTx(applyTx)
@@ -209,16 +194,16 @@ func Exec22(ctx context.Context,
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
 							}
+							if err := rs.Flush(applyTx); err != nil {
+								return err
+							}
 							if err = applyTx.Commit(); err != nil {
 								return err
 							}
 							for i := 0; i < len(reconWorkers); i++ {
-								reconWorkers[i].ResetTx(nil, nil)
+								reconWorkers[i].ResetTx(nil)
 							}
-							if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
-								return err
-							}
-							if applyTx, err = db.BeginRw(ctx); err != nil {
+							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
 							agg.SetTx(applyTx)
@@ -311,18 +296,22 @@ loop:
 					if sizeEstimate >= commitThreshold {
 						commitStart := time.Now()
 						log.Info("Committing...")
-						if err = applyTx.Commit(); err != nil {
+						if err := rs.Flush(applyTx); err != nil {
 							return err
 						}
-						reconWorkers[0].ResetTx(nil, nil)
-						if err := db.Update(ctx, func(tx kv.RwTx) error { return rs.Flush(tx) }); err != nil {
-							return err
+						if !initialCycle {
+							if err = execStage.Update(applyTx, blockNum); err != nil {
+								return err
+							}
+							if err := applyTx.Commit(); err != nil {
+								return err
+							}
+							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+								return err
+							}
+							agg.SetTx(applyTx)
+							reconWorkers[0].ResetTx(applyTx)
 						}
-						if applyTx, err = db.BeginRw(ctx); err != nil {
-							return err
-						}
-						agg.SetTx(applyTx)
-						reconWorkers[0].ResetTx(applyTx, chainTx)
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
 				default:
@@ -341,24 +330,11 @@ loop:
 	}
 	if parallel {
 		wg.Wait()
-	} else {
-		if err := applyTx.Commit(); err != nil {
-			return err
-		}
 	}
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err = rs.Flush(tx); err != nil {
-			return err
-		}
-		if err = execStage.Update(tx, blockNum); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	if err = rs.Flush(applyTx); err != nil {
 		return err
 	}
-
-	if err = execStage.Update(chainTx, blockNum); err != nil {
+	if err = execStage.Update(applyTx, blockNum); err != nil {
 		return err
 	}
 

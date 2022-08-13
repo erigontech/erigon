@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -55,19 +55,16 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	ctx := context.Background()
 	var err error
 	dirs := datadir2.New(datadir)
-	reconDbPath := path.Join(datadir, "db22")
-	if reset {
-		dir.Recreate(reconDbPath)
-	}
-	dir.MustExist(reconDbPath)
+
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiter).Open()
+	db, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
 	}
-	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
-	if err != nil {
-		return err
+	if reset {
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chainConfig.ChainName) }); err != nil {
+			return err
+		}
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
@@ -77,22 +74,6 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	// Compute mapping blockNum -> last TxNum in that block
-	maxBlockNum := allSnapshots.BlocksAvailable() + 1
-	txNums := make([]uint64, maxBlockNum)
-	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-				txNums[blockNum] = baseTxNum + txAmount
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-	}
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -133,7 +114,6 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		block = execStage.BlockNumber + 1
 	}
 
-	rs := state.NewState22()
 	aggDir := path.Join(dirs.DataDir, "agg22")
 	if reset {
 		dir.Recreate(aggDir)
@@ -148,28 +128,14 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	workerCount := workers
 	_ = workerCount
 
-	//execCfg := stagedsync.StageExecuteBlocksCfg(chainDb, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
-	//	/*stateStream=*/ false,
-	//	/*badBlockHalt=*/ false, dirs, blockReader, nil, genesis, workerCount)
-	//maxBlockNum := allSnapshots.BlocksAvailable() + 1
-	//if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
-	//	return err
-	//}
-
-	var chainTx kv.RwTx
-	if workerCount == 1 {
-		chainTx, err = chainDb.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer chainTx.Rollback()
-	}
-	if err := stagedsync.Exec22(execCtx, execStage, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
+		/*stateStream=*/ false,
+		/*badBlockHalt=*/ false, dirs, blockReader, nil, genesis, workerCount)
+	maxBlockNum := allSnapshots.BlocksAvailable() + 1
+	if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
 		return err
 	}
-	if workerCount == 1 {
-		chainTx.Commit()
-	}
+
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		log.Info("Transaction replay complete", "duration", time.Since(startTime))
 		log.Info("Computing hashed state")
@@ -185,35 +151,27 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs.Tmp), ctx); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var rootHash common.Hash
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		var rootHash common.Hash
 		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var header *types.Header
-	if err := db.View(ctx, func(tx kv.Tx) error {
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)
 		if err != nil {
 			return err
 		}
-		header, err = blockReader.HeaderByNumber(ctx, tx, execStage.BlockNumber)
+		header, err := blockReader.HeaderByNumber(ctx, tx, execStage.BlockNumber)
 		if err != nil {
 			return err
 		}
+		if rootHash != header.Root {
+			err := fmt.Errorf("incorrect root hash: expecteed %x", header.Root)
+			log.Error(err.Error())
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		return err
-	}
-	if rootHash != header.Root {
-		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
 	}
 	return nil
 }

@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
@@ -46,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -290,15 +288,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
 
-	reconDbPath := path.Join(cfg.dirs.DataDir, "db22")
-	dir.MustExist(reconDbPath)
-	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
-	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiter).Open()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
 	rs := state.NewState22()
 	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
 	dir.MustExist(aggDir)
@@ -308,7 +297,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(execCtx, s, workersCount, db, cfg.db, tx, rs,
+	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {

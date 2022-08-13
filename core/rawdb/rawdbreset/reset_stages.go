@@ -101,7 +101,35 @@ func ResetSenders(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetExec(tx kv.RwTx, chain string) error {
+func ResetExec(tx kv.RwTx, chain string) (err error) {
+	if err = stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+	if err = stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
+		return err
+	}
+	if err = stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
+		return err
+	}
+	if err = stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
+		return err
+	}
+	stateBuckets := []string{
+		kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
+		kv.Epoch, kv.PendingEpoch, kv.BorReceipts, kv.ContractCode,
+	}
+	for _, b := range stateBuckets {
+		if err := tx.ClearBucket(b); err != nil {
+			return err
+		}
+	}
+
 	historyV2, err := rawdb.HistoryV2.Enabled(tx)
 	if err != nil {
 		return err
@@ -125,18 +153,6 @@ func ResetExec(tx kv.RwTx, chain string) error {
 			}
 		}
 	} else {
-		if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.ContractCode); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.PlainState); err != nil {
-			return err
-		}
 		if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
 			return err
 		}
@@ -161,27 +177,13 @@ func ResetExec(tx kv.RwTx, chain string) error {
 		if err := tx.ClearBucket(kv.CallTraceSet); err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.Epoch); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.BorReceipts); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
-			return err
-		}
-		if err := stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
-			return err
-		}
 
 		genesis := core.DefaultGenesisBlockByChainName(chain)
 		if _, _, err := genesis.WriteGenesisState(tx); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
