@@ -132,7 +132,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	if root, known := api.rootHashCache.Get(key); known {
 		return root.(string), nil
 	}
-	length := uint64(end - start + 1)
+	length := end - start + 1
 	if length > MaxCheckpointLength {
 		return "", &MaxCheckpointLengthExceededError{start, end}
 	}
@@ -147,7 +147,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 		wg.Add(1)
 		concurrent <- true
 		go func(number uint64) {
-			blockHeaders[number-start] = api.chain.GetHeaderByNumber(uint64(number))
+			blockHeaders[number-start] = api.chain.GetHeaderByNumber(number)
 			<-concurrent
 			wg.Done()
 		}(i)

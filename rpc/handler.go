@@ -224,7 +224,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
 			buffer, _ := json.Marshal(answer)
-			stream.Write(json.RawMessage(buffer))
+			stream.Write(buffer)
 		}
 		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))

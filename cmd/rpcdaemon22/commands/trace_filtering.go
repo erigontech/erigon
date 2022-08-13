@@ -319,7 +319,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
-		txNum := uint64(it.Next())
+		txNum := it.Next()
 		// Find block number
 		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
 			return api._txNums[i] > txNum
