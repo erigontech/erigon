@@ -64,6 +64,7 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
+		ExecWorkerCount:            1,
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -240,7 +241,8 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle time.Duration
+	LoopThrottle    time.Duration
+	ExecWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration

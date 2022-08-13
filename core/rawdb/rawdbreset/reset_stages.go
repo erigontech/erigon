@@ -102,61 +102,82 @@ func ResetSenders(tx kv.RwTx) error {
 }
 
 func ResetExec(tx kv.RwTx, chain string) error {
-	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+	historyV2, err := rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.PlainState); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.PlainContractCode); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.Receipts); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.Log); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.Code); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.CallTraceSet); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.Epoch); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.BorReceipts); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
-		return err
-	}
+	if historyV2 {
+		buckets := []string{
+			kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+			kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
+			kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
+			kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+			kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
+			kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
+			kv.LogAddressKeys, kv.LogAddressIdx,
+			kv.LogTopicsKeys, kv.LogTopicsIdx,
+			kv.TracesFromKeys, kv.TracesFromIdx,
+			kv.TracesToKeys, kv.TracesToIdx,
+		}
+		for _, b := range buckets {
+			if err := tx.ClearBucket(b); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.HashedStorage); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.ContractCode); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.PlainState); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.PlainContractCode); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.Receipts); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.Log); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.Code); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.CallTraceSet); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.Epoch); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.BorReceipts); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+			return err
+		}
+		if err := stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
+			return err
+		}
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
-	historyV2, _ := rawdb.HistoryV2.Enabled(tx)
-	if !historyV2 {
+		genesis := core.DefaultGenesisBlockByChainName(chain)
 		if _, _, err := genesis.WriteGenesisState(tx); err != nil {
 			return err
 		}

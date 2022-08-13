@@ -77,9 +77,10 @@ type ExecuteBlockCfg struct {
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
 
-	dirs    datadir.Dirs
-	exec22  bool
-	genesis *core.Genesis
+	dirs         datadir.Dirs
+	exec22       bool
+	workersCount int
+	genesis      *core.Genesis
 }
 
 func StageExecuteBlocksCfg(
@@ -97,6 +98,7 @@ func StageExecuteBlocksCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
+	workersCount int,
 ) ExecuteBlockCfg {
 	var exec22 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -125,6 +127,7 @@ func StageExecuteBlocksCfg(
 		hd:            hd,
 		genesis:       genesis,
 		exec22:        exec22,
+		workersCount:  workersCount,
 	}
 }
 
@@ -244,9 +247,12 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}()
 	ctx = context.Background()
 
-	workersCount := 1
+	workersCount := cfg.workersCount
+	if !initialCycle {
+		workersCount = 1
+	}
 	useExternalTx := tx != nil
-	if !useExternalTx {
+	if !useExternalTx && workersCount == 1 {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -308,7 +314,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-	if !useExternalTx {
+	if !useExternalTx && workersCount == 1 {
 		if err = tx.Commit(); err != nil {
 			return err
 		}

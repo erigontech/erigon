@@ -3,11 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"path"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -54,22 +51,13 @@ var erigon22Cmd = &cobra.Command{
 	},
 }
 
-func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) error {
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	execCtx, cancel := context.WithCancel(ctx)
-	go func() {
-		<-sigs
-		cancel()
-	}()
-	ctx = context.Background()
+func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger) error {
+	ctx := context.Background()
 	var err error
 	dirs := datadir2.New(datadir)
 	reconDbPath := path.Join(datadir, "db22")
-	if reset && dir.Exist(reconDbPath) {
-		if err = os.RemoveAll(reconDbPath); err != nil {
-			return err
-		}
+	if reset {
+		dir.Recreate(reconDbPath)
 	}
 	dir.MustExist(reconDbPath)
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
@@ -147,10 +135,8 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 
 	rs := state.NewState22()
 	aggDir := path.Join(dirs.DataDir, "agg22")
-	if reset && dir.Exist(aggDir) {
-		if err = os.RemoveAll(aggDir); err != nil {
-			return err
-		}
+	if reset {
+		dir.Recreate(aggDir)
 	}
 	dir.MustExist(aggDir)
 	agg, err := libstate.NewAggregator22(aggDir, stagedsync.AggregationStep)
@@ -160,6 +146,15 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	defer agg.Close()
 
 	workerCount := workers
+	_ = workerCount
+
+	//execCfg := stagedsync.StageExecuteBlocksCfg(chainDb, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
+	//	/*stateStream=*/ false,
+	//	/*badBlockHalt=*/ false, dirs, blockReader, nil, genesis, workerCount)
+	//maxBlockNum := allSnapshots.BlocksAvailable() + 1
+	//if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
+	//	return err
+	//}
 
 	var chainTx kv.RwTx
 	if workerCount == 1 {
@@ -172,7 +167,9 @@ func Erigon22(ctx context.Context, genesis *core.Genesis, logger log.Logger) err
 	if err := stagedsync.Exec22(execCtx, execStage, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 		return err
 	}
-
+	if workerCount == 1 {
+		chainTx.Commit()
+	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		log.Info("Transaction replay complete", "duration", time.Since(startTime))
 		log.Info("Computing hashed state")
