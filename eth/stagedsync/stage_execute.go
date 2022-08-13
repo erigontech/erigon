@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"os/signal"
 	"path"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -74,9 +77,10 @@ type ExecuteBlockCfg struct {
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
 
-	dirs    datadir.Dirs
-	exec22  bool
-	genesis *core.Genesis
+	dirs         datadir.Dirs
+	exec22       bool
+	workersCount int
+	genesis      *core.Genesis
 }
 
 func StageExecuteBlocksCfg(
@@ -94,6 +98,7 @@ func StageExecuteBlocksCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
+	workersCount int,
 ) ExecuteBlockCfg {
 	var exec22 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -122,6 +127,7 @@ func StageExecuteBlocksCfg(
 		hd:            hd,
 		genesis:       genesis,
 		exec22:        exec22,
+		workersCount:  workersCount,
 	}
 }
 
@@ -232,9 +238,21 @@ func newStateReaderWriter(
 }
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	workersCount := 1
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	execCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		<-sigs
+		cancel()
+	}()
+	ctx = context.Background()
+
+	workersCount := cfg.workersCount
+	if !initialCycle {
+		workersCount = 1
+	}
 	useExternalTx := tx != nil
-	if !useExternalTx {
+	if !useExternalTx && workersCount == 1 {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -243,10 +261,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	fromBlock := s.BlockNumber
-	if s.BlockNumber > 0 {
-		fromBlock = s.BlockNumber + 1
-	}
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
 	if errStart != nil {
 		return errStart
@@ -266,7 +280,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	// Compute mapping blockNum -> last TxNum in that block
 	txNums := make([]uint64, prevStageProgress)
-	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, fromBlock, func(blockNum, baseTxNum, txAmount uint64) error {
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum >= prevStageProgress {
 			return nil
 		}
@@ -294,13 +308,13 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
+	if err := Exec22(execCtx, s, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-	if !useExternalTx {
+	if !useExternalTx && workersCount == 1 {
 		if err = tx.Commit(); err != nil {
 			return err
 		}

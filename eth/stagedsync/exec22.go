@@ -69,14 +69,25 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCount int,
-	db kv.RwDB, chainDb kv.RwDB, chainTx kv.Tx,
-	rs *state.State22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
-	txNums []uint64, logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
-	maxBlockNum uint64,
-	chainConfig *params.ChainConfig, genesis *core.Genesis,
-	initialCycle bool,
-) (err error) {
+func Exec22(ctx context.Context,
+	execStage *StageState,
+	workerCount int,
+	db kv.RwDB,
+	chainDb kv.RwDB,
+	chainTx kv.RwTx,
+	rs *state.State22,
+	blockReader services.FullBlockReader,
+	allSnapshots *snapshotsync.RoSnapshots,
+	txNums []uint64,
+	logger log.Logger,
+	agg *state2.Aggregator22, engine consensus.Engine,
+	maxBlockNum uint64, chainConfig *params.ChainConfig, genesis *core.Genesis,
+	initialCycle bool) (err error) {
+	var block uint64
+	if execStage.BlockNumber > 0 {
+		block = execStage.BlockNumber + 1
+	}
+
 	var applyTx kv.RwTx
 	var lock sync.RWMutex
 	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
@@ -87,7 +98,7 @@ func Exec22(ctx context.Context, execStage *StageState, block uint64, workerCoun
 	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		applyTx, err = db.BeginRw(ctx)
@@ -322,7 +333,7 @@ loop:
 		// Check for interrupts
 		select {
 		case <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum+1))
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			atomic.StoreUint64(&maxTxNum, inputTxNum)
 			break loop
 		default:
@@ -331,10 +342,9 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
-		applyTx.Commit()
-	}
-	for i := 0; i < len(reconWorkers); i++ {
-		reconWorkers[i].ResetTx(nil, nil)
+		if err := applyTx.Commit(); err != nil {
+			return err
+		}
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = rs.Flush(tx); err != nil {
@@ -347,6 +357,11 @@ loop:
 	}); err != nil {
 		return err
 	}
+
+	if err = execStage.Update(chainTx, blockNum); err != nil {
+		return err
+	}
+
 	return nil
 }
 
