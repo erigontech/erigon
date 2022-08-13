@@ -235,6 +235,8 @@ func newStateReaderWriter(
 	return stateReader, stateWriter, nil
 }
 
+// ================ Erigon22 ================
+
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -262,7 +264,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	var prevStageProgress uint64
 	// Compute mapping blockNum -> last TxNum in that block
 	var txNums []uint64
-
 	if tx != nil {
 		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
 		if err != nil {
@@ -334,6 +335,92 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	return nil
 }
+
+func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	if u.UnwindPoint >= s.BlockNumber {
+		return nil
+	}
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	logPrefix := u.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	//rs := state.NewState22()
+	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+
+	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
+
+	var prevStageProgress uint64
+	// Compute mapping blockNum -> last TxNum in that block
+	var txNums []uint64
+	if tx != nil {
+		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		if err != nil {
+			return err
+		}
+		txNums = make([]uint64, prevStageProgress+1)
+		if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
+			if blockNum > prevStageProgress {
+				return nil
+			}
+			txNums[blockNum] = baseTxNum + txAmount
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	} else {
+		if err = cfg.db.View(ctx, func(tx kv.Tx) error {
+			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			if err != nil {
+				return err
+			}
+			txNums = make([]uint64, prevStageProgress)
+			if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
+				if blockNum > prevStageProgress {
+					return nil
+				}
+				txNums[blockNum] = baseTxNum + txAmount
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	agg.SetTx(tx)
+	agg.SetTxNum(txNums[prevStageProgress])
+	if err := agg.Unwind(txNums[u.UnwindPoint]); err != nil {
+		return err
+	}
+	if err = u.Done(tx); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ================ Erigon22 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if cfg.exec22 {
@@ -547,6 +634,10 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	if cfg.exec22 {
+		return UnwindExec22(u, s, tx, ctx, cfg, initialCycle)
+	}
+
 	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
