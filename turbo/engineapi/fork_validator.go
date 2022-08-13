@@ -34,7 +34,6 @@ import (
 
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
-const maxPowDepth = 3   // Supported terminal blocks side fork length.
 
 type validatePayloadFunc func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody) error
 
@@ -234,9 +233,6 @@ func (fv *ForkValidator) TryAddingPoWBlock(block *types.Block) {
 	defer fv.clean()
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	if math.AbsoluteDifference(fv.currentHeight, block.NumberU64()) > maxPowDepth {
-		return
-	}
 	fv.sideForksBlock[block.Hash()] = forkSegment{block.Header(), block.RawBody()}
 }
 
