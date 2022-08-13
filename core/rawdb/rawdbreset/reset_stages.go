@@ -120,32 +120,14 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 	if err = stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if err = tx.ClearBucket(kv.PlainState); err != nil {
-		return err
+	stateBuckets := []string{
+		kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
+		kv.Epoch, kv.PendingEpoch, kv.BorReceipts, kv.ContractCode,
 	}
-	if err = tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.TrieOfStorage); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.Epoch); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.PendingEpoch); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.BorReceipts); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.ContractCode); err != nil {
-		return err
+	for _, b := range stateBuckets {
+		if err := tx.ClearBucket(b); err != nil {
+			return err
+		}
 	}
 
 	historyV2, err := rawdb.HistoryV2.Enabled(tx)
