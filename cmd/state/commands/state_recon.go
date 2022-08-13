@@ -107,11 +107,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 
 func (rw *ReconWorker) SetTx(tx kv.Tx) {
 	rw.stateReader.SetTx(tx)
-}
-
-func (rw *ReconWorker) SetBroTx(tx kv.Tx) {
-	rw.stateReader.SetBroTx(tx)
-	rw.stateWriter.SetBroTx(tx)
+	rw.stateWriter.SetTx(tx)
 }
 
 func (rw *ReconWorker) run() {
@@ -424,22 +420,10 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	} else if err = os.RemoveAll(reconDbPath); err != nil {
 		return err
 	}
-	bmapPath := path.Join(datadir, "bmapdb")
-	if _, err = os.Stat(bmapPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	} else if err = os.RemoveAll(bmapPath); err != nil {
-		return err
-	}
 	startTime := time.Now()
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).WriteMap().Open()
-	if err != nil {
-		return err
-	}
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
-	bdb, err := kv2.NewMDBX(logger).Path(bmapPath).RoTxsLimiter(limiterB).WriteMap().Open()
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 	if err != nil {
 		return err
 	}
@@ -552,7 +536,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		accountCollectorsX[i].Close()
 		accountCollectorsX[i] = nil
 	}
-	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+	if brwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
 	if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -599,7 +583,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		storageCollectorsX[i].Close()
 		storageCollectorsX[i] = nil
 	}
-	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+	if brwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
 	if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -648,7 +632,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		codeCollectorsX[i].Close()
 		codeCollectorsX[i] = nil
 	}
-	if brwTx, err = bdb.BeginRw(ctx); err != nil {
+	if brwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
 	if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -665,15 +649,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	var lock sync.RWMutex
 	reconWorkers := make([]*ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
-	broTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
 		for i := 0; i < workerCount; i++ {
 			if roTxs[i] != nil {
 				roTxs[i].Rollback()
-			}
-			if broTxs[i] != nil {
-				broTxs[i].Rollback()
 			}
 			if chainTxs[i] != nil {
 				chainTxs[i].Rollback()
@@ -684,9 +664,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
-		if broTxs[i], err = bdb.BeginRo(ctx); err != nil {
-			return err
-		}
 		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
 			return err
 		}
@@ -695,7 +672,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
-		reconWorkers[i].SetBroTx(broTxs[i])
 	}
 	wg.Add(workerCount)
 	count := uint64(0)
@@ -773,42 +749,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}()
 	var inputTxNum uint64
 	var header *types.Header
-	broTx, err := bdb.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if broTx != nil {
-			broTx.Rollback()
-		}
-	}()
-	acursor, err := broTx.CursorDupSort(kv.BAccount)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if acursor != nil {
-			acursor.Close()
-		}
-	}()
-	scursor, err := broTx.CursorDupSort(kv.BStorage)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if scursor != nil {
-			scursor.Close()
-		}
-	}()
-	ccursor, err := broTx.CursorDupSort(kv.BCode)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if ccursor != nil {
-			ccursor.Close()
-		}
-	}()
 	var txKey [8]byte
 	for bn := uint64(0); bn < blockNum; bn++ {
 		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
@@ -840,14 +780,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			inputTxNum++
 		}
 	}
-	acursor.Close()
-	acursor = nil
-	scursor.Close()
-	scursor = nil
-	ccursor.Close()
-	ccursor = nil
-	broTx.Rollback()
-	broTx = nil
 	close(workCh)
 	wg.Wait()
 	reconDone <- struct{}{} // Complete logging and committing go-routine

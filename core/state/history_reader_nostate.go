@@ -22,7 +22,6 @@ func (r *RequiredStateError) Error() string {
 type HistoryReaderNoState struct {
 	ac         *libstate.Aggregator22Context
 	tx         kv.Tx
-	broTx      kv.Tx
 	txNum      uint64
 	trace      bool
 	rs         *ReconState
@@ -43,16 +42,12 @@ func (hr *HistoryReaderNoState) SetTx(tx kv.Tx) {
 	hr.tx = tx
 }
 
-func (hr *HistoryReaderNoState) SetBroTx(tx kv.Tx) {
-	hr.broTx = tx
-}
-
 func (hr *HistoryReaderNoState) SetTrace(trace bool) {
 	hr.trace = trace
 }
 
 func (hr *HistoryReaderNoState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	txKey, err := hr.broTx.GetOne(kv.XAccount, address.Bytes())
+	txKey, err := hr.tx.GetOne(kv.XAccount, address.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +146,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	}
 	copy(hr.composite, address.Bytes())
 	copy(hr.composite[20:], key.Bytes())
-	txKey, err := hr.broTx.GetOne(kv.XStorage, hr.composite[:])
+	txKey, err := hr.tx.GetOne(kv.XStorage, hr.composite[:])
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +205,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
+	txKey, err := hr.tx.GetOne(kv.XCode, address.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +255,7 @@ func (hr *HistoryReaderNoState) ReadAccountCode(address common.Address, incarnat
 }
 
 func (hr *HistoryReaderNoState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	txKey, err := hr.broTx.GetOne(kv.XCode, address.Bytes())
+	txKey, err := hr.tx.GetOne(kv.XCode, address.Bytes())
 	if err != nil {
 		return 0, err
 	}

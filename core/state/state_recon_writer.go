@@ -191,7 +191,7 @@ type StateReconWriter struct {
 	ac        *libstate.Aggregator22Context
 	rs        *ReconState
 	txNum     uint64
-	broTx     kv.Tx
+	tx        kv.Tx
 	composite []byte
 }
 
@@ -206,12 +206,12 @@ func (w *StateReconWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
-func (w *StateReconWriter) SetBroTx(tx kv.Tx) {
-	w.broTx = tx
+func (w *StateReconWriter) SetTx(tx kv.Tx) {
+	w.tx = tx
 }
 
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	txKey, err := w.broTx.GetOne(kv.XAccount, address.Bytes())
+	txKey, err := w.tx.GetOne(kv.XAccount, address.Bytes())
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	txKey, err := w.broTx.GetOne(kv.XCode, address.Bytes())
+	txKey, err := w.tx.GetOne(kv.XCode, address.Bytes())
 	if err != nil {
 		return err
 	}
@@ -262,7 +262,7 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	}
 	copy(w.composite, address.Bytes())
 	copy(w.composite[20:], key.Bytes())
-	txKey, err := w.broTx.GetOne(kv.XStorage, w.composite)
+	txKey, err := w.tx.GetOne(kv.XStorage, w.composite)
 	if err != nil {
 		return err
 	}
