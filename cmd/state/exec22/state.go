@@ -84,7 +84,7 @@ func NewWorker22(lock sync.Locker, background bool, db kv.RoDB, chainDb kv.RoDB,
 	return w
 }
 
-func (rw *Worker22) Tx() kv.Tx { return rw.tx }
+func (rw *Worker22) Tx() kv.Tx { return rw.chainTx }
 func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
 	if rw.background && rw.tx != nil {
 		rw.tx.Rollback()
@@ -94,12 +94,9 @@ func (rw *Worker22) ResetTx(tx kv.Tx, chainTx kv.Tx) {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
 	}
-	if tx != nil {
-		rw.tx = tx
-		rw.stateReader.SetTx(rw.tx)
-	}
 	if chainTx != nil {
 		rw.chainTx = chainTx
+		rw.stateReader.SetTx(rw.chainTx)
 		rw.epoch = EpochReader{tx: rw.chainTx}
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
@@ -116,18 +113,12 @@ func (rw *Worker22) Run() {
 func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	if rw.background && rw.tx == nil {
-		var err error
-		if rw.tx, err = rw.db.BeginRo(rw.ctx); err != nil {
-			panic(err)
-		}
-		rw.stateReader.SetTx(rw.tx)
-	}
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
 			panic(err)
 		}
+		rw.stateReader.SetTx(rw.chainTx)
 		rw.epoch = EpochReader{tx: rw.chainTx}
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}

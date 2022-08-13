@@ -118,11 +118,23 @@ func ResetExec(tx kv.RwTx, chain string) error {
 			kv.LogTopicsKeys, kv.LogTopicsIdx,
 			kv.TracesFromKeys, kv.TracesFromIdx,
 			kv.TracesToKeys, kv.TracesToIdx,
+
+			kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
 		}
 		for _, b := range buckets {
 			if err := tx.ClearBucket(b); err != nil {
 				return err
 			}
+		}
+
+		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.HashedStorage); err != nil {
+			return err
+		}
+		if err := tx.ClearBucket(kv.ContractCode); err != nil {
+			return err
 		}
 	} else {
 		if err := tx.ClearBucket(kv.HashedAccounts); err != nil {

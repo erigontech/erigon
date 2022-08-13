@@ -83,6 +83,8 @@ func Exec22(ctx context.Context,
 	agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig, genesis *core.Genesis,
 	initialCycle bool) (err error) {
+	db = chainDb
+
 	var block uint64
 	if execStage.BlockNumber > 0 {
 		block = execStage.BlockNumber + 1
@@ -101,15 +103,7 @@ func Exec22(ctx context.Context,
 	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, db, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
-		applyTx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if applyTx != nil {
-				applyTx.Rollback()
-			}
-		}()
+		applyTx = chainTx
 		reconWorkers[0].ResetTx(applyTx, chainTx)
 		agg.SetTx(applyTx)
 	}
@@ -342,19 +336,11 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
-		if err := applyTx.Commit(); err != nil {
-			return err
-		}
+		//if err := applyTx.Commit(); err != nil {
+		//	return err
+		//}
 	}
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err = rs.Flush(tx); err != nil {
-			return err
-		}
-		if err = execStage.Update(tx, blockNum); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	if err = rs.Flush(chainTx); err != nil {
 		return err
 	}
 

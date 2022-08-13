@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -55,19 +56,17 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	ctx := context.Background()
 	var err error
 	dirs := datadir2.New(datadir)
-	reconDbPath := path.Join(datadir, "db22")
-	if reset {
-		dir.Recreate(reconDbPath)
-	}
-	dir.MustExist(reconDbPath)
+
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiter).Open()
-	if err != nil {
-		return err
-	}
 	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
+	}
+	db := chainDb
+	if reset {
+		if err := chainDb.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chainConfig.ChainName) }); err != nil {
+			return err
+		}
 	}
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
@@ -164,7 +163,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		}
 		defer chainTx.Rollback()
 	}
-	if err := stagedsync.Exec22(execCtx, execStage, workerCount, db, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
+	if err := stagedsync.Exec22(execCtx, execStage, workerCount, chainDb, chainDb, chainTx, rs, blockReader, allSnapshots, txNums, logger, agg, engine, maxBlockNum, chainConfig, genesis, true); err != nil {
 		return err
 	}
 	if workerCount == 1 {
