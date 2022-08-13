@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"os/signal"
 	"path"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -232,6 +235,15 @@ func newStateReaderWriter(
 }
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	execCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		<-sigs
+		cancel()
+	}()
+	ctx = context.Background()
+
 	workersCount := 1
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -294,7 +306,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	defer agg.Close()
 
-	if err := Exec22(ctx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
+	if err := Exec22(execCtx, s, fromBlock, workersCount, db, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {

@@ -1096,7 +1096,6 @@ func allSnapshots(db kv.RoDB) *snapshotsync.RoSnapshots {
 			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
 				panic(err)
 			}
-			_allSnapshotsSingleton.ReopenFolder()
 		}
 	})
 	return _allSnapshotsSingleton
