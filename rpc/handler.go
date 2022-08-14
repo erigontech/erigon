@@ -37,21 +37,20 @@ import (
 //
 // The entry points for incoming messages are:
 //
-//    h.handleMsg(message)
-//    h.handleBatch(message)
+//	h.handleMsg(message)
+//	h.handleBatch(message)
 //
 // Outgoing calls use the requestOp struct. Register the request before sending it
 // on the connection:
 //
-//    op := &requestOp{ids: ...}
-//    h.addRequestOp(op)
+//	op := &requestOp{ids: ...}
+//	h.addRequestOp(op)
 //
 // Now send the request, then wait for the reply to be delivered through handleMsg:
 //
-//    if err := op.wait(...); err != nil {
-//        h.removeRequestOp(op) // timeout, etc.
-//    }
-//
+//	if err := op.wait(...); err != nil {
+//	    h.removeRequestOp(op) // timeout, etc.
+//	}
 type handler struct {
 	reg            *serviceRegistry
 	unsubscribeCb  *callback
@@ -77,6 +76,38 @@ type handler struct {
 type callProc struct {
 	ctx       context.Context
 	notifiers []*Notifier
+}
+
+func HandleError(err error, stream *jsoniter.Stream) error {
+	if err != nil {
+		//return msg.errorResponse(err)
+		stream.WriteObjectField("error")
+		stream.WriteObjectStart()
+		stream.WriteObjectField("code")
+		ec, ok := err.(Error)
+		if ok {
+			stream.WriteInt(ec.ErrorCode())
+		} else {
+			stream.WriteInt(defaultErrorCode)
+		}
+		stream.WriteMore()
+		stream.WriteObjectField("message")
+		stream.WriteString(fmt.Sprintf("%v", err))
+		de, ok := err.(DataError)
+		if ok {
+			stream.WriteMore()
+			stream.WriteObjectField("data")
+			data, derr := json.Marshal(de.ErrorData())
+			if derr == nil {
+				stream.Write(data)
+			} else {
+				stream.WriteString(fmt.Sprintf("%v", derr))
+			}
+		}
+		stream.WriteObjectEnd()
+	}
+
+	return nil
 }
 
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
@@ -193,7 +224,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
 			buffer, _ := json.Marshal(answer)
-			stream.Write(json.RawMessage(buffer))
+			stream.Write(buffer)
 		}
 		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
@@ -479,33 +510,9 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteObjectField("result")
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
-		//return msg.errorResponse(err)
-
+		stream.WriteNil()
 		stream.WriteMore()
-		stream.WriteObjectField("error")
-		stream.WriteObjectStart()
-		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
-			stream.WriteInt(ec.ErrorCode())
-		} else {
-			stream.WriteInt(defaultErrorCode)
-		}
-		stream.WriteMore()
-		stream.WriteObjectField("message")
-		stream.WriteString(fmt.Sprintf("%v", err))
-		de, ok := err.(DataError)
-		if ok {
-			stream.WriteMore()
-			stream.WriteObjectField("data")
-			data, derr := json.Marshal(de.ErrorData())
-			if derr == nil {
-				stream.Write(data)
-			} else {
-				stream.WriteString(fmt.Sprintf("%v", derr))
-			}
-		}
-		stream.WriteObjectEnd()
+		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()
 	stream.Flush()

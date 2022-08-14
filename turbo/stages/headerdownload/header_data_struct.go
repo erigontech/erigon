@@ -301,6 +301,7 @@ type HeaderDownload struct {
 
 	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
+	firstSeenHeightPoS   *uint64
 	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus

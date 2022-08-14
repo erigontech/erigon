@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -55,8 +56,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
@@ -78,8 +78,7 @@ var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 
 		if unwind == 0 {
@@ -98,8 +97,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		logger := log.New()
-		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		if unwind == 0 {
 			unwind = 1
@@ -147,6 +145,18 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	pm, engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig := tool.ChainConfigFromDB(db)
 
+	var exec22 bool
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		exec22, err = rawdb.HistoryV2.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -182,7 +192,8 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, dirs.Tmp, getBlockReader(db), nil)
+	genesis := core.DefaultGenesisBlockByChainName(chain)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, exec22, dirs, getBlockReader(db), nil, genesis, 1)
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
@@ -489,13 +500,17 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	sync.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
+	exec22, err := rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
+		return err
+	}
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
+	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, dirs.Tmp, getBlockReader(db), nil)
+		/*badBlockHalt=*/ false, exec22, dirs, getBlockReader(db), nil, genesis, 1)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {

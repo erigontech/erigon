@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-
 	// "errors"
 	"fmt"
 	"io"
@@ -212,7 +211,7 @@ type mdbx_db struct {
 	txnID     uint64 /* txnid of last committed modification */
 }
 
-//nolint // database size-related parameters, used as placeholder, doesn't have any meaning in this code
+// nolint // database size-related parameters, used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
 	grow_pv   uint16 //nolint
 	shrink_pv uint16 //nolint

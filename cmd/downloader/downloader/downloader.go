@@ -64,13 +64,10 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
 		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
 	}
-	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) && !HasSegFile(cfg.DataDir) { // it's ok to remove "datadir/snapshots/db" dir or add .seg files manually
-		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
-	} else {
-		if err := copyFromTmp(cfg.DataDir); err != nil {
-			return nil, err
-		}
+	if err := moveFromTmp(cfg.DataDir); err != nil {
+		return nil, err
 	}
+
 	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -154,14 +151,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
-	if !prevStats.Completed && stats.Completed {
-		d.onComplete()
-	}
-
 	d.stats = stats
 }
 
-func copyFromTmp(snapDir string) error {
+func moveFromTmp(snapDir string) error {
 	tmpDir := filepath.Join(snapDir, "tmp")
 	if !common.FileExist(tmpDir) {
 		return nil
@@ -187,40 +180,6 @@ func copyFromTmp(snapDir string) error {
 	}
 	_ = os.Remove(tmpDir)
 	return nil
-}
-
-// onComplete - only once - after download of all files fully done:
-// - closing torrent client, closing downloader db
-// - removing _tmp suffix from snapDir
-// - open new torrentClient and db
-func (d *Downloader) onComplete() {
-	snapDir, lastPart := filepath.Split(d.cfg.DataDir)
-	if lastPart != "tmp" {
-		return
-	}
-
-	d.clientLock.Lock()
-	defer d.clientLock.Unlock()
-
-	d.torrentClient.Close()
-	d.folder.Close()
-	d.pieceCompletionDB.Close()
-	d.db.Close()
-
-	if err := copyFromTmp(snapDir); err != nil {
-		panic(err)
-	}
-	d.cfg.DataDir = snapDir
-
-	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
-	if err != nil {
-		panic(err)
-	}
-	d.db = db
-	d.pieceCompletionDB = c
-	d.folder = m
-	d.torrentClient = torrentClient
-	_ = d.addSegments()
 }
 
 func (d *Downloader) verify() error {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -151,21 +152,32 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	notifyFrom++
 
-	var notifyTo uint64 = notifyFrom
+	var notifyTo = notifyFrom
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
 		notifyTo = binary.BigEndian.Uint64(k)
-		headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, notifyTo)
+		if err != nil {
+			log.Warn("[Finish] failed checking if header is cannonical")
+		}
+
+		headerHash := common.BytesToHash(k[8:])
+		if canonicalHash == headerHash {
+			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
+		}
+
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		log.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
+
 	notifier.OnNewHeader(headersRlp)
 	headerTiming := time.Since(t)
+
 	t = time.Now()
 	if notifier.HasLogSubsriptions() {
 		logs, err := ReadLogs(tx, notifyFrom, isUnwind)

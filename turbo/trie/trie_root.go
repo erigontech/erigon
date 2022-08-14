@@ -174,26 +174,27 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 }
 
 // CalcTrieRoot algo:
-//	for iterateIHOfAccounts {
-//		if canSkipState
-//          goto SkipAccounts
 //
-//		for iterateAccounts from prevIH to currentIH {
-//			use(account)
-//			for iterateIHOfStorage within accountWithIncarnation{
-//				if canSkipState
-//					goto SkipStorage
+//		for iterateIHOfAccounts {
+//			if canSkipState
+//	         goto SkipAccounts
 //
-//				for iterateStorage from prevIHOfStorage to currentIHOfStorage {
-//					use(storage)
+//			for iterateAccounts from prevIH to currentIH {
+//				use(account)
+//				for iterateIHOfStorage within accountWithIncarnation{
+//					if canSkipState
+//						goto SkipStorage
+//
+//					for iterateStorage from prevIHOfStorage to currentIHOfStorage {
+//						use(storage)
+//					}
+//	           SkipStorage:
+//					use(ihStorage)
 //				}
-//            SkipStorage:
-//				use(ihStorage)
 //			}
+//	   SkipAccounts:
+//			use(AccTrie)
 //		}
-//    SkipAccounts:
-//		use(AccTrie)
-//	}
 func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan struct{}) (common.Hash, error) {
 
 	accC, err := tx.Cursor(kv.HashedAccounts)
@@ -635,10 +636,6 @@ func (r *RootHashAggregator) genStructAccount() error {
 		if r.hc == nil {
 			return nil
 		}
-
-		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-		//	fmt.Printf("collect: %x,%b,%b, del:%t\n", keyHex, hasHash, hasTree, hashes == nil)
-		//}
 		return r.hc(keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasTree, r.hasHash,
 		false,
@@ -1318,18 +1315,24 @@ func (c *StorageTrieCursor) _deleteCurrent() error {
 }
 
 /*
-	Dense Sequence - if between 2 AccTrie records not possible insert any state record - then they form "dense sequence"
-	If 2 AccTrie records form Dense Sequence - then no reason to iterate over state - just use AccTrie one after another
-	Example1:
-		1234
-		1235
-	Example2:
-		12ff
-		13
-	Example3:
-		12ff
-		13000000
-	If 2 AccTrie records form "sequence" then it can be consumed without moving StateCursor
+Dense Sequence - if between 2 AccTrie records not possible insert any state record - then they form "dense sequence"
+If 2 AccTrie records form Dense Sequence - then no reason to iterate over state - just use AccTrie one after another
+Example1:
+
+	1234
+	1235
+
+Example2:
+
+	12ff
+	13
+
+Example3:
+
+	12ff
+	13000000
+
+If 2 AccTrie records form "sequence" then it can be consumed without moving StateCursor
 */
 func isDenseSequence(prev []byte, next []byte) bool {
 	isSequence := false

@@ -325,6 +325,8 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		}
 		if label == kv.ChainDB {
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		return opts.Open()
 	}

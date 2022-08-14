@@ -70,8 +70,13 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 16), ctx: ctx, ctxCancel: cancel}
+
+	p.lock.RLock()
+	t := p.tasks
+	p.lock.RUnlock()
+
 	go func() { // each peer has own worker, then slow
-		for f := range p.tasks {
+		for f := range t {
 			f()
 		}
 	}()

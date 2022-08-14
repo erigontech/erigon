@@ -27,7 +27,7 @@ var (
 
 // Payloads
 var (
-	mockPayload1 *types2.ExecutionPayload = &types2.ExecutionPayload{
+	mockPayload1 = &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(common.HexToHash("0x2")),
 		BlockHash:     gointerfaces.ConvertHashToH256(payload1Hash),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
@@ -43,7 +43,7 @@ var (
 		Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
 		Transactions:  make([][]byte, 0),
 	}
-	mockPayload2 *types2.ExecutionPayload = &types2.ExecutionPayload{
+	mockPayload2 = &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload1Hash),
 		BlockHash:     gointerfaces.ConvertHashToH256(payload2Hash),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),

@@ -3,11 +3,16 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -147,12 +152,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if txn == nil {
 		var borTx types.Transaction
 		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
-
 		if err != nil {
+			stream.WriteNil()
 			return err
 		}
 
 		if borTx != nil {
+			stream.WriteNil()
 			return nil
 		}
 		stream.WriteNil()
@@ -242,4 +248,196 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
+}
+
+func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+	var (
+		hash               common.Hash
+		replayTransactions types.Transactions
+		evm                *vm.EVM
+		blockCtx           vm.BlockContext
+		txCtx              vm.TxContext
+		overrideBlockHash  map[uint64]common.Hash
+		baseFee            uint256.Int
+	)
+
+	overrideBlockHash = make(map[uint64]common.Hash)
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	if len(bundles) == 0 {
+		stream.WriteNil()
+		return fmt.Errorf("empty bundles")
+	}
+	empty := true
+	for _, bundle := range bundles {
+		if len(bundle.Transactions) != 0 {
+			empty = false
+		}
+	}
+
+	if empty {
+		stream.WriteNil()
+		return fmt.Errorf("empty bundles")
+	}
+
+	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
+
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	// -1 is a default value for transaction index.
+	// If it's -1, we will try to replay every single transaction in that block
+	transactionIndex := -1
+
+	if simulateContext.TransactionIndex != nil {
+		transactionIndex = *simulateContext.TransactionIndex
+	}
+
+	if transactionIndex == -1 {
+		transactionIndex = len(block.Transactions())
+	}
+
+	replayTransactions = block.Transactions()[:transactionIndex]
+
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), api.filters, api.stateCache)
+
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	st := state.New(stateReader)
+
+	parent := block.Header()
+
+	if parent == nil {
+		stream.WriteNil()
+		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
+	}
+
+	// Get a new instance of the EVM
+	signer := types.MakeSigner(chainConfig, blockNum)
+	rules := chainConfig.Rules(blockNum)
+
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+
+	getHash := func(i uint64) common.Hash {
+		if hash, ok := overrideBlockHash[i]; ok {
+			return hash
+		}
+		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		if err != nil {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		}
+		return hash
+	}
+
+	if parent.BaseFee != nil {
+		baseFee.SetFromBig(parent.BaseFee)
+	}
+
+	blockCtx = vm.BlockContext{
+		CanTransfer:     core.CanTransfer,
+		Transfer:        core.Transfer,
+		GetHash:         getHash,
+		ContractHasTEVM: contractHasTEVM,
+		Coinbase:        parent.Coinbase,
+		BlockNumber:     parent.Number.Uint64(),
+		Time:            parent.Time,
+		Difficulty:      new(big.Int).Set(parent.Difficulty),
+		GasLimit:        parent.GasLimit,
+		BaseFee:         &baseFee,
+	}
+
+	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+
+	// Setup the gas pool (also for unmetered requests)
+	// and apply the message.
+	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	for _, txn := range replayTransactions {
+		msg, err := txn.AsMessage(*signer, nil, rules)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		txCtx = core.NewEVMTxContext(msg)
+		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
+		// Execute the transaction message
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+
+	}
+
+	// after replaying the txns, we want to overload the state
+	if config.StateOverrides != nil {
+		err = config.StateOverrides.Override(evm.IntraBlockState().(*state.IntraBlockState))
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+	}
+
+	stream.WriteArrayStart()
+	for bundle_index, bundle := range bundles {
+		stream.WriteArrayStart()
+		// first change blockContext
+		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		for txn_index, txn := range bundle.Transactions {
+			if txn.Gas == nil || *(txn.Gas) == 0 {
+				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
+			}
+			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
+			if err != nil {
+				stream.WriteNil()
+				return err
+			}
+			txCtx = core.NewEVMTxContext(msg)
+			ibs := evm.IntraBlockState().(*state.IntraBlockState)
+			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
+			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream)
+
+			if err != nil {
+				stream.WriteNil()
+				return err
+			}
+
+			if txn_index < len(bundle.Transactions)-1 {
+				stream.WriteMore()
+			}
+		}
+		stream.WriteArrayEnd()
+
+		if bundle_index < len(bundles)-1 {
+			stream.WriteMore()
+		}
+		blockCtx.BlockNumber++
+		blockCtx.Time++
+	}
+	stream.WriteArrayEnd()
+	return nil
 }

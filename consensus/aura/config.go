@@ -73,7 +73,7 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	return nil
 }
 
-//TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
+// TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
 type JsonSpec struct {
 	StepDuration *uint64           `json:"stepDuration"` // Block duration, in seconds.
 	Validators   *ValidatorSetJson `json:"validators"`   // Valid authorities

@@ -73,7 +73,8 @@ type EVMInterpreter struct {
 	jt *JumpTable // EVM instruction table
 }
 
-//structcheck doesn't see embedding
+// structcheck doesn't see embedding
+//
 //nolint:structcheck
 type VM struct {
 	evm *EVM

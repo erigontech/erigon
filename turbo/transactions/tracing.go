@@ -132,7 +132,7 @@ func TraceTx(
 	}
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-	var refunds bool = true
+	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
@@ -250,7 +250,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 				value   uint256.Int
 			)
 			env.IntraBlockState().GetState(contract.Address(), &address, &value)
-			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+			l.storage[contract.Address()][address] = value.Bytes32()
 			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.

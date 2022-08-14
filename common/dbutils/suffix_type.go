@@ -5,7 +5,7 @@ import "encoding/binary"
 type Suffix []byte
 
 func ToSuffix(b []byte) Suffix {
-	return Suffix(b)
+	return b
 }
 
 func (s Suffix) Add(key []byte) Suffix {
@@ -20,7 +20,7 @@ func (s Suffix) Add(key []byte) Suffix {
 	binary.BigEndian.PutUint32(dv, 1+s.KeyCount()) // Increment the counter of keys
 	dv[l] = byte(len(key))
 	copy(dv[l+1:], key)
-	return Suffix(dv)
+	return dv
 }
 func (s Suffix) MultiAdd(keys [][]byte) Suffix {
 	var l int
@@ -43,7 +43,7 @@ func (s Suffix) MultiAdd(keys [][]byte) Suffix {
 		copy(dv[i:], key)
 		i += len(key)
 	}
-	return Suffix(dv)
+	return dv
 }
 
 func (s Suffix) KeyCount() uint32 {

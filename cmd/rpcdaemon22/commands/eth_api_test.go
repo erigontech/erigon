@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -15,6 +17,29 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 )
+
+func TestGetBalanceChangesInBlock(t *testing.T) {
+	assert := assert.New(t)
+	myBlockNum := rpc.BlockNumberOrHashWithNumber(0)
+
+	db := rpcdaemontest.CreateTestKV(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false), db, nil)
+	balances, err := api.GetBalanceChangesInBlock(context.Background(), myBlockNum)
+	if err != nil {
+		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
+	}
+	expected := map[common.Address]*hexutil.Big{
+		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
+		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
+		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
+	}
+	assert.Equal(len(expected), len(balances))
+	for i := range balances {
+		assert.Contains(expected, i, "%s is not expected to be present in the output.", i)
+		assert.Equal(balances[i], expected[i], "the value for %s is expected to be %v, but got %v.", i, expected[i], balances[i])
+	}
+}
 
 func TestGetTransactionReceipt(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)

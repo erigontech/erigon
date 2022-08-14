@@ -1081,7 +1081,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 	} else {
 		for span.StartBlock > blockNum {
 			// Span wit low enough block number is not loaded
-			var spanID uint64 = span.ID - 1
+			var spanID = span.ID - 1
 			var heimdallSpan HeimdallSpan
 			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
