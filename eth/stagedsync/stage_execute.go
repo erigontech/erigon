@@ -739,7 +739,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						fmt.Printf("del code: %x\n", dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						if err != nil {
 							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
@@ -752,7 +751,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
-				fmt.Printf("put acc: %x, %x\n", k, newV)
 				if err := next(k, k, newV); err != nil {
 					return err
 				}
@@ -762,7 +760,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
-				fmt.Printf("del acc: %x\n", k)
 				if err := next(k, k, nil); err != nil {
 					return err
 				}
@@ -779,12 +776,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
 		}
 		if len(v) > 0 {
-			fmt.Printf("put: %x, %x\n", k[:storageKeyLength], v)
 			if err := next(k, k[:storageKeyLength], v); err != nil {
 				return err
 			}
 		} else {
-			fmt.Printf("del: %x\n", k[:storageKeyLength])
 			if err := next(k, k[:storageKeyLength], nil); err != nil {
 				return err
 			}
