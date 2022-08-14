@@ -98,6 +98,7 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
+
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            db,
