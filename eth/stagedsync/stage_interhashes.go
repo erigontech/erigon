@@ -101,7 +101,11 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 				return trie.EmptyRoot, fmt.Errorf("Wrong trie root")
 			}
 			if cfg.hd != nil {
-				header := rawdb.ReadHeader(tx, headerHash, to)
+				header, err := cfg.blockReader.HeaderByHash(ctx, tx, headerHash)
+				if err != nil {
+					return trie.EmptyRoot, err
+				}
+
 				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			}
 			if to > s.BlockNumber {
