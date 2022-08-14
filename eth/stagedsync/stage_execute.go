@@ -328,6 +328,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
+		panic(1)
 		return nil
 	}
 	useExternalTx := tx != nil
@@ -394,9 +395,42 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 
 	agg.SetTx(tx)
 	agg.SetTxNum(txNums[prevStageProgress])
-	if err := agg.Unwind(txNums[u.UnwindPoint]); err != nil {
+	rs := state.NewState22()
+	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
 		return err
 	}
+	if err := rs.Flush(tx); err != nil {
+		return err
+	}
+
+	/*
+		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("truncate receipts: %w", err)
+		}
+		if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("truncate bor receipts: %w", err)
+		}
+		if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("delete newer epochs: %w", err)
+		}
+
+		// Truncate CallTraceSet
+		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+		c, err := tx.RwCursorDupSort(kv.CallTraceSet)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			err = c.DeleteCurrentDuplicates()
+			if err != nil {
+				return err
+			}
+		}
+	*/
 	if err = u.Done(tx); err != nil {
 		return err
 	}
@@ -706,6 +740,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						fmt.Printf("del code: %x\n", dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						if err != nil {
 							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
@@ -718,6 +753,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
+				fmt.Printf("put acc: %x, %x\n", k, newV)
 				if err := next(k, k, newV); err != nil {
 					return err
 				}
@@ -727,6 +763,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
+				fmt.Printf("del acc: %x\n", k)
 				if err := next(k, k, nil); err != nil {
 					return err
 				}
@@ -743,10 +780,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
 		}
 		if len(v) > 0 {
+			fmt.Printf("put: %x, %x\n", k[:storageKeyLength], v)
 			if err := next(k, k[:storageKeyLength], v); err != nil {
 				return err
 			}
 		} else {
+			fmt.Printf("del: %x\n", k[:storageKeyLength])
 			if err := next(k, k[:storageKeyLength], nil); err != nil {
 				return err
 			}

@@ -636,10 +636,6 @@ func (r *RootHashAggregator) genStructAccount() error {
 		if r.hc == nil {
 			return nil
 		}
-
-		//if bytes.HasPrefix(keyHex, common.FromHex("060e")) {
-		//	fmt.Printf("collect: %x,%b,%b, del:%t\n", keyHex, hasHash, hasTree, hashes == nil)
-		//}
 		return r.hc(keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasTree, r.hasHash,
 		false,

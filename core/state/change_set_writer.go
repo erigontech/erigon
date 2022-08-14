@@ -129,6 +129,13 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 		return err
 	}
 	if err = changeset.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		if len(v[20:]) > 0 {
+			var acc accounts.Account
+			if err := acc.DecodeForStorage(v[20:]); err != nil {
+				panic(fmt.Errorf("%w, %x", err, v))
+			}
+			//fmt.Printf("puttt: %x, %x,%x, %d, %d, %d\n", k, v[:20], v[20:], acc.Nonce, acc.Balance.Uint64(), acc.Incarnation)
+		}
 		if err = w.db.AppendDup(kv.AccountChangeSet, k, v); err != nil {
 			return err
 		}
