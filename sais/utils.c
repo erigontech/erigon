@@ -2,7 +2,7 @@
 
 int lcp_kasai(const unsigned char *T, int *SA, int *LCP, int *FTR, int *INV, int sa_size, int n)
 {
-    for (int i = 0, j = 0;; i < sa_size; i++)
+    for (int i = 0, j = 0; i < sa_size; i++)
     {
         if ((SA[i] & 1) == 0)
             FTR[j++] = SA[i] >> 1;

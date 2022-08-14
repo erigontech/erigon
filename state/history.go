@@ -500,6 +500,50 @@ func (h *History) prune(step uint64, txFrom, txTo uint64) error {
 	return nil
 }
 
+func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(k, v []byte) error) error {
+	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
+	}
+	defer historyKeysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	var k, v []byte
+	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	valsC, err := h.tx.RwCursor(h.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer valsC.Close()
+	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		if err := f(k, v); err != nil {
+			return err
+		}
+		if err = valsC.Delete(v[len(v)-8:]); err != nil {
+			return err
+		}
+		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
+			return err
+		}
+		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v
+		if err = historyKeysCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
+	}
+	return nil
+}
+
 type HistoryContext struct {
 	h                        *History
 	indexFiles, historyFiles *btree.BTreeG[*ctxItem]

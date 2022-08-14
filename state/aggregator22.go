@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -283,7 +284,119 @@ func (a *Aggregator22) Unwind(txUnwindTo uint64) error {
 		return nil
 	}
 
-	return a.prune(step, txUnwindTo, math2.MaxUint64)
+	changes := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer changes.Close()
+
+	//return ForRange(db, bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
+	//	if err := libcommon.Stopped(quit); err != nil {
+	//		return err
+	//	}
+	//	if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
+	//		return innerErr
+	//	}
+	//	return nil
+	//})
+
+	//if err := changes.Load(tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	//	if len(k) == 20 {
+	//		if len(v) > 0 {
+	//			var acc accounts.Account
+	//			if err := acc.DecodeForStorage(v); err != nil {
+	//				return err
+	//			}
+	//
+	//			// Fetch the code hash
+	//			recoverCodeHashPlain(&acc, tx, k)
+	//			var address commonold.Address
+	//			copy(address[:], k)
+	//
+	//			// cleanup contract code bucket
+	//			original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
+	//			if err != nil {
+	//				return fmt.Errorf("read account for %x: %w", address, err)
+	//			}
+	//			if original != nil {
+	//				// clean up all the code incarnations original incarnation and the new one
+	//				for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+	//					err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+	//					if err != nil {
+	//						return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+	//					}
+	//				}
+	//			}
+	//
+	//			newV := make([]byte, acc.EncodingLengthForStorage())
+	//			acc.EncodeForStorage(newV)
+	//			if accumulator != nil {
+	//				accumulator.ChangeAccount(address, acc.Incarnation, newV)
+	//			}
+	//			if err := next(k, k, newV); err != nil {
+	//				return err
+	//			}
+	//		} else {
+	//			if accumulator != nil {
+	//				var address commonold.Address
+	//				copy(address[:], k)
+	//				accumulator.DeleteAccount(address)
+	//			}
+	//			if err := next(k, k, nil); err != nil {
+	//				return err
+	//			}
+	//		}
+	//		return nil
+	//	}
+	//	if accumulator != nil {
+	//		var address commonold.Address
+	//		var incarnation uint64
+	//		var location commonold.Hash
+	//		copy(address[:], k[:length.Addr])
+	//		incarnation = binary.BigEndian.Uint64(k[length.Addr:])
+	//		copy(location[:], k[length.Addr+length.Incarnation:])
+	//		accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
+	//	}
+	//	if len(v) > 0 {
+	//		if err := next(k, k[:storageKeyLength], v); err != nil {
+	//			return err
+	//		}
+	//	} else {
+	//		if err := next(k, k[:storageKeyLength], nil); err != nil {
+	//			return err
+	//		}
+	//	}
+	//	return nil
+	//
+	//}, etl.TransformArgs{Quit: quit}); err != nil {
+	//	return err
+	//}
+
+	if err := a.accounts.pruneF(step, txUnwindTo, math2.MaxUint64, func(k, v []byte) error {
+		//libcommon.Copy(k), libcommon.Copy(v)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.storage.pruneF(step, txUnwindTo, math2.MaxUint64, func(k, v []byte) error {
+		fmt.Printf("alex: %x, %x\n", k, v)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.code.prune(step, txUnwindTo, math2.MaxUint64); err != nil {
+		return err
+	}
+	if err := a.logAddrs.prune(txUnwindTo, math2.MaxUint64); err != nil {
+		return err
+	}
+	if err := a.logTopics.prune(txUnwindTo, math2.MaxUint64); err != nil {
+		return err
+	}
+	if err := a.tracesFrom.prune(txUnwindTo, math2.MaxUint64); err != nil {
+		return err
+	}
+	if err := a.tracesTo.prune(txUnwindTo, math2.MaxUint64); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {
