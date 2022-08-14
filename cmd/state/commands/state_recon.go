@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -35,9 +36,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
@@ -976,6 +981,15 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			rwTx.Rollback()
 		}
 	}()
+	if err = rwTx.ClearBucket(kv.PlainState); err != nil {
+		return err
+	}
+	if err = rwTx.ClearBucket(kv.Code); err != nil {
+		return err
+	}
+	if err = rwTx.ClearBucket(kv.PlainContractCode); err != nil {
+		return err
+	}
 	if err = plainStateCollector.Load(rwTx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -988,6 +1002,46 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	plainContractCollector.Close()
+
+	sentryControlServer, err := sentry.NewMultiClient(
+		db,
+		"",
+		chainConfig,
+		common.Hash{},
+		engine,
+		1,
+		nil,
+		ethconfig.Defaults.Sync,
+		blockReader,
+		false,
+	)
+	if err != nil {
+		return err
+	}
+	cfg := ethconfig.Defaults
+	cfg.DeprecatedTxPool.Disable = true
+	cfg.Dirs = datadir2.New(datadir)
+	cfg.Snapshot = allSnapshots.Cfg()
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, datadir, &stagedsync.Notifications{}, nil, allSnapshots, nil, nil)
+	if err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+	execStage, err := stagedSync.StageState(stages.Execution, rwTx, db)
+	if err != nil {
+		return err
+	}
+	if err = execStage.Update(rwTx, blockNum-1); err != nil {
+		return err
+	}
+
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
