@@ -5,7 +5,7 @@ linters:
   disable-all: true
   enable:
     - errorlint
-#    - unconvert
+    - unconvert
     - predeclared
 #    - wastedassign # go1.18
 #    - thelper

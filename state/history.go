@@ -500,7 +500,7 @@ func (h *History) prune(step uint64, txFrom, txTo uint64) error {
 	return nil
 }
 
-func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(k, v []byte) error) error {
+func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(txNum uint64, k, v []byte) error) error {
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -524,10 +524,11 @@ func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(k, v []byte) e
 		if txNum >= txTo {
 			break
 		}
-		if err := f(k, v); err != nil {
+		_, vv, _ := valsC.SeekExact(v[len(v)-8:])
+		if err := f(txNum, v[:len(v)-8], vv); err != nil {
 			return err
 		}
-		if err = valsC.Delete(v[len(v)-8:]); err != nil {
+		if err = valsC.DeleteCurrent(); err != nil {
 			return err
 		}
 		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
