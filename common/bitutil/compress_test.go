@@ -18,9 +18,10 @@ package bitutil
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/log/v3"
 	"math/rand"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )

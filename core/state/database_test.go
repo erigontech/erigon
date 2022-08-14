@@ -1012,7 +1012,7 @@ func TestEip2200Gas(t *testing.T) {
 	require.NoError(t, err)
 }
 
-//Create contract, drop trie, reload trie from disk and add block with contract call
+// Create contract, drop trie, reload trie from disk and add block with contract call
 func TestWrongIncarnation(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -1125,7 +1125,7 @@ func TestWrongIncarnation(t *testing.T) {
 	require.NoError(t, err)
 }
 
-//create acc, deploy to it contract, reorg to state without contract
+// create acc, deploy to it contract, reorg to state without contract
 func TestWrongIncarnation2(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (

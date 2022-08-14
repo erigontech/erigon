@@ -60,7 +60,7 @@ func StageMiningExecCfg(
 }
 
 // SpawnMiningExecStage
-//TODO:
+// TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false

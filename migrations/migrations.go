@@ -21,15 +21,15 @@ import (
 //
 // Idempotency is expected
 // Best practices to achieve Idempotency:
-// - in dbutils/bucket.go add suffix for existing bucket variable, create new bucket with same variable name.
-//	Example:
-//		- SyncStageProgress = []byte("SSP1")
-//		+ SyncStageProgressOld1 = []byte("SSP1")
-//		+ SyncStageProgress = []byte("SSP2")
-// - in the beginning of migration: check that old bucket exists, clear new bucket
-// - in the end:drop old bucket (not in defer!).
-// - if you need migrate multiple buckets - create separate migration for each bucket
-// - write test - and check that it's safe to apply same migration twice
+//   - in dbutils/bucket.go add suffix for existing bucket variable, create new bucket with same variable name.
+//     Example:
+//   - SyncStageProgress = []byte("SSP1")
+//   - SyncStageProgressOld1 = []byte("SSP1")
+//   - SyncStageProgress = []byte("SSP2")
+//   - in the beginning of migration: check that old bucket exists, clear new bucket
+//   - in the end:drop old bucket (not in defer!).
+//   - if you need migrate multiple buckets - create separate migration for each bucket
+//   - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,

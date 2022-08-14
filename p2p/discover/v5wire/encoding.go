@@ -232,6 +232,7 @@ func (c *Codec) writeHeaders(head *Header) {
 }
 
 // makeHeader creates a packet header.
+//
 //nolint:unparam
 func (c *Codec) makeHeader(toID enode.ID, flag byte, authsizeExtra int) Header {
 	var authsize int
@@ -279,6 +280,7 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 }
 
 // encodeWhoareyou encodes a WHOAREYOU packet.
+//
 //nolint:unparam
 func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error) {
 	// Sanity check node field to catch misbehaving callers.
@@ -340,6 +342,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Who
 }
 
 // encodeAuthHeader creates the auth header on a request packet following WHOAREYOU.
+//
 //nolint:unparam
 func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoareyou) (*handshakeAuthData, *session, error) {
 	auth := new(handshakeAuthData)

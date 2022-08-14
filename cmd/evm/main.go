@@ -19,9 +19,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
 	"math/big"
 	"os"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"

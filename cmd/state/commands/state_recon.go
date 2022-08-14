@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -73,8 +74,8 @@ type ReconWorker struct {
 	chainConfig  *params.ChainConfig
 	logger       log.Logger
 	genesis      *core.Genesis
-	epoch        epochReader
-	chain        chainReader
+	epoch        exec22.EpochReader
+	chain        exec22.ChainReader
 	isPoSA       bool
 	posa         consensus.PoSA
 }
@@ -99,8 +100,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		genesis:      genesis,
 		engine:       engine,
 	}
-	rw.epoch = epochReader{tx: chainTx}
-	rw.chain = chainReader{config: chainConfig, tx: chainTx, blockReader: blockReader}
+	rw.epoch = exec22.NewEpochReader(chainTx)
+	rw.chain = exec22.NewChainReader(chainConfig, chainTx, blockReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
@@ -407,7 +408,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}()
 	ctx := context.Background()
 	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
+	agg, err := libstate.NewAggregator22(aggPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -444,8 +445,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	txNums := make([]uint64, allSnapshots.BlocksAvailable()+1)
 	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 				txNums[blockNum] = baseTxNum + txAmount
+				return nil
 			}); err != nil {
 				return err
 			}

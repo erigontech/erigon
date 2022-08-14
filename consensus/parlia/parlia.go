@@ -839,29 +839,27 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Wait until sealing is terminated or delay timeout.
 	//log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
+	select {
+	case <-stop:
+		return nil
+	case <-time.After(delay):
+	}
+	if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
+		log.Info("[parlia] Waiting for received in turn block to process")
 		select {
 		case <-stop:
-			return
-		case <-time.After(delay):
+			log.Info("[parlia] Received block process finished, abort block seal")
+			return nil
+		case <-time.After(time.Duration(processBackOffTime) * time.Second):
+			log.Info("[parlia] Process backoff time exhausted, start to seal block")
 		}
-		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
-			log.Info("[parlia] Waiting for received in turn block to process")
-			select {
-			case <-stop:
-				log.Info("[parlia] Received block process finished, abort block seal")
-				return
-			case <-time.After(time.Duration(processBackOffTime) * time.Second):
-				log.Info("[parlia] Process backoff time exhausted, start to seal block")
-			}
-		}
+	}
 
-		select {
-		case results <- block.WithSeal(header):
-		default:
-			log.Warn("[parlia] Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
-		}
-	}()
+	select {
+	case results <- block.WithSeal(header):
+	default:
+		log.Warn("[parlia] Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
+	}
 
 	return nil
 }

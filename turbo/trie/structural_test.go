@@ -50,9 +50,9 @@ func TestV2HashBuilding(t *testing.T) {
 	valueShort := []byte("VAL")
 	for i, key := range keys {
 		if i%2 == 0 {
-			tr.Update([]byte(key), valueNode(valueLong))
+			tr.Update([]byte(key), valueLong)
 		} else {
-			tr.Update([]byte(key), valueNode(valueShort))
+			tr.Update([]byte(key), valueShort)
 		}
 	}
 	trieHash := tr.Hash()
@@ -110,7 +110,7 @@ func TestV2Resolution(t *testing.T) {
 	tr := New(common.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
-		tr.Update([]byte(key), valueNode(value))
+		tr.Update([]byte(key), value)
 	}
 	trieHash := tr.Hash()
 
@@ -201,7 +201,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	tr := New(common.Hash{})
 	valueShort := []byte("VAL")
 	for _, key := range keys {
-		tr.Update([]byte(key)[common.HashLength:], valueNode(valueShort))
+		tr.Update([]byte(key)[common.HashLength:], valueShort)
 	}
 	trieHash := tr.Hash()
 

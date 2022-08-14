@@ -2,10 +2,11 @@ package database
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/cmd/observer/utils"
-	"github.com/ledgerwatch/log/v3"
 	"math/rand"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/observer/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type DBRetrier struct {

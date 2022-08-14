@@ -29,6 +29,8 @@ func (back *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockH
 	return rawdb.ReadCanonicalHash(tx, blockHeight)
 }
 
+func (back *BlockReader) Snapshots() *RoSnapshots { return nil }
+
 func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeader(tx, hash, blockHeight)
 	return h, nil
@@ -128,6 +130,8 @@ func (back *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter,
 	}
 	return block.Header(), nil
 }
+
+func (back *RemoteBlockReader) Snapshots() *RoSnapshots { return nil }
 
 func (back *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum := rawdb.ReadHeaderNumber(tx, hash)
@@ -237,6 +241,8 @@ func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapsho
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
 
+func (back *BlockReaderWithSnapshots) Snapshots() *RoSnapshots { return back.sn }
+
 func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
 		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
@@ -275,6 +281,9 @@ func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Ge
 			h, err = back.headerFromSnapshotByHash(hash, segments[i], buf)
 			if err != nil {
 				return err
+			}
+			if h != nil {
+				break
 			}
 		}
 		return nil

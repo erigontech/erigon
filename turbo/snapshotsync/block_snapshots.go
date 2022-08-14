@@ -173,7 +173,7 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
 	var buf []byte
 	g := sn.seg.MakeGetter()
 	blockNum := sn.idxBodyNumber.BaseDataID()
@@ -183,7 +183,9 @@ func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) erro
 		if err := rlp.DecodeBytes(buf, &b); err != nil {
 			return err
 		}
-		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
+		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+			return err
+		}
 		blockNum++
 	}
 	return nil
@@ -332,10 +334,10 @@ type RoSnapshots struct {
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
-//  - it opens snapshots only on App start and immutable after
-//  - all snapshots of given blocks range must exist - to make this blocks range available
-//  - gaps are not allowed
-//  - segment have [from:to) semantic
+//   - it opens snapshots only on App start and immutable after
+//   - all snapshots of given blocks range must exist - to make this blocks range available
+//   - gaps are not allowed
+//   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.Snapshot, snapDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
@@ -794,7 +796,10 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 
 	for {
 		select {
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -2108,4 +2113,34 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 		}
 	}
 	return req
+}
+
+type BodiesIterator struct{}
+
+func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
+	if from < s.BlocksAvailable() {
+		if err := s.Bodies.View(func(bs []*BodySegment) error {
+			for _, b := range bs {
+				if err := b.Iterate(f); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	}
+	for i := s.BlocksAvailable() + 1; ; i++ {
+		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			break
+		}
+		if err := f(i, baseTxId, uint64(txAmount)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
