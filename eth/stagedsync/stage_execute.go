@@ -328,7 +328,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
-		panic(1)
 		return nil
 	}
 	useExternalTx := tx != nil
