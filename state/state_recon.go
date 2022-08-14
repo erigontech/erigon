@@ -28,10 +28,18 @@ import (
 
 // Algorithms for reconstituting the state from state history
 
-func (hc *HistoryContext) MaxTxNum(key []byte) (bool, uint64) {
+func (hc *HistoryContext) IsMaxTxNum(key []byte, txNum uint64) bool {
 	var found bool
 	var foundTxNum uint64
-	hc.indexFiles.Descend(func(item *ctxItem) bool {
+	hc.indexFiles.AscendGreaterOrEqual(&ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item *ctxItem) bool {
+		if item.endTxNum <= txNum {
+			return true
+		}
+		if item.startTxNum > txNum {
+			if !found || foundTxNum != txNum {
+				return false
+			}
+		}
 		if item.reader.Empty() {
 			return true
 		}
@@ -43,14 +51,12 @@ func (hc *HistoryContext) MaxTxNum(key []byte) (bool, uint64) {
 			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 			found = true
 			foundTxNum = ef.Max()
-			return false
+			// if there is still chance to find higher ef.Max() than txNum, we continue
+			return foundTxNum == txNum
 		}
 		return true
 	})
-	if !found {
-		return false, 0
-	}
-	return true, foundTxNum
+	return found && txNum == foundTxNum
 }
 
 type ReconItem struct {
@@ -110,6 +116,7 @@ type ScanIterator struct {
 	uptoTxNum      uint64
 	hasNext        bool
 	nextTxNum      uint64
+	nextKey        []byte
 	fromKey, toKey []byte
 	key            []byte
 	progress       uint64
@@ -135,6 +142,7 @@ func (si *ScanIterator) advance() {
 			max := ef.Max()
 			if max < si.uptoTxNum {
 				si.nextTxNum = max
+				si.nextKey = key
 				si.hasNext = true
 				return
 			}
@@ -147,10 +155,10 @@ func (si *ScanIterator) HasNext() bool {
 	return si.hasNext
 }
 
-func (si *ScanIterator) Next() (uint64, uint64) {
-	n, p := si.nextTxNum, si.progress
+func (si *ScanIterator) Next() ([]byte, uint64, uint64) {
+	k, n, p := si.nextKey, si.nextTxNum, si.progress
 	si.advance()
-	return n, p
+	return k, n, p
 }
 
 func (si *ScanIterator) Total() uint64 {

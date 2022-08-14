@@ -280,7 +280,7 @@ func checkHistoryHistory(t *testing.T, db kv.RwDB, h *History, txs uint64) {
 			//fmt.Printf("label=%s\n", label)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
-			val, ok, _, err := hc.GetNoState(k[:], txNum+1)
+			val, ok, err := hc.GetNoState(k[:], txNum+1)
 			//require.Equal(t, ok, txNum < 976)
 			if ok {
 				require.NoError(t, err, label)

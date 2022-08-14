@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	math2 "math"
-	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -204,62 +203,62 @@ func (a *Aggregator22) buildFiles(step uint64, collation Agg22Collation) (Agg22S
 			sf.Close()
 		}
 	}()
-	var wg sync.WaitGroup
-	wg.Add(7)
+	//var wg sync.WaitGroup
+	//wg.Add(7)
 	errCh := make(chan error, 7)
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
+	//go func() {
+	//	defer wg.Done()
+	var err error
+	if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	wg.Wait()
+	close(errCh)
+	//}()
 	var lastError error
 	for err := range errCh {
 		lastError = err
@@ -498,76 +497,76 @@ func (a *Aggregator22) mergeFiles(files SelectedStaticFiles22, r Ranges22, maxSp
 			mf.Close()
 		}
 	}()
-	var wg sync.WaitGroup
-	wg.Add(7)
+	//var wg sync.WaitGroup
+	//wg.Add(7)
 	errCh := make(chan error, 7)
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.accounts.any() {
-			if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(files.accountsIdx, files.accountsHist, r.accounts, maxSpan); err != nil {
-				errCh <- err
-			}
+	//go func() {
+	//	defer wg.Done()
+	var err error
+	if r.accounts.any() {
+		if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(files.accountsIdx, files.accountsHist, r.accounts, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.storage.any() {
-			if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(files.storageIdx, files.storageHist, r.storage, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.storage.any() {
+		if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(files.storageIdx, files.storageHist, r.storage, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.code.any() {
-			if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(files.codeIdx, files.codeHist, r.code, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.code.any() {
+		if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(files.codeIdx, files.codeHist, r.code, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.logAddrs {
-			if mf.logAddrs, err = a.logAddrs.mergeFiles(files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.logAddrs {
+		if mf.logAddrs, err = a.logAddrs.mergeFiles(files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.logTopics {
-			if mf.logTopics, err = a.logTopics.mergeFiles(files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.logTopics {
+		if mf.logTopics, err = a.logTopics.mergeFiles(files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.tracesFrom {
-			if mf.tracesFrom, err = a.tracesFrom.mergeFiles(files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.tracesFrom {
+		if mf.tracesFrom, err = a.tracesFrom.mergeFiles(files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.tracesTo {
-			if mf.tracesTo, err = a.tracesTo.mergeFiles(files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.tracesTo {
+		if mf.tracesTo, err = a.tracesTo.mergeFiles(files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, maxSpan); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
+	}
+	//}()
+	//go func() {
+	//	wg.Wait()
+	close(errCh)
+	//}()
 	var lastError error
 	for err := range errCh {
 		lastError = err
@@ -729,11 +728,11 @@ func (ac *Aggregator22Context) TraceToIterator(addr []byte, startTxNum, endTxNum
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *Aggregator22Context) MaxAccountsTxNum(addr []byte) (bool, uint64) {
-	return ac.accounts.MaxTxNum(addr)
+func (ac *Aggregator22Context) IsMaxAccountsTxNum(addr []byte, txNum uint64) bool {
+	return ac.accounts.IsMaxTxNum(addr, txNum)
 }
 
-func (ac *Aggregator22Context) MaxStorageTxNum(addr []byte, loc []byte) (bool, uint64) {
+func (ac *Aggregator22Context) IsMaxStorageTxNum(addr []byte, loc []byte, txNum uint64) bool {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -741,18 +740,18 @@ func (ac *Aggregator22Context) MaxStorageTxNum(addr []byte, loc []byte) (bool, u
 	}
 	copy(ac.keyBuf, addr)
 	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.MaxTxNum(ac.keyBuf)
+	return ac.storage.IsMaxTxNum(ac.keyBuf, txNum)
 }
 
-func (ac *Aggregator22Context) MaxCodeTxNum(addr []byte) (bool, uint64) {
-	return ac.code.MaxTxNum(addr)
+func (ac *Aggregator22Context) IsMaxCodeTxNum(addr []byte, txNum uint64) bool {
+	return ac.code.IsMaxTxNum(addr, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
+func (ac *Aggregator22Context) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoState(addr, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64, error) {
+func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -763,16 +762,16 @@ func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte
 	return ac.storage.GetNoState(ac.keyBuf, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64, error) {
+func (ac *Aggregator22Context) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.code.GetNoState(addr, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64, error) {
-	code, noState, stateTxNum, err := ac.code.GetNoState(addr, txNum)
+func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
+	code, noState, err := ac.code.GetNoState(addr, txNum)
 	if err != nil {
-		return 0, false, 0, err
+		return 0, false, err
 	}
-	return len(code), noState, stateTxNum, nil
+	return len(code), noState, nil
 }
 
 func (ac *Aggregator22Context) IterateAccountsHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {

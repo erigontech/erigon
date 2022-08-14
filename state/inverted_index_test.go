@@ -357,3 +357,64 @@ func TestInvIndexScanFiles(t *testing.T) {
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
 }
+
+func TestChangedKeysIterator(t *testing.T) {
+	_, db, ii, txs := filledInvIndex(t)
+	defer db.Close()
+	defer func() {
+		ii.Close()
+	}()
+	mergeInverted(t, db, ii, txs)
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		roTx.Rollback()
+	}()
+	ic := ii.MakeContext()
+	it := ic.IterateChangedKeys(0, 20, roTx)
+	defer func() {
+		it.Close()
+	}()
+	var keys []string
+	for it.HasNext() {
+		k := it.Next(nil)
+		keys = append(keys, fmt.Sprintf("%x", k))
+	}
+	it.Close()
+	require.Equal(t, []string{
+		"0000000000000001",
+		"0000000000000002",
+		"0000000000000003",
+		"0000000000000004",
+		"0000000000000005",
+		"0000000000000006",
+		"0000000000000007",
+		"0000000000000008",
+		"0000000000000009",
+		"000000000000000a",
+		"000000000000000b",
+		"000000000000000c",
+		"000000000000000d",
+		"000000000000000e",
+		"000000000000000f",
+		"0000000000000010",
+		"0000000000000011",
+		"0000000000000012"}, keys)
+	it = ic.IterateChangedKeys(995, 1000, roTx)
+	keys = keys[:0]
+	for it.HasNext() {
+		k := it.Next(nil)
+		keys = append(keys, fmt.Sprintf("%x", k))
+	}
+	it.Close()
+	require.Equal(t, []string{
+		"0000000000000001",
+		"0000000000000002",
+		"0000000000000003",
+		"0000000000000004",
+		"0000000000000005",
+		"0000000000000006",
+		"0000000000000009",
+		"000000000000000c",
+	}, keys)
+}

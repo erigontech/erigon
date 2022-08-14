@@ -575,15 +575,14 @@ func (h *History) MakeContext() *HistoryContext {
 	return &hc
 }
 
-func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64, error) {
+func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64
 	var foundEndTxNum uint64
 	var foundStartTxNum uint64
 	var found bool
-	var anyItem bool
-	var maxTxNum uint64
-	hc.indexFiles.Ascend(func(item *ctxItem) bool {
+	//hc.indexFiles.Ascend(func(item *ctxItem) bool {
+	hc.indexFiles.AscendGreaterOrEqual(&ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item *ctxItem) bool {
 		//fmt.Printf("ef item %d-%d, key %x\n", item.startTxNum, item.endTxNum, key)
 		if item.reader.Empty() {
 			return true
@@ -602,10 +601,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, ui
 				found = true
 				//fmt.Printf("Found n=%d\n", n)
 				return false
-			} else {
-				maxTxNum = ef.Max()
 			}
-			anyItem = true
 		}
 		return true
 	})
@@ -616,7 +612,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, ui
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
 		if historyItem, ok = hc.historyFiles.Get(&search); !ok {
-			return nil, false, 0, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
+			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
 		}
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
@@ -626,13 +622,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, ui
 		g.Reset(offset)
 		if hc.h.compressVals {
 			v, _ := g.Next(nil)
-			return v, true, 0, nil
+			return v, true, nil
 		}
 		v, _ := g.NextUncompressed()
-		return v, true, 0, nil
-	} else if anyItem {
-		return nil, false, maxTxNum, nil
-	} else {
-		return nil, true, 0, nil
+		return v, true, nil
 	}
+	return nil, false, nil
 }

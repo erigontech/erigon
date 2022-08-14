@@ -400,6 +400,10 @@ const (
 	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
 	CodeR          = "CodeR"          // temporary table for Code reconstitution
 	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
+
+	XAccount = "XAccount"
+	XStorage = "XStorage"
+	XCode    = "XCode"
 )
 
 // Keys
@@ -526,10 +530,6 @@ var ChaindataTables = []string{
 	RStorageIdx,
 	RCodeKeys,
 	RCodeIdx,
-
-	PlainStateR,
-	CodeR,
-	PlainContractR,
 }
 
 const (
@@ -547,6 +547,14 @@ var SentryTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
+}
+var ReconTables = []string{
+	XAccount,
+	XStorage,
+	XCode,
+	PlainStateR,
+	CodeR,
+	PlainContractR,
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
@@ -634,6 +642,7 @@ var ChaindataTablesCfg = TableCfg{
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
+var ReconTablesCfg = TableCfg{}
 
 func sortBuckets() {
 	sort.SliceStable(ChaindataTables, func(i, j int) bool {
@@ -683,6 +692,13 @@ func reinit() {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
 			DownloaderTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
+	for _, name := range ReconTables {
+		_, ok := ReconTablesCfg[name]
+		if !ok {
+			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }
