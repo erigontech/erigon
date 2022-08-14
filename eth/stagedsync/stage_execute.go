@@ -395,9 +395,42 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 
 	agg.SetTx(tx)
 	agg.SetTxNum(txNums[prevStageProgress])
-	if err := agg.Unwind(txNums[u.UnwindPoint]); err != nil {
+	rs := state.NewState22()
+	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
 		return err
 	}
+	if err := rs.Flush(tx); err != nil {
+		return err
+	}
+
+	/*
+		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("truncate receipts: %w", err)
+		}
+		if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("truncate bor receipts: %w", err)
+		}
+		if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
+			return fmt.Errorf("delete newer epochs: %w", err)
+		}
+
+		// Truncate CallTraceSet
+		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+		c, err := tx.RwCursorDupSort(kv.CallTraceSet)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
+			if err != nil {
+				return err
+			}
+			err = c.DeleteCurrentDuplicates()
+			if err != nil {
+				return err
+			}
+		}
+	*/
 	if err = u.Done(tx); err != nil {
 		return err
 	}
