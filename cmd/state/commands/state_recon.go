@@ -1006,7 +1006,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	plainContractCollector.Close()
 
 	sentryControlServer, err := sentry.NewMultiClient(
-		db,
+		chainDb,
 		"",
 		chainConfig,
 		common.Hash{},
@@ -1025,7 +1025,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, false /* exec22 */, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, false /* exec22 */, nil)
 	if err != nil {
 		return err
 	}
@@ -1037,7 +1037,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			rwTx.Rollback()
 		}
 	}()
-	execStage, err := stagedSync.StageState(stages.Execution, rwTx, db)
+	execStage, err := stagedSync.StageState(stages.Execution, rwTx, chainDb)
 	if err != nil {
 		return err
 	}
@@ -1066,14 +1066,28 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
 		return err
 	}
+	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
+	if err != nil {
+		return err
+	}
+	if err = hashStage.Update(rwTx, blockNum-1); err != nil {
+		return err
+	}
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
+	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}
 	var rootHash common.Hash
-	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(chainDb, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		return err
+	}
+	trieStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
+	if err != nil {
+		return err
+	}
+	if err = trieStage.Update(rwTx, blockNum-1); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
