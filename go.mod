@@ -2,11 +2,8 @@ module github.com/ledgerwatch/erigon
 
 go 1.18
 
-replace github.com/ledgerwatch/erigon-lib => ./../erigon-lib
-
-
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220813104409-4999fb010739
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220814105353-404276494a0c
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
