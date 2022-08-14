@@ -429,7 +429,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	limiter := semaphore.NewWeighted(int64(workerCount + 1))
 	chainDbPath := path.Join(datadir, "chaindata")
-	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Readonly().Open()
+	chainDb, err := kv2.NewMDBX(logger).Path(chainDbPath).RoTxsLimiter(limiter).Open()
 	if err != nil {
 		return err
 	}
@@ -967,7 +967,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 		plainContractCollectors[i].Close()
 	}
-	rwTx, err = db.BeginRw(ctx)
+	rwTx, err = chainDb.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -991,12 +991,21 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
+	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}
 	log.Info("Reconstitution complete", "duration", time.Since(startTime))
 	log.Info("Computing hashed state")
 	tmpDir := filepath.Join(datadir, "tmp")
+	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
+		return err
+	}
+	if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
+		return err
+	}
+	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
+		return err
+	}
 	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
 		return err
 	}
