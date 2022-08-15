@@ -273,7 +273,7 @@ loop:
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
 					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].Tx(), txTask, agg); err != nil {
-						panic(err)
+						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
 					outputTxNum++
 					outputBlockNum = txTask.BlockNum
@@ -355,7 +355,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
 			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
-				panic(err)
+				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 			atomic.AddUint64(outputTxNum, 1)

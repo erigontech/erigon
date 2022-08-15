@@ -397,11 +397,16 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	agg.SetLogPrefix(logPrefix)
 	rs := state.NewState22()
 	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
-		return err
+		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
-		return err
+		return fmt.Errorf("State22.Flush: %w", err)
 	}
+
+	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+	//	fmt.Printf("st: %x, %x\n", k, v)
+	//	return nil
+	//})
 
 	/*
 		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -731,22 +736,21 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				recoverCodeHashPlain(&acc, tx, k)
 				var address commonold.Address
 				copy(address[:], k)
-				/*
-					// cleanup contract code bucket
-					original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
-					if err != nil {
-						return fmt.Errorf("read account for %x: %w", address, err)
-					}
-					if original != nil {
-						// clean up all the code incarnations original incarnation and the new one
-						for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-							err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
-							if err != nil {
-								return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
-							}
+
+				// cleanup contract code bucket
+				original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return fmt.Errorf("read account for %x: %w", address, err)
+				}
+				if original != nil {
+					// clean up all the code incarnations original incarnation and the new one
+					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+						if err != nil {
+							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 						}
 					}
-				*/
+				}
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)

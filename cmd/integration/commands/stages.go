@@ -731,7 +731,6 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
-	fmt.Printf("distance: %d\n", pm.History)
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
