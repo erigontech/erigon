@@ -1004,6 +1004,9 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	plainContractCollector.Close()
+	if err = rwTx.Commit(); err != nil {
+		return err
+	}
 
 	sentryControlServer, err := sentry.NewMultiClient(
 		chainDb,
@@ -1032,11 +1035,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
 	execStage, err := stagedSync.StageState(stages.Execution, rwTx, chainDb)
 	if err != nil {
 		return err
@@ -1045,9 +1043,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
 	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}
@@ -1063,7 +1058,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(db, tmpDir), ctx); err != nil {
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, tmpDir), ctx); err != nil {
 		return err
 	}
 	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
