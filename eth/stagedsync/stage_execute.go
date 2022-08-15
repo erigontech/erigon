@@ -392,7 +392,6 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 			return err
 		}
 	}
-
 	agg.SetTx(tx)
 	agg.SetTxNum(txNums[prevStageProgress])
 	agg.SetLogPrefix(logPrefix)
