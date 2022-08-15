@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var DefaultMode = Mode{
@@ -76,6 +77,12 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
+		if pruneBlockBefore != 0 {
+			log.Warn("specifying prune.before.r might break CL compatibility")
+			if beforeR > pruneBlockBefore {
+				log.Warn("the specified prune.before.r block number is higher than the deployed contract block number")
+			}
+		}
 		mode.Initialised = true
 		mode.Receipts = Before(beforeR)
 	} else {
