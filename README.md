@@ -69,9 +69,22 @@ Usage
 
 ### Getting Started
 
+For building a release (this will be suitable for most users just wanting to run a node):
 ```sh
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone https://github.com/ledgerwatch/erigon.git
 cd erigon
+git tag -l |  grep 2022
+git checkout <tag with the latest release>
+make erigon
+./build/bin/erigon
+```
+You can also get the latest release tag by checking [the list of releases](https://github.com/ledgerwatch/erigon/releases)
+
+For building the bleeding edge development branch:
+```sh
+git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
+cd erigon
+git checkout devel
 make erigon
 ./build/bin/erigon
 ```
