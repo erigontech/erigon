@@ -97,15 +97,18 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if cfg.checkRoot && root != expectedRootHash {
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if cfg.badBlockHalt {
-				return trie.EmptyRoot, fmt.Errorf("Wrong trie root")
+				return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 			}
 			if cfg.hd != nil {
 				header, err := cfg.blockReader.HeaderByHash(ctx, tx, headerHash)
 				if err != nil {
 					return trie.EmptyRoot, err
 				}
-
-				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+				if header == nil {
+					log.Warn(fmt.Sprintf("[%s] No header found", logPrefix), "hash", headerHash)
+				} else {
+					cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
+				}
 			}
 			if to > s.BlockNumber {
 				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
