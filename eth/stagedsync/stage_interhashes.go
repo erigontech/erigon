@@ -112,9 +112,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 					if _, err := (*cfg.snapshotDownloader).Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 						return trie.EmptyRoot, err
 					}
+				} else {
+					cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 				}
-
-				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			}
 			if to > s.BlockNumber {
 				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
