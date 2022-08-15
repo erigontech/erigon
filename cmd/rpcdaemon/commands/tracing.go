@@ -67,7 +67,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		if numberOk {
 			return fmt.Errorf("invalid arguments; block with number %d not found", number)
 		}
-		return fmt.Errorf("invalid arguments; block with hash %v not found", hash)
+		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
 	chainConfig, err := api.chainConfig(tx)
