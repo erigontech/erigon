@@ -147,7 +147,7 @@ This stage doesn't use a network connection.
 
 [TODO]
 
-### Stages 11, 12, 13, 14: Generate Indexes Stages [8, 9](/eth/stagedsync/stage_indexes.go), [10](/eth/stagedsync/stage_log_index.go), and [11](/eth/stagedsync/stage_txlookup.go)
+### Stages [11, 12](/eth/stagedsync/stage_indexes.go), [13](/eth/stagedsync/stage_log_index.go), and [14](/eth/stagedsync/stage_txlookup.go): Generate Indexes 
 
 There are 4 indexes that are generated during sync.
 
