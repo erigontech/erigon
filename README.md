@@ -150,7 +150,8 @@ Windows users may run erigon in 3 possible ways:
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure Windows System "Path" variable has:
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
