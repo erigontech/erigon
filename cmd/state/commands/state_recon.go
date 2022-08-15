@@ -1032,7 +1032,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	if err != nil {
+	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}
 	execStage, err := stagedSync.StageState(stages.Execution, rwTx, chainDb)
@@ -1040,10 +1040,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	if err = execStage.Update(rwTx, blockNum-1); err != nil {
-		return err
-	}
-
-	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}
 	log.Info("Reconstitution complete", "duration", time.Since(startTime))
