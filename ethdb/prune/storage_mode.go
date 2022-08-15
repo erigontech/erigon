@@ -21,11 +21,17 @@ var DefaultMode = Mode{
 	Experiments: Experiments{}, // all off
 }
 
+var (
+	mainnetDepositContractBlock uint64 = 11052984
+	sepoliaDepositContractBlock uint64 = 1273020
+	goerliDepositContractBlock  uint64 = 4367322
+)
+
 type Experiments struct {
 	TEVM bool
 }
 
-func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 	if flags != "default" && flags != "disabled" {
@@ -45,6 +51,8 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 			}
 		}
 	}
+
+	pruneBlockBefore := pruneBlockDefault(chainId)
 
 	if exactHistory > 0 {
 		mode.Initialised = true
@@ -70,6 +78,11 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	if beforeR > 0 {
 		mode.Initialised = true
 		mode.Receipts = Before(beforeR)
+	} else {
+		if exactReceipts == 0 {
+			mode.Initialised = true
+			mode.Receipts = Before(pruneBlockBefore)
+		}
 	}
 	if beforeT > 0 {
 		mode.Initialised = true
@@ -93,6 +106,19 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	}
 
 	return mode, nil
+}
+
+func pruneBlockDefault(chainId uint64) uint64 {
+	switch chainId {
+	case 1 /* mainnet */ :
+		return mainnetDepositContractBlock
+	case 11155111 /* sepolia */ :
+		return sepoliaDepositContractBlock
+	case 5 /* goerli */ :
+		return goerliDepositContractBlock
+	}
+
+	return 0
 }
 
 func Get(db kv.Getter) (Mode, error) {
