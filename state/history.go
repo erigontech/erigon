@@ -524,14 +524,22 @@ func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(txNum uint64, 
 		if txNum >= txTo {
 			break
 		}
-		_, vv, _ := valsC.SeekExact(v[len(v)-8:])
-		if err := f(txNum, v[:len(v)-8], vv); err != nil {
-			return err
+		key, txnNumBytes := v[:len(v)-8], v[len(v)-8:]
+		{
+			kk, vv, err := valsC.SeekExact(txnNumBytes)
+			if err != nil {
+				return err
+			}
+			if err := f(txNum, key, vv); err != nil {
+				return err
+			}
+			if kk != nil {
+				if err = valsC.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
 		}
-		if err = valsC.DeleteCurrent(); err != nil {
-			return err
-		}
-		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
+		if err = idxC.DeleteExact(key, k); err != nil {
 			return err
 		}
 		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v
