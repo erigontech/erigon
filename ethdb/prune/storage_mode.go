@@ -80,7 +80,7 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		if pruneBlockBefore != 0 {
 			log.Warn("specifying prune.before.r might break CL compatibility")
 			if beforeR > pruneBlockBefore {
-				log.Warn("the specified prune.before.r block number is higher than the deployed contract block number")
+				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
 			}
 		}
 		mode.Initialised = true
