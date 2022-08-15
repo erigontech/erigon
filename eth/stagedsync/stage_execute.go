@@ -396,6 +396,7 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	agg.SetTx(tx)
 	agg.SetTxNum(txNums[prevStageProgress])
 	rs := state.NewState22()
+	rs.SetLogPrefix(logPrefix)
 	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
 		return err
 	}
