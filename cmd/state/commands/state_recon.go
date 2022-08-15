@@ -910,7 +910,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	var rootHash common.Hash
-	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */, nil /* snapshot downloader */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -24,26 +23,24 @@ import (
 )
 
 type TrieCfg struct {
-	db                 kv.RwDB
-	checkRoot          bool
-	badBlockHalt       bool
-	tmpDir             string
-	saveNewHashesToDB  bool // no reason to save changes when calculating root for mining
-	blockReader        services.FullBlockReader
-	hd                 *headerdownload.HeaderDownload
-	snapshotDownloader *proto_downloader.DownloaderClient
+	db                kv.RwDB
+	checkRoot         bool
+	badBlockHalt      bool
+	tmpDir            string
+	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
+	blockReader       services.FullBlockReader
+	hd                *headerdownload.HeaderDownload
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, snapshotDownloader *proto_downloader.DownloaderClient) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) TrieCfg {
 	return TrieCfg{
-		db:                 db,
-		checkRoot:          checkRoot,
-		tmpDir:             tmpDir,
-		saveNewHashesToDB:  saveNewHashesToDB,
-		badBlockHalt:       badBlockHalt,
-		blockReader:        blockReader,
-		hd:                 hd,
-		snapshotDownloader: snapshotDownloader,
+		db:                db,
+		checkRoot:         checkRoot,
+		tmpDir:            tmpDir,
+		saveNewHashesToDB: saveNewHashesToDB,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		hd:                hd,
 	}
 }
 
@@ -100,18 +97,12 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if cfg.checkRoot && root != expectedRootHash {
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if cfg.badBlockHalt {
-				return trie.EmptyRoot, fmt.Errorf("wrong trie root")
+				return trie.EmptyRoot, fmt.Errorf("Wrong trie root")
 			}
 			if cfg.hd != nil {
 				header, err := cfg.blockReader.HeaderByHash(ctx, tx, headerHash)
 				if err != nil {
 					return trie.EmptyRoot, err
-				}
-				if header == nil {
-					log.Warn("[%s] No header found to report", "hash", headerHash)
-					if _, err := (*cfg.snapshotDownloader).Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-						return trie.EmptyRoot, err
-					}
 				}
 
 				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
