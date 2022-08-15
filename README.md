@@ -179,7 +179,7 @@ C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
 relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
+ are not needed for CL and you can safely prune them with `--prune htc`.
 
  ## ETH2 Deposit Contract Block Number
 
