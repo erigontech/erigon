@@ -57,6 +57,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
+	if block == nil {
+		return fmt.Errorf("invalid arguments; cannot retrieve block")
+	}
+
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
