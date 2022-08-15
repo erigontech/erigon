@@ -1039,7 +1039,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	if err = execStage.Update(rwTx, blockNum-1); err != nil {
+	if err = execStage.Update(rwTx, block); err != nil {
 		return err
 	}
 	log.Info("Reconstitution complete", "duration", time.Since(startTime))
@@ -1061,7 +1061,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	if err = hashStage.Update(rwTx, blockNum-1); err != nil {
+	if err = hashStage.Update(rwTx, block); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
@@ -1074,11 +1074,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(chainDb, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
 		return err
 	}
-	trieStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
+	trieStage, err := stagedSync.StageState(stages.IntermediateHashes, rwTx, chainDb)
 	if err != nil {
 		return err
 	}
-	if err = trieStage.Update(rwTx, blockNum-1); err != nil {
+	if err = trieStage.Update(rwTx, block); err != nil {
 		return err
 	}
 	if err = rwTx.Commit(); err != nil {
