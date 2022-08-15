@@ -76,6 +76,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
+		if syncHeadHeader == nil {
+			return trie.EmptyRoot, fmt.Errorf("no header found with number %d", to)
+		}
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
 	}
