@@ -43,10 +43,16 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 	defer tx.Rollback()
-	var block *types.Block
-	if number, ok := blockNrOrHash.Number(); ok {
+	var (
+		block     *types.Block
+		number    rpc.BlockNumber
+		hasNumber bool
+		hash      common.Hash
+		hasHash   bool
+	)
+	if number, hasNumber = blockNrOrHash.Number(); hasNumber {
 		block, err = api.blockByRPCNumber(number, tx)
-	} else if hash, ok := blockNrOrHash.Hash(); ok {
+	} else if hash, hasHash = blockNrOrHash.Hash(); hasHash {
 		block, err = api.blockByHashWithSenders(tx, hash)
 	} else {
 		return fmt.Errorf("invalid arguments; neither block nor hash specified")
@@ -58,9 +64,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if block == nil {
-		if number, ok := blockNrOrHash.Number(); ok {
+		if hasNumber {
 			return fmt.Errorf("invalid arguments; block with number %d not found", number)
-		} else if hash, ok := blockNrOrHash.Hash(); ok {
+		}
+		if hasHash {
 			return fmt.Errorf("invalid arguments; block with hash %v not found", hash)
 		}
 	}
