@@ -181,6 +181,16 @@ Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). 
 relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
  are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
 
+ ## ETH2 Deposit Contract Block Number
+
+ - Mainnnet: 11052984
+ - Sepolia: 
+
+ ## ETH2 Deposit Contract Address
+
+ - Mainnet: 0x00000000219ab540356cBB839Cbe05303d7705Fa
+ - Sepolia: 
+
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
 as well as `--authrpc.vhosts <CL host>`.
 
