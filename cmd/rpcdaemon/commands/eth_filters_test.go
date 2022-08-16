@@ -77,7 +77,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 		Addresses: addresses,
 	}
 
-	ids := make([]rpchelper.LogsSubID, 1000, 1000)
+	ids := make([]rpchelper.LogsSubID, 1000)
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
