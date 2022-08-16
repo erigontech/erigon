@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -72,7 +71,7 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	fileConfig := make(map[string]string)
 
 	if fileExtension == ".yaml" {
-		yamlFile, err := ioutil.ReadFile(filePath)
+		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
@@ -81,7 +80,7 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 			return err
 		}
 	} else if fileExtension == ".toml" {
-		tomlFile, err := ioutil.ReadFile(filePath)
+		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}

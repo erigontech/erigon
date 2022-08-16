@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -762,7 +763,7 @@ func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRem
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
-	dialOpts = append(dialOpts, grpc.WithInsecure())
+	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
