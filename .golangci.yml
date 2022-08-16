@@ -7,7 +7,7 @@ linters:
     - gofmt
     - deadcode
     - errcheck
-#    - gosimple # 1.18
+    - gosimple
     - govet
     - ineffassign
 #    - staticcheck # 1.18
