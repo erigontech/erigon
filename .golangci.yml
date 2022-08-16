@@ -10,7 +10,7 @@ linters:
     - gosimple
     - govet
     - ineffassign
-#    - staticcheck # 1.18
+    - staticcheck
 #    - structcheck # 1.18
 #    - unused # 1.18
     - varcheck
