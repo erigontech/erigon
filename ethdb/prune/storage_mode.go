@@ -86,7 +86,7 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 		mode.Initialised = true
 		mode.Receipts = Before(beforeR)
 	} else {
-		if exactReceipts == 0 {
+		if exactReceipts == 0 && mode.Receipts.Enabled() {
 			mode.Initialised = true
 			mode.Receipts = Before(pruneBlockBefore)
 		}
