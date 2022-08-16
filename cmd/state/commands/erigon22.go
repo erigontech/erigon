@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"path"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -53,7 +56,14 @@ var erigon22Cmd = &cobra.Command{
 }
 
 func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		cancel()
+	}()
 	var err error
 	dirs := datadir2.New(datadir)
 
