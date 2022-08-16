@@ -590,6 +590,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
+func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
