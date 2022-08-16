@@ -16,7 +16,7 @@ linters:
     - varcheck
 #    - gocritic
 #    - bodyclose # 1.18
-#    - gosec
+    - gosec
 #    - forcetypeassert
 
 linters-settings:
