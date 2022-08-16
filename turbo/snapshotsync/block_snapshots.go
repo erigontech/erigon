@@ -177,7 +177,7 @@ func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error
 	return sn.seg.WithReadAhead(func() error {
 		var buf []byte
 		g := sn.seg.MakeGetter()
-		blockNum := sn.idxBodyNumber.BaseDataID()
+		blockNum := sn.ranges.from
 		var b types.BodyForStorage
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
