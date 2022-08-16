@@ -239,20 +239,22 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 
 	if snapshots != nil && snapshots.Cfg().Enabled {
-		txNums = make([]uint64, snapshots.BlocksAvailable()+1)
-		if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-			for _, b := range bs {
-				if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-					txNums[blockNum] = baseTxNum + txAmount
-					return nil
-				}); err != nil {
-					return err
+		/*
+			txNums = make([]uint64, snapshots.BlocksAvailable()+1)
+			if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+				for _, b := range bs {
+					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
+						txNums[blockNum] = baseTxNum + txAmount
+						return nil
+					}); err != nil {
+						return err
+					}
 				}
+				return nil
+			}); err != nil {
+				return
 			}
-			return nil
-		}); err != nil {
-			return
-		}
+		*/
 	}
 
 	e22Dir := filepath.Join(dirs.DataDir, "erigon22")
