@@ -228,6 +228,25 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
+func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+	b := s.builders[s.payloadId]
+	if b == nil {
+		return nil, nil
+	}
+
+	pendingBlock := b.Block()
+	if pendingBlock == nil {
+		return nil, nil
+	}
+
+	blockRlp, err := rlp.EncodeToBytes(pendingBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	return &remote.PendingBlockReply{BlockRlp: blockRlp}, nil
+}
+
 func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.EnginePayloadStatus {
 	reply := remote.EnginePayloadStatus{Status: payloadStatus.Status}
 	if payloadStatus.Status != remote.EngineStatus_SYNCING {

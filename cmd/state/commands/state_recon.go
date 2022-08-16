@@ -517,21 +517,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapAccounts(accountCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for i := 0; i < workerCount; i++ {
@@ -564,21 +562,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapStorage(storageCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for i := 0; i < workerCount; i++ {
@@ -611,21 +607,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].bitmapCode(codeCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	var bitmap roaring64.Bitmap
@@ -893,21 +887,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillAccounts(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	doneCount = 0
 	for i := 0; i < workerCount; i++ {
@@ -915,21 +907,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillStorage(plainStateCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	doneCount = 0
 	for i := 0; i < workerCount; i++ {
@@ -937,21 +927,19 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		go fillWorkers[i].fillCode(codeCollectors[i], plainContractCollectors[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
-		select {
-		case <-logEvery.C:
-			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
-			var p float64
-			for i := 0; i < workerCount; i++ {
-				if total := fillWorkers[i].Total(); total > 0 {
-					p += float64(fillWorkers[i].Progress()) / float64(total)
-				}
+		<-logEvery.C
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
 			}
-			p *= 100.0
-			log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
 		}
+		p *= 100.0
+		log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
+		)
 	}
 	// Load all collections into the main collector
 	for i := 0; i < workerCount; i++ {

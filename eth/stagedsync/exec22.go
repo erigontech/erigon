@@ -78,8 +78,9 @@ func Exec22(ctx context.Context,
 	genesis *core.Genesis, initialCycle bool,
 ) (err error) {
 
-	var block uint64
+	var block, stageProgress uint64
 	if execStage.BlockNumber > 0 {
+		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
 	}
 
@@ -222,7 +223,7 @@ func Exec22(ctx context.Context,
 	var header *types.Header
 	var blockNum uint64
 loop:
-	for blockNum = block; blockNum < maxBlockNum; blockNum++ {
+	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)
 		rules := chainConfig.Rules(blockNum)
 		if header, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
@@ -273,7 +274,7 @@ loop:
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
 					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].Tx(), txTask, agg); err != nil {
-						panic(err)
+						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
 					outputTxNum++
 					outputBlockNum = txTask.BlockNum
@@ -281,6 +282,8 @@ loop:
 				} else {
 					return fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
 				}
+
+				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
 					progress.Log(rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
@@ -293,7 +296,7 @@ loop:
 							return err
 						}
 						if !initialCycle {
-							if err = execStage.Update(applyTx, blockNum); err != nil {
+							if err = execStage.Update(applyTx, stageProgress); err != nil {
 								return err
 							}
 							if err := applyTx.Commit(); err != nil {
@@ -323,24 +326,22 @@ loop:
 	}
 	if parallel {
 		wg.Wait()
-	}
-	if !parallel {
-		if err = rs.Flush(applyTx); err != nil {
-			return err
-		}
-		if err = execStage.Update(applyTx, blockNum); err != nil {
-			return err
-		}
-	} else {
 		if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
 			if err = rs.Flush(tx); err != nil {
 				return err
 			}
-			if err = execStage.Update(tx, blockNum); err != nil {
+			if err = execStage.Update(tx, stageProgress); err != nil {
 				return err
 			}
 			return nil
 		}); err != nil {
+			return err
+		}
+	} else {
+		if err = rs.Flush(applyTx); err != nil {
+			return err
+		}
+		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
 	}
@@ -355,7 +356,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
 			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
-				panic(err)
+				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 			atomic.AddUint64(outputTxNum, 1)

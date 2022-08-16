@@ -150,7 +150,8 @@ Windows users may run erigon in 3 possible ways:
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure Windows System "Path" variable has:
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
@@ -178,7 +179,21 @@ Windows users may run erigon in 3 possible ways:
 
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
 relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
+ are not needed for CL and you can safely prune them with `--prune htc`.
+
+ ## ETH2 Deposit Contract Block Number
+
+ - Mainnnet: 11052984
+ - Sepolia: 1273020
+ - Goerli: 4367322
+
+
+ ## ETH2 Deposit Contract Address
+
+ - Mainnet: 0x00000000219ab540356cBB839Cbe05303d7705Fa
+ - Sepolia: 0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D
+ - Goerli: 0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b
+
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
 as well as `--authrpc.vhosts <CL host>`.

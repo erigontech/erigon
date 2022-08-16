@@ -511,6 +511,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						fmt.Printf("del state22 code2: %x\n", address)
 						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						if err != nil {
 							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
@@ -547,7 +548,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			copy(location[:], k[length.Addr+length.Incarnation:])
 			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
 		}
-		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[20:], currentInc, k[20:])
+		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
 		if len(v) > 0 {
 			if err := next(k, newKeys, v); err != nil {
 				return err

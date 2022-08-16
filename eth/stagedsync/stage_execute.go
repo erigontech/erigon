@@ -392,16 +392,21 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 			return err
 		}
 	}
-
 	agg.SetTx(tx)
 	agg.SetTxNum(txNums[prevStageProgress])
+	agg.SetLogPrefix(logPrefix)
 	rs := state.NewState22()
 	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
-		return err
+		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
-		return err
+		return fmt.Errorf("State22.Flush: %w", err)
 	}
+
+	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+	//	fmt.Printf("st: %x, %x\n", k, v)
+	//	return nil
+	//})
 
 	/*
 		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {

@@ -174,21 +174,23 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
-	var buf []byte
-	g := sn.seg.MakeGetter()
-	blockNum := sn.idxBodyNumber.BaseDataID()
-	var b types.BodyForStorage
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, &b); err != nil {
-			return err
+	return sn.seg.WithReadAhead(func() error {
+		var buf []byte
+		g := sn.seg.MakeGetter()
+		blockNum := sn.ranges.from
+		var b types.BodyForStorage
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := rlp.DecodeBytes(buf, &b); err != nil {
+				return err
+			}
+			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+				return err
+			}
+			blockNum++
 		}
-		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
-			return err
-		}
-		blockNum++
-	}
-	return nil
+		return nil
+	})
 }
 
 func (sn *TxnSegment) closeIdx() {
@@ -588,6 +590,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
+func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {

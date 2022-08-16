@@ -120,9 +120,11 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 	if err = stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
+
 	stateBuckets := []string{
 		kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
-		kv.Epoch, kv.PendingEpoch, kv.BorReceipts, kv.ContractCode,
+		kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
+		kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 	}
 	for _, b := range stateBuckets {
 		if err := tx.ClearBucket(b); err != nil {
@@ -159,19 +161,10 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 		if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.PlainContractCode); err != nil {
-			return err
-		}
 		if err := tx.ClearBucket(kv.Receipts); err != nil {
 			return err
 		}
 		if err := tx.ClearBucket(kv.Log); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.Code); err != nil {
 			return err
 		}
 		if err := tx.ClearBucket(kv.CallTraceSet); err != nil {

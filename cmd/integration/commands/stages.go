@@ -731,7 +731,6 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
-	fmt.Printf("distance: %d\n", pm.History)
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
@@ -1227,7 +1226,8 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB) error {
-	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC,
+	chainConfig := tool.ChainConfigFromDB(db)
+	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneFlag, pruneH, pruneR, pruneT, pruneC,
 		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
 	if err != nil {
 		return err

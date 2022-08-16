@@ -239,20 +239,22 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 
 	if snapshots != nil && snapshots.Cfg().Enabled {
-		txNums = make([]uint64, snapshots.BlocksAvailable()+1)
-		if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-			for _, b := range bs {
-				if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-					txNums[blockNum] = baseTxNum + txAmount
-					return nil
-				}); err != nil {
-					return err
+		/*
+			txNums = make([]uint64, snapshots.BlocksAvailable()+1)
+			if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+				for _, b := range bs {
+					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
+						txNums[blockNum] = baseTxNum + txAmount
+						return nil
+					}); err != nil {
+						return err
+					}
 				}
+				return nil
+			}); err != nil {
+				return
 			}
-			return nil
-		}); err != nil {
-			return
-		}
+		*/
 	}
 
 	e22Dir := filepath.Join(dirs.DataDir, "erigon22")
@@ -372,6 +374,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			// open snapshots by looking on files in snapshots dir
+			// snapshots may be not downloaded yet and it's fine, but in most cases it will geve good UX (immediate avaiability of snapshots when RPCDaemon start)
+			allSnapshots.OptimisticalyReopenFolder()
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
 					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
