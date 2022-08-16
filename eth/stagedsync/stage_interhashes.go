@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -69,10 +70,14 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 
 	var expectedRootHash common.Hash
 	var headerHash common.Hash
+	var syncHeadHeader *types.Header
 	if cfg.checkRoot {
 		syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, to)
 		if err != nil {
 			return trie.EmptyRoot, err
+		}
+		if syncHeadHeader == nil {
+			return trie.EmptyRoot, fmt.Errorf("no header found with number %d", to)
 		}
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
@@ -100,15 +105,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 				return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 			}
 			if cfg.hd != nil {
-				header, err := cfg.blockReader.HeaderByHash(ctx, tx, headerHash)
-				if err != nil {
-					return trie.EmptyRoot, err
-				}
-				if header == nil {
-					log.Warn(fmt.Sprintf("[%s] No header found", logPrefix), "hash", headerHash)
-				} else {
-					cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
-				}
+				cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
 			}
 			if to > s.BlockNumber {
 				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
