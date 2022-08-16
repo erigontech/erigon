@@ -116,7 +116,7 @@ func newTable(
 		initDone:   make(chan struct{}),
 		closeReq:   make(chan struct{}),
 		closed:     make(chan struct{}),
-		rand:       mrand.New(mrand.NewSource(0)),
+		rand:       mrand.New(mrand.NewSource(0)), // nolint: gosec
 		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
 
 		revalidateInterval: revalidateInterval,
