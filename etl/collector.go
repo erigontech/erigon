@@ -27,9 +27,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const TmpDirName = "etl-temp"
@@ -156,6 +157,13 @@ func (c *Collector) Close() {
 	}
 }
 
+// loadFilesIntoBucket uses merge-sort to order the elements stored within the slice of providers,
+// regardless of ordering within the files the elements will be processed in order.
+// The first pass reads the first element from each of the providers and populates a heap with the key/value/provider index.
+// Later, the heap is popped to get the first element, the record is processed using the LoadFunc, and the provider is asked
+// for the next item, which is then added back to the heap.
+// The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
+// this continues until all providers have reached their EOF.
 func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	var m runtime.MemStats
 
