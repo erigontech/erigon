@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	math2 "math"
 
@@ -285,21 +286,6 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	step := a.txNum / a.aggregationStep
 	if step == 0 {
 		return nil
-	}
-
-	codeChanges := etl.NewCollector(a.logPrefix, "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer codeChanges.Close()
-
-	if err := a.code.pruneF(step, txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-		if err := codeChanges.Collect(k, v); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := codeChanges.Load(a.rwTx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
 	}
 
 	stateChanges := etl.NewCollector(a.logPrefix, "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
@@ -844,4 +830,12 @@ func (a *Aggregator22) MakeContext() *Aggregator22Context {
 		tracesFrom: a.tracesFrom.MakeContext(),
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
+}
+
+func decodeHex(in string) []byte {
+	payload, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return payload
 }
