@@ -1,9 +1,7 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
-	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -52,9 +50,6 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if bytes.Equal(address.Bytes(), common.Hex2Bytes("22ea9f6b28db76a7162054c05ed812deb2f519cd")) {
-		fmt.Printf("put: %x, %x, %d\n", address, value, account.Balance.Uint64())
-	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}

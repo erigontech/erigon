@@ -170,6 +170,7 @@ func executeBlock(
 	}
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.ReceiptForStorage
+
 	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
@@ -289,7 +290,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-
 	if !useExternalTx && workersCount == 1 {
 		if err = tx.Commit(); err != nil {
 			return err

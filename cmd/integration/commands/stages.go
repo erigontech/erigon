@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -682,10 +683,6 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
-			return err
-		}
-
 		return nil
 	}
 
@@ -703,10 +700,6 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 	err = stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, false)
 	if err != nil {
-		return err
-	}
-
-	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
 		return err
 	}
 	return nil
@@ -761,7 +754,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	}
-	//integrity.Trie(db, tx, integritySlow, ctx)
+	integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }
 

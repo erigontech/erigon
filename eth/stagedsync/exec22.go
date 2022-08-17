@@ -222,7 +222,6 @@ func Exec22(ctx context.Context,
 
 	var header *types.Header
 	var blockNum uint64
-	fmt.Printf("loop f: %d, %d\n", block, maxBlockNum)
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)

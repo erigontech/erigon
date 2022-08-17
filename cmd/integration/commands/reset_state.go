@@ -110,11 +110,11 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "snapsthos: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 
-	fmt.Printf("==== state =====\n")
-	db.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		fmt.Printf("st: %x, %x\n", k, v)
-		return nil
-	})
+	//fmt.Printf("==== state =====\n")
+	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+	//	fmt.Printf("st: %x, %x\n", k, v)
+	//	return nil
+	//})
 	//fmt.Printf("====  code =====\n")
 	//db.ForEach(kv.Code, nil, func(k, v []byte) error {
 	//	fmt.Printf("code: %x, %x\n", k, v)

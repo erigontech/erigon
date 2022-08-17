@@ -113,9 +113,6 @@ func NewState22() *State22 {
 }
 
 func (rs *State22) put(table string, key, val []byte) {
-	//if bytes.Equal(key, common.Hex2Bytes("22ea9f6b28db76a7162054c05ed812deb2f519cd")) {
-	//	fmt.Printf("put: %x, %x, %s\n", key, val, dbg.Stack())
-	//}
 	t, ok := rs.changes[table]
 	if !ok {
 		t = btree.NewG[StateItem](32, stateItemLess)
@@ -508,19 +505,19 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				copy(address[:], k)
 
 				// cleanup contract code bucket
-				original, err := NewPlainStateReader(tx).ReadAccountData(address)
-				if err != nil {
-					return fmt.Errorf("read account for %x: %w", address, err)
-				}
-				if original != nil {
-					// clean up all the code incarnations original incarnation and the new one
-					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
-						if err != nil {
-							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
-						}
-					}
-				}
+				//original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				//if err != nil {
+				//	return fmt.Errorf("read account for %x: %w", address, err)
+				//}
+				//if original != nil {
+				//	// clean up all the code incarnations original incarnation and the new one
+				//	for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+				//		err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+				//		if err != nil {
+				//			return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+				//		}
+				//	}
+				//}
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
