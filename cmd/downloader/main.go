@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -104,7 +105,8 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := Downloader(cmd.Context()); err != nil {
+		var mu sync.Mutex
+		if err := Downloader(cmd.Context(), &mu); err != nil {
 			log.Error("Downloader", "err", err)
 			return nil
 		}
@@ -112,7 +114,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Downloader(ctx context.Context) error {
+func Downloader(ctx context.Context, mu *sync.Mutex) error {
 	dirs := datadir.New(datadirCli)
 	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
@@ -133,12 +135,12 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, mu, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
 
-	d, err := downloader.New(cfg)
+	d, err := downloader.New(ctx, cfg)
 	if err != nil {
 		return err
 	}
