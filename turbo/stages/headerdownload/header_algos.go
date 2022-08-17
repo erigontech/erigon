@@ -304,7 +304,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		log.Info("Latest bad header", "hash", hd.latestBadHeader)
 	}
 	for _, s := range ss {
-		log.Debug(s)
+		log.Info(s)
 	}
 }
 
