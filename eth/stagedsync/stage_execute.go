@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -171,7 +170,6 @@ func executeBlock(
 	}
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.ReceiptForStorage
-
 	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
@@ -292,28 +290,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return err
 	}
 
-	fmt.Printf("==== F: %d =====\n", s.BlockNumber)
-	tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		if len(k) == 20 && bytes.HasPrefix(k, commonold.Hex2Bytes("22")) {
-			fmt.Printf("st: %x, %x\n", k, v)
-		}
-		return nil
-	})
-	//fmt.Printf("==== F: code =====\n")
-	//tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-	//	fmt.Printf("code: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== F2: code =====\n")
-	//tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-	//	fmt.Printf("code2: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== F: IncarnationMap =====\n")
-	//tx.ForEach(kv.IncarnationMap, nil, func(k, v []byte) error {
-	//	fmt.Printf("IncarnationMap: %x, %x\n", k, v)
-	//	return nil
-	//})
 	if !useExternalTx && workersCount == 1 {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -368,29 +344,6 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	if err := rs.Flush(tx); err != nil {
 		return fmt.Errorf("State22.Flush: %w", err)
 	}
-
-	fmt.Printf("==== U: %d =====\n", s.BlockNumber)
-	tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		if len(k) == 20 && bytes.HasPrefix(k, commonold.Hex2Bytes("22")) {
-			fmt.Printf("st: %x, %x\n", k, v)
-		}
-		return nil
-	})
-	//fmt.Printf("==== U: code =====\n")
-	//tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-	//	fmt.Printf("code: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== U2: code =====\n")
-	//tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-	//	fmt.Printf("code2: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== U: IncarnationMap =====\n")
-	//tx.ForEach(kv.IncarnationMap, nil, func(k, v []byte) error {
-	//	fmt.Printf("IncarnationMap: %x, %x\n", k, v)
-	//	return nil
-	//})
 
 	/*
 		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -558,7 +511,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		asyncEngine = asyncEngine.WithExecutionContext(ctx)
 		effectiveEngine = asyncEngine.(consensus.Engine)
 	}
-	fmt.Printf("loop f: %d, %d\n", stageProgress+1, to)
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -660,29 +612,6 @@ Loop:
 		return fmt.Errorf("batch commit: %v", err)
 	}
 
-	fmt.Printf("==== F: %d =====\n", s.BlockNumber)
-	tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		if len(k) == 20 && bytes.HasPrefix(k, commonold.Hex2Bytes("22")) {
-			fmt.Printf("st: %x, %x\n", k, v)
-		}
-		return nil
-	})
-	//fmt.Printf("==== F: code =====\n")
-	//tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-	//	fmt.Printf("code: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== F2: code =====\n")
-	//tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-	//	fmt.Printf("code2: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== F: IncarnationMap =====\n")
-	//tx.ForEach(kv.IncarnationMap, nil, func(k, v []byte) error {
-	//	fmt.Printf("IncarnationMap: %x, %x\n", k, v)
-	//	return nil
-	//})
-
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -747,29 +676,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if err = u.Done(tx); err != nil {
 		return err
 	}
-
-	fmt.Printf("==== U: %d =====\n", s.BlockNumber)
-	tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		if len(k) == 20 && bytes.HasPrefix(k, commonold.Hex2Bytes("22")) {
-			fmt.Printf("st: %x, %x\n", k, v)
-		}
-		return nil
-	})
-	//fmt.Printf("==== U: code =====\n")
-	//tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-	//	fmt.Printf("code: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== U2: code =====\n")
-	//tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-	//	fmt.Printf("code2: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== U: IncarnationMap =====\n")
-	//tx.ForEach(kv.IncarnationMap, nil, func(k, v []byte) error {
-	//	fmt.Printf("IncarnationMap: %x, %x\n", k, v)
-	//	return nil
-	//})
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

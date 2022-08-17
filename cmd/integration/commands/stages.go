@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -762,7 +761,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	}
-	integrity.Trie(db, tx, integritySlow, ctx)
+	//integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }
 
