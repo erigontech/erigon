@@ -58,7 +58,7 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
-	fmt.Fprint(w, "\n \t stage_at \t prune_at\n")
+	fmt.Fprint(w, "\n \t\t stage_at \t prune_at\n")
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
@@ -67,7 +67,7 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d \t %d\n", string(stage), progress, prunedTo)
+		fmt.Fprintf(w, "%s \t\t %d \t %d\n", string(stage), progress, prunedTo)
 	}
 	pm, err := prune.Get(db)
 	if err != nil {

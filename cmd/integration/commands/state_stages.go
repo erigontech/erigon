@@ -53,6 +53,7 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
+		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
@@ -284,6 +285,8 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
+		stagedsync.ResetHashState(tx)
+		stagedsync.ResetIH(tx)
 		if err := stateStages.Run(db, tx, false); err != nil {
 			return err
 		}

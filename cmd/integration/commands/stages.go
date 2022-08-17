@@ -683,6 +683,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
+			return err
+		}
+
 		return nil
 	}
 
@@ -700,6 +704,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 	err = stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, false)
 	if err != nil {
+		return err
+	}
+
+	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
 		return err
 	}
 	return nil

@@ -72,7 +72,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 func Exec22(ctx context.Context,
 	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots, txNums []uint64,
+	allSnapshots *snapshotsync.RoSnapshots, txNums exec22.TxNums,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis, initialCycle bool,
@@ -114,7 +114,7 @@ func Exec22(ctx context.Context,
 	heap.Init(&rws)
 	var outputTxNum uint64
 	if block > 0 {
-		outputTxNum = txNums[block-1]
+		outputTxNum = txNums.MaxOf(block - 1)
 	}
 
 	var inputBlockNum, outputBlockNum uint64
@@ -217,11 +217,12 @@ func Exec22(ctx context.Context,
 	}
 	var inputTxNum uint64
 	if block > 0 {
-		inputTxNum = txNums[block-1]
+		inputTxNum = txNums.MaxOf(block - 1)
 	}
 
 	var header *types.Header
 	var blockNum uint64
+	fmt.Printf("loop f: %d, %d\n", block, maxBlockNum)
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)
