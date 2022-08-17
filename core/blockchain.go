@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -296,6 +297,7 @@ func ExecuteBlockEphemerally(
 
 	receiptSha := types.DeriveSha(receipts)
 	if !statelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+		log.Debug("mismatched receipts", "got", receiptSha, "from", receipts, "expected", block.ReceiptHash())
 		return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 	}
 
