@@ -119,6 +119,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
+	hd.latestBadHeader = headerHash
 	// Find the link, remove it and all its descendands from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
@@ -299,6 +300,9 @@ func (hd *HeaderDownload) logAnchorState() {
 	}
 	sort.Strings(ss)
 	log.Info("Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
+	if (hd.latestBadHeader != common.Hash{}) {
+		log.Debug("Latest bad header", "hash", hd.latestBadHeader)
+	}
 	for _, s := range ss {
 		log.Debug(s)
 	}

@@ -295,6 +295,7 @@ type HeaderDownload struct {
 	QuitPoWMining          chan struct{}
 	trace                  bool
 	stats                  Stats
+	latestBadHeader        common.Hash
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          services.HeaderReader
