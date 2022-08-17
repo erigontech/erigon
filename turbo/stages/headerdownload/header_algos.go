@@ -301,7 +301,7 @@ func (hd *HeaderDownload) logAnchorState() {
 	sort.Strings(ss)
 	log.Info("Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	if (hd.latestBadHeader != common.Hash{}) {
-		log.Debug("Latest bad header", "hash", hd.latestBadHeader)
+		log.Info("Latest bad header", "hash", hd.latestBadHeader)
 	}
 	for _, s := range ss {
 		log.Debug(s)
