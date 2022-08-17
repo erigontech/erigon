@@ -238,7 +238,7 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 	mining = direct.NewMiningClient(miningServer)
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 
-	if snapshots != nil && snapshots.Cfg().Enabled {
+	if snapshots != nil && snapshots.Cfg().Enabled { // nolint: staticcheck
 		/*
 			txNums = make([]uint64, snapshots.BlocksAvailable()+1)
 			if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {

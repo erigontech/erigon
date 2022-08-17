@@ -157,7 +157,7 @@ func (cfg dialConfig) withDefaults() dialConfig {
 			panic(err)
 		}
 		seed := int64(binary.BigEndian.Uint64(seedb))
-		cfg.rand = mrand.New(mrand.NewSource(seed))
+		cfg.rand = mrand.New(mrand.NewSource(seed)) // nolint: gosec
 	}
 	return cfg
 }

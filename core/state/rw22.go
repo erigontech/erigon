@@ -489,6 +489,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 }
 
 func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.Aggregator22, accumulator *shards.Accumulator) error {
+	agg.SetTx(tx)
 	var currentInc uint64
 	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
@@ -511,7 +512,6 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						fmt.Printf("del state22 code2: %x\n", address)
 						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 						if err != nil {
 							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
@@ -528,6 +528,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 					return err
 				}
 			} else {
+				currentInc = 1
 				if accumulator != nil {
 					var address common.Address
 					copy(address[:], k)

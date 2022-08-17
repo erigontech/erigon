@@ -642,7 +642,7 @@ func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerI
 	switch ss.Protocol.Version {
 	case eth.ETH66, eth.ETH67:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
-			RequestId: rand.Uint64(),
+			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 				Amount:  1,
 				Reverse: false,

@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -252,44 +253,9 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	var prevStageProgress uint64
-	// Compute mapping blockNum -> last TxNum in that block
-	var txNums []uint64
-	if tx != nil {
-		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
-		if err != nil {
-			return err
-		}
-		txNums = make([]uint64, prevStageProgress)
-		if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-			if blockNum >= prevStageProgress {
-				return nil
-			}
-			txNums[blockNum] = baseTxNum + txAmount
-			return nil
-		}); err != nil {
-			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-		}
-	} else {
-		if err = cfg.db.View(ctx, func(tx kv.Tx) error {
-			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
-			if err != nil {
-				return err
-			}
-			txNums = make([]uint64, prevStageProgress)
-			if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-				if blockNum >= prevStageProgress {
-					return nil
-				}
-				txNums[blockNum] = baseTxNum + txAmount
-				return nil
-			}); err != nil {
-				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+	prevStageProgress, err := senderStageProgress(tx, cfg.db)
+	if err != nil {
+		return err
 	}
 
 	logPrefix := s.LogPrefix()
@@ -312,6 +278,11 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		return err
 	}
 	defer agg.Close()
+
+	txNums, err := makeMapping(tx, cfg.db, to, allSnapshots)
+	if err != nil {
+		return err
+	}
 
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
@@ -353,60 +324,26 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 
-	var prevStageProgress uint64
-	// Compute mapping blockNum -> last TxNum in that block
-	var txNums []uint64
-	if tx != nil {
-		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
-		if err != nil {
-			return err
-		}
-		txNums = make([]uint64, prevStageProgress+1)
-		if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-			if blockNum > prevStageProgress {
-				return nil
-			}
-			txNums[blockNum] = baseTxNum + txAmount
-			return nil
-		}); err != nil {
-			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-		}
-	} else {
-		if err = cfg.db.View(ctx, func(tx kv.Tx) error {
-			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
-			if err != nil {
-				return err
-			}
-			txNums = make([]uint64, prevStageProgress)
-			if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-				if blockNum > prevStageProgress {
-					return nil
-				}
-				txNums[blockNum] = baseTxNum + txAmount
-				return nil
-			}); err != nil {
-				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+	prevStageProgress, err := senderStageProgress(tx, cfg.db)
+	if err != nil {
+		return err
 	}
-	agg.SetTx(tx)
-	agg.SetTxNum(txNums[prevStageProgress])
+
+	txNums, err := makeMapping(tx, cfg.db, prevStageProgress, allSnapshots)
+	if err != nil {
+		return err
+	}
+
 	agg.SetLogPrefix(logPrefix)
+	agg.SetTxNum(txNums.MaxOf(prevStageProgress))
 	rs := state.NewState22()
-	if err := rs.Unwind(ctx, tx, txNums[u.UnwindPoint], agg, cfg.accumulator); err != nil {
+	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
+	if err := rs.Unwind(ctx, tx, txNums.MaxOf(u.UnwindPoint), agg, cfg.accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
 		return fmt.Errorf("State22.Flush: %w", err)
 	}
-
-	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-	//	fmt.Printf("st: %x, %x\n", k, v)
-	//	return nil
-	//})
 
 	/*
 		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -447,6 +384,57 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	}
 
 	return nil
+}
+
+func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err error) {
+	if tx != nil {
+		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		if err != nil {
+			return prevStageProgress, err
+		}
+	} else {
+		if err = db.View(context.Background(), func(tx kv.Tx) error {
+			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return prevStageProgress, err
+		}
+	}
+	return prevStageProgress, nil
+}
+
+func makeMapping(tx kv.Tx, db kv.RoDB, toBlock uint64, allSnapshots *snapshotsync.RoSnapshots) (txNums exec22.TxNums, err error) {
+	if tx != nil {
+		return makeMappingOnTx(tx, toBlock, allSnapshots)
+	}
+	if err = db.View(context.Background(), func(tx kv.Tx) error {
+		txNums, err = makeMappingOnTx(tx, toBlock, allSnapshots)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return
+}
+
+// makeMapping compute mapping blockNum -> last TxNum in that block
+func makeMappingOnTx(tx kv.Tx, toBlock uint64, allSnapshots *snapshotsync.RoSnapshots) (txNums exec22.TxNums, err error) {
+	txNums = make(exec22.TxNums, toBlock+1)
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, allSnapshots, 0, func(blockNum, baseTxNum, txAmount uint64) error {
+		if blockNum > toBlock {
+			return nil
+		}
+		txNums[blockNum] = baseTxNum + txAmount
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
+	}
+	return txNums, nil
 }
 
 // ================ Erigon22 End ================
