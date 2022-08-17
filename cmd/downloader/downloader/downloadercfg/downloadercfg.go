@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -25,7 +24,6 @@ const DefaultNetworkChunkSize = 1 * 1024 * 1024
 
 type Cfg struct {
 	*torrent.ClientConfig
-	Mu            *sync.Mutex
 	DownloadSlots int
 }
 
@@ -55,7 +53,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapDir string, verbosity lg.Level, dbg bool, mu *sync.Mutex, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
+func New(snapDir string, verbosity lg.Level, dbg bool, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -119,5 +117,5 @@ func New(snapDir string, verbosity lg.Level, dbg bool, mu *sync.Mutex, natif nat
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
-	return &Cfg{ClientConfig: torrentConfig, Mu: mu, DownloadSlots: downloadSlots}, nil
+	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
 }

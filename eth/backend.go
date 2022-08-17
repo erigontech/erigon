@@ -828,7 +828,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, cfg.Snapshot.DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader.New(ctx, cfg.Downloader)
+			s.downloader, err = downloader.New(cfg.Downloader)
 			if err != nil {
 				return nil, nil, err
 			}

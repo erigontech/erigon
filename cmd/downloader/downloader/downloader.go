@@ -52,7 +52,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
+func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 
 		statsLock: &sync.RWMutex{},
 	}
-	if err := d.addSegments(ctx); err != nil {
+	if err := d.addSegments(); err != nil {
 		return nil, err
 	}
 	return d, nil
@@ -221,12 +221,10 @@ func (d *Downloader) verify() error {
 	return nil
 }
 
-func (d *Downloader) addSegments(ctx context.Context) error {
+func (d *Downloader) addSegments() error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	d.cfg.Mu.Lock()
-	defer d.cfg.Mu.Unlock()
-	if err := BuildTorrentFilesIfNeed(ctx, d.cfg.DataDir); err != nil {
+	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
 		return err
 	}
 	files, err := seedableSegmentFiles(d.cfg.DataDir)
