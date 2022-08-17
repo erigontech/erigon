@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -73,7 +74,12 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return err
 	}
 	if reset {
-		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chainConfig.ChainName) }); err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if _, e := rawdb.HistoryV2.WriteOnce(tx, true); e != nil {
+				return e
+			}
+			return rawdbreset.ResetExec(tx, chainConfig.ChainName)
+		}); err != nil {
 			return err
 		}
 	}
@@ -118,6 +124,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
+	cfg.BatchSize = datasize.GB
 	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, exec22, nil)
 	if err != nil {
 		return err
