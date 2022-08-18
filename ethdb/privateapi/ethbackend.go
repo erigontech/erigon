@@ -229,6 +229,9 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 }
 
 func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	b := s.builders[s.payloadId]
 	if b == nil {
 		return nil, nil
