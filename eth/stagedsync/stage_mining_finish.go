@@ -14,7 +14,7 @@ type MiningFinishCfg struct {
 	db          kv.RwDB
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
-	sealCancel  <-chan struct{}
+	sealCancel  chan struct{}
 	miningState MiningState
 }
 
@@ -23,7 +23,7 @@ func StageMiningFinishCfg(
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	miningState MiningState,
-	sealCancel <-chan struct{},
+	sealCancel chan struct{},
 ) MiningFinishCfg {
 	return MiningFinishCfg{
 		db:          db,
@@ -75,7 +75,8 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 			"difficulty", block.Difficulty(),
 		)
 	}
-
+	// interrupt aborts the in-flight sealing task.
+	cfg.sealCancel <- struct{}{}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
