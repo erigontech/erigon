@@ -139,7 +139,7 @@ jobs:
          run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
        - name: run hive
-         run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
+         run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA
 
        - name: parse hive output
          run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results --outdir=/work/results
