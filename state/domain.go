@@ -72,8 +72,9 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 // Domain should not have any go routines or locks
 type Domain struct {
 	*History
-	keysTable string // Needs to be table with DupSort
-	valsTable string
+	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
+	valsTable string // key + invertedStep -> values
+
 	files     *btree.BTreeG[*filesItem] // Static files pertaining to this domain, items are of type `filesItem`
 	prefixLen int                       // Number of bytes in the keys that can be used for prefix iteration
 	stats     DomainStats

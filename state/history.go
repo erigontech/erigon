@@ -39,10 +39,11 @@ import (
 
 type History struct {
 	*InvertedIndex
-	historyValsTable string
+	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	settingsTable    string
-	files            *btree.BTreeG[*filesItem]
-	compressVals     bool
+
+	files        *btree.BTreeG[*filesItem]
+	compressVals bool
 }
 
 func NewHistory(
