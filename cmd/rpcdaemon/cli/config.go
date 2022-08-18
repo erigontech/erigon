@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -259,7 +260,7 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 
 	e22Dir := filepath.Join(dirs.DataDir, "erigon22")
 	dir.MustExist(e22Dir)
-	if agg, err = libstate.NewAggregator(e22Dir, 3_125_000); err != nil {
+	if agg, err = libstate.NewAggregator(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
 		return
 	}
 	return
@@ -461,7 +462,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
 		dir.MustExist(e22Dir)
-		if agg, err = libstate.NewAggregator(e22Dir, 3_125_000); err != nil {
+		if agg, err = libstate.NewAggregator(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 	}

@@ -6,29 +6,40 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type HashStateCfg struct {
-	db     kv.RwDB
-	tmpDir string
+	db   kv.RwDB
+	dirs datadir.Dirs
+
+	historyV2 bool
+	snapshos  *snapshotsync.RoSnapshots
 }
 
-func StageHashStateCfg(db kv.RwDB, tmpDir string) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, snapshos *snapshotsync.RoSnapshots) HashStateCfg {
 	return HashStateCfg{
-		db:     db,
-		tmpDir: tmpDir,
+		db:        db,
+		dirs:      dirs,
+		historyV2: historyV2,
+		snapshos:  snapshos,
 	}
 }
 
@@ -112,7 +123,7 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, quit)
-	prom.TempDir = cfg.tmpDir
+	prom.TempDir = cfg.dirs.Tmp
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
@@ -129,7 +140,7 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 	if err := promotePlainState(
 		logPrefix,
 		tx,
-		cfg.tmpDir,
+		cfg.dirs.Tmp,
 		etl.IdentityLoadFunc,
 		ctx.Done(),
 	); err != nil {
@@ -141,7 +152,7 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		tx,
 		kv.PlainContractCode,
 		kv.ContractCode,
-		cfg.tmpDir,
+		cfg.dirs.Tmp,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
@@ -576,9 +587,77 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, db kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	prom := NewPromoter(db, quit)
-	prom.TempDir = cfg.tmpDir
+func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+	if cfg.historyV2 {
+		txnNums, err := makeMapping(tx, cfg.db, to, cfg.snapshos)
+		if err != nil {
+
+		}
+		e22Dir := filepath.Join(cfg.dirs.DataDir, "erigon22")
+		dir.MustExist(e22Dir)
+
+		// accs
+		accounts, err := state.NewHistory(e22Dir, ethconfig.HistoryV2AggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings, false /* compressVals */)
+		if err != nil {
+			return err
+		}
+		collector := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer collector.Close()
+		aCtx := accounts.InvertedIndex.MakeContext()
+		aIt := aCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), tx)
+		defer aIt.Close()
+		for aIt.HasNext() {
+			k := aIt.Next(nil)
+			value, err := tx.GetOne(kv.PlainState, k)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			if err := collector.Collect(newK, value); err != nil {
+				return err
+			}
+		}
+		if err := collector.Load(tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+
+		// storage
+
+		storage, err := state.NewHistory(e22Dir, ethconfig.HistoryV2AggregationStep, "storage", kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings, false /* compressVals */)
+		if err != nil {
+			return err
+		}
+		collectorS := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer collectorS.Close()
+		sCtx := storage.InvertedIndex.MakeContext()
+		sIt := sCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), tx)
+		defer sIt.Close()
+		for sIt.HasNext() {
+			k := sIt.Next(nil)
+			value, err := tx.GetOne(kv.PlainState, k)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(k)
+			if err != nil {
+				return err
+			}
+			if err := collectorS.Collect(newK, value); err != nil {
+				return err
+			}
+		}
+		if err := collectorS.Load(tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	prom := NewPromoter(tx, quit)
+	prom.TempDir = cfg.dirs.Tmp
 	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, true /* codes */); err != nil {
 		return err
 	}

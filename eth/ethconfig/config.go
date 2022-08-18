@@ -39,6 +39,8 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
+const HistoryV2AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
 	Blocks:           20,
