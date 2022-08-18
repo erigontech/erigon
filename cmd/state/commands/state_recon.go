@@ -1042,7 +1042,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true), ctx); err != nil {
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, allSnapshots), ctx); err != nil {
 		return err
 	}
 	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
