@@ -290,7 +290,7 @@ func RPCMarshalBlockEx(block *types.Block, inclTx bool, fullTx bool, borTx types
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
-		fields["transactions"] = make([]interface{}, 1)
+		fields["transactions"] = make([]interface{}, 0)
 	}
 
 	if inclTx {
