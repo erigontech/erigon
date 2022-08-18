@@ -124,7 +124,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	cfg.BatchSize = datasize.GB
+	cfg.BatchSize = 64 * datasize.MB
 	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, exec22, nil)
 	if err != nil {
 		return err
