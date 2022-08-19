@@ -707,10 +707,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	pm := tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	dirs := datadir.New(datadirCli)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -736,7 +736,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil)
+	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV2, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -761,21 +761,16 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	var historyV2 bool
-	historyV2, err = rawdb.HistoryV2.Enabled(tx)
-	if err != nil {
-		return err
-	}
 
 	if reset {
 		err = stagedsync.ResetHashState(tx)
@@ -784,8 +779,6 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 		}
 		return tx.Commit()
 	}
-
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	s := stage(sync, tx, nil, stages.HashState)
 	if pruneTo > 0 {
@@ -1142,6 +1135,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
 	dirs, historyV2, pm := datadir.New(datadirCli), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	vmConfig := &vm.Config{}
 
@@ -1194,8 +1188,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
-
 	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, txNums, agg(), nil)
 	if err != nil {
 		panic(err)
@@ -1211,7 +1203,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
 			stagedsync.StageHashStateCfg(db, dirs, historyV2, txNums, agg()),
-			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
+			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV2, txNums, agg()),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,

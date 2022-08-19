@@ -493,6 +493,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		cCtx := agg.Code().InvertedIndex.MakeContext()
 		cIt := cCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
 		defer cIt.Close()
+
 		for cIt.HasNext() {
 			k := cIt.Next(nil)
 
@@ -543,16 +544,31 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		for sIt.HasNext() {
 			k := sIt.Next(nil)
 
-			value, err := p.tx.GetOne(kv.PlainState, k)
+			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
-			newK, err := transformPlainStateKey(k)
+			if len(accBytes) == 0 {
+				return nil
+			}
+			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
+			if err != nil {
+				return err
+			}
+			if incarnation == 0 {
+				return nil
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
 
-			if err := collector.Collect(newK, value); err != nil {
+			if err := collector.Collect(newK, newV); err != nil {
 				return err
 			}
 		}
