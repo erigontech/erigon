@@ -160,7 +160,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, false, allSnapshots), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, false, allSnapshots, agg), ctx); err != nil {
 			return err
 		}
 		var rootHash common.Hash
