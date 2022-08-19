@@ -265,7 +265,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	starknet *rpcservices.StarknetService,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	ff *rpchelper.Filters,
-	agg *libstate.Aggregator,
+	agg *libstate.Aggregator22,
 	txNums []uint64,
 	err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
@@ -453,7 +453,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
 		dir.MustExist(e22Dir)
-		if agg, err = libstate.NewAggregator(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
+		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 	}

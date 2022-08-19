@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -20,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -197,6 +200,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	dirs := datadir.New(tmpdir)
 	var err error
+	aggDir := path.Join(dirs.DataDir, "agg22")
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -348,6 +358,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.sentriesClient.Hd,
 				mock.gspec,
 				1,
+				agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
 			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, historyV2, allSnapshots),
