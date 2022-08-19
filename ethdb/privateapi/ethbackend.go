@@ -229,6 +229,9 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 }
 
 func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	b := s.builders[s.payloadId]
 	if b == nil {
 		return nil, nil
@@ -519,7 +522,13 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Block request successful", "hash", block.Header().Hash(), "transactions count", len(encodedTransactions), "number", block.NumberU64())
+
+	blockRlp, err := rlp.EncodeToBytes(block)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("PoS block built successfully", "hash", block.Header().Hash(),
+		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", blockRlp)
 
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),

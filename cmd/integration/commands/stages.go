@@ -1200,14 +1200,18 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 	miner := stagedsync.NewMiningState(&cfg.Miner)
-
+	miningCancel := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		close(miningCancel)
+	}()
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
 			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
-			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
