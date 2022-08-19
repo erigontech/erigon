@@ -806,6 +806,10 @@ func (a *Aggregator22) Stats() FilesStats22 {
 	return fs
 }
 
+func (a *Aggregator22) Code() *History     { return a.code }
+func (a *Aggregator22) Accounts() *History { return a.accounts }
+func (a *Aggregator22) Storage() *History  { return a.storage }
+
 type Aggregator22Context struct {
 	a          *Aggregator22
 	keyBuf     []byte
