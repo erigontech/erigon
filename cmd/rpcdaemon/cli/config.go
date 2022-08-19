@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -208,15 +209,11 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
-	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots, ethBackendServer remote.ETHBACKENDServer,
-	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
-) (
-	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters,
-	agg *libstate.Aggregator,
-	txNums []uint64,
-	err error,
-) {
+func EmbeddedServices(ctx context.Context,
+	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
+	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots,
+	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
+) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums []uint64, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.NewDummy()
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -257,11 +254,6 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 		*/
 	}
 
-	e22Dir := filepath.Join(dirs.DataDir, "erigon22")
-	dir.MustExist(e22Dir)
-	if agg, err = libstate.NewAggregator(e22Dir, 3_125_000); err != nil {
-		return
-	}
 	return
 }
 
@@ -273,7 +265,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	starknet *rpcservices.StarknetService,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	ff *rpchelper.Filters,
-	agg *libstate.Aggregator,
+	agg *libstate.Aggregator22,
 	txNums []uint64,
 	err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
@@ -461,7 +453,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
 		dir.MustExist(e22Dir)
-		if agg, err = libstate.NewAggregator(e22Dir, 3_125_000); err != nil {
+		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 	}

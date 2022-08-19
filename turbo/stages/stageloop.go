@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -23,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -336,7 +338,8 @@ func NewStagedSync(
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
-	exec22 bool,
+	historyV2 bool,
+	agg *state.Aggregator22,
 	forkValidator *engineapi.ForkValidator,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
@@ -399,15 +402,16 @@ func NewStagedSync(
 				notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				exec22,
+				historyV2,
 				dirs,
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
 				cfg.Sync.ExecWorkerCount,
+				agg,
 			),
 			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),
-			stagedsync.StageHashStateCfg(db, dirs.Tmp),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, snapshots),
 			stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
@@ -419,7 +423,7 @@ func NewStagedSync(
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, tmpdir string, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, exec22 bool) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, historyV2 bool, agg *state.Aggregator22) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
@@ -443,7 +447,7 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				snapshots,
 				nil,
 				blockReader,
-				tmpdir,
+				dirs.Tmp,
 				notifications.Events,
 				nil, nil), stagedsync.StageBodiesCfg(
 				db,
@@ -456,8 +460,8 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				cfg.BatchSize,
 				snapshots,
 				blockReader,
-			), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, tmpdir, cfg.Prune, nil, controlServer.Hd),
+			), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -469,15 +473,16 @@ func NewInMemoryExecution(ctx context.Context, logger log.Logger, db kv.RwDB, cf
 				notifications.Accumulator,
 				cfg.StateStream,
 				true,
-				exec22,
+				historyV2,
 				cfg.Dirs,
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
 				1,
+				agg,
 			),
-			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, true, tmpdir, blockReader, controlServer.Hd)),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, snapshots),
+			stagedsync.StageTrieCfg(db, true, true, true, dirs.Tmp, blockReader, controlServer.Hd)),
 		stagedsync.StateUnwindOrder,
 		nil,
 	), nil

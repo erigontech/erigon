@@ -1032,7 +1032,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	log.Info("Reconstitution complete", "duration", time.Since(startTime))
 	log.Info("Computing hashed state")
-	tmpDir := filepath.Join(datadir, "tmp")
+	tmpDir := cfg.Dirs.Tmp
 	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
@@ -1042,7 +1042,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, tmpDir), ctx); err != nil {
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, allSnapshots), ctx); err != nil {
 		return err
 	}
 	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
