@@ -82,7 +82,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	var headerHash common.Hash
 	var syncHeadHeader *types.Header
 	if cfg.checkRoot {
-		syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, to)
+		syncHeadHeader, err = cfg.blockReader.HeaderByNumber(ctx, tx, to)
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
