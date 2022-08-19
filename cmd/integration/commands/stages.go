@@ -707,10 +707,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	pm, historyV2 := tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	dirs := datadir.New(datadirCli)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -736,7 +736,6 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV2, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
