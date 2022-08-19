@@ -26,15 +26,13 @@ import (
 type FinishCfg struct {
 	db            kv.RwDB
 	tmpDir        string
-	log           log.Logger
 	headCh        chan *types.Block
 	forkValidator *engineapi.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block, forkValidator *engineapi.ForkValidator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, headCh chan *types.Block, forkValidator *engineapi.ForkValidator) FinishCfg {
 	return FinishCfg{
 		db:            db,
-		log:           logger,
 		tmpDir:        tmpDir,
 		headCh:        headCh,
 		forkValidator: forkValidator,

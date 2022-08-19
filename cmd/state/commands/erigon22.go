@@ -11,10 +11,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -76,6 +77,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -95,17 +97,8 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return err
 	}
 
-	var historyV2 bool
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		historyV2, err = rawdb.HistoryV2.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 	cfg := ethconfig.Defaults
+	cfg.HistoryV2 = tool.HistoryV2FromDB(db)
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
@@ -121,7 +114,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	}
 	defer agg.Close()
 
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, historyV2, agg, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, txNums, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -142,7 +135,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	workerCount := workers
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, blockReader, nil, genesis, workerCount, agg)
+		/*badBlockHalt=*/ false, cfg.HistoryV2, dirs, blockReader, nil, genesis, workerCount, agg)
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
 	if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
 		return err
@@ -160,7 +153,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, false, allSnapshots), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV2, txNums, agg), ctx); err != nil {
 			return err
 		}
 		var rootHash common.Hash
