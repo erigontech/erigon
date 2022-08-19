@@ -1016,7 +1016,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, false /* exec22 */, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, false /* exec22 */, agg, nil)
 	if err != nil {
 		return err
 	}

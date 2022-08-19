@@ -146,7 +146,7 @@ func init() {
 }
 
 func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
-	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
+	engine, vmConfig, stateStages, miningStages, miner, _ := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
 	dirs := datadir.New(datadirCli)
 	aggDir := path.Join(dirs.DataDir, "agg22")
@@ -418,7 +418,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 }
 
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
-	_, _, sync, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -487,17 +487,9 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 }
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
-	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
+	engine, vmConfig, sync, _, _, agg := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
-	dirs := datadir.New(datadirCli)
-
-	aggDir := path.Join(dirs.DataDir, "agg22")
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
+	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
