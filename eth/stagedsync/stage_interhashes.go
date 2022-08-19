@@ -217,7 +217,7 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 			if incarnation == 0 {
 				return nil
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:], nil)
 			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
 			if err != nil {
 				return err

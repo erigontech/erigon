@@ -81,7 +81,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 	if err1 != nil {
 		return nil, err1
 	}
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey, nil)
 	if dbr.storageCache != nil {
 		if enc, ok := dbr.storageCache.HasGet(nil, compositeKey); ok {
 			return enc, nil

@@ -549,7 +549,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			copy(location[:], k[length.Addr+length.Incarnation:])
 			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
 		}
-		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
+		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:], nil)
 		if len(v) > 0 {
 			if err := next(k, newKeys, v); err != nil {
 				return err
@@ -725,7 +725,7 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), nil)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)

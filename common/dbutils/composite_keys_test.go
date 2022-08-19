@@ -24,7 +24,7 @@ func TestPlainParseCompositeStorageKey(t *testing.T) {
 	expectedIncarnation := uint64(999000999)
 	expectedKey := common.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
 
-	compositeKey := PlainGenerateCompositeStorageKey(expectedAddr.Bytes(), expectedIncarnation, expectedKey.Bytes())
+	compositeKey := PlainGenerateCompositeStorageKey(expectedAddr.Bytes(), expectedIncarnation, expectedKey.Bytes(), nil)
 
 	addr, incarnation, key := PlainParseCompositeStorageKey(compositeKey)
 
@@ -50,7 +50,7 @@ func TestParseCompositeStorageKey(t *testing.T) {
 	expectedIncarnation := uint64(999000999)
 	expectedKey := common.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
 
-	compositeKey := GenerateCompositeStorageKey(expectedAddrHash, expectedIncarnation, expectedKey)
+	compositeKey := GenerateCompositeStorageKey(expectedAddrHash, expectedIncarnation, expectedKey, nil)
 
 	addrHash, incarnation, key := ParseCompositeStorageKey(compositeKey)
 

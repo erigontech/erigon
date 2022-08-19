@@ -41,7 +41,7 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), nil)
 	enc, err := r.db.GetOne(kv.PlainState, compositeKey)
 	if err != nil {
 		return nil, err

@@ -40,7 +40,7 @@ func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *CachedReader2) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), nil)
 	enc, err := r.cache.Get(compositeKey)
 	if err != nil {
 		return nil, err

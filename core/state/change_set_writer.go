@@ -111,7 +111,7 @@ func (w *ChangeSetWriter) WriteAccountStorage(address common.Address, incarnatio
 		return nil
 	}
 
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), nil)
 
 	w.storageChanges[string(compositeKey)] = original.Bytes()
 	w.storageChanged[address] = true

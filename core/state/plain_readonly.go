@@ -48,6 +48,7 @@ type PlainState struct {
 	blockNr                      uint64
 	storage                      map[common.Address]*btree.BTree
 	trace                        bool
+	buf                          []byte
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
@@ -183,7 +184,8 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 }
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	s.buf = dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), s.buf)
+	compositeKey := s.buf
 	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 	if err != nil {
 		return nil, err

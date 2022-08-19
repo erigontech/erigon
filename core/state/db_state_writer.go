@@ -132,7 +132,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	if err != nil {
 		return err
 	}
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey, nil)
 
 	v := value.Bytes()
 	if len(v) == 0 {

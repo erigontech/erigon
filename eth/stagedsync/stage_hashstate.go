@@ -191,6 +191,7 @@ func promotePlainState(
 		return hash[:], err
 	}
 
+	var compositeKey []byte
 	convertStorageFunc := func(key []byte) ([]byte, error) {
 		addrHash, err := common.HashData(key[:length.Addr])
 		if err != nil {
@@ -201,7 +202,7 @@ func promotePlainState(
 		if err != nil {
 			return nil, err
 		}
-		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		compositeKey = dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey, compositeKey)
 		return compositeKey, nil
 	}
 
@@ -289,7 +290,7 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey, nil)
 		return compositeKey, nil
 	default:
 		// no other keys are supported
@@ -541,8 +542,9 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		sCtx := agg.Storage().InvertedIndex.MakeContext()
 		sIt := sCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
 		defer sIt.Close()
+		var plainKey, k []byte
 		for sIt.HasNext() {
-			k := sIt.Next(nil)
+			k = sIt.Next(k)
 
 			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
@@ -558,7 +560,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 			if incarnation == 0 {
 				return nil
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			plainKey = dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:], plainKey)
 			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
 			if err != nil {
 				return err

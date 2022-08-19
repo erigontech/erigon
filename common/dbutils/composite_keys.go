@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -71,12 +72,17 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 
 // AddrHash + incarnation + KeyHash
 // For contract storage
-func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	copy(compositeKey, addressHash[:])
-	binary.BigEndian.PutUint64(compositeKey[common.HashLength:], incarnation)
-	copy(compositeKey[common.HashLength+common.IncarnationLength:], seckey[:])
-	return compositeKey
+func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash, buf []byte) []byte {
+	if len(buf) >= length.Hash+length.Incarnation+length.Hash {
+		buf = buf[:length.Hash+length.Incarnation+length.Hash]
+	} else {
+		buf = make([]byte, length.Hash+length.Incarnation+length.Hash)
+	}
+
+	copy(buf, addressHash[:])
+	binary.BigEndian.PutUint64(buf[common.HashLength:], incarnation)
+	copy(buf[common.HashLength+common.IncarnationLength:], seckey[:])
+	return buf
 }
 
 func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.Hash) {
@@ -89,12 +95,16 @@ func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.
 
 // AddrHash + incarnation + KeyHash
 // For contract storage (for plain state)
-func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte) []byte {
-	compositeKey := make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
-	copy(compositeKey, address)
-	binary.BigEndian.PutUint64(compositeKey[common.AddressLength:], incarnation)
-	copy(compositeKey[common.AddressLength+common.IncarnationLength:], key)
-	return compositeKey
+func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte, buf []byte) []byte {
+	if len(buf) >= common.AddressLength+common.IncarnationLength+common.HashLength {
+		buf = buf[:common.AddressLength+common.IncarnationLength+common.HashLength]
+	} else {
+		buf = make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
+	}
+	copy(buf, address)
+	binary.BigEndian.PutUint64(buf[common.AddressLength:], incarnation)
+	copy(buf[common.AddressLength+common.IncarnationLength:], key)
+	return buf
 }
 
 func PlainParseCompositeStorageKey(compositeKey []byte) (common.Address, uint64, common.Hash) {

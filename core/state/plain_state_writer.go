@@ -105,7 +105,7 @@ func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnati
 	if *original == *value {
 		return nil
 	}
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes(), nil)
 
 	v := value.Bytes()
 	if w.accumulator != nil {

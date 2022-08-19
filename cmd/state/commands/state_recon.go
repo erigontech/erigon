@@ -306,7 +306,7 @@ func (fw *FillWorker) fillStorage(plainStateCollector *etl.Collector) {
 		key, val, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.currentKey = key
-		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:])
+		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state.FirstContractIncarnation, key[20:], nil)
 		if len(val) > 0 {
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
 				panic(err)

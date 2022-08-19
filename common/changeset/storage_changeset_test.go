@@ -39,7 +39,7 @@ func emptyValueGenerator(j int) []byte {
 func getTestDataAtIndex(i, j int, inc uint64) []byte {
 	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
-	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
+	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes(), nil)
 }
 
 func TestEncodingStorageNewWithRandomIncarnation(t *testing.T) {
@@ -317,7 +317,7 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
 		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:]), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:], nil), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -347,7 +347,7 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
 		key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 		val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:]), val.Bytes())
+		err = ch.Add(dbutils.PlainGenerateCompositeStorageKey(address, rand.Uint64(), key[:], nil), val.Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,37 +401,37 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := NewStorageChangeSet()
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()), val1))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()), val5))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key6.Bytes()), val6))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes(), nil), val1))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes(), nil), val5))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key6.Bytes(), nil), val6))
 
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key2.Bytes()), val2))
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()), val3))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key2.Bytes(), nil), val2))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes(), nil), val3))
 
-	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes()), val4))
+	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes(), nil), val4))
 
 	assert.NoError(t, EncodeStorage(1, ch, func(k, v []byte) error {
 		return c.Put(k, v)
 	}))
 
-	data1, err1 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()))
+	data1, err1 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes(), nil))
 	assert.NoError(t, err1)
 	assert.Equal(t, data1, val1)
 
-	data3, err3 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()))
+	data3, err3 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes(), nil))
 	assert.NoError(t, err3)
 	assert.Equal(t, data3, val3)
 
-	data5, err5 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()))
+	data5, err5 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes(), nil))
 	assert.NoError(t, err5)
 	assert.Equal(t, data5, val5)
 
-	_, errA := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key1.Bytes()))
+	_, errA := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key1.Bytes(), nil))
 	assert.Error(t, errA)
 
-	_, errB := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractD.Bytes(), 2, key1.Bytes()))
+	_, errB := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractD.Bytes(), 2, key1.Bytes(), nil))
 	assert.Error(t, errB)
 
-	_, errC := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key7.Bytes()))
+	_, errC := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key7.Bytes(), nil))
 	assert.Error(t, errC)
 }
