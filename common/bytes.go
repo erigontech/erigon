@@ -23,13 +23,23 @@ func ByteCount(b uint64) string {
 	if b < unit {
 		return fmt.Sprintf("%dB", b)
 	}
+	bGb, exp := MBToGB(b)
+	return fmt.Sprintf("%.1f%cB", bGb, "KMGTPE"[exp])
+}
+
+func MBToGB(b uint64) (float64, int) {
+	const unit = 1024
+	if b < unit {
+		return float64(b), 0
+	}
+
 	div, exp := uint64(unit), 0
 	for n := b / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f%cB",
-		float64(b)/float64(div), "KMGTPE"[exp])
+
+	return float64(b) / float64(div), exp
 }
 
 func Copy(b []byte) []byte {
