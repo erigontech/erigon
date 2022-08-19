@@ -175,6 +175,48 @@ C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
+### Using TOML or YAML Config Files
+
+You can set Erigon flags through a YAML or TOML configuration file with the flag `--config`. The flags set in the configuration
+file can be overwritten by writing the flags directly on Erigon command line
+
+## Example
+
+`./build/bin/erigon --config ./config.yaml --chain=goerli
+
+Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the flag inside
+of the yaml configuration file and sets the chain to goerli
+
+## TOML 
+
+Example of setting up TOML config file
+
+```
+`datadir = 'your datadir'
+port = "1111"
+chain = "mainnet"
+http = "true"
+"private.api.addr"="localhost:9090"
+
+"http.api" = ["eth","debug","net"]
+```
+
+## YAML 
+
+Example of setting up a YAML config file
+
+```
+datadir : 'your datadir'
+port : "1111"
+chain : "mainnet"
+http : "true"
+private.api.addr : "localhost:9090"
+
+http.api : ["eth","debug","net"]
+```
+
+
+
 ### Beacon Chain (Consensus Layer)
 
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
