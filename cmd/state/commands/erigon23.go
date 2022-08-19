@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,18 +15,16 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -45,6 +45,8 @@ func init() {
 	withChain(erigon23Cmd)
 	withLogPath(erigon23Cmd)
 
+	erigon23Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon23Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	rootCmd.AddCommand(erigon23Cmd)
 }
 
@@ -135,12 +137,20 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
 	defer agg.Close()
+
 	startTxNum := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
 
+	agg.SetTx(rwTx)
+	latestTx, err := agg.SeekCommitment(startTxNum)
+	if err != nil && startTxNum != 0 {
+		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
+	}
+	startTxNum = latestTx
+
 	interrupt := false
 	if startTxNum == 0 {
-		_, genesisIbs, err := genesis.ToBlock()
+		genBlock, genesisIbs, err := genesis.ToBlock()
 		if err != nil {
 			return err
 		}
@@ -149,12 +159,22 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper23{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
+
+		blockRootHash, err := agg.ComputeCommitment(true, false)
+		if err != nil {
+			return err
+		}
 		if err = agg.FinishTx(); err != nil {
 			return err
 		}
+
+		genesisRootHash := genBlock.Root()
+		if !bytes.Equal(blockRootHash, genesisRootHash[:]) {
+			return fmt.Errorf("genesis root hash mismatch: expected %x got %x", genesisRootHash, blockRootHash)
+		}
 	}
 
-	logger.Info("Initialised chain configuration", "config", chainConfig)
+	logger.Info("Initialised chain configuration", "startTxNum", startTxNum, "config", chainConfig)
 
 	var (
 		blockNum uint64
@@ -198,6 +218,40 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	readWrapper := &ReaderWrapper23{ac: agg.MakeContext(), roTx: rwTx}
 	writeWrapper := &WriterWrapper23{w: agg}
 
+	commitFn := func(txn uint64) error {
+		var spaceDirty uint64
+		if spaceDirty, _, err = rwTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
+			return fmt.Errorf("retrieving spaceDirty: %w", err)
+		}
+		if spaceDirty >= dirtySpaceThreshold {
+			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+		}
+		log.Info("database commitment", "block", blockNum, "txNum", txn)
+
+		if err = rwTx.Commit(); err != nil {
+			return err
+		}
+		if interrupt {
+			return nil
+		}
+
+		if rwTx, err = db.BeginRw(ctx); err != nil {
+			return err
+		}
+		agg.SetTx(rwTx)
+		readWrapper.roTx = rwTx
+		return nil
+	}
+
+	defer func() {
+		interrupt = true
+		if err := commitFn(txNum); err != nil {
+			log.Error("commit on exit failed", "err", err)
+		}
+	}()
+
+	agg.SetCommitFn(commitFn)
+
 	for !interrupt {
 		blockNum++
 		trace = traceBlock > 0 && blockNum == uint64(traceBlock)
@@ -224,32 +278,12 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
+			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
+			if err := commitFn(txNum); err != nil {
+				log.Error("db commit", "err", err)
+			}
 		default:
-		}
-		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		commit := interrupt
-		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
-			var spaceDirty uint64
-			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-				return fmt.Errorf("retrieving spaceDirty: %w", err)
-			}
-			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-				commit = true
-			}
-		}
-		if commit {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if !interrupt {
-				if rwTx, err = db.BeginRw(ctx); err != nil {
-					return err
-				}
-			}
-			agg.SetTx(rwTx)
-			readWrapper.roTx = rwTx
 		}
 	}
 
@@ -268,9 +302,9 @@ type stat23 struct {
 }
 
 func (s *stat23) print(aStats libstate.FilesStats, logger log.Logger) {
-	totalFiles := 0
-	totalDatSize := 0
-	totalIdxSize := 0
+	totalFiles := aStats.FilesCount
+	totalDatSize := aStats.DataSize
+	totalIdxSize := aStats.IdxSize
 
 	logger.Info("Progress", "block", s.blockNum, "blk/s", s.speed, "state files", totalFiles,
 		"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
@@ -327,6 +361,10 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Pre-block transaction
 	ww.w.SetTxNum(txNum)
+	if err := ww.w.FinishTx(); err != nil {
+		return 0, nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+	}
+
 	getHashFn := core.GetHashFn(header, getHeader)
 
 	for i, tx := range block.Transactions() {
@@ -380,7 +418,6 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			}
 		}
 	}
-
 	if txNum >= startTxNum {
 		ibs := state.New(rw)
 		if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
@@ -401,6 +438,16 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 
+		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+			rootHash, err := ww.w.ComputeCommitment(true, trace)
+			if err != nil {
+				return 0, nil, err
+			}
+			if !bytes.Equal(rootHash, header.Root[:]) {
+				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
+			}
+		}
+
 		if err := ww.w.FinishTx(); err != nil {
 			return 0, nil, fmt.Errorf("failed to finish tx: %w", err)
 		}
@@ -411,6 +458,9 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
+	if err := ww.w.FinishTx(); err != nil {
+		return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+	}
 
 	return txNum, receipts, nil
 }
@@ -435,7 +485,6 @@ func (rw *ReaderWrapper23) ReadAccountData(address common.Address) (*accounts.Ac
 	if len(enc) == 0 {
 		return nil, nil
 	}
-
 	var a accounts.Account
 	a.Reset()
 	pos := 0
@@ -511,6 +560,7 @@ func (ww *WriterWrapper23) UpdateAccountData(address common.Address, original, a
 	}
 	value := make([]byte, l)
 	pos := 0
+
 	if account.Nonce == 0 {
 		value[pos] = 0
 		pos++
