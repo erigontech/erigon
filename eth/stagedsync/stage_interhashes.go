@@ -203,16 +203,31 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 		for it.HasNext() {
 			k := it.Next(nil)
 
-			newK, err := transformPlainStateKey(k)
+			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
-			newValue, err := p.tx.GetOne(kv.PlainState, k)
+			if len(accBytes) == 0 {
+				return nil
+			}
+			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
+			if err != nil {
+				return err
+			}
+			if incarnation == 0 {
+				return nil
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
 
-			if err := collector.Collect(newK, newValue); err != nil {
+			if err := collector.Collect(newK, newV); err != nil {
 				return err
 			}
 		}
