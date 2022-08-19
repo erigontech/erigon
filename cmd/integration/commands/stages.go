@@ -1132,19 +1132,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	defer agg.Close()
 
-	var pm prune.Mode
-	if err = db.View(context.Background(), func(tx kv.Tx) error {
-		pm, err = prune.Get(tx)
-		if err != nil {
-			return err
-		}
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	pm := tool.PruneModeFromDB(db)
 	vmConfig := &vm.Config{}
 
 	events := privateapi.NewEvents()
