@@ -5,12 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -20,9 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -31,16 +27,16 @@ type HashStateCfg struct {
 	dirs datadir.Dirs
 
 	historyV2 bool
-	snapshos  *snapshotsync.RoSnapshots
+	txNums    exec22.TxNums
 	agg       *state.Aggregator22
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, snapshos *snapshotsync.RoSnapshots, agg *state.Aggregator22) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, txNums exec22.TxNums, agg *state.Aggregator22) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
 		historyV2: historyV2,
-		snapshos:  snapshos,
+		txNums:    txNums,
 		agg:       agg,
 	}
 }
@@ -122,6 +118,9 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 }
 
 func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+	if cfg.historyV2 {
+		panic("not implemented yet")
+	}
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, cfg.dirs, quit)
@@ -487,18 +486,11 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, txnNums exec22.TxNums, from, to uint64, storage, codes bool) error {
-	e22Dir := filepath.Join(p.dirs.DataDir, "erigon22")
-	dir.MustExist(e22Dir)
-
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txnNums exec22.TxNums, from, to uint64, storage, codes bool) error {
 	if codes {
-		code, err := state.NewHistory(e22Dir, ethconfig.HistoryV2AggregationStep, "code", kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings, true /* compressVals */)
-		if err != nil {
-			return err
-		}
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
-		cCtx := code.InvertedIndex.MakeContext()
+		cCtx := agg.Code().InvertedIndex.MakeContext()
 		cIt := cCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
 		defer cIt.Close()
 		for cIt.HasNext() {
@@ -543,13 +535,9 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, txnNums exec22.TxNums, f
 	}
 
 	if storage {
-		storage, err := state.NewHistory(e22Dir, ethconfig.HistoryV2AggregationStep, "storage", kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings, false /* compressVals */)
-		if err != nil {
-			return err
-		}
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
-		sCtx := storage.InvertedIndex.MakeContext()
+		sCtx := agg.Storage().InvertedIndex.MakeContext()
 		sIt := sCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
 		defer sIt.Close()
 		for sIt.HasNext() {
@@ -573,13 +561,9 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, txnNums exec22.TxNums, f
 		}
 	}
 
-	accs, err := state.NewHistory(e22Dir, ethconfig.HistoryV2AggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings, false /* compressVals */)
-	if err != nil {
-		return err
-	}
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
-	aCtx := accs.InvertedIndex.MakeContext()
+	aCtx := agg.Accounts().InvertedIndex.MakeContext()
 	aIt := aCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
 	defer aIt.Close()
 	for aIt.HasNext() {
@@ -706,19 +690,14 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
 	if cfg.historyV2 {
-		txnNums, err := makeMapping(tx, cfg.db, to, cfg.snapshos)
-		if err != nil {
-			return err
-		}
-
 		prom := NewPromoter(tx, cfg.dirs, quit)
-		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, false, true); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, false, true); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, false, false); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, false, false); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, true, false); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
 			return err
 		}
 		return nil

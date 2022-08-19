@@ -19,6 +19,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -784,6 +785,8 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 		return tx.Commit()
 	}
 
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
 	s := stage(sync, tx, nil, stages.HashState)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
@@ -794,7 +797,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db), agg())
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
@@ -1160,6 +1163,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	cfg := ethconfig.Defaults
+	cfg.HistoryV2 = historyV2
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
@@ -1190,7 +1194,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, historyV2, agg(), nil)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
+	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, txNums, agg(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1204,7 +1210,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn, agg()),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, txNums, agg()),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),

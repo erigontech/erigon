@@ -447,20 +447,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
-	txNums := make([]uint64, allSnapshots.BlocksAvailable()+1)
-	if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-		for _, b := range bs {
-			if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-				txNums[blockNum] = baseTxNum + txAmount
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-	}
+	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
 	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
@@ -1013,10 +1000,11 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	cfg := ethconfig.Defaults
+	cfg.HistoryV2 = true
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, false /* exec22 */, agg, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, txNums, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -1042,7 +1030,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, allSnapshots, agg), ctx); err != nil {
+	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, txNums, agg), ctx); err != nil {
 		return err
 	}
 	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
