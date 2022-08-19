@@ -193,7 +193,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums, agg *state.Aggregator22, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
 	if storage {
 		collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
@@ -249,7 +249,7 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 	return nil
 }
 
-func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
@@ -438,17 +438,17 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		return nil
 	}
 	if cfg.historyV2 {
-		if err := p.PromoteOnHistoryV2(logPrefix, cfg.txNums, cfg.agg, s, s.BlockNumber, to, false /* storage */, collect); err != nil {
+		if err := p.PromoteOnHistoryV2(logPrefix, cfg.txNums, cfg.agg, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
-		if err := p.PromoteOnHistoryV2(logPrefix, cfg.txNums, cfg.agg, s, s.BlockNumber, to, true /* storage */, collect); err != nil {
+		if err := p.PromoteOnHistoryV2(logPrefix, cfg.txNums, cfg.agg, s.BlockNumber, to, true, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
-		if err := p.Promote(logPrefix, s, s.BlockNumber, to, false /* storage */, collect); err != nil {
+		if err := p.Promote(logPrefix, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
-		if err := p.Promote(logPrefix, s, s.BlockNumber, to, true /* storage */, collect); err != nil {
+		if err := p.Promote(logPrefix, s.BlockNumber, to, true, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
