@@ -485,7 +485,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteHistoryV2(logPrefix string, s *StageState, txnNums exec22.TxNums, from, to uint64, storage bool, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, txnNums exec22.TxNums, from, to uint64, storage, codes bool) error {
 	e22Dir := filepath.Join(p.dirs.DataDir, "erigon22")
 	dir.MustExist(e22Dir)
 
@@ -601,7 +601,7 @@ func (p *Promoter) PromoteHistoryV2(logPrefix string, s *StageState, txnNums exe
 	}
 	return nil
 }
-func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
+func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
@@ -710,26 +710,26 @@ func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to u
 		}
 
 		prom := NewPromoter(tx, cfg.dirs, quit)
-		if err := prom.PromoteHistoryV2(logPrefix, s, txnNums, from, to, false /* storage */, true /* codes */); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, false, true); err != nil {
 			return err
 		}
-		if err := prom.PromoteHistoryV2(logPrefix, s, txnNums, from, to, false /* storage */, false /* codes */); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, false, false); err != nil {
 			return err
 		}
-		if err := prom.PromoteHistoryV2(logPrefix, s, txnNums, from, to, true /* storage */, false /* codes */); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, txnNums, from, to, true, false); err != nil {
 			return err
 		}
 		return nil
 	}
 
 	prom := NewPromoter(tx, cfg.dirs, quit)
-	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, true); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, s, from, to, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, false); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, s, from, to, true /* storage */, false /* codes */); err != nil {
+	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
 	return nil

@@ -209,15 +209,11 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
-	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots, ethBackendServer remote.ETHBACKENDServer,
-	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
-) (
-	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters,
-	agg *libstate.Aggregator,
-	txNums []uint64,
-	err error,
-) {
+func EmbeddedServices(ctx context.Context,
+	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
+	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots,
+	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
+) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums []uint64, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.NewDummy()
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -258,11 +254,6 @@ func EmbeddedServices(ctx context.Context, dirs datadir.Dirs, erigonDB kv.RoDB, 
 		*/
 	}
 
-	e22Dir := filepath.Join(dirs.DataDir, "erigon22")
-	dir.MustExist(e22Dir)
-	if agg, err = libstate.NewAggregator(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
-		return
-	}
 	return
 }
 
