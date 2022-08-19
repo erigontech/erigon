@@ -1135,6 +1135,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
 	dirs, historyV2, pm := datadir.New(datadirCli), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	vmConfig := &vm.Config{}
 
@@ -1186,8 +1187,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if err != nil {
 		panic(err)
 	}
-
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, txNums, agg(), nil)
 	if err != nil {
