@@ -3,18 +3,14 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"path"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -57,14 +53,7 @@ var erigon22Cmd = &cobra.Command{
 }
 
 func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		cancel()
-	}()
+	ctx := context.Background()
 	var err error
 	dirs := datadir2.New(datadir)
 
@@ -75,10 +64,13 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	}
 	if reset {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			if _, e := rawdb.HistoryV2.WriteOnce(tx, true); e != nil {
+			if e := rawdbreset.ResetExec(tx, chainConfig.ChainName); e != nil {
 				return e
 			}
-			return rawdbreset.ResetExec(tx, chainConfig.ChainName)
+			if e := rawdb.HistoryV2.ForceWrite(tx, true); e != nil {
+				return e
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -120,6 +112,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	}); err != nil {
 		panic(err)
 	}
+	fmt.Printf("exec22 = %t\n", exec22)
 	cfg := ethconfig.Defaults
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
@@ -148,11 +141,6 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		dir.Recreate(aggDir)
 	}
 	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, stagedsync.AggregationStep)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
 
 	workerCount := workers
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
