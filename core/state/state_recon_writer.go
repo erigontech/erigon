@@ -245,7 +245,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
-		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), nil, codeHash[:], w.txNum)
+		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation, nil), nil, codeHash[:], w.txNum)
 	}
 	return nil
 }

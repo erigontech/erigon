@@ -177,7 +177,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	for i, addr := range addrList {
 		account := accountList[i]
 		incarnation := incarnationList[i]
-		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
+		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation, nil)
 		if incarnation > 0 {
 			codeHash, err := d.db.GetOne(kv.PlainContractCode, storagePrefix)
 			if err != nil {

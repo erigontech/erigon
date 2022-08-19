@@ -169,7 +169,8 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	}
 	//restore codehash
 	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
-		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+		s.buf = dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation, s.buf)
+		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, s.buf); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)
 			}

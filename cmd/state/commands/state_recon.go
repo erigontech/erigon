@@ -326,7 +326,7 @@ func (fw *FillWorker) fillCode(codeCollector, plainContractCollector *etl.Collec
 		key, val, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.currentKey = key
-		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation)
+		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state.FirstContractIncarnation, nil)
 		if len(val) > 0 {
 			codeHash, err := common.HashData(val)
 			if err != nil {

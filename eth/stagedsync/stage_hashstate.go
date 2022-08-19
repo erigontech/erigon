@@ -387,7 +387,7 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation, nil)
 		var codeHash []byte
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
@@ -474,7 +474,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation, nil)
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
@@ -512,7 +512,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 			if incarnation == 0 {
 				return nil
 			}
-			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation, nil)
 			var codeHash []byte
 			codeHash, err = p.tx.GetOne(kv.PlainContractCode, plainKey)
 			if err != nil {

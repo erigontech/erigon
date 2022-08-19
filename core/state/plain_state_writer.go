@@ -69,7 +69,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if err := w.db.Put(kv.Code, codeHash[:], code); err != nil {
 		return err
 	}
-	return w.db.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
+	return w.db.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation, nil), codeHash[:])
 }
 
 func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {

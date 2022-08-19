@@ -280,13 +280,13 @@ func TestStorageDeletion(t *testing.T) {
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation2, nil)))
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation3, nil)))
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation, nil)...), plainLocation1[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation, nil)...), plainLocation2[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation, nil)...), plainLocation3[:])
 	assert.Nil(t, err)
 
 	var s StageState

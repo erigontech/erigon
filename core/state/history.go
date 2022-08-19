@@ -83,7 +83,7 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			var codeHash []byte
 			var err error
-			codeHash, err = tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+			codeHash, err = tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation, nil))
 			if err != nil {
 				return nil, err
 			}
