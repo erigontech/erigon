@@ -761,21 +761,16 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	var historyV2 bool
-	historyV2, err = rawdb.HistoryV2.Enabled(tx)
-	if err != nil {
-		return err
-	}
 
 	if reset {
 		err = stagedsync.ResetHashState(tx)
@@ -784,8 +779,6 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 		}
 		return tx.Commit()
 	}
-
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	s := stage(sync, tx, nil, stages.HashState)
 	if pruneTo > 0 {
