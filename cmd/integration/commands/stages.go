@@ -760,9 +760,8 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	dirs := datadir.New(datadirCli)
-	pm := tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	_, _, sync, _, _, agg := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
 
 	tx, err := db.BeginRw(ctx)
@@ -795,7 +794,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db))
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db), agg)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
@@ -1195,7 +1194,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn, agg),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
