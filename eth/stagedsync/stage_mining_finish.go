@@ -76,7 +76,11 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 		)
 	}
 	// interrupt aborts the in-flight sealing task.
-	cfg.sealCancel <- struct{}{}
+	select {
+	case cfg.sealCancel <- struct{}{}:
+	default:
+		log.Trace("None in-flight sealing task.")
+	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
