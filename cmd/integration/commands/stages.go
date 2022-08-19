@@ -708,7 +708,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
+	dirs := datadir.New(datadirCli)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -734,7 +734,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, false, tmpdir, getBlockReader(db), nil)
+	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -759,7 +759,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
+	dirs := datadir.New(datadirCli)
 
 	pm, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
@@ -769,6 +769,12 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	var historyV2 bool
+	historyV2, err = rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
+		return err
+	}
 
 	if reset {
 		err = stagedsync.ResetHashState(tx)
@@ -787,7 +793,8 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	}
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	cfg := stagedsync.StageHashStateCfg(db, tmpdir)
+
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
@@ -1116,18 +1123,18 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
 	logger := log.New()
+	dirs := datadir.New(datadirCli)
 
 	var pm prune.Mode
 	var err error
-	var exec22 bool
+	var historyV2 bool
 	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		pm, err = prune.Get(tx)
 		if err != nil {
 			return err
 		}
-		exec22, err = rawdb.HistoryV2.Enabled(tx)
+		historyV2, err = rawdb.HistoryV2.Enabled(tx)
 		if err != nil {
 			return err
 		}
@@ -1188,7 +1195,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, exec22, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, historyV2, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1200,10 +1207,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}()
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir, nil),
-			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, false, tmpdir, br, nil),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
+			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn),
+			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,

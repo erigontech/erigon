@@ -67,6 +67,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 			return err
 		}
 	}
+
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
 	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
@@ -93,10 +94,10 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	if err != nil {
 		return err
 	}
-	var exec22 bool
 
+	var historyV2 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		exec22, err = rawdb.HistoryV2.Enabled(tx)
+		historyV2, err = rawdb.HistoryV2.Enabled(tx)
 		if err != nil {
 			return err
 		}
@@ -108,7 +109,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, exec22, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, historyV2, nil)
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	workerCount := workers
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, exec22, dirs, blockReader, nil, genesis, workerCount)
+		/*badBlockHalt=*/ false, historyV2, dirs, blockReader, nil, genesis, workerCount)
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
 	if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
 		return err
@@ -158,7 +159,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs.Tmp), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots), ctx); err != nil {
 			return err
 		}
 		var rootHash common.Hash
