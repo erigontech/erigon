@@ -509,7 +509,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
@@ -541,7 +541,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
 
 	must(sync.SetCurrentStage(stages.Senders))
@@ -640,7 +640,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
 	dirs := datadir.New(datadirCli)
-	engine, vmConfig, sync, _, _, agg := newSync(ctx, db, nil)
+	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
 
 	if reset {
@@ -676,7 +676,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, agg)
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -707,7 +707,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm := tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	dirs := datadir.New(datadirCli)
 
@@ -761,7 +761,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	_, _, sync, _, _, agg := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
 
 	tx, err := db.BeginRw(ctx)
@@ -794,7 +794,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db), agg)
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, allSnapshots(db), agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
@@ -821,7 +821,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -875,7 +875,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 
 func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -935,7 +935,7 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
 	tx, err := db.BeginRw(ctx)
@@ -1005,7 +1005,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 
 func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	_, _, sync, _, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 
@@ -1105,6 +1105,23 @@ func allSnapshots(db kv.RoDB) *snapshotsync.RoSnapshots {
 	return _allSnapshotsSingleton
 }
 
+var openAggOnce sync.Once
+var _aggSingleton *libstate.Aggregator22
+
+func agg() *libstate.Aggregator22 {
+	openSnapshotOnce.Do(func() {
+		aggDir := path.Join(datadirCli, "agg22")
+		dir.MustExist(aggDir)
+		var err error
+		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+		if err != nil {
+			panic(err)
+		}
+	})
+
+	return _aggSingleton
+}
+
 var openBlockReaderOnce sync.Once
 var _blockReaderSingleton services.FullBlockReader
 
@@ -1119,16 +1136,9 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 	return _blockReaderSingleton
 }
 
-func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState, *libstate.Aggregator22) {
+func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
 	dirs, historyV2, pm := datadir.New(datadirCli), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
-	aggDir := path.Join(dirs.DataDir, "agg22")
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
-	if err != nil {
-		panic(err)
-	}
-	defer agg.Close()
 
 	vmConfig := &vm.Config{}
 
@@ -1180,7 +1190,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, historyV2, agg, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, historyV2, agg(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1194,7 +1204,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn, agg),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, allSn, agg()),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
@@ -1202,7 +1212,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningPruneOrder,
 	)
 
-	return engine, vmConfig, sync, miningSync, miner, agg
+	return engine, vmConfig, sync, miningSync, miner
 }
 
 func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
