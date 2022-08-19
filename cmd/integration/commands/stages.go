@@ -1109,7 +1109,7 @@ var openAggOnce sync.Once
 var _aggSingleton *libstate.Aggregator22
 
 func agg() *libstate.Aggregator22 {
-	openSnapshotOnce.Do(func() {
+	openAggOnce.Do(func() {
 		aggDir := path.Join(datadirCli, "agg22")
 		dir.MustExist(aggDir)
 		var err error
