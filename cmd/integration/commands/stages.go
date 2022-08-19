@@ -1122,8 +1122,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState, *libstate.Aggregator22) {
 	logger := log.New()
-	dirs := datadir.New(datadirCli)
-	chainConfig, historyV2 := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, historyV2, pm := datadir.New(datadirCli), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
 	aggDir := path.Join(dirs.DataDir, "agg22")
 	dir.MustExist(aggDir)
 	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
@@ -1132,7 +1131,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	defer agg.Close()
 
-	pm := tool.PruneModeFromDB(db)
 	vmConfig := &vm.Config{}
 
 	events := privateapi.NewEvents()
