@@ -48,7 +48,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 51, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, cfg, nil)
+	err = promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, cfg, nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, StageHashStateCfg(db2, dirs, historyV2, nil), nil)
+	err := promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, StageHashStateCfg(db2, dirs, historyV2, nil), nil)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			}
 			db, tx := memdb.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, dirs, historyV2, nil), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := promoteHashedStateIncrementally("logPrefix", 1, 10, tx, StageHashStateCfg(db, dirs, historyV2, nil), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
 			}
 		})

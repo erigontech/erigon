@@ -32,14 +32,16 @@ type HashStateCfg struct {
 
 	historyV2 bool
 	snapshos  *snapshotsync.RoSnapshots
+	agg       *state.Aggregator22
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, snapshos *snapshotsync.RoSnapshots) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, snapshos *snapshotsync.RoSnapshots, agg *state.Aggregator22) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
 		historyV2: historyV2,
 		snapshos:  snapshos,
+		agg:       agg,
 	}
 }
 
@@ -77,7 +79,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
 			return err
 		}
 	}
@@ -702,7 +704,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
 	if cfg.historyV2 {
 		txnNums, err := makeMapping(tx, cfg.db, to, cfg.snapshos)
 		if err != nil {
