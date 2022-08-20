@@ -91,7 +91,7 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	makeTestDb(ctx, db)
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
-
+	hd.SetPOSSync(true)
 	events := NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
@@ -149,6 +149,7 @@ func TestMockValidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd.SetPOSSync(true)
 
 	events := NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
@@ -184,6 +185,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd.SetPOSSync(true)
 
 	events := NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
