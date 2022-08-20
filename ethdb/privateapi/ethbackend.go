@@ -397,24 +397,18 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
 	if newPayload {
 		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
 		if err != nil {
 			return nil, err
 		}
-		td, err = rawdb.ReadTdByHash(tx, parentHash)
-	} else {
-		td, err = rawdb.ReadTdByHash(tx, blockHash)
 	}
-	if err != nil {
-		return nil, err
-	}
+
 	// Check if we already reached TTD.
-	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+	if !s.hd.POSSync() {
 		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
 	}
 
 	var canonicalHash common.Hash
