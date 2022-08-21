@@ -274,8 +274,10 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		stagedsync.ResetHashState(tx)
-		stagedsync.ResetIH(tx)
+		if historyV2 {
+			stagedsync.ResetHashState(tx)
+			stagedsync.ResetIH(tx)
+		}
 		if err := stateStages.Run(db, tx, false); err != nil {
 			return err
 		}
