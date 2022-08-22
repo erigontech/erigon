@@ -722,6 +722,10 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
 			return err
 		}
+		tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
+			fmt.Printf("after ha: %x, %x\n", k, v)
+			return nil
+		})
 		return nil
 	}
 
@@ -735,6 +739,10 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
+	tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
+		fmt.Printf("after ha: %x, %x\n", k, v)
+		return nil
+	})
 	return nil
 }
 
