@@ -1,0 +1,17 @@
+{
+  "testSuites": [
+    {
+      "name": "engine-transition",
+      "testCases": [
+        "Terminal blocks are gossiped",
+        "Build Payload After Multiple Terminal blocks via gossip"
+      ]
+    },
+    {
+      "Name": "sync",
+      "testCases": [
+        "go-ethereum as sync source"
+      ]
+    }
+  ]
+}
