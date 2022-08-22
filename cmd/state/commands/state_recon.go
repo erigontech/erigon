@@ -447,7 +447,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
-	txNums := exec22.TxNumsFromDB(allSnapshots, db)
+	txNums := exec22.TxNumsFromDB(allSnapshots, chainDb)
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
 	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
@@ -949,7 +949,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		}
 		plainContractCollectors[i].Close()
 	}
-	rwTx, err = chainDb.BeginRw(ctx)
+	rwTx, err = db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -1008,7 +1008,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
+	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
 	execStage, err := stagedSync.StageState(stages.Execution, rwTx, chainDb)
@@ -1043,7 +1043,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
-	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
+	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
 	var rootHash common.Hash

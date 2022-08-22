@@ -257,14 +257,14 @@ type MultiClient struct {
 	forks         []uint64
 	genesisHash   common.Hash
 	networkId     uint64
-	db            kv.RwDB
+	db            kv.RoDB
 	Engine        consensus.Engine
 	blockReader   services.HeaderAndCanonicalReader
 	logPeerInfo   bool
 }
 
 func NewMultiClient(
-	db kv.RwDB,
+	db kv.RoDB,
 	nodeName string,
 	chainConfig *params.ChainConfig,
 	genesisHash common.Hash,
