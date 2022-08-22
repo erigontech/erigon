@@ -1,6 +1,6 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
+Erigon is an implementation of Ethereum (execution client), on the efficiency frontier, written in Go.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
