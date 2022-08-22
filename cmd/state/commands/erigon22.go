@@ -11,7 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -75,6 +78,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 			return err
 		}
 	}
+
 	startTime := time.Now()
 	var blockReader services.FullBlockReader
 	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
@@ -83,6 +87,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -101,24 +106,26 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	if err != nil {
 		return err
 	}
-	var exec22 bool
 
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		exec22, err = rawdb.HistoryV2.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Printf("exec22 = %t\n", exec22)
 	cfg := ethconfig.Defaults
+	cfg.HistoryV2 = tool.HistoryV2FromDB(db)
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
 	cfg.BatchSize = 64 * datasize.MB
-	stagedSync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, exec22, nil)
+
+	aggDir := path.Join(dirs.DataDir, "agg22")
+	if reset {
+		dir.Recreate(aggDir)
+	}
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+
+	stagedSync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, txNums, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -136,16 +143,10 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		block = execStage.BlockNumber + 1
 	}
 
-	aggDir := path.Join(dirs.DataDir, "agg22")
-	if reset {
-		dir.Recreate(aggDir)
-	}
-	dir.MustExist(aggDir)
-
 	workerCount := workers
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, exec22, dirs, blockReader, nil, genesis, workerCount)
+		/*badBlockHalt=*/ false, cfg.HistoryV2, dirs, blockReader, nil, genesis, workerCount, agg)
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
 	if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
 		return err
@@ -163,11 +164,11 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs.Tmp), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV2, txNums, agg), ctx); err != nil {
 			return err
 		}
 		var rootHash common.Hash
-		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(db, false /* checkRoot */, false /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */, cfg.HistoryV2, txNums, agg), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
 		execStage, err = stagedSync.StageState(stages.Execution, tx, db)

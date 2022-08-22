@@ -229,6 +229,9 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 }
 
 func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	b := s.builders[s.payloadId]
 	if b == nil {
 		return nil, nil
@@ -394,24 +397,18 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
 	if newPayload {
 		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
 		if err != nil {
 			return nil, err
 		}
-		td, err = rawdb.ReadTdByHash(tx, parentHash)
-	} else {
-		td, err = rawdb.ReadTdByHash(tx, blockHash)
 	}
-	if err != nil {
-		return nil, err
-	}
+
 	// Check if we already reached TTD.
-	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+	if !s.hd.POSSync() {
 		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
 	}
 
 	var canonicalHash common.Hash
@@ -519,7 +516,13 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Block request successful", "hash", block.Header().Hash(), "transactions count", len(encodedTransactions), "number", block.NumberU64())
+
+	blockRlp, err := rlp.EncodeToBytes(block)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("PoS block built successfully", "hash", block.Header().Hash(),
+		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", blockRlp)
 
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),

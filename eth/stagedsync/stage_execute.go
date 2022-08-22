@@ -80,6 +80,7 @@ type ExecuteBlockCfg struct {
 	exec22       bool
 	workersCount int
 	genesis      *core.Genesis
+	agg          *libstate.Aggregator22
 }
 
 func StageExecuteBlocksCfg(
@@ -93,13 +94,14 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
+
 	exec22 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
-
+	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            db,
@@ -118,6 +120,7 @@ func StageExecuteBlocksCfg(
 		genesis:       genesis,
 		exec22:        exec22,
 		workersCount:  workersCount,
+		agg:           agg,
 	}
 }
 
@@ -271,13 +274,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	rs := state.NewState22()
-	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
 
 	txNums, err := makeMapping(tx, cfg.db, to, allSnapshots)
 	if err != nil {
@@ -285,7 +281,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
-		cfg.blockReader, allSnapshots, txNums, log.New(), agg, cfg.engine,
+		cfg.blockReader, allSnapshots, txNums, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
