@@ -308,7 +308,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 
 	if pruneMode.Initialised {
 		// If storage mode is not explicitly specified, we take whatever is in the database
-		if pm.String() != "" && !reflect.DeepEqual(pm, pruneMode) {
+		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}
