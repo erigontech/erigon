@@ -57,8 +57,8 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{
-			contractAddress:  *j.SafeContract,
-			validators:       ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition},
+			contractAddress:  *j.Contract,
+			validators:       ValidatorSafeContract{contractAddress: *j.Contract, posdaoTransition: posdaoTransition},
 			posdaoTransition: posdaoTransition,
 		}
 	}
