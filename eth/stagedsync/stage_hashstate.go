@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -346,7 +347,7 @@ type Promoter struct {
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _, err := decode(dbKey, dbValue)
+		bn, k, _, err := decode(dbKey, dbValue)
 		if err != nil {
 			return err
 		}
@@ -359,7 +360,9 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-
+		if bytes.Equal(newK, common.FromHex("ca7b66240bdbf737a0cd88783afb3724f53280750849e21d2f83cb972f01be7e")) {
+			fmt.Printf("alex found in block: %d,%x,%x %x\n", bn, k, newK, value)
+		}
 		return next(dbKey, newK, value)
 	}
 }
@@ -486,12 +489,14 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txnNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+	txnFrom := txNums.MinOf(from + 1)
+	txnTo := uint64(math.MaxUint64)
 	if codes {
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		cCtx := agg.Code().InvertedIndex.MakeContext()
-		cIt := cCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+		cIt := cCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer cIt.Close()
 
 		for cIt.HasNext() {
@@ -539,7 +544,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		sCtx := agg.Storage().InvertedIndex.MakeContext()
-		sIt := sCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+		sIt := sCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer sIt.Close()
 		for sIt.HasNext() {
 			k := sIt.Next(nil)
@@ -575,15 +580,35 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		if err := collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 			return err
 		}
+		return nil
 	}
+
+	fmt.Printf("alex found in txn: %d, %d\n", from, txNums.MinOf(from))
+
+	{
+		aCtx := agg.Accounts().InvertedIndex.MakeContext()
+		aIt := aCtx.IterateChangedKeys(txnFrom-10, txnTo, p.tx)
+		defer aIt.Close()
+		for aIt.HasNext() {
+			k := aIt.Next(nil)
+			fmt.Printf("--- 12222 emmmm: %x\n", k)
+			if bytes.Equal(k, common.FromHex("fb37c82bca4d6f331aa391f247fcf5c0359da755")) {
+				fmt.Printf("--- 12222 alex found in block: %x\n", k)
+			}
+		}
+	}
+	fmt.Printf("---\n")
 
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 	aCtx := agg.Accounts().InvertedIndex.MakeContext()
-	aIt := aCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+	aIt := aCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 	defer aIt.Close()
 	for aIt.HasNext() {
 		k := aIt.Next(nil)
+		if bytes.Equal(k, common.FromHex("fb37c82bca4d6f331aa391f247fcf5c0359da755")) {
+			fmt.Printf("alex found in block: %x\n", k)
+		}
 
 		value, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
@@ -716,6 +741,10 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
 			return err
 		}
+		tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
+			fmt.Printf("after ha: %x, %x\n", k, v)
+			return nil
+		})
 		return nil
 	}
 
@@ -729,6 +758,10 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
+	tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
+		fmt.Printf("after ha: %x, %x\n", k, v)
+		return nil
+	})
 	return nil
 }
 
