@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -194,6 +195,9 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 }
 
 func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
+	var l OldestAppearedLoad
+	l.innerLoadFunc = load
+
 	if storage {
 		collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
@@ -239,25 +243,48 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	it := agg.Accounts().InvertedIndex.MakeContext().IterateChangedKeys(txNums.MinOf(from), txNums.MaxOf(to), p.tx)
-	defer it.Close()
-	for it.HasNext() {
-		k := it.Next(nil)
+	bigCurrent := big.NewInt(0)
+	fromKey := make([]byte, 4)
+	bigCurrent.SetUint64(txNums.MinOf(from))
+	bigCurrent.FillBytes(fromKey)
+	toKey := make([]byte, 4)
+	bigCurrent.SetUint64(txNums.MaxOf(to))
+	bigCurrent.FillBytes(toKey)
 
+	agg.SetTx(p.tx)
+	agg.Accounts().MakeContext().Iterate(txNums.MinOf(from), txNums.MaxOf(to), func(txNum uint64, k, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		newValue, err := p.tx.GetOne(kv.PlainState, k)
-		if err != nil {
-			return err
-		}
 
-		if err := collector.Collect(newK, newValue); err != nil {
+		fmt.Printf("collect: %x->%x, %x\n", k, newK, v)
+		panic(1)
+		if err := collector.Collect(newK, v); err != nil {
 			return err
 		}
-	}
-	if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+		return nil
+	})
+
+	//it := agg.Accounts().InvertedIndex.MakeContext().IterateChangedKeys(txNums.MinOf(from), txNums.MaxOf(to), p.tx)
+	//defer it.Close()
+	//for it.HasNext() {
+	//	k := it.Next(nil)
+	//
+	//	newK, err := transformPlainStateKey(k)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	newV, err := p.tx.GetOne(kv.PlainState, k)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if err := collector.Collect(newK, newV); err != nil {
+	//		return err
+	//	}
+	//}
+	if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 		return err
 	}
 
@@ -312,9 +339,9 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 					}
 				}
 			}
-
 		}
 
+		fmt.Printf("collect: %x->%x, %x\n", k, newK, v)
 		return next(dbKey, newK, v)
 	}
 
