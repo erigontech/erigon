@@ -39,6 +39,8 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
+const HistoryV2AggregationStep = 3_125_000 /* number of transactions in smallest static file */
+
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
 	Blocks:           20,
@@ -64,6 +66,7 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
+		ExecWorkerCount:            1,
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -220,6 +223,9 @@ type Config struct {
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
 
+	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	HistoryV2 bool
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 
@@ -237,14 +243,15 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle time.Duration
+	LoopThrottle    time.Duration
+	ExecWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
 }
 
 // Chains where snapshots are enabled by default
-var ChainsWithSnapshots map[string]struct{} = map[string]struct{}{
+var ChainsWithSnapshots = map[string]struct{}{
 	networkname.MainnetChainName:    {},
 	networkname.BSCChainName:        {},
 	networkname.GoerliChainName:     {},

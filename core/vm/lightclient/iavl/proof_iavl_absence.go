@@ -75,7 +75,7 @@ func (op IAVLAbsenceOp) Run(args [][]byte) ([][]byte, error) {
 	// XXX What is the encoding for keys?
 	// We should decode the key depending on whether it's a string or hex,
 	// maybe based on quotes and 0x prefix?
-	err = op.Proof.VerifyAbsence([]byte(op.key))
+	err = op.Proof.VerifyAbsence(op.key)
 	if err != nil {
 		return nil, cmn.ErrorWrap(err, "verifying absence")
 	}

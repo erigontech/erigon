@@ -1,6 +1,6 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
+Erigon is an implementation of Ethereum (execution client), on the efficiency frontier, written in Go.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -150,7 +150,8 @@ Windows users may run erigon in 3 possible ways:
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure Windows System "Path" variable has:
+C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
@@ -174,11 +175,67 @@ Windows users may run erigon in 3 possible ways:
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
+### Using TOML or YAML Config Files
+
+You can set Erigon flags through a YAML or TOML configuration file with the flag `--config`. The flags set in the configuration
+file can be overwritten by writing the flags directly on Erigon command line
+
+## Example
+
+`./build/bin/erigon --config ./config.yaml --chain=goerli
+
+Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the flag inside
+of the yaml configuration file and sets the chain to goerli
+
+## TOML 
+
+Example of setting up TOML config file
+
+```
+`datadir = 'your datadir'
+port = "1111"
+chain = "mainnet"
+http = "true"
+"private.api.addr"="localhost:9090"
+
+"http.api" = ["eth","debug","net"]
+```
+
+## YAML 
+
+Example of setting up a YAML config file
+
+```
+datadir : 'your datadir'
+port : "1111"
+chain : "mainnet"
+http : "true"
+private.api.addr : "localhost:9090"
+
+http.api : ["eth","debug","net"]
+```
+
+
+
 ### Beacon Chain (Consensus Layer)
 
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
 relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for CL and you can safely prune them with `--prune.r.before=<old block number>` in combination with `--prune htc`.
+ are not needed for CL and you can safely prune them with `--prune htc`.
+
+ ## ETH2 Deposit Contract Block Number
+
+ - Mainnnet: 11052984
+ - Sepolia: 1273020
+ - Goerli: 4367322
+
+
+ ## ETH2 Deposit Contract Address
+
+ - Mainnet: 0x00000000219ab540356cBB839Cbe05303d7705Fa
+ - Sepolia: 0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D
+ - Goerli: 0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b
+
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
 as well as `--authrpc.vhosts <CL host>`.
@@ -196,15 +253,15 @@ where `<erigon address>` is either `localhost` or the IP address of the device r
 
 ### Multiple Instances / One Machine
 
-Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
+Define 6 flags to avoid conflicts: `--datadir --port --http.port --authrpc.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
 
 ```
 # mainnet
-./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --authrpc.port=8551 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
 # rinkeby
-./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --authrpc.port=8552 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
@@ -410,19 +467,19 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 |  9090 |    TCP    | gRPC Connections       | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
+|  8551 |    TCP    | Engine API (JWT auth)  | Private |
 
 Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
+Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer node.
 
 #### `RPC` ports
 
 |  Port |  Protocol |      Purpose       |  Expose |
 |:-----:|:---------:|:------------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets  | Private |
-|  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically, 8551 (JWT authenticated) is exposed only internally for the [Engine API] JSON-RPC queries.
 
 #### `sentry` ports
 

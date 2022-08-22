@@ -131,8 +131,14 @@ func (n *Node) Start() error {
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
-		n.stopServices(started) //nolint:errcheck
-		n.doClose(nil)
+		stopErr := n.stopServices(started)
+		if stopErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", stopErr)
+		} //nolint:errcheck
+		closeErr := n.doClose(nil)
+		if closeErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", closeErr)
+		}
 	}
 	return err
 }
@@ -319,6 +325,8 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		}
 		if label == kv.ChainDB {
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		return opts.Open()
 	}

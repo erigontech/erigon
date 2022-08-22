@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"syscall"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
@@ -50,7 +50,8 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	dirs := datadir2.New(datadir)
+	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open()
 	if err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 			if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
 				return err
 			}
-			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, stateDbPath), ctx); err != nil {
+			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs, false, nil, nil), ctx); err != nil {
 				return err
 			}
 			var root common.Hash

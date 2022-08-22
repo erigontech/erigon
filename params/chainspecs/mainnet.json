@@ -17,6 +17,6 @@
   "londonBlock": 12965000,
   "arrowGlacierBlock": 13773000,
   "grayGlacierBlock": 15050000,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "terminalTotalDifficulty": 58750000000000000000000,
   "ethash": {}
 }

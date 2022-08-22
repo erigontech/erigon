@@ -173,20 +173,24 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
-	var buf []byte
-	g := sn.seg.MakeGetter()
-	blockNum := sn.idxBodyNumber.BaseDataID()
-	var b types.BodyForStorage
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, &b); err != nil {
-			return err
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
+	return sn.seg.WithReadAhead(func() error {
+		var buf []byte
+		g := sn.seg.MakeGetter()
+		blockNum := sn.ranges.from
+		var b types.BodyForStorage
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := rlp.DecodeBytes(buf, &b); err != nil {
+				return err
+			}
+			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+				return err
+			}
+			blockNum++
 		}
-		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
-		blockNum++
-	}
-	return nil
+		return nil
+	})
 }
 
 func (sn *TxnSegment) closeIdx() {
@@ -332,10 +336,10 @@ type RoSnapshots struct {
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
-//  - it opens snapshots only on App start and immutable after
-//  - all snapshots of given blocks range must exist - to make this blocks range available
-//  - gaps are not allowed
-//  - segment have [from:to) semantic
+//   - it opens snapshots only on App start and immutable after
+//   - all snapshots of given blocks range must exist - to make this blocks range available
+//   - gaps are not allowed
+//   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.Snapshot, snapDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
@@ -586,6 +590,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
+func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
@@ -762,11 +767,12 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	sem := semaphore.NewWeighted(int64(workers))
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
-			for _, sn := range segments {
-				if sn.T != t {
+			for index := range segments {
+				segment := segments[index]
+				if segment.T != t {
 					continue
 				}
-				if hasIdxFile(&sn) {
+				if hasIdxFile(&segment) {
 					continue
 				}
 				if err := sem.Acquire(ctx, 1); err != nil {
@@ -784,7 +790,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 					if err := buildIdx(ctx, sn, chainID, tmpDir, p, lvl); err != nil {
 						errs <- err
 					}
-				}(sn)
+				}(segment)
 			}
 		}
 		wg.Wait()
@@ -793,7 +799,10 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 
 	for {
 		select {
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -1114,8 +1123,8 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 
 	var downloadRequest []DownloadRequest
-	for _, r := range rangesToMerge {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&r, "", ""))
+	for i := range rangesToMerge {
+		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
 	}
 
 	return RequestSnapshotsDownload(ctx, downloadRequest, downloader)
@@ -2107,4 +2116,34 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 		}
 	}
 	return req
+}
+
+type BodiesIterator struct{}
+
+func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
+	if from < s.BlocksAvailable() {
+		if err := s.Bodies.View(func(bs []*BodySegment) error {
+			for _, b := range bs {
+				if err := b.Iterate(f); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	}
+	for i := s.BlocksAvailable() + 1; ; i++ {
+		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			break
+		}
+		if err := f(i, baseTxId, uint64(txAmount)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

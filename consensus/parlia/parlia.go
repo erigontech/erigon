@@ -2,9 +2,11 @@ package parlia
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"io"
 	"math/big"
 	"sort"
@@ -218,6 +220,7 @@ type Parlia struct {
 	config      *params.ParliaConfig // Consensus engine configuration parameters for parlia consensus
 	genesisHash common.Hash
 	db          kv.RwDB // Database to store and retrieve snapshot checkpoints
+	chainDb     kv.RwDB
 
 	recentSnaps *lru.ARCCache // Snapshots for recent block to speed up
 	signatures  *lru.ARCCache // Signatures of recent blocks to speed up mining
@@ -243,6 +246,7 @@ func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
 	snapshots *snapshotsync.RoSnapshots,
+	chainDb kv.RwDB,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
@@ -273,6 +277,7 @@ func New(
 		chainConfig:     chainConfig,
 		config:          parliaConfig,
 		db:              db,
+		chainDb:         chainDb,
 		recentSnaps:     recentSnaps,
 		signatures:      signatures,
 		validatorSetABI: vABI,
@@ -845,7 +850,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			return
 		case <-time.After(delay):
 		}
-		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
+		if p.shouldWaitForCurrentBlockProcess(p.chainDb, header, snap) {
 			log.Info("[parlia] Waiting for received in turn block to process")
 			select {
 			case <-stop:
@@ -932,12 +937,20 @@ func (p *Parlia) IsSystemContract(to *common.Address) bool {
 	return isToSystemContract(*to)
 }
 
-func (p *Parlia) shouldWaitForCurrentBlockProcess(chain consensus.ChainHeaderReader, header *types.Header, snap *Snapshot) bool {
+func (p *Parlia) shouldWaitForCurrentBlockProcess(chainDb kv.RwDB, header *types.Header, snap *Snapshot) bool {
 	if header.Difficulty.Cmp(diffInTurn) == 0 {
 		return false
 	}
 
-	highestVerifiedHeader := chain.CurrentHeader()
+	roTx, err := chainDb.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	defer roTx.Rollback()
+	hash := rawdb.ReadHeadHeaderHash(roTx)
+	number := rawdb.ReadHeaderNumber(roTx, hash)
+
+	highestVerifiedHeader := rawdb.ReadHeader(roTx, hash, *number)
 	if highestVerifiedHeader == nil {
 		return false
 	}

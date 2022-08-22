@@ -3,16 +3,18 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
-	"sort"
 	"sync"
 	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -20,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -305,7 +308,8 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	for addr := range txTask.BalanceIncreaseSet {
+		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
 			var err error
@@ -474,6 +478,94 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 	return nil
 }
 
+func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
+	var address common.Address
+	copy(address[:], key)
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
+			copy(acc.CodeHash[:], codeHash)
+		}
+	}
+}
+
+func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.Aggregator22, accumulator *shards.Accumulator) error {
+	agg.SetTx(tx)
+	var currentInc uint64
+	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(k) == 20 {
+			if len(v) > 0 {
+				var acc accounts.Account
+				if err := deserialise2(&acc, v); err != nil {
+					return fmt.Errorf("%w, %x", err, v)
+				}
+				currentInc = acc.Incarnation
+				// Fetch the code hash
+				recoverCodeHashPlain(&acc, tx, k)
+				var address common.Address
+				copy(address[:], k)
+
+				// cleanup contract code bucket
+				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return fmt.Errorf("read account for %x: %w", address, err)
+				}
+				if original != nil {
+					// clean up all the code incarnations original incarnation and the new one
+					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+						if err != nil {
+							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+						}
+					}
+				}
+
+				newV := make([]byte, acc.EncodingLengthForStorage())
+				acc.EncodeForStorage(newV)
+				if accumulator != nil {
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
+				}
+				if err := next(k, k, newV); err != nil {
+					return err
+				}
+			} else {
+				currentInc = 1
+				if accumulator != nil {
+					var address common.Address
+					copy(address[:], k)
+					accumulator.DeleteAccount(address)
+				}
+				if err := next(k, k, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if accumulator != nil {
+			var address common.Address
+			var incarnation uint64
+			var location common.Hash
+			copy(address[:], k[:length.Addr])
+			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
+			copy(location[:], k[length.Addr+length.Incarnation:])
+			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
+		}
+		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
+		if len(v) > 0 {
+			if err := next(k, newKeys, v); err != nil {
+				return err
+			}
+		} else {
+			if err := next(k, newKeys, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (rs *State22) DoneCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -581,9 +673,6 @@ func (w *StateWriter22) ResetWriteSet() {
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
-	for _, list := range w.writeLists {
-		sort.Sort(list)
-	}
 	return w.writeLists
 }
 
@@ -687,9 +776,6 @@ func (r *StateReader22) ResetReadSet() {
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
-	for _, list := range r.readLists {
-		sort.Sort(list)
-	}
 	return r.readLists
 }
 

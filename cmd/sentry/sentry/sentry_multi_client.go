@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -241,22 +243,24 @@ func pumpStreamLoop[TMessage interface{}](
 // MultiClient - does handle request/response/subscriptions to multiple sentries
 // each sentry may support same or different p2p protocol
 type MultiClient struct {
-	lock        sync.RWMutex
-	Hd          *headerdownload.HeaderDownload
-	Bd          *bodydownload.BodyDownload
-	nodeName    string
-	sentries    []direct.SentryClient
-	headHeight  uint64
-	headHash    common.Hash
-	headTd      *uint256.Int
-	ChainConfig *params.ChainConfig
-	forks       []uint64
-	genesisHash common.Hash
-	networkId   uint64
-	db          kv.RwDB
-	Engine      consensus.Engine
-	blockReader services.HeaderAndCanonicalReader
-	logPeerInfo bool
+	lock          sync.RWMutex
+	Hd            *headerdownload.HeaderDownload
+	Bd            *bodydownload.BodyDownload
+	IsMock        bool
+	forkValidator *engineapi.ForkValidator
+	nodeName      string
+	sentries      []direct.SentryClient
+	headHeight    uint64
+	headHash      common.Hash
+	headTd        *uint256.Int
+	ChainConfig   *params.ChainConfig
+	forks         []uint64
+	genesisHash   common.Hash
+	networkId     uint64
+	db            kv.RwDB
+	Engine        consensus.Engine
+	blockReader   services.HeaderAndCanonicalReader
+	logPeerInfo   bool
 }
 
 func NewMultiClient(
@@ -270,6 +274,7 @@ func NewMultiClient(
 	syncCfg ethconfig.Sync,
 	blockReader services.HeaderAndCanonicalReader,
 	logPeerInfo bool,
+	forkValidator *engineapi.ForkValidator,
 ) (*MultiClient, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
@@ -284,14 +289,15 @@ func NewMultiClient(
 	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
 
 	cs := &MultiClient{
-		nodeName:    nodeName,
-		Hd:          hd,
-		Bd:          bd,
-		sentries:    sentries,
-		db:          db,
-		Engine:      engine,
-		blockReader: blockReader,
-		logPeerInfo: logPeerInfo,
+		nodeName:      nodeName,
+		Hd:            hd,
+		Bd:            bd,
+		sentries:      sentries,
+		db:            db,
+		Engine:        engine,
+		blockReader:   blockReader,
+		logPeerInfo:   logPeerInfo,
+		forkValidator: forkValidator,
 	}
 	cs.ChainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.ChainConfig)
@@ -323,7 +329,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 		}
 		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
-			RequestId: rand.Uint64(),
+			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 				Amount:  1,
 				Reverse: false,
@@ -466,6 +472,26 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			// Do not propagate blocks who are post TTD
+			firstPosSeen := cs.Hd.FirstPoSHeight()
+			var propagate bool
+			if firstPosSeen != nil {
+				propagate = *firstPosSeen >= segments[0].Number
+			} else {
+				propagate = true
+			}
+			if !cs.IsMock && propagate {
+				if cs.forkValidator != nil {
+					cs.forkValidator.TryAddingPoWBlock(request.Block)
+				}
+				cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
+					{
+						Number: segments[0].Number,
+						Hash:   segments[0].Hash,
+					},
+				})
+			}
+
 			cs.Hd.ProcessHeaders(segments, true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -499,7 +525,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodiesPacket66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
 	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
@@ -737,7 +763,7 @@ func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRem
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
-	dialOpts = append(dialOpts, grpc.WithInsecure())
+	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)

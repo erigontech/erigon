@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -20,9 +22,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -56,9 +60,9 @@ type MockSentry struct {
 	t              *testing.T
 	cancel         context.CancelFunc
 	DB             kv.RwDB
-	tmpdir         string
-	snapDir        string
+	dirs           datadir.Dirs
 	Engine         consensus.Engine
+	gspec          *core.Genesis
 	ChainConfig    *params.ChainConfig
 	Sync           *stagedsync.Sync
 	MiningSync     *stagedsync.Sync
@@ -187,6 +191,8 @@ func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Priv
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+	historyV2 := false
+
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -195,6 +201,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	dirs := datadir.New(tmpdir)
 	var err error
+	aggDir := path.Join(dirs.DataDir, "agg22")
+	dir.MustExist(aggDir)
+	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -204,9 +217,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,
 		Log:         log.New(),
-		tmpdir:      tmpdir,
-		snapDir:     dirs.Snap,
+		dirs:        dirs,
 		Engine:      engine,
+		gspec:       gspec,
 		ChainConfig: gspec.Config,
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
@@ -293,7 +306,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		cfg.Sync,
 		blockReader,
 		false,
+		nil,
 	)
+
+	mock.sentriesClient.IsMock = true
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -306,12 +322,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	isBor := mock.ChainConfig.Bor != nil
+	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, dirs.Tmp, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
-			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.dirs.Tmp, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.sentriesClient.Bd,
@@ -325,7 +342,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -337,18 +354,22 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.Notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				mock.tmpdir,
+				/*exec22=*/ historyV2,
+				dirs,
 				blockReader,
 				mock.sentriesClient.Hd,
+				mock.gspec,
+				1,
+				agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
-			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, mock.tmpdir, blockReader, nil),
-			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
-			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
-			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil, nil),
+			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, historyV2, txNums, agg),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, historyV2, txNums, agg),
+			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
+			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
+			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, allSnapshots, isBor),
+			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil, nil),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -361,17 +382,22 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	miningConfig.Noverify = false
 	miningConfig.Etherbase = mock.Address
 	miningConfig.SigKey = mock.Key
+	miningCancel := make(chan struct{})
+	go func() {
+		<-mock.Ctx.Done()
+		close(miningCancel)
+	}()
 
 	miner := stagedsync.NewMiningState(&miningConfig)
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, mock.tmpdir),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir, nil),
-			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, mock.tmpdir, blockReader, nil),
-			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
+			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil),
+			stagedsync.StageHashStateCfg(mock.DB, dirs, historyV2, txNums, agg),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, historyV2, txNums, agg),
+			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,

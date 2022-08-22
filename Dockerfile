@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/root/.cache \
 
 FROM docker.io/library/alpine:3.15
 
-RUN apk add --no-cache ca-certificates libstdc++ tzdata
+RUN apk add --no-cache ca-certificates curl libstdc++ jq tzdata
 # copy compiled artifacts from builder
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 

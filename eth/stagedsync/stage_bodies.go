@@ -183,7 +183,8 @@ Loop:
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
-			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
+			// Txn & uncle roots are verified via bd.requestedMap
+			err := cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
 			if err != nil {
 				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
 				u.UnwindTo(blockHeight-1, header.Hash())
@@ -258,6 +259,11 @@ Loop:
 func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
+	if speed == 0 && wastedSpeed == 0 {
+		// Don't log "Wrote block ..." unless we're actually writing something
+		return
+	}
+
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),

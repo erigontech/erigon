@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/nxadm/tail"
 	"io"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/nxadm/tail"
 )
 
 type Log struct {

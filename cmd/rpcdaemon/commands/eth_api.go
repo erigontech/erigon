@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -23,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -100,12 +102,17 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
+	_historyV2     *bool
+	_historyV2Lock sync.RWMutex
+
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
+	_agg         *libstate.Aggregator22
+	_txNums      []uint64
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums []uint64, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -115,7 +122,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, _txNums: txNums}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -181,6 +188,25 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
+}
+
+func (api *BaseAPI) historyV2(tx kv.Tx) bool {
+	api._historyV2Lock.RLock()
+	historyV2 := api._historyV2
+	api._historyV2Lock.RUnlock()
+
+	if historyV2 != nil {
+		return *historyV2
+	}
+	enabled, err := rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
+		log.Warn("HisoryV2Enabled: read", "err", err)
+		return false
+	}
+	api._historyV2Lock.Lock()
+	api._historyV2 = &enabled
+	api._historyV2Lock.Unlock()
+	return enabled
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {

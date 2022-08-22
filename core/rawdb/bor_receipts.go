@@ -1,12 +1,14 @@
 package rawdb
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -77,32 +79,22 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 	return borReceipt
 }
 
-// ReadBorReceiptLogs retrieves all the bor block receipt logs belonging to a block.
-// If it is unable to populate these metadata fields then nil is returned.
-func ReadBorReceiptLogs(db kv.Tx, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) []*types.Log {
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	borReceipt := ReadRawBorReceipt(db, blockHash, blockNumber)
-	if borReceipt == nil {
-		return nil
-	}
-
-	borLogs := borReceipt.Logs
-
-	types.DeriveFieldsForBorLogs(borLogs, blockHash, blockNumber, txIndex, logIndex)
-
-	return borLogs
-}
-
-// WriteBorReceipt stores all the bor receipt belonging to a block.
+// WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync recipt and log).
 func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage) error {
 	// Convert the bor receipt into their storage form and serialize them
-	bytes, err := rlp.EncodeToBytes(borReceipt)
-	if err != nil {
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	cbor.Marshal(buf, borReceipt.Logs)
+	if err := tx.Append(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex)), buf.Bytes()); err != nil {
 		return err
 	}
 
+	buf.Reset()
+	err := cbor.Marshal(buf, borReceipt)
+	if err != nil {
+		return err
+	}
 	// Store the flattened receipt slice
-	if err := tx.Append(kv.BorReceipts, borReceiptKey(number), bytes); err != nil {
+	if err := tx.Append(kv.BorReceipts, borReceiptKey(number), buf.Bytes()); err != nil {
 		return err
 	}
 
@@ -112,6 +104,14 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 // DeleteBorReceipt removes receipt data associated with a block hash.
 func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	key := borReceiptKey(number)
+
+	// we delete Bor Receipt log too
+	borReceipt := ReadBorReceipt(tx, hash, number)
+	if borReceipt != nil {
+		if err := tx.Delete(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex))); err != nil {
+			log.Crit("Failed to delete bor log", "err", err)
+		}
+	}
 
 	if err := tx.Delete(kv.BorReceipts, key); err != nil {
 		log.Crit("Failed to delete bor receipt", "err", err)

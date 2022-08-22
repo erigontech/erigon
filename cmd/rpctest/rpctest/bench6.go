@@ -2,9 +2,10 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func Bench6(erigon_url string) {

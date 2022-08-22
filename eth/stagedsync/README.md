@@ -91,7 +91,7 @@ At that stage, we download bodies for block headers that we already downloaded.
 
 That is the most intensive stage for the network connection, the vast majority of data is downloaded here.
 
-### Stage 6: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
+### Stage 5: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
 
 This stage recovers and stores senders for each transaction in each downloaded block.
 
@@ -99,7 +99,7 @@ This is also a CPU intensive stage and also benefits from multi-core CPUs.
 
 This stage doesn't use any network connection.
 
-### Stage 7: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
+### Stage 6: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
 
 During this stage, we execute block-by-block everything that we downloaded before.
 
@@ -113,11 +113,11 @@ This stage is disk intensive.
 
 This stage can spawn unwinds if the block execution fails.
 
-### Stage 8: [Transpile marked VM contracts to TEVM](/eth/stagedsync/stage_tevm.go)
+### Stage 7: [Transpile marked VM contracts to TEVM](/eth/stagedsync/stage_tevm.go)
 
 [TODO]
 
-### Stage 10: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
+### Stage 8: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
 
 Erigon during execution uses Plain state storage.
 
@@ -129,7 +129,7 @@ If the hashed state is not empty, then we are looking at the History ChangeSets 
 
 This stage doesn't use a network connection.
 
-### Stage 11: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
+### Stage 9: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
 
 This stage build the Merkle trie and checks the root hash for the current state.
 
@@ -143,11 +143,11 @@ If the root hash doesn't match, it initiates an unwind one block backwards.
 
 This stage doesn't use a network connection.
 
-### Stage 12: [Generate call traces index](/eth/stagedsync/stage_call_traces.go)
+### Stage 10: [Generate call traces index](/eth/stagedsync/stage_call_traces.go)
 
 [TODO]
 
-### Stages 13, 14, 15, 16: Generate Indexes Stages [8, 9](/eth/stagedsync/stage_indexes.go), [10](/eth/stagedsync/stage_log_index.go), and [11](/eth/stagedsync/stage_txlookup.go)
+### Stages [11, 12](/eth/stagedsync/stage_indexes.go), [13](/eth/stagedsync/stage_log_index.go), and [14](/eth/stagedsync/stage_txlookup.go): Generate Indexes 
 
 There are 4 indexes that are generated during sync.
 
@@ -171,7 +171,7 @@ This index sets up a link from the [TODO] to [TODO].
 
 This index sets up a link from the transaction hash to the block number.
 
-### Stage 17: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
+### Stage 15: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
 
 During this stage we start the transaction pool or update its state. For instance, we remove the transactions from the blocks we have downloaded from the pool.
 
@@ -179,6 +179,6 @@ On unwinds, we add the transactions from the blocks we unwind, back to the pool.
 
 This stage doesn't use a network connection.
 
-### Stage 18: Finish
+### Stage 16: Finish
 
 This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/Readme.md), such as [`eth_blockNumber`](../../README.md).

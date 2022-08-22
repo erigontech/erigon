@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/flags"
@@ -193,7 +195,10 @@ func main() {
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
 			code = ec.ExitCode()
 		}
-		fmt.Fprintln(os.Stderr, err)
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("print error", "err", printErr)
+		}
 		os.Exit(code)
 	}
 }

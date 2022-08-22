@@ -19,6 +19,7 @@ func (l Log) MarshalJSON() ([]byte, error) {
 		Topics      []common.Hash  `json:"topics" gencodec:"required"`
 		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber hexutil.Uint64 `json:"blockNumber"`
+		Timestamp   hexutil.Uint64 `json:"timestamp"`
 		TxHash      common.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     hexutil.Uint   `json:"transactionIndex"`
 		BlockHash   common.Hash    `json:"blockHash"`
@@ -30,6 +31,7 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	enc.Topics = l.Topics
 	enc.Data = l.Data
 	enc.BlockNumber = hexutil.Uint64(l.BlockNumber)
+	enc.Timestamp = hexutil.Uint64(l.Timestamp)
 	enc.TxHash = l.TxHash
 	enc.TxIndex = hexutil.Uint(l.TxIndex)
 	enc.BlockHash = l.BlockHash
@@ -45,6 +47,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 		Topics      []common.Hash   `json:"topics" gencodec:"required"`
 		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		Timestamp   *hexutil.Uint64 `json:"timestamp"`
 		TxHash      *common.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
 		BlockHash   *common.Hash    `json:"blockHash"`
@@ -69,6 +72,9 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	l.Data = *dec.Data
 	if dec.BlockNumber != nil {
 		l.BlockNumber = uint64(*dec.BlockNumber)
+	}
+	if dec.Timestamp != nil {
+		l.Timestamp = uint64(*dec.Timestamp)
 	}
 	if dec.TxHash == nil {
 		return errors.New("missing required field 'transactionHash' for Log")
