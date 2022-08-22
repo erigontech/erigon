@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
@@ -108,7 +107,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	}
 
 	cfg := ethconfig.Defaults
-	cfg.HistoryV2 = tool.HistoryV2FromDB(db)
+	cfg.HistoryV2 = true
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
