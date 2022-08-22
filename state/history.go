@@ -501,6 +501,46 @@ func (h *History) prune(step uint64, txFrom, txTo uint64) error {
 	return nil
 }
 
+func (h *History) iterateInDB(step uint64, txFrom, txTo uint64, f func(txNum uint64, k, v []byte) error) error {
+	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
+	}
+	defer historyKeysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	var k, v []byte
+	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	valsC, err := h.tx.RwCursor(h.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer valsC.Close()
+	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		key, txnNumBytes := v[:len(v)-8], v[len(v)-8:]
+		{
+			_, vv, err := valsC.SeekExact(txnNumBytes)
+			if err != nil {
+				return err
+			}
+			if err := f(txNum, key, vv); err != nil {
+				return err
+			}
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
+	}
+	return nil
+}
 func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(txNum uint64, k, v []byte) error) error {
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
@@ -560,6 +600,7 @@ type HistoryContext struct {
 }
 
 func (h *History) MakeContext() *HistoryContext {
+	fmt.Printf("a: %d-%d\n", h.InvertedIndex.files.Len(), h.files.Len())
 	var hc = HistoryContext{h: h}
 	hc.indexFiles = btree.NewG[*ctxItem](32, ctxItemLess)
 	h.InvertedIndex.files.Ascend(func(item *filesItem) bool {
