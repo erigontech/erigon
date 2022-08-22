@@ -600,7 +600,6 @@ type HistoryContext struct {
 }
 
 func (h *History) MakeContext() *HistoryContext {
-	fmt.Printf("a: %d-%d\n", h.InvertedIndex.files.Len(), h.files.Len())
 	var hc = HistoryContext{h: h}
 	hc.indexFiles = btree.NewG[*ctxItem](32, ctxItemLess)
 	h.InvertedIndex.files.Ascend(func(item *filesItem) bool {

@@ -247,9 +247,6 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 		i += uint64(n)
 		poss = append(poss, pos)
 	}
-	if posMaxDepth > 31 {
-		fmt.Printf("alex: %d\n", posMaxDepth)
-	}
 
 	if dictSize > 0 {
 		var bitLen int

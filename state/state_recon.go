@@ -287,8 +287,6 @@ func (hc *HistoryContext) iterateHistoryBeforeTxNum(fromKey, toKey []byte, txNum
 }
 
 func (hc *HistoryContext) Iterate(txNumFrom, txNumTo uint64, f func(txNum uint64, k, v []byte) error) {
-	fmt.Printf("alex11: %d-%d\n", txNumFrom, txNumTo)
-	fmt.Printf("alex12: %d\n", hc.historyFiles.Len())
 	hc.historyFiles.Ascend(func(item *ctxItem) bool {
 		if item.endTxNum < txNumFrom {
 			return true
