@@ -256,24 +256,6 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 		return nil
 	})
 
-	//it := agg.Accounts().InvertedIndex.MakeContext().IterateChangedKeys(txNums.MinOf(from), txNums.MaxOf(to), p.tx)
-	//defer it.Close()
-	//for it.HasNext() {
-	//	k := it.Next(nil)
-	//
-	//	newK, err := transformPlainStateKey(k)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	newV, err := p.tx.GetOne(kv.PlainState, k)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	if err := collector.Collect(newK, newV); err != nil {
-	//		return err
-	//	}
-	//}
 	if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 		return err
 	}
