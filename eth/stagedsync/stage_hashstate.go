@@ -583,22 +583,6 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		return nil
 	}
 
-	fmt.Printf("alex found in txn: %d, %d\n", from, txNums.MinOf(from))
-
-	{
-		aCtx := agg.Accounts().InvertedIndex.MakeContext()
-		aIt := aCtx.IterateChangedKeys(txnFrom-10, txnTo, p.tx)
-		defer aIt.Close()
-		for aIt.HasNext() {
-			k := aIt.Next(nil)
-			fmt.Printf("--- 12222 emmmm: %x\n", k)
-			if bytes.Equal(k, common.FromHex("fb37c82bca4d6f331aa391f247fcf5c0359da755")) {
-				fmt.Printf("--- 12222 alex found in block: %x\n", k)
-			}
-		}
-	}
-	fmt.Printf("---\n")
-
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 	aCtx := agg.Accounts().InvertedIndex.MakeContext()
@@ -606,9 +590,6 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 	defer aIt.Close()
 	for aIt.HasNext() {
 		k := aIt.Next(nil)
-		if bytes.Equal(k, common.FromHex("fb37c82bca4d6f331aa391f247fcf5c0359da755")) {
-			fmt.Printf("alex found in block: %x\n", k)
-		}
 
 		value, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
@@ -741,10 +722,6 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
 			return err
 		}
-		tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
-			fmt.Printf("after ha: %x, %x\n", k, v)
-			return nil
-		})
 		return nil
 	}
 
@@ -758,10 +735,6 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
-	tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
-		fmt.Printf("after ha: %x, %x\n", k, v)
-		return nil
-	})
 	return nil
 }
 
