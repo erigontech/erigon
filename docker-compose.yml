@@ -54,7 +54,7 @@ services:
 
   txpool:
     <<: *default-erigon-service
-    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094
+    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094 --sentry.api.ddr=sentry:9091
 
   rpcdaemon:
     <<: *default-erigon-service
