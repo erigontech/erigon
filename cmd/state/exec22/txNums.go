@@ -24,7 +24,7 @@ func (s TxNums) MinOf(blockNum uint64) (txnNum uint64) {
 func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) TxNums {
 	historyV2 := tool.HistoryV2FromDB(db)
 	if !historyV2 {
-		return nil
+		//return nil
 	}
 
 	toBlock := s.BlocksAvailable()
