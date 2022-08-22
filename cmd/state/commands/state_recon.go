@@ -656,7 +656,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots, chainDb)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])

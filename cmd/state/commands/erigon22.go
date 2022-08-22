@@ -89,7 +89,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots, db)
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",

@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"io"
 	"math/big"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -220,7 +221,7 @@ type Parlia struct {
 	config      *params.ParliaConfig // Consensus engine configuration parameters for parlia consensus
 	genesisHash common.Hash
 	db          kv.RwDB // Database to store and retrieve snapshot checkpoints
-	chainDb     kv.RwDB
+	chainDb     kv.RoDB
 
 	recentSnaps *lru.ARCCache // Snapshots for recent block to speed up
 	signatures  *lru.ARCCache // Signatures of recent blocks to speed up mining
@@ -246,7 +247,7 @@ func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
 	snapshots *snapshotsync.RoSnapshots,
-	chainDb kv.RwDB,
+	chainDb kv.RoDB,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
@@ -937,7 +938,7 @@ func (p *Parlia) IsSystemContract(to *common.Address) bool {
 	return isToSystemContract(*to)
 }
 
-func (p *Parlia) shouldWaitForCurrentBlockProcess(chainDb kv.RwDB, header *types.Header, snap *Snapshot) bool {
+func (p *Parlia) shouldWaitForCurrentBlockProcess(chainDb kv.RoDB, header *types.Header, snap *Snapshot) bool {
 	if header.Difficulty.Cmp(diffInTurn) == 0 {
 		return false
 	}

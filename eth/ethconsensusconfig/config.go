@@ -1,8 +1,9 @@
 package ethconsensusconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -19,7 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RoDB) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {

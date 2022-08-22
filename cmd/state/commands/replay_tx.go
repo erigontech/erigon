@@ -160,7 +160,7 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 		}
 		getHashFn := core.GetHashFn(header, getHeader)
 		logger := log.New()
-		engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+		engine := initConsensusEngine(chainConfig, logger, allSnapshots, nil)
 		txnHash := txn.Hash()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, contractHasTEVM)
 		ibs.Prepare(txnHash, blockHash, txIndex)
