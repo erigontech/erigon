@@ -75,13 +75,14 @@ func BenchmarkDecompressMatchPrefix(b *testing.B) {
 func BenchmarkDecompressTorrent(t *testing.B) {
 	t.Skip()
 
-	// fpath := "./v1-000500-001000-transactions.seg"
-	// fpath := "./v1-004000-004500-transactions.seg"
-	// fpath := "./v1-005500-006000-transactions.seg"
+	// fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
 	fpath := "./v1-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
-	fmt.Printf("stat: %+v %dbytes\n", st.Name(), st.Size())
+	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
+
+	condensePatternTableBitThreshold = 6
+	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 
 	d, err := NewDecompressor(fpath)
 	require.NoError(t, err)
@@ -89,7 +90,7 @@ func BenchmarkDecompressTorrent(t *testing.B) {
 
 	getter := d.MakeGetter()
 
-	for i := 0; i < t.N; i++ {
+	for i := 0; i < t.N && getter.HasNext(); i++ {
 		_, sz := getter.Next(nil)
 		if sz == 0 {
 			t.Fatal("sz == 0")
