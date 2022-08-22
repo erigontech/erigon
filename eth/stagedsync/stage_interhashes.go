@@ -467,7 +467,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	if cfg.historyV2 {
 		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			if len(k) == 32 {
-				fmt.Printf("rl: %x, %t\n", k, len(v) == 0)
 				rl.AddKeyWithMarker(k, len(v) == 0)
 				return nil
 			}
@@ -475,21 +474,20 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			if err != nil {
 				return err
 			}
-			if len(accBytes) == 0 {
-				return nil
-			}
-			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
-			if err != nil {
-				return err
-			}
-			if incarnation == 0 {
-				return nil
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
+				if err != nil {
+					return err
+				}
+				if incarnation == 0 {
+					return nil
+				}
 			}
 			compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 			copy(compositeKey, k[:32])
 			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
 			copy(compositeKey[40:], k[32:])
-			fmt.Printf("rl: %x, %t\n", compositeKey, len(v) == 0)
 			rl.AddKeyWithMarker(compositeKey, len(v) == 0)
 			return nil
 		}
@@ -501,7 +499,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		}
 	} else {
 		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			fmt.Printf("rl: %x, %t\n", k, len(v) == 0)
 			rl.AddKeyWithMarker(k, len(v) == 0)
 			return nil
 		}

@@ -347,7 +347,7 @@ type Promoter struct {
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		bn, k, _, err := decode(dbKey, dbValue)
+		_, k, _, err := decode(dbKey, dbValue)
 		if err != nil {
 			return err
 		}
@@ -359,9 +359,6 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
-		}
-		if bytes.Equal(newK, common.FromHex("ca7b66240bdbf737a0cd88783afb3724f53280750849e21d2f83cb972f01be7e")) {
-			fmt.Printf("alex found in block: %d,%x,%x %x\n", bn, k, newK, value)
 		}
 		return next(dbKey, newK, value)
 	}
@@ -553,15 +550,15 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 			if err != nil {
 				return err
 			}
-			if len(accBytes) == 0 {
-				return nil
-			}
-			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
-			if err != nil {
-				return err
-			}
-			if incarnation == 0 {
-				return nil
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
+				if err != nil {
+					return err
+				}
+				if incarnation == 0 {
+					return nil
+				}
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
@@ -590,7 +587,6 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 	defer aIt.Close()
 	for aIt.HasNext() {
 		k := aIt.Next(nil)
-
 		value, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
@@ -722,10 +718,6 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
 			return err
 		}
-		tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
-			fmt.Printf("after ha: %x, %x\n", k, v)
-			return nil
-		})
 		return nil
 	}
 
@@ -739,10 +731,6 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
-	tx.ForPrefix(kv.HashedAccounts, nil, func(k, v []byte) error {
-		fmt.Printf("after ha: %x, %x\n", k, v)
-		return nil
-	})
 	return nil
 }
 
