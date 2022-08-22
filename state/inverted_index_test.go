@@ -399,7 +399,8 @@ func TestChangedKeysIterator(t *testing.T) {
 		"000000000000000f",
 		"0000000000000010",
 		"0000000000000011",
-		"0000000000000012"}, keys)
+		"0000000000000012",
+		"0000000000000013"}, keys)
 	it = ic.IterateChangedKeys(995, 1000, roTx)
 	keys = keys[:0]
 	for it.HasNext() {
@@ -416,5 +417,6 @@ func TestChangedKeysIterator(t *testing.T) {
 		"0000000000000006",
 		"0000000000000009",
 		"000000000000000c",
+		"000000000000001b",
 	}, keys)
 }

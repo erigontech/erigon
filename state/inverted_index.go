@@ -457,11 +457,13 @@ func (it *InvertedIterator1) advance() {
 	} else if it.hasNextInDb {
 		it.nextKey = append(it.nextKey[:0], it.nextDbKey...)
 		it.advanceInDb()
+	} else {
+		it.nextKey = nil
 	}
 }
 
 func (it *InvertedIterator1) HasNext() bool {
-	return it.hasNextInFiles || it.hasNextInDb
+	return it.hasNextInFiles || it.hasNextInDb || it.nextKey != nil
 }
 
 func (it *InvertedIterator1) Next(keyBuf []byte) []byte {
