@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -359,7 +360,6 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if err != nil {
 			return err
 		}
-
 		return next(dbKey, newK, value)
 	}
 }
@@ -486,12 +486,14 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txnNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+	txnFrom := txNums.MinOf(from + 1)
+	txnTo := uint64(math.MaxUint64)
 	if codes {
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		cCtx := agg.Code().InvertedIndex.MakeContext()
-		cIt := cCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+		cIt := cCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer cIt.Close()
 
 		for cIt.HasNext() {
@@ -539,7 +541,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		sCtx := agg.Storage().InvertedIndex.MakeContext()
-		sIt := sCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+		sIt := sCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer sIt.Close()
 		for sIt.HasNext() {
 			k := sIt.Next(nil)
@@ -548,15 +550,15 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 			if err != nil {
 				return err
 			}
-			if len(accBytes) == 0 {
-				return nil
-			}
-			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
-			if err != nil {
-				return err
-			}
-			if incarnation == 0 {
-				return nil
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
+				if err != nil {
+					return err
+				}
+				if incarnation == 0 {
+					return nil
+				}
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
@@ -575,16 +577,16 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		if err := collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 	aCtx := agg.Accounts().InvertedIndex.MakeContext()
-	aIt := aCtx.IterateChangedKeys(txnNums.MinOf(from), txnNums.MaxOf(to), p.tx)
+	aIt := aCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 	defer aIt.Close()
 	for aIt.HasNext() {
 		k := aIt.Next(nil)
-
 		value, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err

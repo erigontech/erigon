@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/bits"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -194,44 +196,42 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 }
 
 func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
+	nonEmptyMarker := []byte{1}
+
+	var l OldestAppearedLoad
+	l.innerLoadFunc = load
+	agg.SetTx(p.tx)
+
+	txnFrom := txNums.MinOf(from + 1)
+	txnTo := uint64(math.MaxUint64)
 	if storage {
 		collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 
-		it := agg.Storage().InvertedIndex.MakeContext().IterateChangedKeys(txNums.MinOf(from), txNums.MaxOf(to), p.tx)
-		defer it.Close()
-		for it.HasNext() {
-			k := it.Next(nil)
-
-			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
+		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
 			}
-			if len(accBytes) == 0 {
-				return nil
-			}
-			incarnation, err := accounts.DecodeIncarnationFromStorage(accBytes)
+			secKey, err := common.HashData(k[length.Addr:])
 			if err != nil {
 				return err
 			}
-			if incarnation == 0 {
-				return nil
+			compositeKey := make([]byte, common.HashLength+common.HashLength)
+			copy(compositeKey, addrHash[:])
+			copy(compositeKey[common.HashLength:], secKey[:])
+			if len(v) == 0 {
+				if err := collector.Collect(compositeKey, nil); err != nil {
+					return err
+				}
+			} else {
+				if err := collector.Collect(compositeKey, nonEmptyMarker); err != nil {
+					return err
+				}
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
-			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
-			if err != nil {
-				return err
-			}
-			newK, err := transformPlainStateKey(plainKey)
-			if err != nil {
-				return err
-			}
-
-			if err := collector.Collect(newK, newV); err != nil {
-				return err
-			}
-		}
-		if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+			return nil
+		})
+		if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 			return err
 		}
 		return nil
@@ -239,25 +239,24 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums
 	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	it := agg.Accounts().InvertedIndex.MakeContext().IterateChangedKeys(txNums.MinOf(from), txNums.MaxOf(to), p.tx)
-	defer it.Close()
-	for it.HasNext() {
-		k := it.Next(nil)
-
+	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		newValue, err := p.tx.GetOne(kv.PlainState, k)
-		if err != nil {
-			return err
+		if len(v) == 0 {
+			if err := collector.Collect(newK, nil); err != nil {
+				return err
+			}
+		} else {
+			if err := collector.Collect(newK, nonEmptyMarker); err != nil {
+				return err
+			}
 		}
+		return nil
+	})
 
-		if err := collector.Collect(newK, newValue); err != nil {
-			return err
-		}
-	}
-	if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+	if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 		return err
 	}
 
@@ -312,7 +311,6 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 					}
 				}
 			}
-
 		}
 
 		return next(dbKey, newK, v)
@@ -448,11 +446,33 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to uint64, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix)
 	rl := trie.NewRetainList(0)
-	collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		rl.AddKeyWithMarker(k, len(v) == 0)
-		return nil
-	}
 	if cfg.historyV2 {
+		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			if len(k) == 32 {
+				rl.AddKeyWithMarker(k, len(v) == 0)
+				return nil
+			}
+			accBytes, err := p.tx.GetOne(kv.HashedAccounts, k[:32])
+			if err != nil {
+				return err
+			}
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
+				if err != nil {
+					return err
+				}
+				if incarnation == 0 {
+					return nil
+				}
+			}
+			compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+			copy(compositeKey, k[:32])
+			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
+			copy(compositeKey[40:], k[32:])
+			rl.AddKeyWithMarker(compositeKey, len(v) == 0)
+			return nil
+		}
 		if err := p.PromoteOnHistoryV2(logPrefix, cfg.txNums, cfg.agg, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -460,6 +480,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			return trie.EmptyRoot, err
 		}
 	} else {
+		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			rl.AddKeyWithMarker(k, len(v) == 0)
+			return nil
+		}
 		if err := p.Promote(logPrefix, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
