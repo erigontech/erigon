@@ -35,9 +35,10 @@ type Experiments struct {
 func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
+
 	if flags != "default" && flags != "disabled" {
-		mode.Initialised = true
 		for _, flag := range flags {
+			mode.Initialised = true
 			switch flag {
 			case 'h':
 				mode.History = Distance(params.FullImmutabilityThreshold)
@@ -111,7 +112,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 			return DefaultMode, fmt.Errorf("unexpected experiment found: %s", ex)
 		}
 	}
-
 	return mode, nil
 }
 
@@ -319,7 +319,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 
 	if pruneMode.Initialised {
 		// If storage mode is not explicitly specified, we take whatever is in the database
-		if !reflect.DeepEqual(pm, pruneMode) {
+		if pm.String() != "" && !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}
