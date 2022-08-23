@@ -590,7 +590,8 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
-func (s *RoSnapshots) OptimisticalyReopenFolder() { _ = s.ReopenFolder() }
+func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
+func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
@@ -876,43 +877,16 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func SegmentsList(dir string) (res []string, err error) {
-	files, _, err := Segments(dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		_, fName := filepath.Split(f.Path)
-		res = append(res, fName)
-	}
-	return res, nil
-}
-
-// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
-// it also does notify about changes after db commit
-func EnforceSnapshotsInvariant(db kv.RwDB, dir string, allSnapshots *RoSnapshots, notifier DBEventNotifier) (snList []string, err error) {
-	snListInFolder, err := SegmentsList(dir)
-	if err != nil {
-		return nil, err
-	}
-	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		snList, err = rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
-		if err != nil {
-			return err
-		}
+func EnforceSnapshotsInvariant2(tx kv.RwTx, allSnapshots *RoSnapshots) error {
+	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
-	}); err != nil {
-		return snList, err
 	}
-	if allSnapshots != nil {
-		if err := allSnapshots.ReopenList(snList, true); err != nil {
-			return snList, err
-		}
+	files := allSnapshots.Files()
+	slices.Sort(files)
+	if err := rawdb.WriteSnapshots(tx, files); err != nil {
+		return err
 	}
-	if notifier != nil {
-		notifier.OnNewSnapshot()
-	}
-	return snList, nil
+	return nil
 }
 
 func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {

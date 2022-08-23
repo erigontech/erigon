@@ -1176,10 +1176,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if err := cfg.snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
-	}
-	if cfg.dbEventNotifier != nil {
+	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
@@ -1291,6 +1288,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
+		if err := cfg.snapshots.ReopenFolder(); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -1390,10 +1390,8 @@ Finish:
 		}
 	}
 
-	if dbEmpty {
-		if err = rawdb.WriteSnapshots(tx, snInDB); err != nil {
-			return err
-		}
+	if err = snapshotsync.EnforceSnapshotsInvariant2(tx, cfg.snapshots); err != nil {
+		return err
 	}
 	return nil
 }

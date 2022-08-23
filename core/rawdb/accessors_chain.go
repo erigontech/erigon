@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -1629,36 +1628,6 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 func WriteSnapshots(tx kv.RwTx, list []string) error {
 	res, _ := json.Marshal(list)
 	return tx.Put(kv.DatabaseInfo, SapshotsKey, res)
-}
-
-// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
-func EnforceSnapshotsInvariant(tx kv.RwTx, snListInFolder []string) (filtered []string, err error) {
-	snList, err := ReadSnapshots(tx)
-	if err != nil {
-		return filtered, err
-	}
-	exists := map[string]string{}
-
-	for _, fName := range snListInFolder {
-		exists[fName] = ""
-	}
-
-	for _, fName := range snList {
-		if _, ok := exists[fName]; !ok {
-			delete(exists, fName)
-			continue
-		}
-		filtered = append(filtered, fName)
-		delete(exists, fName)
-	}
-	for fName := range exists {
-		filtered = append(filtered, fName)
-	}
-	slices.Sort(filtered)
-	if err = WriteSnapshots(tx, filtered); err != nil {
-		return filtered, err
-	}
-	return filtered, nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size

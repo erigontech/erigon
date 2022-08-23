@@ -368,7 +368,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
 			// open snapshots by looking on files in snapshots dir
 			// snapshots may be not downloaded yet and it's fine, but in most cases it will geve good UX (immediate avaiability of snapshots when RPCDaemon start)
-			allSnapshots.OptimisticalyReopenFolder()
+			allSnapshots.OptimisticReopenWithDB(db)
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
 					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
