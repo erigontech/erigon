@@ -522,7 +522,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, err
 	}
 	log.Info("PoS block built successfully", "hash", block.Header().Hash(),
-		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", blockRlp)
+		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", common.Bytes2Hex(blockRlp))
 
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
