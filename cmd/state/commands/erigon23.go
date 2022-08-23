@@ -52,7 +52,7 @@ var erigon23Cmd = &cobra.Command{
 	Use:   "erigon23",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger, err := initSeparatedLogging(logdir)
+		logger, err := initSeparatedLogging(logdir, "erigon23")
 		if err != nil {
 			return err
 		}
@@ -60,18 +60,18 @@ var erigon23Cmd = &cobra.Command{
 	},
 }
 
-func initSeparatedLogging(logPath string) (log.Logger, error) {
+func initSeparatedLogging(logPath string, filePrefix string) (log.Logger, error) {
 	err := os.MkdirAll(logPath, 0764)
 	if err != nil {
 		return nil, err
 	}
 
 	logger := log.New()
-	userLog, err := log.FileHandler(path.Join(logPath, "erigon23-user.log"), log.LogfmtFormat(), 1<<27) // 128Mb
+	userLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-user.log"), log.LogfmtFormat(), 1<<27) // 128Mb
 	if err != nil {
 		return nil, err
 	}
-	errLog, err := log.FileHandler(path.Join(logPath, "erigon23-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
+	errLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
 	if err != nil {
 		return nil, err
 	}

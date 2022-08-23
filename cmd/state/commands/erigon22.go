@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
@@ -48,7 +49,7 @@ var erigon22Cmd = &cobra.Command{
 	Use:   "erigon22",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 histoty (ugrade 2)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger, err := initSeparatedLogging(logdir)
+		logger, err := initSeparatedLogging(logdir, "erigon22")
 		if err != nil {
 			return err
 		}
