@@ -513,6 +513,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
+				log.Info("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
 				backend.sentriesClient.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: b.NumberU64(),
@@ -745,7 +746,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
-				hasWork = true
+				hasWork = false
 			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:

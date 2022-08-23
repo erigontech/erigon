@@ -133,6 +133,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		}
 	}
 
+	log.Info(fmt.Sprintf("[%s] intermediate hashes completed", logPrefix), "from", s.BlockNumber, "to", to, "state root", root, "expectedRootHash", expectedRootHash)
 	return root, err
 }
 
