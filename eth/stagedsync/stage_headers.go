@@ -1176,9 +1176,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
-		cfg.dbEventNotifier.OnNewSnapshot()
-	}
 
 	cfg.snapshots.LogStat()
 
@@ -1291,6 +1288,9 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		if err := cfg.snapshots.ReopenFolder(); err != nil {
 			return err
 		}
+		if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
+			cfg.dbEventNotifier.OnNewSnapshot()
+		}
 		return nil
 	}
 
@@ -1390,8 +1390,14 @@ Finish:
 		}
 	}
 
-	if err = snapshotsync.EnforceSnapshotsInvariant2(tx, cfg.snapshots); err != nil {
+	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return err
+	}
+	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files()); err != nil {
+		return err
+	}
+	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
+		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 	return nil
 }

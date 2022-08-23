@@ -432,6 +432,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		_, fName := filepath.Split(seg.Seg.FilePath())
 		list = append(list, fName)
 	}
+	slices.Sort(list)
 	return list
 }
 
@@ -881,9 +882,7 @@ func EnforceSnapshotsInvariant2(tx kv.RwTx, allSnapshots *RoSnapshots) error {
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	files := allSnapshots.Files()
-	slices.Sort(files)
-	if err := rawdb.WriteSnapshots(tx, files); err != nil {
+	if err := rawdb.WriteSnapshots(tx, allSnapshots.Files()); err != nil {
 		return err
 	}
 	return nil
