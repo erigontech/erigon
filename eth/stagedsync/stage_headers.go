@@ -1419,7 +1419,7 @@ Finish:
 
 func calculateDownloadTime(amountLeft, downloadRate uint64) string {
 	if downloadRate == 0 {
-		return fmt.Sprint("999hrs:99m:99s")
+		return "999hrs:99m:99s"
 	}
 	timeLeftInSeconds := amountLeft / downloadRate
 
