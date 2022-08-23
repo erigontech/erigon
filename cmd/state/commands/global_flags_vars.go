@@ -1,10 +1,11 @@
 package commands
 
 import (
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -16,6 +17,7 @@ var (
 	indexBucket     string
 	snapshotsCli    bool
 	chain           string
+	logdir          string
 )
 
 func must(err error) {
@@ -55,4 +57,8 @@ func withSnapshotBlocks(cmd *cobra.Command) {
 
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+}
+
+func withLogPath(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&logdir, "log-dir", "/var/lib/erigon", "path to write user and error logs to")
 }

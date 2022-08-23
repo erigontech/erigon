@@ -14,15 +14,17 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -41,6 +43,7 @@ func init() {
 	withBlock(erigon23Cmd)
 	withDataDir(erigon23Cmd)
 	withChain(erigon23Cmd)
+	withLogPath(erigon23Cmd)
 
 	rootCmd.AddCommand(erigon23Cmd)
 }
@@ -49,9 +52,34 @@ var erigon23Cmd = &cobra.Command{
 	Use:   "erigon23",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
+		logger, err := initSeparatedLogging(logdir)
+		if err != nil {
+			return err
+		}
 		return Erigon23(genesis, chainConfig, logger)
 	},
+}
+
+func initSeparatedLogging(logPath string) (log.Logger, error) {
+	err := os.MkdirAll(logPath, 0764)
+	if err != nil {
+		return nil, err
+	}
+
+	logger := log.New()
+	userLog, err := log.FileHandler(path.Join(logPath, "erigon23-user.log"), log.LogfmtFormat(), 1<<27) // 128Mb
+	if err != nil {
+		return nil, err
+	}
+	errLog, err := log.FileHandler(path.Join(logPath, "erigon23-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
+	if err != nil {
+		return nil, err
+	}
+
+	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(log.LvlInfo, userLog), log.LvlFilterHandler(log.LvlError, errLog))
+	logger.SetHandler(mux)
+	log.SetRootHandler(mux)
+	return logger, nil
 }
 
 func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {

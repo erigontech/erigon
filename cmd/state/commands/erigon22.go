@@ -6,6 +6,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -24,9 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -40,13 +41,17 @@ func init() {
 	withDataDir(erigon22Cmd)
 	rootCmd.AddCommand(erigon22Cmd)
 	withChain(erigon22Cmd)
+	withLogPath(erigon22Cmd)
 }
 
 var erigon22Cmd = &cobra.Command{
 	Use:   "erigon22",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 histoty (ugrade 2)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
+		logger, err := initSeparatedLogging(logdir)
+		if err != nil {
+			return err
+		}
 		return Erigon22(cmd.Context(), genesis, logger)
 	},
 }
