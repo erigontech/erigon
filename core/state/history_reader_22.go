@@ -67,7 +67,7 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 		return nil, nil
 	}
 	var a accounts.Account
-	if err := deserialise2(&a, enc); err != nil {
+	if err := accounts.Deserialise2(&a, enc); err != nil {
 		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 	}
 
@@ -75,38 +75,6 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
 	}
 	return &a, nil
-}
-
-func deserialise2(a *accounts.Account, enc []byte) error {
-	a.Reset()
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
-		pos += codeHashBytes
-	}
-	if pos >= len(enc) {
-		return fmt.Errorf("deserialse2: %d >= %d ", pos, len(enc))
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
-	}
-	return nil
 }
 
 func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {

@@ -119,12 +119,30 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 }
 
 func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	if cfg.historyV2 {
-		panic("not implemented yet")
-	}
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, cfg.dirs, quit)
+	if cfg.historyV2 {
+		cfg.agg.SetTx(tx)
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, false /* storage */, true /* codes */); err != nil {
+			return err
+		}
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, false /* storage */, false /* codes */); err != nil {
+			return err
+		}
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, true /* storage */, false /* codes */); err != nil {
+			return err
+		}
+		tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
+			fmt.Printf("ha: %x,%x\n", k, v)
+			return nil
+		})
+		tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
+			fmt.Printf("hs: %x,%x\n", k, v)
+			return nil
+		})
+		return nil
+	}
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
 		return err
 	}
@@ -134,6 +152,14 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
+	tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
+		fmt.Printf("ha: %x,%x\n", k, v)
+		return nil
+	})
+	tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
+		fmt.Printf("hs: %x,%x\n", k, v)
+		return nil
+	})
 	return nil
 }
 
@@ -487,12 +513,16 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 }
 
 func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+	if to > from+16 {
+		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
+	}
+
 	txnFrom := txNums.MinOf(from + 1)
 	txnTo := uint64(math.MaxUint64)
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
 	if codes {
-		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		defer collector.Close()
-		cCtx := agg.Code().InvertedIndex.MakeContext()
+		cCtx := agg.Accounts().InvertedIndex.MakeContext()
 		cIt := cCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer cIt.Close()
 
@@ -538,8 +568,6 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 	}
 
 	if storage {
-		collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		defer collector.Close()
 		sCtx := agg.Storage().InvertedIndex.MakeContext()
 		sIt := sCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 		defer sIt.Close()
@@ -580,8 +608,6 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		return nil
 	}
 
-	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
 	aCtx := agg.Accounts().InvertedIndex.MakeContext()
 	aIt := aCtx.IterateChangedKeys(txnFrom, txnTo, p.tx)
 	defer aIt.Close()
@@ -652,6 +678,105 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
+func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, codes bool) error {
+	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+
+	txnFrom := txNums.MinOf(unwindTo)
+	txnTo := uint64(math.MaxUint64)
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
+	var l OldestAppearedLoad
+	l.innerLoadFunc = etl.IdentityLoadFunc
+
+	acc := accounts.NewAccount()
+	if codes {
+		agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+			if len(v) == 0 {
+				return nil
+			}
+			if err := accounts.Deserialise2(&acc, v); err != nil {
+				return err
+			}
+
+			incarnation := acc.Incarnation
+			if incarnation == 0 {
+				return nil
+			}
+			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+			codeHash, err := p.tx.GetOne(kv.PlainContractCode, plainKey)
+			if err != nil {
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
+			}
+			newK, err := transformContractCodeKey(plainKey)
+			if err != nil {
+				return err
+			}
+			return collector.Collect(newK, codeHash)
+		})
+		return collector.Load(p.tx, kv.ContractCode, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+	}
+
+	if storage {
+		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+			newKAcc, err := transformPlainStateKey(k[:20])
+			if err != nil {
+				panic(err)
+				return err
+			}
+			//TODO: it's a hack, where I must get real Incarnation??
+			val, err := p.tx.GetOne(kv.HashedAccounts, newKAcc)
+			if err != nil {
+				panic(err)
+				return err
+			}
+			if err := acc.DecodeForStorage(val); err != nil {
+				panic(val)
+				return err
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
+			newK, err := transformPlainStateKey(plainKey)
+			if err != nil {
+				panic(err)
+				return err
+			}
+			return collector.Collect(newK, v)
+		})
+		return collector.Load(p.tx, kv.HashedStorage, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+	}
+
+	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+
+		if len(v) == 0 {
+			return collector.Collect(newK, nil)
+		}
+		if err := accounts.Deserialise2(&acc, v); err != nil {
+			return err
+		}
+		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
+			return collector.Collect(newK, v)
+		}
+
+		if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+			copy(acc.CodeHash[:], codeHash)
+		} else {
+			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+		}
+
+		value := make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(value)
+
+		if err := collector.Collect(newK, value); err != nil {
+			return err
+		}
+		return nil
+	})
+	return collector.Load(p.tx, kv.HashedAccounts, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+}
+
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
@@ -667,14 +792,13 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
 	var l OldestAppearedLoad
+	l.innerLoadFunc = etl.IdentityLoadFunc
 	var loadBucket string
 	var extractFunc etl.ExtractFunc
 	if codes {
 		loadBucket = kv.ContractCode
 		extractFunc = getCodeUnwindExtractFunc(p.tx, changeSetBucket)
-		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
-		l.innerLoadFunc = etl.IdentityLoadFunc
 		if storage {
 			loadBucket = kv.HashedStorage
 			extractFunc = getUnwindExtractStorage(changeSetBucket)
@@ -707,8 +831,9 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 }
 
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+	prom := NewPromoter(tx, cfg.dirs, quit)
 	if cfg.historyV2 {
-		prom := NewPromoter(tx, cfg.dirs, quit)
+		cfg.agg.SetTx(tx)
 		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, false, true); err != nil {
 			return err
 		}
@@ -721,7 +846,6 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		return nil
 	}
 
-	prom := NewPromoter(tx, cfg.dirs, quit)
 	if err := prom.Promote(logPrefix, from, to, false, true); err != nil {
 		return err
 	}

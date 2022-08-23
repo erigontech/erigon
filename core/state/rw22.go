@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/bits"
 	"sync"
 	"unsafe"
 
@@ -238,72 +237,6 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func serialise2(a *accounts.Account) []byte {
-	var l int
-	l++
-	if a.Nonce > 0 {
-		l += (bits.Len64(a.Nonce) + 7) / 8
-	}
-	l++
-	if !a.Balance.IsZero() {
-		l += a.Balance.ByteLen()
-	}
-	l++
-	if !a.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if a.Incarnation > 0 {
-		l += (bits.Len64(a.Incarnation) + 7) / 8
-	}
-	value := make([]byte, l)
-	pos := 0
-	if a.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
-		value[pos] = byte(nonceBytes)
-		var nonce = a.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if a.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := a.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if a.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		copy(value[pos:pos+32], a.CodeHash[:])
-		pos += 32
-	}
-	if a.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := (bits.Len64(a.Incarnation) + 7) / 8
-		value[pos] = byte(incBytes)
-		var inc = a.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
-	return value
-}
-
 func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -324,7 +257,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			enc0 = serialise2(&a)
+			enc0 = accounts.Serialise2(&a)
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
@@ -345,7 +278,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		addr1 := make([]byte, len(addr)+8)
 		copy(addr1, addr)
 		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
-		prev := serialise2(original)
+		prev := accounts.Serialise2(original)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
 		}
@@ -495,7 +428,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		if len(k) == 20 {
 			if len(v) > 0 {
 				var acc accounts.Account
-				if err := deserialise2(&acc, v); err != nil {
+				if err := accounts.Deserialise2(&acc, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
 				currentInc = acc.Incarnation
@@ -688,7 +621,7 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 	var prev []byte
 	if original.Initialised {
-		prev = serialise2(original)
+		prev = accounts.Serialise2(original)
 	}
 	w.accountPrevs[string(address.Bytes())] = prev
 	return nil
