@@ -878,16 +878,6 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func EnforceSnapshotsInvariant2(tx kv.RwTx, allSnapshots *RoSnapshots) error {
-	if err := allSnapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	if err := rawdb.WriteSnapshots(tx, allSnapshots.Files()); err != nil {
-		return err
-	}
-	return nil
-}
-
 func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {

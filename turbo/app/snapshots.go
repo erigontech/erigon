@@ -289,11 +289,11 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), dirs.Snap)
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return err
+	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := snapshotsync.EnforceSnapshotsInvariant2(tx, allSnapshots); err != nil {
-			return err
-		}
-		return nil
+		return rawdb.WriteSnapshots(tx, allSnapshots.Files())
 	}); err != nil {
 		return err
 	}
