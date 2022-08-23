@@ -140,7 +140,7 @@ jobs:
 
        - name: run hive and parse output
          run: |
-          sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA
+          sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --exit.fail=false
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results --outdir=/work/results --exclusionsFile=/work/hive/exclusions.json
 
        - name: archive hive results
