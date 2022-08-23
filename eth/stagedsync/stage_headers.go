@@ -117,7 +117,7 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	{ //TODO: move it to own stage
+	{ //TODO: move it to dedicated stage
 		if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
 			return err
 		}
