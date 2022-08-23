@@ -369,6 +369,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `kvClient.Snapshots` after establish grpc connection
 			allSnapshots.OptimisticReopenWithDB(db)
+			allSnapshots.LogStat()
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
 					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
