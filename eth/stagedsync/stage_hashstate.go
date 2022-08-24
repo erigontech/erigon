@@ -133,14 +133,6 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, true /* storage */, false /* codes */); err != nil {
 			return err
 		}
-		tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
-			fmt.Printf("u ha: %x,%x\n", k, v)
-			return nil
-		})
-		tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
-			fmt.Printf("u hs: %x,%x\n", k, v)
-			return nil
-		})
 		return nil
 	}
 	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
@@ -152,14 +144,6 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */); err != nil {
 		return err
 	}
-	tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
-		fmt.Printf("u ha: %x,%x\n", k, v)
-		return nil
-	})
-	tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
-		fmt.Printf("u hs: %x,%x\n", k, v)
-		return nil
-	})
 	return nil
 }
 
