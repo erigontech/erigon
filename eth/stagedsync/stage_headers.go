@@ -1383,8 +1383,10 @@ Loop:
 					continue
 				}
 				libcommon.ReadMemStats(&m)
+				downloadTimeLeft := calculateDownloadTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
+					"download-time", downloadTimeLeft,
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -1413,4 +1415,17 @@ Finish:
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 	return nil
+}
+
+func calculateDownloadTime(amountLeft, downloadRate uint64) string {
+	if downloadRate == 0 {
+		return "999hrs:99m:99s"
+	}
+	timeLeftInSeconds := amountLeft / downloadRate
+
+	hours := timeLeftInSeconds / 3600
+	minutes := (timeLeftInSeconds / 60) % 60
+	seconds := timeLeftInSeconds % 60
+
+	return fmt.Sprintf("%dhrs:%dm:%ds", hours, minutes, seconds)
 }
