@@ -360,6 +360,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.sentriesClient.Hd,
 				mock.gspec,
 				1,
+				txNums,
 				agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
