@@ -180,16 +180,13 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
+		gasSnap := gasPool.Gas()
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
+			gasPool = new(core.GasPool).AddGas(gasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
-
-		//if !chainConfig.IsByzantium(header.Number) {
-		//	batch.Rollback()
-		//}
-		//fmt.Printf("Tx Hash: %x\n", txn.Hash())
 
 		current.Txs = append(current.Txs, txn)
 		current.Receipts = append(current.Receipts, receipt)

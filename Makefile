@@ -56,7 +56,7 @@ validate_docker_build_args:
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
-		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
+		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
 		--build-arg UID=${DOCKER_UID} \

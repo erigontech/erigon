@@ -823,11 +823,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	}
 
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap)
-	_, err := snapshotsync.EnforceSnapshotsInvariant(s.chainDB, dirs.Snap, allSnapshots, s.notifications.Events)
-	if err != nil {
-		return nil, nil, err
-	}
-
+	var err error
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 	if !snConfig.NoDownloader {

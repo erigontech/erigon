@@ -32,7 +32,7 @@ services:
       context: .
     command: |
       erigon ${ERIGON_FLAGS-} --private.api.addr=0.0.0.0:9090
-      --sentry.api.addr=sentry:9091 --downloader.api.addr=downloader:9093 --no-downloader --txpool.disable
+      --sentry.api.addr=sentry:9091 --downloader.api.addr=downloader:9093 --txpool.disable
       --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
       --authrpc.jwtsecret=/home/erigon/.local/share/erigon/jwt.hex --datadir=/home/erigon/.local/share/erigon
     ports: [ "8551:8551" ]
@@ -54,7 +54,7 @@ services:
 
   txpool:
     <<: *default-erigon-service
-    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094 --sentry.api.ddr=sentry:9091 --datadir=/home/erigon/.local/share/erigon
+    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094 --sentry.api.addr=sentry:9091 --datadir=/home/erigon/.local/share/erigon
 
   rpcdaemon:
     <<: *default-erigon-service
