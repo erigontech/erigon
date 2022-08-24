@@ -275,11 +275,28 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var ok bool
 
 	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if !ok || blockNum == 0 {
-		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
-		// but 0 block number is used here to mean that the transaction is not found
-		return nil, nil
+
+	if !ok {
+		if cc.Bor == nil {
+			return nil, nil
+		}
+
+		blockNum = api._blockReader.HeaderByHash(ctx, tx, txnHash)
+
+		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if borTx == nil {
+			return nil, nil
+		}
+		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		if borReceipt == nil {
+			return nil, nil
+		}
+		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -307,23 +324,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if txn == nil {
-		if cc.Bor == nil {
-			return nil, nil
-		}
-
-		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil
-		}
-		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
-		if borReceipt == nil {
-			return nil, nil
-		}
-		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
-	}
+		
 
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
