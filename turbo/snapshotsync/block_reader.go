@@ -671,7 +671,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 	fmt.Printf("looking of tx inside of snapshots")
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		fmt.Printf("snapshot segment %+v", sn)
+		fmt.Printf("snapshot segment %+v\n", sn)
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
 			continue
 		}
@@ -698,8 +698,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		blockNum = reader2.Lookup(txnHash[:])
 
 		// final txnHash check  - completely avoid false-positives
-		fmt.Printf("txhash %s", txnHash)
-		fmt.Printf("tx hash from snapshot %s", txn.Hash())
+		fmt.Printf("txhash %s\n", txnHash)
+		fmt.Printf("tx hash from snapshot %s\n", txn.Hash())
 		if txn.Hash() == txnHash {
 			return
 		}
