@@ -668,8 +668,10 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 }
 
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+	fmt.Printf("looking of tx inside of snapshots")
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
+		fmt.Printf("snapshot segment %+v", sn)
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
 			continue
 		}
