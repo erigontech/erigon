@@ -53,8 +53,8 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	}
 	log.Info("Transaction replay",
 		//"workers", workerCount,
-		"at block", outputBlockNum,
-		"input block", atomic.LoadUint64(&inputBlockNum),
+		"at blk", outputBlockNum,
+		"input blk", atomic.LoadUint64(&inputBlockNum),
 		"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"result queue", rws.Len(),
