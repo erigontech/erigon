@@ -153,11 +153,13 @@ func SpawnStageHeaders(
 		if err != nil {
 			return err
 		}
+		if transitionedToPoS {
+			cfg.hd.SetFirstPoSHeight(blockNumber)
+		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		cfg.hd.SetFirstPoSHeight(blockNumber)
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)

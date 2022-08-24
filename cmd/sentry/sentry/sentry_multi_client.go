@@ -472,13 +472,11 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
+			propagate := !cs.ChainConfig.TerminalTotalDifficultyPassed
 			// Do not propagate blocks who are post TTD
 			firstPosSeen := cs.Hd.FirstPoSHeight()
-			var propagate bool
-			if firstPosSeen != nil {
+			if firstPosSeen != nil && propagate {
 				propagate = *firstPosSeen >= segments[0].Number
-			} else {
-				propagate = true
 			}
 			if !cs.IsMock && propagate {
 				if cs.forkValidator != nil {
