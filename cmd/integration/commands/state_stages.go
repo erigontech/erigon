@@ -147,6 +147,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
 	dirs := datadir.New(datadirCli)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -183,7 +184,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
