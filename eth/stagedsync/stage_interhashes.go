@@ -368,17 +368,14 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			value, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
-				panic(err)
 				return err
 			}
 			if err := acc.DecodeForStorage(value); err != nil {
-				panic(err)
 				return err
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
-				panic(err)
 				return err
 			}
 			return collector.Collect(newK, value)
@@ -400,7 +397,6 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		if len(value) > 0 {
 			var oldAccount accounts.Account
 			if err = oldAccount.DecodeForStorage(value); err != nil {
-				panic(err)
 				return err
 			}
 			if oldAccount.Incarnation > 0 {
@@ -409,7 +405,6 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 				} else {
 					var newAccount accounts.Account
 					if err = accounts.Deserialise2(&newAccount, v); err != nil {
-						panic(err)
 						return err
 					}
 					if newAccount.Incarnation > oldAccount.Incarnation {
