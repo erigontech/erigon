@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
@@ -273,7 +272,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		log.Info("transaction in block", "transaction", tx.Hash())
+
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
@@ -324,7 +323,8 @@ func ExecuteBlockEphemerally(
 	}
 
 	blockLogs := ibs.Logs()
-	var stateSyncReceipt *types.ReceiptForStorage
+	var stateSyncReceipt *types.Receipt
+	var stateSyncReceiptForStorage *types.ReceiptForStorage
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
 		var stateSyncLogs []*types.Log
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
@@ -332,11 +332,15 @@ func ExecuteBlockEphemerally(
 		if len(blockLogs) > len(logs) {
 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
-			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
+			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 
-			stateSyncReceipt = &types.ReceiptForStorage{
-				Status: types.ReceiptStatusSuccessful, // make receipt status successful
-				Logs:   stateSyncLogs,
+			stateSyncReceiptForStorage = &types.ReceiptForStorage{
+				TxHash:           stateSyncReceipt.TxHash,
+				TransactionIndex: stateSyncReceipt.TransactionIndex,
+				BlockHash:        stateSyncReceipt.BlockHash,
+				BlockNumber:      stateSyncReceipt.BlockNumber,
+				Status:           types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:             stateSyncLogs,
 			}
 		}
 	}
@@ -350,7 +354,7 @@ func ExecuteBlockEphemerally(
 		Difficulty:        (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:           math.HexOrDecimal64(*usedGas),
 		Rejected:          rejectedTxs,
-		ReceiptForStorage: stateSyncReceipt,
+		ReceiptForStorage: stateSyncReceiptForStorage,
 	}
 
 	return execRs, nil
