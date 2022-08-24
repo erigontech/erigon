@@ -365,36 +365,18 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 	if storage {
 		acc := accounts.NewAccount()
 		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
-			newKAcc, err := transformPlainStateKey(k[:20])
+			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
+			value, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				panic(err)
 				return err
 			}
-			//TODO: it's a hack, where I must get real Incarnation??
-			val, err := p.tx.GetOne(kv.HashedAccounts, newKAcc)
-			if err != nil {
-				panic(err)
-				return err
-			}
-			if err := acc.DecodeForStorage(val); err != nil {
+			if err := acc.DecodeForStorage(value); err != nil {
 				panic(err)
 				return err
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
-			if err != nil {
-				panic(err)
-				return err
-			}
-			/*
-				newK, err := transformPlainStateKey(k)
-				if err != nil {
-					panic(err)
-					return err
-				}
-			*/
-			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-			value, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				panic(err)
 				return err

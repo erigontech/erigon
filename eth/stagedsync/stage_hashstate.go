@@ -134,11 +134,11 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 			return err
 		}
 		tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
-			fmt.Printf("ha: %x,%x\n", k, v)
+			fmt.Printf("u ha: %x,%x\n", k, v)
 			return nil
 		})
 		tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
-			fmt.Printf("hs: %x,%x\n", k, v)
+			fmt.Printf("u hs: %x,%x\n", k, v)
 			return nil
 		})
 		return nil
@@ -153,11 +153,11 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 		return err
 	}
 	tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
-		fmt.Printf("ha: %x,%x\n", k, v)
+		fmt.Printf("u ha: %x,%x\n", k, v)
 		return nil
 	})
 	tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
-		fmt.Printf("hs: %x,%x\n", k, v)
+		fmt.Printf("u hs: %x,%x\n", k, v)
 		return nil
 	})
 	return nil
@@ -718,25 +718,16 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 
 	if storage {
 		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
-			newKAcc, err := transformPlainStateKey(k[:20])
+			val, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
-				panic(err)
-				return err
-			}
-			//TODO: it's a hack, where I must get real Incarnation??
-			val, err := p.tx.GetOne(kv.HashedAccounts, newKAcc)
-			if err != nil {
-				panic(err)
 				return err
 			}
 			if err := acc.DecodeForStorage(val); err != nil {
-				panic(val)
 				return err
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
-				panic(err)
 				return err
 			}
 			return collector.Collect(newK, v)
@@ -757,7 +748,9 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 			return err
 		}
 		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-			return collector.Collect(newK, v)
+			value := make([]byte, acc.EncodingLengthForStorage())
+			acc.EncodeForStorage(value)
+			return collector.Collect(newK, value)
 		}
 
 		if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
@@ -768,7 +761,6 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 
 		value := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(value)
-
 		if err := collector.Collect(newK, value); err != nil {
 			return err
 		}
