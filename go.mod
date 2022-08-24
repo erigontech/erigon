@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/RoaringBitmap/roaring v1.2.1
-	github.com/VictoriaMetrics/metrics v1.22.1
+	github.com/VictoriaMetrics/metrics v1.22.2
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee
 	github.com/go-stack/stack v1.8.1
@@ -20,7 +20,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.0
 	github.com/torquem-ch/mdbx-go v0.25.2
-	go.uber.org/atomic v1.9.0
+	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
 	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
