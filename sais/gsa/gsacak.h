@@ -120,21 +120,6 @@ int gsacak_int(int_text *s, uint_t *SA, int_t *LCP, int_da *DA, uint_t n, uint_t
 /******************************************************************************/
 
 
-#define m64 1
-
-#if m64
-	typedef int64_t  int_t;
-	typedef uint64_t uint_t;
-	#define PRIdN	 PRId64
-#else
-	typedef int32_t  int_t;
-	typedef uint32_t uint_t;
-	#define PRIdN	 PRId32
-#endif
-
-typedef uint32_t int_text;
-
-
 
 int_t SACA_K(int_t	*s, uint_t *SA,
   uint_t n, unsigned int K,
