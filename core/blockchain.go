@@ -326,12 +326,10 @@ func ExecuteBlockEphemerally(
 	var stateSyncReceipt *types.Receipt
 	var stateSyncReceiptForStorage *types.ReceiptForStorage
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
-		var stateSyncLogs []*types.Log
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
-			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-			stateSyncReceipt.Logs = stateSyncLogs
+			stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
 			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 
