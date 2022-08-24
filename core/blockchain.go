@@ -341,7 +341,7 @@ func ExecuteBlockEphemerally(
 				BlockHash:        stateSyncReceipt.BlockHash,
 				BlockNumber:      stateSyncReceipt.BlockNumber,
 				Status:           types.ReceiptStatusSuccessful, // make receipt status successful
-				Logs:             stateSyncLogs,
+				Logs:             stateSyncReceipt.Logs,
 			}
 		}
 	}
