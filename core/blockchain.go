@@ -331,6 +331,7 @@ func ExecuteBlockEphemerally(
 
 		if len(blockLogs) > len(logs) {
 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+			stateSyncReceipt.Logs = stateSyncLogs
 
 			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 
