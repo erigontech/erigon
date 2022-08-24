@@ -100,7 +100,7 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 
 func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, newTxs chan types.Hashes, chainDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
-		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
 		GrowthStep(16 * datasize.MB).
 		SyncPeriod(30 * time.Second).

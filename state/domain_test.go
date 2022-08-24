@@ -40,7 +40,7 @@ func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 	historyValsTable := "HistoryVals"
 	settingsTable := "Settings"
 	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:        kv.TableCfgItem{Flags: kv.DupSort},
 			valsTable:        kv.TableCfgItem{},
