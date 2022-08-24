@@ -429,7 +429,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	startTime := time.Now()
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 	if err != nil {
 		return err
 	}
