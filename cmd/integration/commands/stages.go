@@ -655,6 +655,8 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
 		vmConfig.Tracer = nil
@@ -677,7 +679,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, agg())
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
