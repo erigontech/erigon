@@ -102,7 +102,7 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 				for i, v := range sliceInterface {
 					s[i] = v.(string)
 				}
-				err := ctx.GlobalSet(key, strings.Join(s[:], ","))
+				err := ctx.GlobalSet(key, strings.Join(s, ","))
 				if err != nil {
 					return err
 				}
