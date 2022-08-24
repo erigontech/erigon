@@ -249,7 +249,7 @@ func StartPProf(address string, withMetrics bool) {
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
 	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 	go func() {
-		if err := http.ListenAndServe(address, nil); err != nil {
+		if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
