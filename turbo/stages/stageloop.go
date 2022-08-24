@@ -246,7 +246,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	if err = mining.Run(nil, miningBatch, false); err != nil {
 		return err
 	}
-
+	tx.Rollback()
 	return nil
 }
 
