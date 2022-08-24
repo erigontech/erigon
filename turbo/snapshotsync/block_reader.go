@@ -696,6 +696,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		blockNum = reader2.Lookup(txnHash[:])
 
 		// final txnHash check  - completely avoid false-positives
+		fmt.Printf("txhash %s", txnHash)
+		fmt.Printf("tx hash from snapshot %s", txn.Hash())
 		if txn.Hash() == txnHash {
 			return
 		}
