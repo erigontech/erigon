@@ -137,6 +137,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
+			Disabled:            bodies.historyV2,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnCallTraces(s, tx, callTraces, ctx)
 			},
@@ -150,6 +151,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 		{
 			ID:          stages.AccountHistoryIndex,
 			Description: "Generate account history index",
+			Disabled:    bodies.historyV2,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
@@ -163,6 +165,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 		{
 			ID:          stages.StorageHistoryIndex,
 			Description: "Generate storage history index",
+			Disabled:    bodies.historyV2,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
@@ -176,6 +179,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 		{
 			ID:          stages.LogIndex,
 			Description: "Generate receipt logs index",
+			Disabled:    bodies.historyV2,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnLogIndex(s, tx, logIndex, ctx, 0)
 			},
