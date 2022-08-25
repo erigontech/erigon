@@ -25,6 +25,7 @@ type TxLookupCfg struct {
 	tmpdir    string
 	snapshots *snapshotsync.RoSnapshots
 	isBor     bool
+	borSprint uint64
 }
 
 func StageTxLookupCfg(
@@ -33,6 +34,7 @@ func StageTxLookupCfg(
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
 	isBor bool,
+	borSprint uint64,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
@@ -40,6 +42,7 @@ func StageTxLookupCfg(
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
 		isBor:     isBor,
+		borSprint: borSprint,
 	}
 }
 
@@ -118,7 +121,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			}
 		}
 
-		if cfg.isBor && blocknum%64 == 0 {
+		if cfg.isBor && blocknum%cfg.borSprint == 0 {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
