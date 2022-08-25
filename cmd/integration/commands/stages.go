@@ -511,7 +511,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig, historyV2 := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
 
@@ -521,7 +523,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db)), ctx); err != nil {
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db), historyV2, txNums), ctx); err != nil {
 				return err
 			}
 

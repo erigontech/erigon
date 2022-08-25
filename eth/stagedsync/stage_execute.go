@@ -81,7 +81,7 @@ type ExecuteBlockCfg struct {
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
-	txNums       exec22.TxNums
+	txNums       *exec22.TxNums
 }
 
 func StageExecuteBlocksCfg(
@@ -102,7 +102,7 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
-	txNums exec22.TxNums,
+	txNums *exec22.TxNums,
 	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{

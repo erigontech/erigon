@@ -72,7 +72,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 func Exec22(ctx context.Context,
 	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots, txNums exec22.TxNums,
+	allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis, initialCycle bool,
@@ -119,7 +119,7 @@ func Exec22(ctx context.Context,
 
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
-	var maxTxNum = txNums[len(txNums)-1]
+	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
 	if parallel {
 		go func() {
 			applyTx, err := chainDb.BeginRw(ctx)
