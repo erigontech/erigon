@@ -30,8 +30,12 @@ func (s *TxNums) Append(blockNum, maxTxnNum uint64) {
 		panic(err)
 	}
 	s.nums = append(s.nums, maxTxnNum)
+	//fmt.Printf("append: %d, %d, %d\n", blockNum, maxTxnNum, len(s.nums))
 }
-func (s *TxNums) Unwind(unwindTo uint64) { s.nums = s.nums[:unwindTo] }
+func (s *TxNums) Unwind(unwindTo uint64) {
+	s.nums = s.nums[:unwindTo]
+	//fmt.Printf("unwind: %d, %d\n", unwindTo, s.nums)
+}
 func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 	blockNum = uint64(sort.Search(len(s.nums), func(i int) bool {
 		return s.nums[i] > endTxNumMinimax

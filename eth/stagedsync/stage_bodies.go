@@ -198,12 +198,12 @@ Loop:
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastBlockNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV2 && ok {
-				cfg.txNums.Append(blockHeight, lastBlockNum)
+				cfg.txNums.Append(blockHeight, lastTxnNum)
 			}
 
 			if blockHeight > bodyProgress {

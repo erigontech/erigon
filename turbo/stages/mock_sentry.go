@@ -239,6 +239,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_, _ = rawdb.HistoryV2.WriteOnce(tx, cfg.HistoryV2)
+		return nil
+	})
+
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 
 	var txNums *exec22.TxNums
