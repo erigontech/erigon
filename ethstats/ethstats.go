@@ -365,7 +365,7 @@ func (s *Service) login(conn *connWrapper) error {
 	// Construct and send the login authentication
 	// infos := s.server.NodeInfo()
 
-	var protocols []string
+	protocols := make([]string, len(s.servers))
 	for _, srv := range s.servers {
 		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
 	}
@@ -542,9 +542,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 		td = common.Big0
 	}
 	// Gather the block infos from the local blockchain
-	var (
-		txs []txStats
-	)
+	txs := make([]txStats, len(block.Transactions()))
 	for _, tx := range block.Transactions() {
 		txs = append(txs, txStats{tx.Hash()})
 	}

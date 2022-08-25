@@ -18,6 +18,7 @@ linters:
 #    - bodyclose # 1.18
     - gosec
 #    - forcetypeassert
+    - prealloc
 
 linters-settings:
   gocritic:

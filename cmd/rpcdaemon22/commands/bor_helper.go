@@ -131,7 +131,7 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Valida
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	var changes []*bor.Validator
+	changes := make([]*bor.Validator, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

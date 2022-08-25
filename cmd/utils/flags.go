@@ -1604,9 +1604,9 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 		return nil
 	}
 	// Otherwise resolve absolute paths and return them
-	var preloads []string
-
-	for _, file := range strings.Split(ctx.GlobalString(PreloadJSFlag.Name), ",") {
+	files := strings.Split(ctx.GlobalString(PreloadJSFlag.Name), ",")
+	preloads := make([]string, len(files))
+	for _, file := range files {
 		preloads = append(preloads, strings.TrimSpace(file))
 	}
 	return preloads

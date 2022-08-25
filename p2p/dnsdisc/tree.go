@@ -104,7 +104,7 @@ func (t *Tree) Links() []string {
 
 // Nodes returns all nodes contained in the tree.
 func (t *Tree) Nodes() []*enode.Node {
-	var nodes []*enode.Node
+	nodes := make([]*enode.Node, len(t.entries))
 	for _, e := range t.entries {
 		if ee, ok := e.(*enrEntry); ok {
 			nodes = append(nodes, ee.node)

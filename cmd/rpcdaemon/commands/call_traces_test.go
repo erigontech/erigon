@@ -34,7 +34,7 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 	if elems, err = v.Array(); err != nil {
 		t.Fatalf("expected array in the response: %v", err)
 	}
-	var numbers []int
+	numbers := make([]int, len(elems))
 	for _, elem := range elems {
 		bn := elem.GetInt("blockNumber")
 		numbers = append(numbers, bn)

@@ -417,7 +417,7 @@ func NewAuRa(config *params.AuRaConfig, db kv.RwDB, ourSigningAddress common.Add
 	if auraParams.StartStep != nil {
 		initialStep = *auraParams.StartStep
 	}
-	var durations []StepDurationInfo
+	durations := make([]StepDurationInfo, 1+len(auraParams.StepDurations))
 	durInfo := StepDurationInfo{
 		TransitionStep:      0,
 		TransitionTimestamp: 0,
