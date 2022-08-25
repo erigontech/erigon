@@ -323,23 +323,19 @@ func ExecuteBlockEphemerally(
 	}
 
 	blockLogs := ibs.Logs()
-	var stateSyncReceipt *types.Receipt
-	var stateSyncReceiptForStorage *types.ReceiptForStorage
+	var stateSyncReceipt *types.ReceiptForStorage
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
+		var stateSyncLogs []*types.Log
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
-			stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
-			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
 
-			stateSyncReceiptForStorage = &types.ReceiptForStorage{
-				TxHash:           stateSyncReceipt.TxHash,
-				TransactionIndex: stateSyncReceipt.TransactionIndex,
-				BlockHash:        stateSyncReceipt.BlockHash,
-				BlockNumber:      stateSyncReceipt.BlockNumber,
-				Status:           types.ReceiptStatusSuccessful, // make receipt status successful
-				Logs:             stateSyncReceipt.Logs,
+			stateSyncReceipt = &types.ReceiptForStorage{
+				Status: types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:   stateSyncLogs,
 			}
 		}
 	}
@@ -353,7 +349,7 @@ func ExecuteBlockEphemerally(
 		Difficulty:        (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:           math.HexOrDecimal64(*usedGas),
 		Rejected:          rejectedTxs,
-		ReceiptForStorage: stateSyncReceiptForStorage,
+		ReceiptForStorage: stateSyncReceipt,
 	}
 
 	return execRs, nil
