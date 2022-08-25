@@ -241,7 +241,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Info(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
+			log.Info(fmt.Sprintf("[%s] Skipping account with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
