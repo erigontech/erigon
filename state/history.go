@@ -541,7 +541,7 @@ func (h *History) iterateInDB(step uint64, txFrom, txTo uint64, f func(txNum uin
 	}
 	return nil
 }
-func (h *History) pruneF(step uint64, txFrom, txTo uint64, f func(txNum uint64, k, v []byte) error) error {
+func (h *History) pruneF(txFrom, txTo uint64, f func(txNum uint64, k, v []byte) error) error {
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)

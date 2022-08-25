@@ -282,15 +282,10 @@ func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo ui
 }
 
 func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
-	step := a.txNum / a.aggregationStep
-	if step == 0 {
-		return nil
-	}
-
 	stateChanges := etl.NewCollector(a.logPrefix, "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer stateChanges.Close()
 
-	if err := a.accounts.pruneF(step, txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
 		if err := stateChanges.Collect(k, v); err != nil {
 			return err
 		}
@@ -298,7 +293,7 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	}); err != nil {
 		return err
 	}
-	if err := a.storage.pruneF(step, txUnwindTo, math2.MaxUint64, func(txNu uint64, k, v []byte) error {
+	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNu uint64, k, v []byte) error {
 		if err := stateChanges.Collect(k, v); err != nil {
 			return err
 		}
