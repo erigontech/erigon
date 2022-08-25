@@ -13,7 +13,7 @@ linters:
 #    - structcheck # 1.18
 #    - unused # 1.18
     - gocritic
-#    - bodyclose # 1.18
+    - bodyclose
     - gosec
 #    - forcetypeassert
 
