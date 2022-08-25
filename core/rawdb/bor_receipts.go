@@ -3,7 +3,6 @@ package rawdb
 import (
 	"bytes"
 	"errors"
-	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -216,14 +215,5 @@ func TruncateBorReceipts(db kv.RwTx, number uint64) error {
 	}); err != nil {
 		return err
 	}
-	return nil
-}
-
-func WriteBorTxLookupEntries(db kv.RwTx, blockNumber *big.Int, txHash common.Hash) error {
-	data := blockNumber.Bytes()
-	if err := db.Put(kv.TxLookup, txHash.Bytes(), data); err != nil {
-		return err
-	}
-
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -118,8 +119,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		}
 
 		if cfg.isBor {
-			borPrefix := []byte("matic-bor-receipt-")
-			if err := next(k, crypto.Keccak256(append(append(borPrefix, k...), v...)), blockNumBytes); err != nil {
+			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
+			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}
