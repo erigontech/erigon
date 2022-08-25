@@ -26,7 +26,7 @@ func (s *TxNums) MinOf(blockNum uint64) (txnNum uint64) {
 }
 func (s *TxNums) Append(blockNum, maxTxnNum uint64) {
 	if len(s.nums) > int(blockNum) {
-		err := fmt.Errorf("trying append blockNum=%d, but already have=%d\n", blockNum, len(s.nums))
+		err := fmt.Errorf("trying append blockNum=%d, but already have=%d", blockNum, len(s.nums))
 		panic(err)
 	}
 	s.nums = append(s.nums, maxTxnNum)
