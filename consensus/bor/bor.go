@@ -1137,7 +1137,7 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	// get validators bytes
-	validators := make([]MinimalVal, len(heimdallSpan.ValidatorSet.Validators))
+	validators := make([]MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
 		validators = append(validators, val.MinimalVal())
 	}
@@ -1147,7 +1147,7 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	// get producers bytes
-	producers := make([]MinimalVal, len(heimdallSpan.SelectedProducers))
+	producers := make([]MinimalVal, 0, len(heimdallSpan.SelectedProducers))
 	for _, val := range heimdallSpan.SelectedProducers {
 		producers = append(producers, val.MinimalVal())
 	}
@@ -1330,7 +1330,7 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator)
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	changes := make([]*Validator, len(oldVals))
+	changes := make([]*Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

@@ -134,7 +134,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
-	bodies := make([]rlp.RawValue, len(query))
+	bodies := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
 		if bytes >= softResponseLimit || len(bodies) >= MaxBodiesServe ||

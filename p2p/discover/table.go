@@ -159,7 +159,7 @@ func (tab *Table) ReadRandomNodes(buf []*enode.Node) (n int) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
-	nodes := make([]*enode.Node, len(&tab.buckets))
+	nodes := make([]*enode.Node, 0, len(&tab.buckets))
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
 			nodes = append(nodes, unwrapNode(n))

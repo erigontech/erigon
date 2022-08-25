@@ -172,7 +172,7 @@ func TestUDPv5_findnodeHandling(t *testing.T) {
 	// This request gets all the distance-249 nodes and some more at 248 because
 	// the bucket at 249 is not full.
 	test.packetIn(&v5wire.Findnode{ReqID: []byte{5}, Distances: []uint{249, 248}})
-	nodes := make([]*enode.Node, len(nodes249)+len(nodes248[:10]))
+	nodes := make([]*enode.Node, 0, len(nodes249)+len(nodes248[:10]))
 	nodes = append(nodes, nodes249...)
 	nodes = append(nodes, nodes248[:10]...)
 	test.expectNodes([]byte{5}, 5, nodes)

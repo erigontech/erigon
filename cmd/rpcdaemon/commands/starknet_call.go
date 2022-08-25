@@ -86,7 +86,7 @@ func (api *StarknetImpl) Call(ctx context.Context, request StarknetCallRequest, 
 		return nil, err
 	}
 
-	result := make([]string, len(response.Result))
+	result := make([]string, 0, len(response.Result))
 	for _, v := range response.Result {
 		s := wrapperspb.String("")
 		v.UnmarshalTo(s)
