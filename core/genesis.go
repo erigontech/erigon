@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -319,7 +320,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
+		tmpDB := mdbx.NewMDBX(log.New()).InMem().MapSize(2 * datasize.GB).MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {

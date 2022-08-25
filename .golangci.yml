@@ -5,7 +5,6 @@ linters:
   disable-all: true
   enable:
     - gofmt
-    - deadcode
     - errcheck
     - gosimple
     - govet
@@ -13,8 +12,7 @@ linters:
     - staticcheck
 #    - structcheck # 1.18
 #    - unused # 1.18
-    - varcheck
-#    - gocritic
+    - gocritic
 #    - bodyclose # 1.18
     - gosec
 #    - forcetypeassert

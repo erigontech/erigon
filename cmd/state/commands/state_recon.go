@@ -429,7 +429,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	startTime := time.Now()
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
-	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+	db, err := kv2.NewMDBX(logger).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 	if err != nil {
 		return err
 	}
@@ -519,6 +519,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer accountCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
 		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return accountCollectorX.Collect(k, v)
@@ -564,6 +565,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer storageCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
 		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return storageCollectorX.Collect(k, v)
@@ -609,6 +611,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer codeCollectorX.Close()
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(&fillWorkers[i].bitmap)
@@ -709,11 +712,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 						if err != nil {
 							return err
 						}
-						defer func() {
-							if rwTx != nil {
-								rwTx.Rollback()
-							}
-						}()
+						defer rwTx.Rollback()
+
 						if err = rs.Flush(rwTx); err != nil {
 							return err
 						}
@@ -778,11 +778,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
+	defer rwTx.Rollback()
+
 	if err = rs.Flush(rwTx); err != nil {
 		return err
 	}
@@ -953,11 +950,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
+	defer rwTx.Rollback()
+
 	if err = rwTx.ClearBucket(kv.PlainState); err != nil {
 		return err
 	}

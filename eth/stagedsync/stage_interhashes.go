@@ -110,24 +110,20 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		}
 	}
 
-	if err == nil {
-		if cfg.checkRoot && root != expectedRootHash {
-			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
-			if cfg.badBlockHalt {
-				return trie.EmptyRoot, fmt.Errorf("wrong trie root")
-			}
-			if cfg.hd != nil {
-				cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
-			}
-			if to > s.BlockNumber {
-				unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-				log.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-				u.UnwindTo(unwindTo, headerHash)
-			}
-		} else if err = s.Update(tx, to); err != nil {
-			return trie.EmptyRoot, err
+	if cfg.checkRoot && root != expectedRootHash {
+		log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
+		if cfg.badBlockHalt {
+			return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 		}
-	} else {
+		if cfg.hd != nil {
+			cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
+		}
+		if to > s.BlockNumber {
+			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
+			log.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+			u.UnwindTo(unwindTo, headerHash)
+		}
+	} else if err = s.Update(tx, to); err != nil {
 		return trie.EmptyRoot, err
 	}
 

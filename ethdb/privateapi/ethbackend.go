@@ -405,9 +405,8 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 		}
 	}
 
-	// Check if we already reached TTD.
 	if !s.hd.POSSync() {
-		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
+		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
 	}
 
