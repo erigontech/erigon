@@ -234,7 +234,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	var fromTxNum, toTxNum uint64
 	if fromBlock > 0 {
-		fromTxNum = api._txNums.MaxOf(fromBlock - 1)
+		fromTxNum = api._txNums.MinOf(fromBlock)
 	}
 	toTxNum = api._txNums.MaxOf(toBlock) // toBlock is an inclusive bound
 
@@ -436,7 +436,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums.MaxOf(blockNum - 1)
+			startTxNum = api._txNums.MinOf(blockNum)
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
