@@ -1414,6 +1414,18 @@ Finish:
 	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
+
+	firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+		}
+	}
+
 	return nil
 }
 
