@@ -73,16 +73,13 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 	}
 	if beforeR > 0 {
 		if pruneBlockBefore != 0 {
-			log.Warn("specifying prune.before.r might break CL compatibility")
 			if beforeR > pruneBlockBefore {
-				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
+				log.Warn("The specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
 			}
 		}
 		mode.Receipts = Before(beforeR)
-	} else {
-		if exactReceipts == 0 && mode.Receipts.Enabled() {
-			mode.Receipts = Before(pruneBlockBefore)
-		}
+	} else if mode.Receipts.Enabled() {
+		log.Warn("Specifying chain-tip-relative receipt pruning by --prune=r or --prune.r.older might break CL compatibility. If you must prune receipts, use --prune.r.before")
 	}
 	if beforeT > 0 {
 		mode.TxIndex = Before(beforeT)

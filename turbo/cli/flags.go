@@ -66,7 +66,7 @@ var (
 	c - prune call traces (used by trace_filter method)
 	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90_000 
 	If item is NOT in the list - means NO pruning for this data.
-	Example: --prune=hrtc`,
+	Example: --prune=htc`,
 		Value: "disabled",
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
