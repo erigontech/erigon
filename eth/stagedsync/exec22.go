@@ -226,11 +226,11 @@ loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)
 		rules := chainConfig.Rules(blockNum)
-		if header, err = blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+		if header, err = blockReader.HeaderByNumber(ctx, applyTx, blockNum); err != nil {
 			return err
 		}
 		blockHash := header.Hash()
-		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, blockNum)
+		b, _, err := blockReader.BlockWithSenders(ctx, applyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
