@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -450,10 +449,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
-	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
-		return txNums[i] > endTxNumMinimax
-	}))
-	if blockNum == uint64(len(txNums)) {
+	ok, blockNum := txNums.Find(endTxNumMinimax)
+	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
 	}
 	if blockNum == 0 {
@@ -464,7 +461,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
 	blockNum = block + 1
-	txNum := txNums[blockNum-1]
+	txNum := txNums.MaxOf(blockNum - 1)
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)

@@ -28,11 +28,11 @@ type HashStateCfg struct {
 	dirs datadir.Dirs
 
 	historyV2 bool
-	txNums    exec22.TxNums
+	txNums    *exec22.TxNums
 	agg       *state.Aggregator22
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, txNums exec22.TxNums, agg *state.Aggregator22) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, txNums *exec22.TxNums, agg *state.Aggregator22) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
@@ -496,7 +496,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, from, to uint64, storage, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, from, to uint64, storage, codes bool) error {
 	if to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
 	}
@@ -662,7 +662,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
-func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, codes bool) error {
+func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, codes bool) error {
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
 	txnFrom := txNums.MinOf(unwindTo)

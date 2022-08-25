@@ -191,8 +191,6 @@ func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Priv
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
-	historyV2 := false
-
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -201,13 +199,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	dirs := datadir.New(tmpdir)
 	var err error
-	aggDir := path.Join(dirs.DataDir, "agg22")
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
-	if err != nil {
-		panic(err)
-	}
-	defer agg.Close()
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -241,11 +232,28 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
+	cfg.HistoryV2 = false
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
+
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
+
+	var txNums *exec22.TxNums
+	var agg *libstate.Aggregator22
+	if cfg.HistoryV2 {
+		aggDir := path.Join(dirs.DataDir, "agg22")
+		dir.MustExist(aggDir)
+		agg, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+		if err != nil {
+			panic(err)
+		}
+		defer agg.Close()
+
+		txNums = exec22.TxNumsFromDB(allSnapshots, db)
+	}
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
@@ -318,11 +326,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 
-	var allSnapshots *snapshotsync.RoSnapshots
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	isBor := mock.ChainConfig.Bor != nil
-	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
@@ -340,6 +346,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.BatchSize,
 				allSnapshots,
 				blockReader,
+				cfg.HistoryV2,
+				txNums,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
@@ -354,7 +362,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.Notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				/*exec22=*/ historyV2,
+				/*exec22=*/ cfg.HistoryV2,
 				dirs,
 				blockReader,
 				mock.sentriesClient.Hd,
@@ -364,8 +372,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
-			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, historyV2, txNums, agg),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, historyV2, txNums, agg),
+			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, cfg.HistoryV2, txNums, agg),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
@@ -396,8 +404,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(mock.DB, dirs, historyV2, txNums, agg),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, historyV2, txNums, agg),
+			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV2, txNums, agg),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
