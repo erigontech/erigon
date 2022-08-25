@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -108,11 +109,11 @@ type BaseAPI struct {
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator
-	_txNums      []uint64
+	_txNums      *exec22.TxNums
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums []uint64, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums *exec22.TxNums, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512

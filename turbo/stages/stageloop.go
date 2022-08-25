@@ -250,8 +250,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
-
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, headerReader services.FullBlockReader, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, txNums *exec22.TxNums) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -273,8 +272,14 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		currentHeight := headersChain[i].Number.Uint64()
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
-		if err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
+		if err != nil {
 			return err
+		}
+		if ok {
+			if txNums != nil {
+				txNums.Append(currentHeight, lastTxnNum)
+			}
 		}
 		rawdb.WriteHeader(batch, currentHeader)
 		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
@@ -313,8 +318,14 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 			return err
 		}
-		if err = rawdb.WriteRawBodyIfNotExists(batch, hash, height, body); err != nil {
+		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
+		if err != nil {
 			return err
+		}
+		if ok {
+			if txNums != nil {
+				txNums.Append(height, lastTxnNum)
+			}
 		}
 	} else {
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
@@ -337,7 +348,7 @@ func NewStagedSync(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
-	txNums exec22.TxNums, agg *state.Aggregator22,
+	txNums *exec22.TxNums, agg *state.Aggregator22,
 	forkValidator *engineapi.ForkValidator,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
@@ -391,6 +402,8 @@ func NewStagedSync(ctx context.Context,
 				cfg.BatchSize,
 				snapshots,
 				blockReader,
+				cfg.HistoryV2,
+				txNums,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
@@ -427,7 +440,7 @@ func NewStagedSync(ctx context.Context,
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, txNums exec22.TxNums, agg *state.Aggregator22) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums, agg *state.Aggregator22) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
@@ -464,6 +477,8 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				cfg.BatchSize,
 				snapshots,
 				blockReader,
+				cfg.HistoryV2,
+				txNums,
 			), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

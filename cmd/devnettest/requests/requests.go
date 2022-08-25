@@ -20,7 +20,7 @@ import (
 
 func post(client *http.Client, url, request string, response interface{}) error {
 	start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) // nolint:bodyclose
 	if err != nil {
 		return fmt.Errorf("client failed to make post request: %v", err)
 	}

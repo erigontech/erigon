@@ -146,7 +146,7 @@ func (hr *HistoryReaderNoState) ReadAccountStorage(address common.Address, incar
 	}
 	copy(hr.composite, address.Bytes())
 	copy(hr.composite[20:], key.Bytes())
-	txKey, err := hr.tx.GetOne(kv.XStorage, hr.composite[:])
+	txKey, err := hr.tx.GetOne(kv.XStorage, hr.composite)
 	if err != nil {
 		return nil, err
 	}
