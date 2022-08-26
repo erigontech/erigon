@@ -146,14 +146,20 @@ func SpawnStageHeaders(
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	transitionedToPoS, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
+	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
+	if !transitionedToPoS {
+		var err error
+		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		if err != nil {
+			return err
+		}
+		if transitionedToPoS {
+			cfg.hd.SetFirstPoSHeight(blockNumber)
+		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		cfg.hd.SetFirstPoSHeight(blockNumber)
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
