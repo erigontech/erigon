@@ -866,7 +866,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 // Protocols returns all the currently configured
 // network protocols to start.
 func (s *Ethereum) Protocols() []p2p.Protocol {
-	var protocols []p2p.Protocol
+	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
 	for i := range s.sentryServers {
 		protocols = append(protocols, s.sentryServers[i].Protocol)
 	}

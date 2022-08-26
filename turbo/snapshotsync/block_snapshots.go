@@ -598,7 +598,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	if err != nil {
 		return err
 	}
-	var list []string
+	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
@@ -1085,7 +1085,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 
-	var downloadRequest []DownloadRequest
+	downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
 	for i := range rangesToMerge {
 		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
 	}
