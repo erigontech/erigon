@@ -56,5 +56,5 @@
        uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
        with:
          token: ${{ secrets.GIST_TOKEN }}
-         gistURL: https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20
+         gistURL: https://gist.githubusercontent.com/revitteth/dc492845ba6eb694e6c7279224634b20
          file: badge.svg
