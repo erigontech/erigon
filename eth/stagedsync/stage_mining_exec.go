@@ -143,7 +143,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 
 			select {
 			case w.taskCh <- &task{receipts: receipts, state: s, tds: w.env.tds, block: block, createdAt: time.Now(), ctx: ctx}:
-				log.Warn("mining: worker task event",
+				log.Debug("mining: worker task event",
 					"number", block.NumberU64(),
 					"hash", block.Hash().String(),
 					"parentHash", block.ParentHash().String(),
@@ -201,12 +201,12 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		}
 
 		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 {
-			log.Warn("Transaction adding was interrupted")
+			log.Debug("Transaction adding was interrupted")
 			break
 		}
 		// If we don't have enough gas for any further transactions then we're done
 		if gasPool.Gas() < params.TxGas {
-			log.Warn(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+			log.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			break
 		}
 		// Retrieve the next transaction and abort if all done
@@ -222,7 +222,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			log.Warn(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
+			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 
 			txs.Pop()
 			continue
@@ -233,15 +233,15 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 
 		if errors.Is(err, core.ErrGasLimitReached) {
 			// Pop the env out-of-gas transaction without shifting in the next from the account
-			log.Warn(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
+			log.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
 			txs.Pop()
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, shift
-			log.Warn(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Warn(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Debug(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
@@ -251,7 +251,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Warn(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Debug(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
 			txs.Shift()
 		}
 	}
@@ -273,7 +273,7 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 	}
 
 	if notifier == nil {
-		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
+		log.Debug(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
