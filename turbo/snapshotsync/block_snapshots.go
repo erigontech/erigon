@@ -1647,23 +1647,29 @@ RETRY:
 			}
 
 			isSystemTx := len(word) == 0
+			var isBorTx bool
 			if isSystemTx { // system-txs hash:pad32(txnID)
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+			} else if isBor && blockNum%sprint == 0 && rawdb.HasBorReceipts(tx, blockNum) {
+				if _, isBorTx, err = parseCtx.ParseTransaction(word[1+20:], 0, &slot, make([]byte, 20), true /* hasEnvelope */, nil /* validateHash */); err != nil {
+					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
+				}
 			} else {
-				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
+				if _, _, err = parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
-			if isBor && blockNum%sprint == 0 && rawdb.HasBorReceipts(tx, blockNum) {
+
+			if isBorTx {
 				header := rawdb.ReadHeaderByNumber(tx, blockNum)
 				if header == nil {
-					return fmt.Errorf("no header found for blockNum %d", blockNum)
+					return fmt.Errorf("no header found inside blockNum %d", blockNum)
 				}
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
-				if err := txnHashIdx.AddKey(borTxHash.Bytes(), offset); err != nil {
+				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
 				}
-				if err := txnHash2BlockNumIdx.AddKey(borTxHash.Bytes(), blockNum); err != nil {
+				if err := txnHash2BlockNumIdx.AddKey(borTxHash[:], blockNum); err != nil {
 					return err
 				}
 			} else {
