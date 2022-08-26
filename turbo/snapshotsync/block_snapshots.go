@@ -1538,7 +1538,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
+		panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1642,7 +1642,7 @@ RETRY:
 		}
 
 		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
+			panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
 		}
 
 		if err := txnHashIdx.Build(); err != nil {
@@ -2007,7 +2007,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		d.Close()
 	}
 	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d\n", f.Count(), expectedTotal)
+		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
 		return err
