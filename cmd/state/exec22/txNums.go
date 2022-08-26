@@ -49,7 +49,10 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 		return nil
 	}
 
-	toBlock := s.BlocksAvailable()
+	var toBlock uint64
+	if s != nil {
+		toBlock = s.BlocksAvailable()
+	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		p, err := stages.GetStageProgress(tx, stages.Bodies)
 		if err != nil {
@@ -67,7 +70,7 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 			if blockNum > toBlock {
 				return nil
 			}
-			txNums.nums[blockNum] = baseTxNum + txAmount
+			txNums.nums[blockNum] = baseTxNum + txAmount - 1
 			return nil
 		}); err != nil {
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
@@ -75,6 +78,9 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 		return nil
 	}); err != nil {
 		panic(err)
+	}
+	if txNums.nums[0] == 0 {
+		txNums.nums[0] = 1
 	}
 	return txNums
 }

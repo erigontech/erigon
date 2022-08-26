@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -60,7 +61,7 @@ type MockSentry struct {
 	t              *testing.T
 	cancel         context.CancelFunc
 	DB             kv.RwDB
-	dirs           datadir.Dirs
+	Dirs           datadir.Dirs
 	Engine         consensus.Engine
 	gspec          *core.Genesis
 	ChainConfig    *params.ChainConfig
@@ -88,6 +89,10 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
+
+	HistoryV2 bool
+	txNums    *exec22.TxNums
+	agg       *libstate.Aggregator22
 }
 
 func (ms *MockSentry) Close() {
@@ -96,6 +101,9 @@ func (ms *MockSentry) Close() {
 		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
+	if ms.HistoryV2 {
+		ms.agg.Close()
+	}
 }
 
 // Stream returns stream, waiting if necessary
@@ -208,7 +216,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,
 		Log:         log.New(),
-		dirs:        dirs,
+		Dirs:        dirs,
 		Engine:      engine,
 		gspec:       gspec,
 		ChainConfig: gspec.Config,
@@ -220,7 +228,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		HistoryV2: false,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -232,7 +241,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
-	cfg.HistoryV2 = false
+	cfg.HistoryV2 = mock.HistoryV2
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
@@ -246,18 +255,15 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 
-	var txNums *exec22.TxNums
-	var agg *libstate.Aggregator22
 	if cfg.HistoryV2 {
 		aggDir := path.Join(dirs.DataDir, "agg22")
 		dir.MustExist(aggDir)
-		agg, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+		mock.agg, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
 		if err != nil {
 			panic(err)
 		}
-		defer agg.Close()
 
-		txNums = exec22.TxNumsFromDB(allSnapshots, db)
+		mock.txNums = exec22.TxNumsFromDB(allSnapshots, db)
 	}
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
@@ -339,7 +345,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, dirs.Tmp, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
-			stagedsync.StageBlockHashesCfg(mock.DB, mock.dirs.Tmp, mock.ChainConfig),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.sentriesClient.Bd,
@@ -352,7 +358,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				allSnapshots,
 				blockReader,
 				cfg.HistoryV2,
-				txNums,
+				mock.txNums,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
@@ -373,12 +379,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.sentriesClient.Hd,
 				mock.gspec,
 				1,
-				txNums,
-				agg,
+				mock.txNums,
+				mock.agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
-			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, cfg.HistoryV2, txNums, agg),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, txNums, agg),
+			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV2, mock.txNums, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, mock.txNums, mock.agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
@@ -409,8 +415,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV2, txNums, agg),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, txNums, agg),
+			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV2, mock.txNums, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, mock.txNums, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
@@ -638,4 +644,17 @@ func (ms *MockSentry) ReceivePayloadStatus() engineapi.PayloadStatus {
 
 func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
+}
+
+func (ms *MockSentry) NewStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
+	if ms.HistoryV2 {
+		agg, _ := libstate.NewAggregator(path.Join(ms.Dirs.DataDir, "agg22"), stagedsync.AggregationStep)
+		defer agg.Close()
+		r := state.NewHistoryReader22(agg.MakeContext(), nil)
+		r.SetTx(tx)
+		r.SetTxNum(ms.txNums.MinOf(blockNum))
+		return state.New(r)
+	}
+
+	return state.New(state.NewPlainState(tx, blockNum))
 }

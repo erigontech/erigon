@@ -2084,7 +2084,12 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 type BodiesIterator struct{}
 
 func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	if from < s.BlocksAvailable() {
+	var blocksInSnapshtos uint64
+	if s != nil && s.cfg.Enabled {
+		blocksInSnapshtos = s.BlocksAvailable()
+	}
+
+	if s != nil && s.cfg.Enabled && from < blocksInSnapshtos {
 		if err := s.Bodies.View(func(bs []*BodySegment) error {
 			for _, b := range bs {
 				if err := b.Iterate(f); err != nil {
@@ -2096,7 +2101,8 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 		}
 	}
-	for i := s.BlocksAvailable() + 1; ; i++ {
+
+	for i := blocksInSnapshtos + 1; ; i++ {
 		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
 		if err != nil {
 			return err
@@ -2104,7 +2110,7 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 		if body == nil {
 			break
 		}
-		if err := f(i, baseTxId, uint64(txAmount)); err != nil {
+		if err := f(i, baseTxId-1, uint64(txAmount)+2); err != nil {
 			return err
 		}
 	}
