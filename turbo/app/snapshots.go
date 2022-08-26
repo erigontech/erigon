@@ -308,7 +308,12 @@ func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dir
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	isBor := chainConfig.Bor != nil
+	sprint := uint64(0)
+	if isBor {
+		sprint = chainConfig.Bor.Sprint
+	}
+	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo, isBor, sprint); err != nil {
 		return err
 	}
 	return nil
