@@ -524,7 +524,7 @@ Loop:
 		return err
 	}
 	if err = batch.Commit(); err != nil {
-		return fmt.Errorf("batch commit: %v", err)
+		return fmt.Errorf("batch commit: %w", err)
 	}
 
 	if !useExternalTx {
