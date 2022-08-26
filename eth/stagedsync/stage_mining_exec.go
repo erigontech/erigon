@@ -213,15 +213,19 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		if txn == nil {
 			break
 		}
-		// Error may be ignored here. The error has already been checked
-		// during transaction acceptance is the transaction pool.
-		//
+
 		// We use the eip155 signer regardless of the env hf.
-		from, _ := txn.Sender(*signer)
+		from, err := txn.Sender(*signer)
+		if err != nil {
+			log.Info(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
+			txs.Pop()
+			continue
+		}
+
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
+			log.Info(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 
 			txs.Pop()
 			continue
