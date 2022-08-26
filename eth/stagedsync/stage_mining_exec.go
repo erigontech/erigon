@@ -3,10 +3,8 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sync/atomic"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -182,9 +180,6 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		if err := checkTransactionsClauses(txn, stateReader, chainConfig, header.Number.Uint64(), header.BaseFee); err != nil {
-			return nil, err
-		}
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		snap := ibs.Snapshot()
@@ -282,81 +277,4 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
-}
-
-func checkTransactionsClauses(txn types.Transaction, reader state.StateReader, config params.ChainConfig, blockNumber uint64, baseFee *big.Int) error {
-	gasBailout := config.Consensus == params.ParliaConsensus
-	sender, ok := txn.GetSender()
-	if !ok {
-		return fmt.Errorf("no sender")
-	}
-	account, err := reader.ReadAccountData(sender)
-	if err != nil {
-		return err
-	}
-
-	accountNonce := account.Nonce
-	txnNonce := txn.GetNonce()
-	// Make sure this transaction's nonce is correct.
-	if accountNonce < txnNonce {
-		return fmt.Errorf("%w: address %v, tx: %d state: %d", core.ErrNonceTooHigh,
-			sender, txnNonce, accountNonce)
-	}
-	if accountNonce > txnNonce {
-		return fmt.Errorf("%w: address %v, tx: %d state: %d", core.ErrNonceTooLow,
-			sender, txnNonce, accountNonce)
-	}
-
-	// Make sure the sender is an EOA (EIP-3607)
-	if !account.IsEmptyCodeHash() {
-		// common.Hash{} means that the sender is not in the state.
-		// Historically there were transactions with 0 gas price and non-existing sender,
-		// so we have to allow that.
-		return fmt.Errorf("%w: address %v, codehash: %s", core.ErrSenderNoEOA,
-			sender, account.CodeHash)
-	}
-
-	baseFee256 := uint256.NewInt(0)
-	if baseFee256.SetFromBig(baseFee) {
-		return fmt.Errorf("bad baseFee")
-	}
-	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-	if config.IsLondon(blockNumber) {
-		if !txn.GetFeeCap().IsZero() || !txn.GetTip().IsZero() {
-			if err := core.CheckEip1559TxGasFeeCap(sender, txn.GetFeeCap(), txn.GetTip(), baseFee256); err != nil {
-				return err
-			}
-		}
-	}
-	txnGas := txn.GetGas()
-	txnPrice := txn.GetPrice()
-	value := txn.GetValue()
-	accountBalance := account.Balance
-
-	want := uint256.NewInt(0)
-	want.SetUint64(txnGas)
-	want, overflow := want.MulOverflow(want, txnPrice)
-	if overflow {
-		return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
-	}
-
-	if txn.GetFeeCap() != nil {
-		want.SetUint64(txnGas)
-		want, overflow = want.MulOverflow(want, txn.GetFeeCap())
-		if overflow {
-			return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
-		}
-		want, overflow = want.AddOverflow(want, value)
-		if overflow {
-			return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
-		}
-	}
-
-	if accountBalance.Cmp(want) < 0 {
-		if !gasBailout {
-			return fmt.Errorf("%w: address %v have %v want %v", core.ErrInsufficientFunds, sender, accountBalance, want)
-		}
-	}
-
-	return nil
 }
