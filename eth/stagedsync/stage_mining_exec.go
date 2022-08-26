@@ -3,8 +3,10 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -180,6 +182,10 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+		if err := checkTransactionsClauses(txn, stateReader, chainConfig, header.Number.Uint64(), header.BaseFee); err != nil {
+			return nil, err
+		}
+		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		snap := ibs.Snapshot()
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
@@ -200,12 +206,12 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		}
 
 		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 {
-			log.Debug("Transaction adding was interrupted")
+			log.Warn("Transaction adding was interrupted")
 			break
 		}
 		// If we don't have enough gas for any further transactions then we're done
 		if gasPool.Gas() < params.TxGas {
-			log.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+			log.Warn(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			break
 		}
 		// Retrieve the next transaction and abort if all done
@@ -221,27 +227,26 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
+			log.Warn(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 
 			txs.Pop()
 			continue
 		}
 
 		// Start executing the transaction
-		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 
 		if errors.Is(err, core.ErrGasLimitReached) {
 			// Pop the env out-of-gas transaction without shifting in the next from the account
-			log.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
+			log.Warn(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
 			txs.Pop()
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, shift
-			log.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Warn(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Debug(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Warn(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
@@ -251,7 +256,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Debug(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Warn(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
 			txs.Shift()
 		}
 	}
@@ -277,4 +282,81 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
+}
+
+func checkTransactionsClauses(txn types.Transaction, reader state.StateReader, config params.ChainConfig, blockNumber uint64, baseFee *big.Int) error {
+	gasBailout := config.Consensus == params.ParliaConsensus
+	sender, ok := txn.GetSender()
+	if !ok {
+		return fmt.Errorf("no sender")
+	}
+	account, err := reader.ReadAccountData(sender)
+	if err != nil {
+		return err
+	}
+
+	accountNonce := account.Nonce
+	txnNonce := txn.GetNonce()
+	// Make sure this transaction's nonce is correct.
+	if accountNonce < txnNonce {
+		return fmt.Errorf("%w: address %v, tx: %d state: %d", core.ErrNonceTooHigh,
+			sender, txnNonce, accountNonce)
+	}
+	if accountNonce > txnNonce {
+		return fmt.Errorf("%w: address %v, tx: %d state: %d", core.ErrNonceTooLow,
+			sender, txnNonce, accountNonce)
+	}
+
+	// Make sure the sender is an EOA (EIP-3607)
+	if !account.IsEmptyCodeHash() {
+		// common.Hash{} means that the sender is not in the state.
+		// Historically there were transactions with 0 gas price and non-existing sender,
+		// so we have to allow that.
+		return fmt.Errorf("%w: address %v, codehash: %s", core.ErrSenderNoEOA,
+			sender, account.CodeHash)
+	}
+
+	baseFee256 := uint256.NewInt(0)
+	if !baseFee256.SetFromBig(baseFee) {
+		return fmt.Errorf("bad baseFee")
+	}
+	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
+	if config.IsLondon(blockNumber) {
+		if !txn.GetFeeCap().IsZero() || !txn.GetTip().IsZero() {
+			if err := core.CheckEip1559TxGasFeeCap(sender, txn.GetFeeCap(), txn.GetTip(), baseFee256); err != nil {
+				return err
+			}
+		}
+	}
+	txnGas := txn.GetGas()
+	txnPrice := txn.GetPrice()
+	value := txn.GetValue()
+	accountBalance := account.Balance
+
+	want := uint256.NewInt(0)
+	want.SetUint64(txnGas)
+	want, overflow := want.MulOverflow(want, txnPrice)
+	if overflow {
+		return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
+	}
+
+	if txn.GetFeeCap() != nil {
+		want.SetUint64(txnGas)
+		want, overflow = want.MulOverflow(want, txn.GetFeeCap())
+		if overflow {
+			return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
+		}
+		want, overflow = want.AddOverflow(want, value)
+		if overflow {
+			return fmt.Errorf("%w: address %v", core.ErrInsufficientFunds, sender)
+		}
+	}
+
+	if accountBalance.Cmp(want) < 0 {
+		if !gasBailout {
+			return fmt.Errorf("%w: address %v have %v want %v", core.ErrInsufficientFunds, sender, accountBalance, want)
+		}
+	}
+
+	return nil
 }
