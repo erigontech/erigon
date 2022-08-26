@@ -121,7 +121,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			}
 		}
 		// we add state sync transactions every bor Sprint amount of blocks
-		if cfg.isBor && blocknum%cfg.borSprint == 0 {
+		if cfg.isBor && blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
