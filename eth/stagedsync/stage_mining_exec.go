@@ -7,6 +7,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -217,7 +218,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
 		if err != nil {
-			log.Info(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			txs.Pop()
 			continue
 		}
@@ -249,7 +250,12 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
-			log.Info(fmt.Sprintf("[%s] Added transaction to mining block", logPrefix), "hash", txn.Hash(), "sender", from)
+			receipt := current.Receipts[len(current.Receipts)-1]
+			receiptRlp, err := rlp.EncodeToBytes(receipt)
+			if err != nil {
+				return nil, err
+			}
+			log.Info(fmt.Sprintf("[%s] Added transaction to mining block", logPrefix), "hash", txn.Hash(), "sender", from, "receipt", common.Bytes2Hex(receiptRlp))
 			coalescedLogs = append(coalescedLogs, logs...)
 			tcount++
 			txs.Shift()
