@@ -1656,6 +1656,9 @@ RETRY:
 			}
 			if isBor && blockNum%sprint == 0 && rawdb.HasBorReceipts(tx, blockNum) {
 				header := rawdb.ReadHeaderByNumber(tx, blockNum)
+				if header == nil {
+					return fmt.Errorf("no header found for blockNum %d", blockNum)
+				}
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash.Bytes(), offset); err != nil {
 					return err
