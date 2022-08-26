@@ -249,14 +249,14 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
-			log.Info(fmt.Sprintf("[%s] Added transaction to mining block", logPrefix), "hash", txn.Hash())
+			log.Info(fmt.Sprintf("[%s] Added transaction to mining block", logPrefix), "hash", txn.Hash(), "sender", from)
 			coalescedLogs = append(coalescedLogs, logs...)
 			tcount++
 			txs.Shift()
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Info(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Info(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
 			txs.Shift()
 		}
 	}
