@@ -252,7 +252,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Info(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Info(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "err", err)
 			txs.Shift()
 		}
 	}
