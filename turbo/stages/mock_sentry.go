@@ -60,7 +60,7 @@ type MockSentry struct {
 	t              *testing.T
 	cancel         context.CancelFunc
 	DB             kv.RwDB
-	dirs           datadir.Dirs
+	Dirs           datadir.Dirs
 	Engine         consensus.Engine
 	gspec          *core.Genesis
 	ChainConfig    *params.ChainConfig
@@ -88,6 +88,8 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
+
+	HistoryV2 bool
 }
 
 func (ms *MockSentry) Close() {
@@ -208,7 +210,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,
 		Log:         log.New(),
-		dirs:        dirs,
+		Dirs:        dirs,
 		Engine:      engine,
 		gspec:       gspec,
 		ChainConfig: gspec.Config,
@@ -220,7 +222,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		HistoryV2: false,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -232,7 +235,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
-	cfg.HistoryV2 = false
+	cfg.HistoryV2 = mock.HistoryV2
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
@@ -339,7 +342,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, dirs.Tmp, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
-			stagedsync.StageBlockHashesCfg(mock.DB, mock.dirs.Tmp, mock.ChainConfig),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.sentriesClient.Bd,
@@ -377,7 +380,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				agg,
 			),
 			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
-			stagedsync.StageHashStateCfg(mock.DB, mock.dirs, cfg.HistoryV2, txNums, agg),
+			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
