@@ -310,7 +310,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
-				log.Error("--prune.r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
+				log.Error("--prune=r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
 					"Alternatively, enforce the old behaviour explicitly by --prune.r.older=90000 flag at the risk of breaking the Consensus Layer.")
 			}
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
