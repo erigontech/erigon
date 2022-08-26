@@ -146,14 +146,20 @@ func SpawnStageHeaders(
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	transitionedToPoS, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
+	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
+	if !transitionedToPoS {
+		var err error
+		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		if err != nil {
+			return err
+		}
+		if transitionedToPoS {
+			cfg.hd.SetFirstPoSHeight(blockNumber)
+		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		cfg.hd.SetFirstPoSHeight(blockNumber)
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
@@ -1326,7 +1332,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB).Preverified
-	var downloadRequest []snapshotsync.DownloadRequest
+	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverified)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverified {
@@ -1414,6 +1420,18 @@ Finish:
 	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
+
+	firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+		}
+	}
+
 	return nil
 }
 

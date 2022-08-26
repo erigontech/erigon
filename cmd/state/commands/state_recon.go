@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -450,10 +449,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	txNums := exec22.TxNumsFromDB(allSnapshots, db)
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
-	blockNum := uint64(sort.Search(len(txNums), func(i int) bool {
-		return txNums[i] > endTxNumMinimax
-	}))
-	if blockNum == uint64(len(txNums)) {
+	ok, blockNum := txNums.Find(endTxNumMinimax)
+	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
 	}
 	if blockNum == 0 {
@@ -464,7 +461,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
 	blockNum = block + 1
-	txNum := txNums[blockNum-1]
+	txNum := txNums.MaxOf(blockNum - 1)
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)
@@ -519,6 +516,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	accountCollectorX := etl.NewCollector("account scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer accountCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
 		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return accountCollectorX.Collect(k, v)
@@ -564,6 +562,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	storageCollectorX := etl.NewCollector("storage scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer storageCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
 		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return storageCollectorX.Collect(k, v)
@@ -609,6 +608,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		)
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", datadir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer codeCollectorX.Close()
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(&fillWorkers[i].bitmap)
@@ -709,11 +709,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 						if err != nil {
 							return err
 						}
-						defer func() {
-							if rwTx != nil {
-								rwTx.Rollback()
-							}
-						}()
+						defer rwTx.Rollback()
+
 						if err = rs.Flush(rwTx); err != nil {
 							return err
 						}
@@ -778,11 +775,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
+	defer rwTx.Rollback()
+
 	if err = rs.Flush(rwTx); err != nil {
 		return err
 	}
@@ -953,11 +947,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
+	defer rwTx.Rollback()
+
 	if err = rwTx.ClearBucket(kv.PlainState); err != nil {
 		return err
 	}

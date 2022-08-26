@@ -36,12 +36,12 @@ type TrieCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV2 bool
-	txNums    exec22.TxNums
+	txNums    *exec22.TxNums
 	agg       *state.Aggregator22
 }
 
 func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload,
-	historyV2 bool, txNums exec22.TxNums, agg *state.Aggregator22) TrieCfg {
+	historyV2 bool, txNums *exec22.TxNums, agg *state.Aggregator22) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -191,7 +191,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
 	nonEmptyMarker := []byte{1}
 
 	var l OldestAppearedLoad
@@ -349,7 +349,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load etl.LoadFunc) error {
 	txnFrom := txNums.MinOf(unwindTo)
 	txnTo := uint64(math.MaxUint64)
 	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))

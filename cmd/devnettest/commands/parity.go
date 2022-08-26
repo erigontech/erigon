@@ -31,7 +31,7 @@ var listStorageKeysCmd = &cobra.Command{
 	Short: "Returns all storage keys of the given address",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !common.IsHexAddress(services.DevAddress) {
-			return fmt.Errorf("address: %v, is not a valid hex address\n", services.DevAddress)
+			return fmt.Errorf("address: %v, is not a valid hex address", services.DevAddress)
 		}
 		toAddress := common.HexToAddress(services.DevAddress)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))

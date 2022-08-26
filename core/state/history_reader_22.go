@@ -25,13 +25,16 @@ type HistoryReader22 struct {
 	ri    *libstate.ReadIndices
 	txNum uint64
 	trace bool
+	tx    kv.Tx
 }
 
 func NewHistoryReader22(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReader22 {
 	return &HistoryReader22{ac: ac, ri: ri}
 }
 
-func (hr *HistoryReader22) SetTx(tx kv.RwTx) {
+func (hr *HistoryReader22) SetTx(tx kv.Tx) { hr.tx = tx }
+
+func (hr *HistoryReader22) SetRwTx(tx kv.RwTx) {
 	hr.ri.SetTx(tx)
 }
 
@@ -56,7 +59,7 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 			return nil, err
 		}
 	}
-	enc, err := hr.ac.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, nil /* roTx */)
+	enc, err := hr.ac.ReadAccountDataBeforeTxNum(address.Bytes(), hr.txNum, hr.tx /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +86,7 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 			return nil, err
 		}
 	}
-	enc, err := hr.ac.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, nil /* roTx */)
+	enc, err := hr.ac.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hr.txNum, hr.tx /* roTx */)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -213,7 +214,7 @@ func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
 	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots,
 	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
-) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums []uint64, err error) {
+) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums *exec22.TxNums, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.NewDummy()
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -266,7 +267,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	ff *rpchelper.Filters,
 	agg *libstate.Aggregator22,
-	txNums []uint64,
+	txNums *exec22.TxNums,
 	err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("either remote db or local db must be specified")
@@ -385,20 +386,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				}()
 			}
 			onNewSnapshot()
-			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
-			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-						txNums[blockNum] = baseTxNum + txAmount
-						return nil
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
+			// TODO: how to don't block startup on remote RPCDaemon?
+			// txNums = exec22.TxNumsFromDB(allSnapshots, db)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			log.Info("Use --snapshots=false")

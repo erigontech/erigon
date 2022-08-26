@@ -8,7 +8,6 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
-	"path"
 	"runtime"
 	"syscall"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -81,7 +79,7 @@ type ExecuteBlockCfg struct {
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
-	txNums       exec22.TxNums
+	txNums       *exec22.TxNums
 }
 
 func StageExecuteBlocksCfg(
@@ -102,7 +100,7 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
-	txNums exec22.TxNums,
+	txNums *exec22.TxNums,
 	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -292,57 +290,28 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	return nil
 }
 
-func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	if u.UnwindPoint >= s.BlockNumber {
-		return nil
-	}
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	logPrefix := u.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
-
-	//rs := state.NewState22()
-	aggDir := path.Join(cfg.dirs.DataDir, "agg22")
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, AggregationStep)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-
-	prevStageProgress, err := senderStageProgress(tx, cfg.db)
-	if err != nil {
-		return err
-	}
-
-	agg.SetLogPrefix(logPrefix)
-	agg.SetTxNum(cfg.txNums.MaxOf(prevStageProgress))
+func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
+	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	if err := rs.Unwind(ctx, tx, cfg.txNums.MaxOf(u.UnwindPoint), agg, cfg.accumulator); err != nil {
+	if err := rs.Unwind(ctx, tx, cfg.txNums.MaxOf(u.UnwindPoint), cfg.agg, cfg.accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
 		return fmt.Errorf("State22.Flush: %w", err)
 	}
 
-	/*
-		if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
-			return fmt.Errorf("truncate receipts: %w", err)
-		}
-		if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
-			return fmt.Errorf("truncate bor receipts: %w", err)
-		}
-		if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-			return fmt.Errorf("delete newer epochs: %w", err)
-		}
+	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate receipts: %w", err)
+	}
+	if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate bor receipts: %w", err)
+	}
+	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("delete newer epochs: %w", err)
+	}
 
+	/*
 		// Truncate CallTraceSet
 		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
 		c, err := tx.RwCursorDupSort(kv.CallTraceSet)
@@ -360,16 +329,6 @@ func UnwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 			}
 		}
 	*/
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -565,7 +524,7 @@ Loop:
 		return err
 	}
 	if err = batch.Commit(); err != nil {
-		return fmt.Errorf("batch commit: %v", err)
+		return fmt.Errorf("batch commit: %w", err)
 	}
 
 	if !useExternalTx {
@@ -607,11 +566,6 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	if cfg.exec22 {
-		return UnwindExec22(u, s, tx, ctx, cfg, initialCycle)
-	}
-
-	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
@@ -626,7 +580,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	logPrefix := u.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err = unwindExecutionStage(u, s, tx, quit, cfg, initialCycle); err != nil {
+	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
 		return err
 	}
 	if err = u.Done(tx); err != nil {
@@ -641,7 +595,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
 	stateBucket := kv.PlainState
 	storageKeyLength := length.Addr + length.Incarnation + length.Hash
@@ -661,9 +615,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
+	if cfg.exec22 {
+		return unwindExec22(u, s, tx, ctx, cfg)
+	}
+
 	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer changes.Close()
-	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
+	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, ctx.Done())
 	if errRewind != nil {
 		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
@@ -736,7 +694,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		}
 		return nil
 
-	}, etl.TransformArgs{Quit: quit}); err != nil {
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 

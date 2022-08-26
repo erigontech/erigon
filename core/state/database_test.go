@@ -163,7 +163,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !it.Next() {
-		t.Error("Expected DeployEvent")
+		t.Fatal("Expected DeployEvent")
 	}
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
