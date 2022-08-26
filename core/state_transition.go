@@ -284,7 +284,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 func CheckEip1559TxGasFeeCap(from common.Address, gasFeeCap, tip, baseFee *uint256.Int) error {
 	if gasFeeCap.Cmp(tip) < 0 {
 		return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
-			from.Hex(), gasFeeCap, tip)
+			from.Hex(), tip, gasFeeCap)
 	}
 	if baseFee != nil && gasFeeCap.Cmp(baseFee) < 0 {
 		return fmt.Errorf("%w: address %v, gasFeeCap: %s baseFee: %s", ErrFeeCapTooLow,
