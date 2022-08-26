@@ -748,7 +748,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tx kv.
 		}
 	case snap.Transactions:
 		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, p, lvl, isBor, sprint); err != nil {
+		if err := TransactionsIdx(ctx, chainID, tx, sn.From, sn.To, dir, tmpDir, p, lvl, isBor, sprint); err != nil {
 			return err
 		}
 	}
@@ -1538,7 +1538,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, isBor bool, sprint uint64) (err error) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, tx kv.Tx, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, isBor bool, sprint uint64) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -1654,14 +1654,22 @@ RETRY:
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
-			// if isBor && blockNum%sprint == 0 &&  {
-
-			// }
-			if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
-				return err
-			}
-			if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
-				return err
+			if isBor && blockNum%sprint == 0 && rawdb.HasBorReceipts(tx, blockNum) {
+				header := rawdb.ReadHeaderByNumber(tx, blockNum)
+				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
+				if err := txnHashIdx.AddKey(borTxHash.Bytes(), offset); err != nil {
+					return err
+				}
+				if err := txnHash2BlockNumIdx.AddKey(borTxHash.Bytes(), blockNum); err != nil {
+					return err
+				}
+			} else {
+				if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
+					return err
+				}
+				if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
+					return err
+				}
 			}
 
 			i++
