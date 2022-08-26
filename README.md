@@ -231,23 +231,7 @@ http.api : ["eth","debug","net"]
 
 ### Beacon Chain (Consensus Layer)
 
-Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
-relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for CL and you can safely prune them with `--prune htc`.
-
- ## ETH2 Deposit Contract Block Number
-
- - Mainnnet: 11052984
- - Sepolia: 1273020
- - Goerli: 4367322
-
-
- ## ETH2 Deposit Contract Address
-
- - Mainnet: 0x00000000219ab540356cBB839Cbe05303d7705Fa
- - Sepolia: 0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D
- - Goerli: 0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b
-
+Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK.
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
 as well as `--authrpc.vhosts <CL host>`.

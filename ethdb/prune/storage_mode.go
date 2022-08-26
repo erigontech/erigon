@@ -1,6 +1,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -79,10 +80,9 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 			}
 		}
 		mode.Receipts = Before(beforeR)
-	} else {
-		if exactReceipts == 0 && mode.Receipts.Enabled() {
-			mode.Receipts = Before(pruneBlockBefore)
-		}
+	} else if exactReceipts == 0 && mode.Receipts.Enabled() && pruneBlockBefore != 0 {
+		// Default --prune=r to pruning receipts before the Beacon Chain genesis
+		mode.Receipts = Before(pruneBlockBefore)
 	}
 	if beforeT > 0 {
 		mode.TxIndex = Before(beforeT)
@@ -309,6 +309,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if pruneMode.Initialised {
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
+			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
+				log.Error("--prune.r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
+					"Alternatively, enforce the old behaviour explicitly by --prune.r.older=90000 flag at the risk of breaking the Consensus Layer.")
+			}
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}
