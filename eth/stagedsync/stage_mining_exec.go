@@ -317,7 +317,7 @@ func checkTransactionsClauses(txn types.Transaction, reader state.StateReader, c
 	}
 
 	baseFee256 := uint256.NewInt(0)
-	if !baseFee256.SetFromBig(baseFee) {
+	if baseFee256.SetFromBig(baseFee) {
 		return fmt.Errorf("bad baseFee")
 	}
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
