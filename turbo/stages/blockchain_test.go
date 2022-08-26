@@ -23,14 +23,10 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"path"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -496,8 +492,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("add %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("add %d: expected receipt to be found", i)
+			}
 		}
 	}
 	// shared tx
@@ -506,8 +506,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("share %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("share %d: expected receipt to be found", i)
+			}
 		}
 	}
 }
@@ -757,7 +761,11 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		})
 		require.NoError(err)
 		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
-		require.Greater(found, uint64(0))
+		if m.HistoryV2 {
+			// receipts are not stored in erigon22
+		} else {
+			require.Greater(found, uint64(0))
+		}
 	} else {
 		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
 		require.NoError(err)
@@ -997,7 +1005,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
-	txNums := exec22.TxNumsFromDB(nil, db.RwKV())
 
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		st := state.New(state.NewDbStateReader(tx))
@@ -1013,27 +1020,15 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	reader := func(blockNum uint64) *state.IntraBlockState {
-		if m.HistoryV2 {
-			agg, _ := libstate.NewAggregator(path.Join(m.Dirs.DataDir, "agg22"), stagedsync.AggregationStep)
-			defer agg.Close()
-			r := state.NewHistoryReader22(agg.MakeContext(), nil)
-			r.SetTx(tx)
-			r.SetTxNum(txNums.MinOf(blockNum))
-			return state.New(r)
-		}
-
-		return state.New(state.NewPlainState(tx, blockNum))
-	}
-	st := reader(1)
+	st := m.NewStateReader(1, tx)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = reader(2)
+	st = m.NewStateReader(2, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = reader(3)
+	st = m.NewStateReader(3, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
