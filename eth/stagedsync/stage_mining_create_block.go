@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -125,9 +126,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	blockNum := executionAt + 1
 	var txs []types.Transaction
-	if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		txSlots := types2.TxsRlp{}
-		if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
+		if err := cfg.txPool2.Best(200, &txSlots, poolTx); err != nil {
 			return err
 		}
 
@@ -144,14 +145,23 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			if transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
 				continue
 			}
-			txs = append(txs, transaction)
-		}
-		var sender common.Address
-		for i := range txs {
+			var sender common.Address
 			copy(sender[:], txSlots.Senders.At(i))
-			txs[i].SetSender(sender)
+			// Check if tx nonce is too low
+			var account accounts.Account
+			ok, err := rawdb.ReadAccount(tx, sender, &account)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if account.Nonce > transaction.GetNonce() {
+				continue
+			}
+			txs = append(txs, transaction)
+			txs[len(txs)-1].SetSender(sender)
 		}
-
 		return nil
 	}); err != nil {
 		return err
