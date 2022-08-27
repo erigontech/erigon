@@ -646,7 +646,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
+func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
 	if ms.HistoryV2 {
 		agg, _ := libstate.NewAggregator(path.Join(ms.Dirs.DataDir, "agg22"), stagedsync.AggregationStep)
 		defer agg.Close()
