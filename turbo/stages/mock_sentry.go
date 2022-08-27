@@ -650,7 +650,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) *state
 	if ms.HistoryV2 {
 		agg, _ := libstate.NewAggregator(path.Join(ms.Dirs.DataDir, "agg22"), stagedsync.AggregationStep)
 		defer agg.Close()
-		r := state.NewHistoryReader22(agg.MakeContext(), nil)
+		r := state.NewHistoryReader23(agg.MakeContext(), nil)
 		r.SetTx(tx)
 		r.SetTxNum(ms.txNums.MinOf(blockNum))
 		return state.New(r)
