@@ -1212,7 +1212,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 					sprint = cfg.chainConfig.Bor.Sprint
 				}
 
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, tx, cfg.tmpdir, workers, log.LvlInfo, isBor, sprint); err != nil {
+				borCfg := types.BorConfigSprint{
+					IsBor:  isBor,
+					Sprint: sprint,
+				}
+
+				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, tx, cfg.tmpdir, workers, log.LvlInfo, borCfg); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
