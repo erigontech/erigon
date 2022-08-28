@@ -26,7 +26,7 @@ func (hr *HistoryReader22) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReader22) SetTrace(trace bool)   { hr.trace = trace }
 
 func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ac.ReadAccountDataNoState(address.Bytes(), hr.txNum)
+	enc, ok, err := hr.ac.ReadAccountDataNoStateWithRecent(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, ok, err := hr.ac.ReadAccountStorageNoState(address.Bytes(), key.Bytes(), hr.txNum)
+	enc, ok, err := hr.ac.ReadAccountStorageNoStateWithRecent(address.Bytes(), key.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, ok, err := hr.ac.ReadAccountCodeNoState(address.Bytes(), hr.txNum)
+	enc, ok, err := hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 }
 
 func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	size, ok, err := hr.ac.ReadAccountCodeSizeNoState(address.Bytes(), hr.txNum)
+	size, ok, err := hr.ac.ReadAccountCodeSizeNoStateWithRecent(address.Bytes(), hr.txNum)
 	if err != nil {
 		return 0, err
 	}
