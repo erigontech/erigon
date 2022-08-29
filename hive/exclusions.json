@@ -20,7 +20,21 @@
         "Invalid Transition Payload Sync, Invalid Transaction Signature",
         "Invalid Ancestor Chain Sync, Invalid Transaction Value, Invalid P9'",
         "Invalid Ancestor Chain Sync, Invalid StateRoot, Invalid P9'",
-        "Invalid Transition Payload Sync, Invalid GasLimit"
+        "Invalid Transition Payload Sync, Invalid GasLimit",
+        "Invalid Ancestor Chain Sync, Invalid Transaction Nonce, Invalid P9'",
+        "Invalid Transition Payload Sync, Invalid Timestamp",
+        "Invalid Transition Payload Sync, Invalid Transaction Nonce",
+        "Invalid Transition Payload Sync, Invalid ReceiptsRoot",
+        "Invalid Ancestor Chain Sync, Incomplete Transactions, Invalid P9'",
+        "Invalid Ancestor Chain Sync, Invalid Timestamp, Invalid P9'",
+        "Invalid Transition Payload Sync, Invalid GasUsed",
+        "Invalid Transition Payload Sync, Invalid StateRoot, Empty Txs",
+        "Invalid Ancestor Chain Sync, Invalid GasLimit, Invalid P9'",
+        "Invalid Ancestor Chain Sync, Invalid ReceiptsRoot, Invalid P8'",
+        "Invalid Ancestor Chain Sync, Invalid Transaction Gas, Invalid P9'",
+        "Invalid Ancestor Chain Sync, Invalid Transaction GasPrice, Invalid P9'",
+        "Invalid Ancestor Chain Re-Org, Invalid Transaction Gas, Invalid P9'",
+        "Invalid Ancestor Chain Sync, Invalid Ommers, Invalid P9'"
       ]
     },
     {

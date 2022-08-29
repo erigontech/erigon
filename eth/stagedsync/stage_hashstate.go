@@ -710,6 +710,17 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 				return err
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
+			/*
+				incarnation := uint64(1)
+				if len(val) == 0 {
+					if err := acc.DecodeForStorage(val); err != nil {
+						return err
+					}
+					incarnation = acc.Incarnation
+					v = nil
+				}
+				plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			*/
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
@@ -731,16 +742,12 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 		if err := accounts.Deserialise2(&acc, v); err != nil {
 			return err
 		}
-		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-			value := make([]byte, acc.EncodingLengthForStorage())
-			acc.EncodeForStorage(value)
-			return collector.Collect(newK, value)
-		}
-
-		if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
-			copy(acc.CodeHash[:], codeHash)
-		} else {
-			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+			}
 		}
 
 		value := make([]byte, acc.EncodingLengthForStorage())

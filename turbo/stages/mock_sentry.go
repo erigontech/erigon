@@ -646,11 +646,11 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
+func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
 	if ms.HistoryV2 {
-		agg, _ := libstate.NewAggregator(path.Join(ms.Dirs.DataDir, "agg22"), stagedsync.AggregationStep)
-		defer agg.Close()
-		r := state.NewHistoryReader22(agg.MakeContext(), nil)
+		aggCtx := ms.agg.MakeContext()
+		aggCtx.SetTx(tx)
+		r := state.NewHistoryReader22(aggCtx)
 		r.SetTx(tx)
 		r.SetTxNum(ms.txNums.MinOf(blockNum))
 		return state.New(r)
