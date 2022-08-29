@@ -1562,6 +1562,13 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, tx kv.Tx, blockFr
 	}
 	defer bodiesSegment.Close()
 
+	headerSegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
+	headerSegment, err := compress.NewDecompressor(headerSegmentPath)
+	if err != nil {
+		return
+	}
+	defer headerSegment.Close()
+
 	segFileName := snap.SegmentFileName(blockFrom, blockTo, snap.Transactions)
 	segmentFilePath := filepath.Join(snapDir, segFileName)
 	d, err := compress.NewDecompressor(segmentFilePath)
@@ -1612,23 +1619,32 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, tx kv.Tx, blockFr
 	parseCtx.WithSender(false)
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
+	headerBuf := make([]byte, 0, 4096)
 
-	withReadAhead := func(f func(g, bodyGetter *compress.Getter) error) error {
+	withReadAhead := func(f func(g, bodyGetter *compress.Getter, headerGetter *compress.Getter) error) error {
 		return d.WithReadAhead(func() error {
 			return bodiesSegment.WithReadAhead(func() error {
-				return f(d.MakeGetter(), bodiesSegment.MakeGetter())
+				return headerSegment.WithReadAhead(func() error {
+					return f(d.MakeGetter(), bodiesSegment.MakeGetter(), headerSegment.MakeGetter())
+				})
 			})
 		})
 	}
 
 RETRY:
-	if err := withReadAhead(func(g, bodyGetter *compress.Getter) error {
+	if err := withReadAhead(func(g, bodyGetter *compress.Getter, headerGetter *compress.Getter) error {
 		var i, offset, nextPos uint64
 		blockNum := firstBlockNum
 		body := &types.BodyForStorage{}
+		header := &types.Header{}
 
 		bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
 		if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+			return err
+		}
+
+		headerBuf, _ = headerGetter.Next(headerBuf[:0])
+		if err := rlp.DecodeBytes(headerBuf, header); err != nil {
 			return err
 		}
 
@@ -1684,7 +1700,6 @@ RETRY:
 
 			i++
 			offset = nextPos
-			parseCtx.WithSender(false)
 		}
 
 		if i != expectedCount {
