@@ -149,10 +149,12 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 				if err = rwTx.Delete(table, item.key); err != nil {
 					return false
 				}
+				//fmt.Printf("Flush [%x]=>\n", ks)
 			} else {
 				if err = rwTx.Put(table, item.key, item.val); err != nil {
 					return false
 				}
+				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
 			}
 			return true
 		})
