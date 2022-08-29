@@ -1651,22 +1651,17 @@ RETRY:
 				}
 				blockNum++
 			}
-
+			txTypeAndlengthOfAddress := 21
 			isSystemTx := len(word) == 0
 			if isSystemTx { // system-txs hash:pad32(txnID)
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
-			} else if borCfg.IsBor && blockNum%borCfg.Sprint == 0 && rawdb.HasBorReceipts(tx, blockNum) {
-				parseCtx.WithSender(true)
-				if _, err = parseCtx.ParseTransaction(word[1+20:], 0, &slot, make([]byte, 20), true /* hasEnvelope */, nil /* validateHash */); err != nil {
-					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
-				}
 			} else {
-				if _, err = parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
+				if _, err = parseCtx.ParseTransaction(word[txTypeAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
 
-			if slot.IsBor {
+			if slot.IsBor && word[2:txTypeAndlengthOfAddress] {
 				header := rawdb.ReadHeaderByNumber(tx, blockNum)
 				if header == nil {
 					return fmt.Errorf("no header found inside blockNum %d", blockNum)
