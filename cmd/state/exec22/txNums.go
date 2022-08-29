@@ -33,6 +33,7 @@ func (s *TxNums) Append(blockNum, maxTxnNum uint64) {
 	//fmt.Printf("append: %d, %d, %d\n", blockNum, maxTxnNum, len(s.nums))
 }
 func (s *TxNums) Unwind(unwindTo uint64) {
+	panic(unwindTo)
 	s.nums = s.nums[:unwindTo]
 	//fmt.Printf("unwind: %d, %d\n", unwindTo, s.nums)
 }
