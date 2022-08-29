@@ -742,16 +742,12 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 		if err := accounts.Deserialise2(&acc, v); err != nil {
 			return err
 		}
-		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-			value := make([]byte, acc.EncodingLengthForStorage())
-			acc.EncodeForStorage(value)
-			return collector.Collect(newK, value)
-		}
-
-		if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
-			copy(acc.CodeHash[:], codeHash)
-		} else {
-			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+			}
 		}
 
 		value := make([]byte, acc.EncodingLengthForStorage())
