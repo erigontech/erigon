@@ -1678,10 +1678,6 @@ RETRY:
 			}
 			emptySender := make([]byte, 20)
 			if slot.IsBor && bytes.Equal(word[2:txTypeAndlengthOfAddress], emptySender) {
-				header := rawdb.ReadHeaderByNumber(tx, blockNum)
-				if header == nil {
-					return fmt.Errorf("no header found inside blockNum %d", blockNum)
-				}
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
