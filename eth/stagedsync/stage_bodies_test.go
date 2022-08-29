@@ -43,7 +43,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 	}
 	{
-		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
@@ -68,7 +68,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
-		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)

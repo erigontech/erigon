@@ -29,12 +29,17 @@ func (s *TxNums) Append(blockNum, maxTxnNum uint64) {
 		err := fmt.Errorf("trying append blockNum=%d, but already have=%d", blockNum, len(s.nums))
 		panic(err)
 	}
+	if len(s.nums) < int(blockNum) {
+		err := fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, len(s.nums))
+		panic(err)
+	}
 	s.nums = append(s.nums, maxTxnNum)
-	//fmt.Printf("append: %d, %d, %d\n", blockNum, maxTxnNum, len(s.nums))
+	//fmt.Printf("after append: %d, %d, %d\n", s.nums, blockNum, maxTxnNum)
 }
 func (s *TxNums) Unwind(unwindTo uint64) {
+	//fmt.Printf("before unwind: %d, %d\n", unwindTo, s.nums)
 	s.nums = s.nums[:unwindTo]
-	//fmt.Printf("unwind: %d, %d\n", unwindTo, s.nums)
+	//fmt.Printf("after unwind: %d, %d\n", unwindTo, s.nums)
 }
 func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 	blockNum = uint64(sort.Search(len(s.nums), func(i int) bool {
