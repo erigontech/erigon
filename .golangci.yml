@@ -10,7 +10,6 @@ linters:
 #    - wastedassign # go1.18
 #    - thelper
     - gofmt
-    - deadcode
     - errcheck
     - gosimple
     - govet
@@ -18,7 +17,6 @@ linters:
     - staticcheck
 #    - structcheck # go1.18
     - unused
-    - varcheck
 #    - gocritic
     - bodyclose # go1.18
     - gosec
