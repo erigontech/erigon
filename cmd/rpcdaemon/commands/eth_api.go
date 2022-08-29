@@ -46,7 +46,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)

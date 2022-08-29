@@ -53,14 +53,14 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 }
 
 // GetLogs implements erigon_getLogs. Return an array of logs that matches the filter conditions
-func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	start := time.Now()
 	var begin, end uint64
-	logs := []*types.Log{}
+	erigonLogs := types.ErigonLogs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		return logs, beginErr
+		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -141,7 +141,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 
 	if txNumbers.GetCardinality() == 0 {
-		return logs, nil
+		return erigonLogs, nil
 	}
 	var lastBlockNum uint64
 	var lastBlockHash common.Hash
@@ -197,18 +197,19 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil, err
 		}
 		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
-		for _, log := range filtered {
+		for i, log := range filtered {
 			log.BlockNumber = blockNum
-			log.Timestamp = timestamp
 			log.BlockHash = lastBlockHash
 			log.TxHash = txHash
 			log.Index = 0
+
+			erigonLogs[i].Log = *log
+			erigonLogs[i].Timestamp = timestamp
 		}
-		logs = append(logs, filtered...)
 	}
 	stats := api._agg.GetAndResetStats()
 	log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
-	return logs, nil
+	return erigonLogs, nil
 }
 
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
