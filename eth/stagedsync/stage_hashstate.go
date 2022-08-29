@@ -90,7 +90,6 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] hashed state completed", logPrefix), "from", s.BlockNumber, "to", to)
 	return nil
 }
 

@@ -119,7 +119,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		}
 	}
 
-	log.Info("SpawnMiningExecStage", "block txn", current.Txs.Len(), "remote txn", current.RemoteTxs.Empty())
+	log.Debug("SpawnMiningExecStage", "block txn", current.Txs.Len(), "remote txn", current.RemoteTxs.Empty())
 	if current.Uncles == nil {
 		current.Uncles = []*types.Header{}
 	}
@@ -136,7 +136,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	if err != nil {
 		return err
 	}
-	log.Info("FinalizeBlockExecution", "current txn", current.Txs.Len(), "current receipt", current.Receipts.Len())
+	log.Debug("FinalizeBlockExecution", "current txn", current.Txs.Len(), "current receipt", current.Receipts.Len())
 
 	/*
 		if w.isRunning() {

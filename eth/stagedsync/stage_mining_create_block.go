@@ -393,7 +393,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		}
 
 		baseFee256 := uint256.NewInt(0)
-		if baseFee256.SetFromBig(baseFee) {
+		if baseFee != nil && baseFee256.SetFromBig(baseFee) {
 			return nil, fmt.Errorf("bad baseFee")
 		}
 		// Make sure the transaction gasFeeCap is greater than the block's baseFee.

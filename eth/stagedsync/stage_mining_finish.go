@@ -43,7 +43,6 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	log.Info("SpawnMiningFinishStage", "CurrentTxs", current.Txs.Len(), "Root", current.Header.Root)
 	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
 	*current = MiningBlock{} // hack to clean global data
 

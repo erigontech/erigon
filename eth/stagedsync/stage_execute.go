@@ -138,7 +138,6 @@ func executeBlock(
 	initialCycle bool,
 	effectiveEngine consensus.Engine,
 ) error {
-	log.Info("executeBlock", "blocknum", block.Number(), "blockhash", block.Hash().Hex(), "gasused", block.GasUsed(), "txn number", block.Transactions().Len())
 	blockNum := block.NumberU64()
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
 	if err != nil {

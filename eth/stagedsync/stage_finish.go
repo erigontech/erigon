@@ -87,7 +87,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		}
 	}
 
-	log.Info("sync stage finished, ", "executionAt", executionAt)
 	return nil
 }
 
