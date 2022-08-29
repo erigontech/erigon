@@ -1660,8 +1660,8 @@ RETRY:
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
-
-			if slot.IsBor && word[2:txTypeAndlengthOfAddress] {
+			emptySender := make([]byte, 20)
+			if slot.IsBor && bytes.Equal(word[2:txTypeAndlengthOfAddress], emptySender) {
 				header := rawdb.ReadHeaderByNumber(tx, blockNum)
 				if header == nil {
 					return fmt.Errorf("no header found inside blockNum %d", blockNum)
