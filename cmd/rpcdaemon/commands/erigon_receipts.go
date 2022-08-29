@@ -52,13 +52,13 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	var begin, end uint64
-	logs := []*types.Log{}
+	erigonLogs := types.ErigonLogs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		return logs, beginErr
+		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -128,7 +128,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 
 	if blockNumbers.GetCardinality() == 0 {
-		return logs, nil
+		return erigonLogs, nil
 	}
 
 	iter := blockNumbers.Iterator()
@@ -163,7 +163,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil
 		})
 		if err != nil {
-			return logs, err
+			return erigonLogs, err
 		}
 		if len(blockLogs) == 0 {
 			continue
@@ -190,16 +190,17 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		if body == nil {
 			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
-		for _, log := range blockLogs {
-			log.Timestamp = timestamp
+		for i, log := range blockLogs {
 			log.BlockNumber = blockNumber
 			log.BlockHash = blockHash
 			log.TxHash = body.Transactions[log.TxIndex].Hash()
+
+			erigonLogs[i].Log = *log
+			erigonLogs[i].Timestamp = timestamp
 		}
-		logs = append(logs, blockLogs...)
 	}
 
-	return logs, nil
+	return erigonLogs, nil
 }
 
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
