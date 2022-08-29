@@ -746,14 +746,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
-				log.Info("slash successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
+				log.Debug("slash successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 			}
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 		return nil, nil, err
 	}
-	log.Info("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
+	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 	if len(systemTxs) > 0 {
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}

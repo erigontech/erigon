@@ -237,26 +237,26 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 
 		if errors.Is(err, core.ErrGasLimitReached) {
 			// Pop the env out-of-gas transaction without shifting in the next from the account
-			log.Info(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
+			log.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "sender", from)
 			txs.Pop()
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, shift
-			log.Info(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Info(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Debug(fmt.Sprintf("[%s] Skipping account with hight nonce", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
-			log.Info(fmt.Sprintf("[%s] addTransactionsToMiningBlock Successful", logPrefix), "sender", from, "nonce", txn.GetNonce())
+			log.Debug(fmt.Sprintf("[%s] addTransactionsToMiningBlock Successful", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			coalescedLogs = append(coalescedLogs, logs...)
 			tcount++
 			txs.Shift()
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Info(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
+			log.Debug(fmt.Sprintf("[%s] Transaction failed, account skipped", logPrefix), "hash", txn.Hash(), "err", err)
 			txs.Shift()
 		}
 	}

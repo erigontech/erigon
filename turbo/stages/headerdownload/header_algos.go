@@ -872,7 +872,6 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
 			hi.unwind = true
-			log.Debug("Feed Header PoW", "Forking point", forkingPoint, "unwind", true)
 		}
 		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
