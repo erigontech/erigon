@@ -500,7 +500,7 @@ func (c *Coherent) evictRoots() {
 		return
 	}
 	to := c.latestViewID - ViewID(c.cfg.KeepViews)
-	var toDel []ViewID
+	toDel := make([]ViewID, 0, len(c.roots))
 	for txID := range c.roots {
 		if txID > to {
 			continue

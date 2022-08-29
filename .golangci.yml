@@ -23,7 +23,7 @@ linters:
     - bodyclose # go1.18
     - gosec
 #    - forcetypeassert
-#    - prealloc
+    - prealloc
 #    - contextcheck
 #    - goerr113
 #    - revive

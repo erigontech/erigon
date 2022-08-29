@@ -1003,8 +1003,8 @@ func (c *CompressorSequential) optimiseCodes() error {
 		}
 		//fmt.Printf("[comp] depth=%d, code=[%b], pattern=[%x]\n", p.depth, p.code, p.word)
 	}
-	var positionList PositionList
-	pos2code := make(map[uint64]*Position)
+	positionList := make(PositionList, 0, len(c.posMap))
+	pos2code := make(map[uint64]*Position, len(c.posMap))
 	for pos, uses := range c.posMap {
 		p := &Position{pos: pos, uses: uses, code: pos, codeBits: 0}
 		positionList = append(positionList, p)

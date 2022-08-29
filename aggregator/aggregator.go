@@ -1426,8 +1426,7 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val, transValBuf commi
 	if err != nil {
 		return nil, err
 	}
-	var transAccountPks [][]byte
-	var transStoragePks [][]byte
+	transAccountPks := make([][]byte, 0, len(accountPlainKeys))
 	var apkBuf, spkBuf []byte
 	for _, accountPlainKey := range accountPlainKeys {
 		if len(accountPlainKey) == length.Addr {
@@ -1463,6 +1462,8 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val, transValBuf commi
 		}
 		transAccountPks = append(transAccountPks, accountPlainKey)
 	}
+
+	transStoragePks := make([][]byte, 0, len(storagePlainKeys))
 	for _, storagePlainKey := range storagePlainKeys {
 		if len(storagePlainKey) == length.Addr+length.Hash {
 			// Non-optimised key originating from a database record

@@ -487,7 +487,7 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 // 2. Corresponding hashed keys
 // 3. Corresponding updates
 func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Update) {
-	var hashed []string
+	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
 	keccak := sha3.NewLegacyKeccak256()

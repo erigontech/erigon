@@ -141,7 +141,7 @@ func Test_BinPatriciaTrie_EmptyState(t *testing.T) {
 }
 
 func renderUpdates(branchNodeUpdates map[string]BranchData) {
-	var keys []string
+	keys := make([]string, 0, len(branchNodeUpdates))
 	for key := range branchNodeUpdates {
 		keys = append(keys, key)
 	}
