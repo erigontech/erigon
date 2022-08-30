@@ -1212,7 +1212,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				isBor := cfg.chainConfig.Bor != nil
+				sprint := uint64(0)
+				if isBor {
+					sprint = cfg.chainConfig.Bor.Sprint
+				}
+
+				borCfg := types.BorConfigSprint{
+					IsBor:  isBor,
+					Sprint: sprint,
+				}
+
+				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo, borCfg); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}

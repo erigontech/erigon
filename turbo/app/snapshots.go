@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -308,7 +309,18 @@ func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dir
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	isBor := chainConfig.Bor != nil
+	sprint := uint64(0)
+	if isBor {
+		sprint = chainConfig.Bor.Sprint
+	}
+
+	borCfg := types.BorConfigSprint{
+		IsBor:  isBor,
+		Sprint: sprint,
+	}
+
+	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo, borCfg); err != nil {
 		return err
 	}
 	return nil

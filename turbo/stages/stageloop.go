@@ -364,6 +364,11 @@ func NewStagedSync(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 	isBor := controlServer.ChainConfig.Bor != nil
+	var sprint uint64
+	if isBor {
+		sprint = controlServer.ChainConfig.Bor.Sprint
+	}
+
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
 			stagedsync.StageHeadersCfg(
@@ -428,7 +433,7 @@ func NewStagedSync(ctx context.Context,
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, isBor),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, isBor, sprint),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, headCh, forkValidator), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,

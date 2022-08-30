@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220830025126-1a42afe5f209
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220830115034-393fcf6856e8
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -171,5 +171,6 @@ require (
 
 require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
+	github.com/ledgerwatch/interfaces v0.0.0-20220803041830-390c8d28c921 // indirect
 	gotest.tools/v3 v3.3.0 // indirect
 )
