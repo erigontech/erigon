@@ -46,7 +46,7 @@ type patternTable struct {
 
 func newPatternTable(bitLen int) *patternTable {
 	pt := &patternTable{
-		bitLen: int(bitLen),
+		bitLen: bitLen,
 	}
 	if bitLen <= condensePatternTableBitThreshold {
 		pt.patterns = make([]*codeword, 1<<pt.bitLen)
