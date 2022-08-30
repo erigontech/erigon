@@ -254,10 +254,11 @@ type ChainConfig struct {
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
-	TerminalTotalDifficulty *big.Int    `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
-	TerminalBlockNumber     *big.Int    `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TerminalBlockNumber in EIP-3675
-	TerminalBlockHash       common.Hash `json:"terminalBlockHash,omitempty"`       // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
-	MergeNetsplitBlock      *big.Int    `json:"mergeNetsplitBlock,omitempty"`      // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	TerminalTotalDifficulty       *big.Int    `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
+	TerminalTotalDifficultyPassed bool        `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
+	TerminalBlockNumber           *big.Int    `json:"terminalBlockNumber,omitempty"`           // Enforce particular terminal block; see TerminalBlockNumber in EIP-3675
+	TerminalBlockHash             common.Hash `json:"terminalBlockHash,omitempty"`             // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
+	MergeNetsplitBlock            *big.Int    `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`

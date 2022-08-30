@@ -172,7 +172,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader23(ac, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
 
 	chainConfig, err := api.chainConfig(tx)

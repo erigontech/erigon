@@ -26,15 +26,20 @@ func (s *TxNums) MinOf(blockNum uint64) (txnNum uint64) {
 }
 func (s *TxNums) Append(blockNum, maxTxnNum uint64) {
 	if len(s.nums) > int(blockNum) {
-		err := fmt.Errorf("trying append blockNum=%d, but already have=%d\n", blockNum, len(s.nums))
+		err := fmt.Errorf("trying append blockNum=%d, but already have=%d", blockNum, len(s.nums))
+		panic(err)
+	}
+	if len(s.nums) < int(blockNum) {
+		err := fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, len(s.nums))
 		panic(err)
 	}
 	s.nums = append(s.nums, maxTxnNum)
-	//fmt.Printf("append: %d, %d, %d\n", blockNum, maxTxnNum, len(s.nums))
+	//fmt.Printf("after append: %d, %d, %d\n", s.nums, blockNum, maxTxnNum)
 }
 func (s *TxNums) Unwind(unwindTo uint64) {
+	//fmt.Printf("before unwind: %d, %d\n", unwindTo, s.nums)
 	s.nums = s.nums[:unwindTo]
-	//fmt.Printf("unwind: %d, %d\n", unwindTo, s.nums)
+	//fmt.Printf("after unwind: %d, %d\n", unwindTo, s.nums)
 }
 func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 	blockNum = uint64(sort.Search(len(s.nums), func(i int) bool {
@@ -49,7 +54,10 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 		return nil
 	}
 
-	toBlock := s.BlocksAvailable()
+	var toBlock uint64
+	if s != nil {
+		toBlock = s.BlocksAvailable()
+	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		p, err := stages.GetStageProgress(tx, stages.Bodies)
 		if err != nil {
@@ -67,7 +75,7 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 			if blockNum > toBlock {
 				return nil
 			}
-			txNums.nums[blockNum] = baseTxNum + txAmount
+			txNums.nums[blockNum] = baseTxNum + txAmount - 1
 			return nil
 		}); err != nil {
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
@@ -75,6 +83,9 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 		return nil
 	}); err != nil {
 		panic(err)
+	}
+	if txNums.nums[0] == 0 {
+		txNums.nums[0] = 1
 	}
 	return txNums
 }

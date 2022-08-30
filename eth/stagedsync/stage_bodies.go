@@ -118,7 +118,11 @@ func BodiesForward(
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery); err != nil {
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) {
+		if cfg.historyV2 {
+			cfg.txNums.Append(blockNum, lastTxnNum)
+		}
+	}); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
 
@@ -303,7 +307,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		return err
 	}
 	if cfg.historyV2 {
-		cfg.txNums.Unwind(u.UnwindPoint)
+		cfg.txNums.Unwind(u.UnwindPoint + 1)
 	}
 
 	if err = u.Done(tx); err != nil {

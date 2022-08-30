@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -27,7 +28,7 @@ type ErigonAPI interface {
 	// Receipt related (see ./erigon_receipts.go)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
-	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.ErigonLogs, error)
 
 	// WatchTheBurn / reward related (see ./erigon_issuance.go)
 	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)

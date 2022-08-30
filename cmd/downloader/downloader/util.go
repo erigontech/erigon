@@ -42,7 +42,7 @@ func AllTorrentPaths(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var res []string
+	res := make([]string, 0, len(files))
 	for _, f := range files {
 		torrentFilePath := filepath.Join(dir, f)
 		res = append(res, torrentFilePath)
@@ -55,7 +55,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var res []string
+	res := make([]string, 0, len(files))
 	for _, f := range files {
 		if !snap.IsCorrectFileName(f.Name()) {
 			continue
@@ -79,7 +79,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var res []string
+	res := make([]string, 0, len(files))
 	for _, f := range files {
 		if !snap.IsCorrectFileName(f.Name()) {
 			continue

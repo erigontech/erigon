@@ -412,6 +412,9 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Txs.lock.RUnlock()
 	max := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
+		if seg.seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
@@ -419,6 +422,9 @@ func (s *RoSnapshots) Files() (list []string) {
 		list = append(list, fName)
 	}
 	for _, seg := range s.Headers.segments {
+		if seg.seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
@@ -426,6 +432,9 @@ func (s *RoSnapshots) Files() (list []string) {
 		list = append(list, fName)
 	}
 	for _, seg := range s.Txs.segments {
+		if seg.Seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
@@ -598,7 +607,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	if err != nil {
 		return err
 	}
-	var list []string
+	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
@@ -1105,7 +1114,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 
-	var downloadRequest []DownloadRequest
+	downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
 	for i := range rangesToMerge {
 		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
 	}
@@ -1577,7 +1586,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, tx kv.Tx, blockFr
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
+		panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1705,7 +1714,7 @@ RETRY:
 		}
 
 		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
+			panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
 		}
 
 		if err := txnHashIdx.Build(); err != nil {
@@ -2071,7 +2080,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		d.Close()
 	}
 	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d\n", f.Count(), expectedTotal)
+		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
 		return err
@@ -2148,7 +2157,12 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 type BodiesIterator struct{}
 
 func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	if from < s.BlocksAvailable() {
+	var blocksInSnapshtos uint64
+	if s != nil && s.cfg.Enabled {
+		blocksInSnapshtos = s.BlocksAvailable()
+	}
+
+	if s != nil && s.cfg.Enabled && from < blocksInSnapshtos {
 		if err := s.Bodies.View(func(bs []*BodySegment) error {
 			for _, b := range bs {
 				if err := b.Iterate(f); err != nil {
@@ -2160,7 +2174,8 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 		}
 	}
-	for i := s.BlocksAvailable() + 1; ; i++ {
+
+	for i := blocksInSnapshtos + 1; ; i++ {
 		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
 		if err != nil {
 			return err
@@ -2168,7 +2183,7 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 		if body == nil {
 			break
 		}
-		if err := f(i, baseTxId, uint64(txAmount)); err != nil {
+		if err := f(i, baseTxId-1, uint64(txAmount)+2); err != nil {
 			return err
 		}
 	}

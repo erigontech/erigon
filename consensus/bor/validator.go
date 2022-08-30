@@ -110,7 +110,7 @@ func (v *Validator) MinimalVal() MinimalVal {
 // ParseValidators returns validator set bytes
 func ParseValidators(validatorsBytes []byte) ([]*Validator, error) {
 	if len(validatorsBytes)%40 != 0 {
-		return nil, errors.New("Invalid validators bytes")
+		return nil, errors.New("invalid validators bytes")
 	}
 
 	result := make([]*Validator, len(validatorsBytes)/40)

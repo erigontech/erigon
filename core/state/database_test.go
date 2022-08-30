@@ -157,16 +157,18 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	var it *contracts.ReviveDeployEventIterator
-	it, err = revive.FilterDeployEvent(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !it.Next() {
-		t.Error("Expected DeployEvent")
-	}
-	if it.Event.D != create2address {
-		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	if !m.HistoryV2 {
+		// HistoryV2 doesn't store Receipts in db by default. Please enable this test, after implementation of special flag which stores logs
+		it, err := revive.FilterDeployEvent(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !it.Next() {
+			t.Fatal("Expected DeployEvent")
+		}
+		if it.Event.D != create2address {
+			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+		}
 	}
 
 	var key2 common.Hash
@@ -203,15 +205,17 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	it, err = revive.FilterDeployEvent(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !it.Next() {
-		t.Error("Expected DeployEvent")
-	}
-	if it.Event.D != create2address {
-		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	if !m.HistoryV2 {
+		it, err := revive.FilterDeployEvent(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !it.Next() {
+			t.Error("Expected DeployEvent")
+		}
+		if it.Event.D != create2address {
+			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+		}
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
@@ -385,16 +389,19 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	var it *contracts.PolyDeployEventIterator
-	it, err = poly.FilterDeployEvent(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !it.Next() {
-		t.Error("Expected DeployEvent")
-	}
-	if it.Event.D != create2address {
-		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+
+	if !m.HistoryV2 {
+		var it *contracts.PolyDeployEventIterator
+		it, err = poly.FilterDeployEvent(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !it.Next() {
+			t.Error("Expected DeployEvent")
+		}
+		if it.Event.D != create2address {
+			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+		}
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
@@ -428,15 +435,17 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	it, err = poly.FilterDeployEvent(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !it.Next() {
-		t.Error("Expected DeployEvent")
-	}
-	if it.Event.D != create2address {
-		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	if !m.HistoryV2 {
+		it, err := poly.FilterDeployEvent(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !it.Next() {
+			t.Error("Expected DeployEvent")
+		}
+		if it.Event.D != create2address {
+			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+		}
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
@@ -458,15 +467,17 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
 		t.Fatal(err)
 	}
-	it, err = poly.FilterDeployEvent(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !it.Next() {
-		t.Error("Expected DeployEvent")
-	}
-	if it.Event.D != create2address {
-		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+	if !m.HistoryV2 {
+		it, err := poly.FilterDeployEvent(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !it.Next() {
+			t.Error("Expected DeployEvent")
+		}
+		if it.Event.D != create2address {
+			t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
+		}
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))

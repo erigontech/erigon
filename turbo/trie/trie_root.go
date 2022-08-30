@@ -310,7 +310,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
 		return EmptyRoot, err
 	}
-
 	return l.receiver.Root(), nil
 }
 
