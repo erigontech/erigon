@@ -359,7 +359,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
-// Check if we can quickly determine status of a newPayload or forkchoiceUpdated
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated
 func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
@@ -397,12 +397,26 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 	}
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
+	var td *big.Int
 	if newPayload {
 		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
 		if err != nil {
 			return nil, err
 		}
+		td, err = rawdb.ReadTdByHash(tx, parentHash)
+	} else {
+		td, err = rawdb.ReadTdByHash(tx, blockHash)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if we already reached TTD.
+	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
+
 	}
 
 	if !s.hd.POSSync() {
