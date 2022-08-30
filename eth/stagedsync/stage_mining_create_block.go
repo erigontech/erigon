@@ -392,12 +392,12 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 			continue
 		}
 
-		baseFee256 := uint256.NewInt(0)
-		if baseFee != nil && baseFee256.SetFromBig(baseFee) {
-			return nil, fmt.Errorf("bad baseFee")
-		}
-		// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 		if config.IsLondon(blockNumber) {
+			baseFee256 := uint256.NewInt(0)
+			if overflow := baseFee256.SetFromBig(baseFee); overflow {
+				return nil, fmt.Errorf("bad baseFee %s", baseFee)
+			}
+			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
 				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256); err != nil {
 					transactions = transactions[1:]

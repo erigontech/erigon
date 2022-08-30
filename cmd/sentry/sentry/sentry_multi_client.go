@@ -212,7 +212,7 @@ func pumpStreamLoop[TMessage interface{}](
 	go func() {
 		for req := range reqs {
 			if err := handleInboundMessage(ctx, req, sentry); err != nil {
-				log.Warn("Handling incoming message", "stream", streamName, "err", err)
+				log.Debug("Handling incoming message", "stream", streamName, "err", err)
 			}
 			if wg != nil {
 				wg.Done()
