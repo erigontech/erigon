@@ -1669,6 +1669,11 @@ RETRY:
 				if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
 					return err
 				}
+
+				if !headerGetter.HasNext() {
+					return fmt.Errorf("not enough headers")
+				}
+
 				headerBuf, _ = headerGetter.Next(headerBuf[:0])
 				if err := rlp.DecodeBytes(headerBuf, header); err != nil {
 					return err
