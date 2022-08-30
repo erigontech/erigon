@@ -1661,10 +1661,16 @@ RETRY:
 				if !bodyGetter.HasNext() {
 					return fmt.Errorf("not enough bodies")
 				}
+
 				bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
 				if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
 					return err
 				}
+				headerBuf, _ = headerGetter.Next(headerBuf[:0])
+				if err := rlp.DecodeBytes(headerBuf, header); err != nil {
+					return err
+				}
+
 				blockNum++
 			}
 			txTypeAndlengthOfAddress := 21
