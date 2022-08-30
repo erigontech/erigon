@@ -359,7 +359,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
-// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
 func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
