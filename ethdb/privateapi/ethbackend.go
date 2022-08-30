@@ -335,7 +335,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
 
-	possibleStatus, err := s.getPayloadStatusFromHashIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
+	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -359,8 +359,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
-// Check if we can make out a status from the payload hash/head hash.
-func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
+// Check if we can quickly determine status of a newPayload or forkchoiceUpdated
+func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -549,7 +549,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	status, err := s.getPayloadStatusFromHashIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
 	if err != nil {
 		return nil, err
 	}
