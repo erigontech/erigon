@@ -1681,12 +1681,12 @@ RETRY:
 			if isSystemTx { // system-txs hash:pad32(txnID)
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 			} else {
-				if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
+				if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */, borCfg.IsBor); err != nil {
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
 			emptySender := make([]byte, 20)
-			if borCfg.IsBor && slot.IsBor && bytes.Equal(word[2:firstTxByteAndlengthOfAddress], emptySender) {
+			if slot.IsBor && bytes.Equal(word[2:firstTxByteAndlengthOfAddress], emptySender) {
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
