@@ -1686,7 +1686,7 @@ RETRY:
 				}
 			}
 			emptySender := make([]byte, 20)
-			if slot.IsBor && bytes.Equal(word[2:firstTxByteAndlengthOfAddress], emptySender) {
+			if slot.IsBor && bytes.Equal(word[1:firstTxByteAndlengthOfAddress], emptySender) {
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
