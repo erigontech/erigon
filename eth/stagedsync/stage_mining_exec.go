@@ -119,6 +119,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		}
 	}
 
+	log.Debug("SpawnMiningExecStage", "block txn", current.Txs.Len(), "remote txn", current.RemoteTxs.Empty())
 	if current.Uncles == nil {
 		current.Uncles = []*types.Header{}
 	}
@@ -129,11 +130,13 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		current.Receipts = types.Receipts{}
 	}
 
-	_, err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter,
+	var err error
+	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter,
 		&cfg.chainConfig, ibs, current.Receipts, epochReader{tx: tx}, chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
 	if err != nil {
 		return err
 	}
+	log.Debug("FinalizeBlockExecution", "current txn", current.Txs.Len(), "current receipt", current.Receipts.Len())
 
 	/*
 		if w.isRunning() {
@@ -183,6 +186,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		snap := ibs.Snapshot()
+		log.Info("addTransactionsToMiningBlock", "txn hash", txn.Hash())
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
@@ -249,6 +253,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
+			log.Debug(fmt.Sprintf("[%s] addTransactionsToMiningBlock Successful", logPrefix), "sender", from, "nonce", txn.GetNonce())
 			coalescedLogs = append(coalescedLogs, logs...)
 			tcount++
 			txs.Shift()

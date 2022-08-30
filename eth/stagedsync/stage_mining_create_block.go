@@ -134,6 +134,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			return err
 		}
 
+		var skipByChainIDMismatch uint64 = 0
 		for i := range txSlots.Txs {
 			s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
 
@@ -144,7 +145,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			if err != nil {
 				return err
 			}
-			if transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+			if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+				skipByChainIDMismatch++
 				continue
 			}
 			var sender common.Address
