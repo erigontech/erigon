@@ -450,7 +450,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "exemplar": true,
-          "expr": "rate(db_commit_seconds_count{phase=\"total\",instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(db_commit_seconds_count{phase=\"total\",instance=~\"$instance\"}[$rate_interval])",
           "interval": "",
           "legendFormat": "commit: {{instance}}",
           "refId": "A"
