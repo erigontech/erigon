@@ -1620,6 +1620,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 
 	parseCtx := types2.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
+	parseCtx.WithBor(borCfg.IsBor)
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 	headerBuf := make([]byte, 0, 4096)
@@ -1686,7 +1687,7 @@ RETRY:
 			if isSystemTx { // system-txs hash:pad32(txnID)
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 			} else {
-				if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */, borCfg.IsBor); err != nil {
+				if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
