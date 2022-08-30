@@ -449,6 +449,7 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
+	// TODO the conversion to int64 then uint64 then new int isn't working!
 	msg := types.NewMessage(
 		from,
 		to,
@@ -456,8 +457,8 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		value,
 		uint64(gasLimit),
 		gasPriceInt,
-		uint256.NewInt(uint64(feeCap.Int64())),
-		uint256.NewInt(uint64(tipCap.Int64())),
+		uint256.NewInt(feeCap.Uint64()),
+		uint256.NewInt(tipCap.Uint64()),
 		data,
 		accessList,
 		false)
