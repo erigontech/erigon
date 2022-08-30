@@ -267,6 +267,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
+	log.Info("Blocks execution22", "from", s.BlockNumber, "to", to)
 	if to <= s.BlockNumber {
 		return nil
 	}
