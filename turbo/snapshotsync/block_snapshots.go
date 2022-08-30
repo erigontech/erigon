@@ -745,7 +745,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tx kv.Tx, tmpDir string, p *background.Progress, lvl log.Lvl, borCfg types.BorConfigSprint) error {
+func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *background.Progress, lvl log.Lvl, borCfg types.BorConfigSprint) error {
 	switch sn.T {
 	case snap.Headers:
 		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
@@ -757,14 +757,14 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tx kv.
 		}
 	case snap.Transactions:
 		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, chainID, tx, sn.From, sn.To, dir, tmpDir, p, lvl, borCfg); err != nil {
+		if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, dir, tmpDir, p, lvl, borCfg); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, db kv.Tx, tmpDir string, workers int, lvl log.Lvl, borCfg types.BorConfigSprint) error {
+func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl, borCfg types.BorConfigSprint) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
@@ -798,7 +798,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, db
 					p := &background.Progress{}
 					ps.Add(p)
 					defer ps.Delete(p)
-					if err := buildIdx(ctx, sn, chainID, db, tmpDir, p, lvl, borCfg); err != nil {
+					if err := buildIdx(ctx, sn, chainID, tmpDir, p, lvl, borCfg); err != nil {
 						errs <- err
 					}
 				}(segment)
@@ -1102,7 +1102,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		Sprint: sprint,
 	}
 
-	err = merger.Merge(ctx, snapshots, tx, rangesToMerge, snapshots.Dir(), true, borCfg)
+	err = merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true, borCfg)
 	if err != nil {
 		return err
 	}
@@ -1144,18 +1144,12 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	p := &background.Progress{}
 	isBor := chainConfig.Bor != nil
 	sprint := uint64(0)
-	var tx kv.Tx
 	if isBor {
 		sprint = chainConfig.Bor.Sprint
-		tx, err := chainDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 	borCfg := types.BorConfigSprint{IsBor: isBor, Sprint: sprint}
 	chainId, _ := uint256.FromBig(chainConfig.ChainID)
-	if err := buildIdx(ctx, f, *chainId, tx, tmpDir, p, lvl, borCfg); err != nil {
+	if err := buildIdx(ctx, f, *chainId, tmpDir, p, lvl, borCfg); err != nil {
 		return err
 	}
 
@@ -1165,7 +1159,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return fmt.Errorf("DumpBodies: %w", err)
 	}
 	p = &background.Progress{}
-	if err := buildIdx(ctx, f, *chainId, tx, tmpDir, p, lvl, borCfg); err != nil {
+	if err := buildIdx(ctx, f, *chainId, tmpDir, p, lvl, borCfg); err != nil {
 		return err
 	}
 
@@ -1175,7 +1169,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return fmt.Errorf("DumpTxs: %w", err)
 	}
 	p = &background.Progress{}
-	if err := buildIdx(ctx, f, *chainId, tx, tmpDir, p, lvl, borCfg); err != nil {
+	if err := buildIdx(ctx, f, *chainId, tmpDir, p, lvl, borCfg); err != nil {
 		return err
 	}
 
@@ -1553,7 +1547,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, tx kv.Tx, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, borCfg types.BorConfigSprint) (err error) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, borCfg types.BorConfigSprint) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -1692,7 +1686,7 @@ RETRY:
 				}
 			}
 			emptySender := make([]byte, 20)
-			if slot.IsBor && bytes.Equal(word[2:txTypeAndlengthOfAddress], emptySender) {
+			if borCfg.IsBor && slot.IsBor && bytes.Equal(word[2:txTypeAndlengthOfAddress], emptySender) {
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
@@ -1994,7 +1988,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, tx kv.Tx, mergeRanges []Range, snapDir string, doIndex bool, borCfg types.BorConfigSprint) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool, borCfg types.BorConfigSprint) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -2015,7 +2009,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, tx kv.Tx, me
 			if doIndex {
 				p := &background.Progress{}
 
-				if err := buildIdx(ctx, f, m.chainID, tx, m.tmpDir, p, m.lvl, borCfg); err != nil {
+				if err := buildIdx(ctx, f, m.chainID, m.tmpDir, p, m.lvl, borCfg); err != nil {
 					return err
 				}
 			}
