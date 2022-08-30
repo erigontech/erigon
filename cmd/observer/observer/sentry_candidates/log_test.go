@@ -2,11 +2,12 @@ package sentry_candidates
 
 import (
 	"context"
+	"strings"
+	"testing"
+
 	"github.com/nxadm/tail"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"strings"
-	"testing"
 )
 
 func TestLogRead(t *testing.T) {

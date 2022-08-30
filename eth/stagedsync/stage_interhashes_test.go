@@ -70,8 +70,9 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// Populate account & storage trie DB tables
 	// ----------------------------------------------------------------
 
+	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
@@ -166,6 +167,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
+	historyV2 := false
 
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(1 * params.Ether)
@@ -191,7 +193,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReader()
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -251,9 +253,9 @@ func TestStorageDeletion(t *testing.T) {
 	// ----------------------------------------------------------------
 	// Populate account & storage trie DB tables
 	// ----------------------------------------------------------------
-
+	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
 	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 

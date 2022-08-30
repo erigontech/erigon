@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -383,7 +384,7 @@ var (
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: runtime.GOMAXPROCS(-1),
+		Value: cmp.Max(10, runtime.GOMAXPROCS(-1)*2),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -631,6 +632,10 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
+	HistoryV2Flag = cli.BoolFlag{
+		Name:  "history.v2",
+		Usage: "Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -851,7 +856,7 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 }
 
 // NewP2PConfig
-//  - doesn't setup bootnodes - they will set when genesisHash will know
+//   - doesn't setup bootnodes - they will set when genesisHash will know
 func NewP2PConfig(
 	nodiscover bool,
 	dirs datadir.Dirs,
@@ -1182,7 +1187,7 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 	}
 }
 
-//nolint
+// nolint
 func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
@@ -1488,6 +1493,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Ethstats = ctx.GlobalString(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
+	cfg.HistoryV2 = ctx.GlobalIsSet(HistoryV2Flag.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
@@ -1598,9 +1604,9 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 		return nil
 	}
 	// Otherwise resolve absolute paths and return them
-	var preloads []string
-
-	for _, file := range strings.Split(ctx.GlobalString(PreloadJSFlag.Name), ",") {
+	files := strings.Split(ctx.GlobalString(PreloadJSFlag.Name), ",")
+	preloads := make([]string, 0, len(files))
+	for _, file := range files {
 		preloads = append(preloads, strings.TrimSpace(file))
 	}
 	return preloads

@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -51,8 +52,9 @@ func ReplayTx(genesis *core.Genesis) error {
 	txNums := make([]uint64, allSnapshots.BlocksAvailable()+1)
 	if err := allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
-			if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+			if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 				txNums[blockNum] = baseTxNum + txAmount
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -103,7 +105,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	fmt.Printf("txNum = %d\n", txNum)
 	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
+	agg, err := libstate.NewAggregator22(aggPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}

@@ -676,7 +676,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			itemType = newItemType
 			switch itemType {
 			case AccountStreamItem:
-				var a *accounts.Account = aVal
+				var a = aVal
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
 				accData.Incarnation = a.Incarnation

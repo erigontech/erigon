@@ -188,9 +188,11 @@ func (rs *ReconState) SizeEstimate() uint64 {
 }
 
 type StateReconWriter struct {
-	ac    *libstate.Aggregator22Context
-	rs    *ReconState
-	txNum uint64
+	ac        *libstate.Aggregator22Context
+	rs        *ReconState
+	txNum     uint64
+	tx        kv.Tx
+	composite []byte
 }
 
 func NewStateReconWriter(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriter {
@@ -204,13 +206,19 @@ func (w *StateReconWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
+func (w *StateReconWriter) SetTx(tx kv.Tx) {
+	w.tx = tx
+}
+
 func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	found, txNum := w.ac.MaxAccountsTxNum(address.Bytes())
-	if !found {
+	txKey, err := w.tx.GetOne(kv.XAccount, address.Bytes())
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
 		return nil
 	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change account [%x] txNum = %d\n", address, txNum)
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -224,12 +232,14 @@ func (w *StateReconWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	found, txNum := w.ac.MaxCodeTxNum(address.Bytes())
-	if !found {
+	txKey, err := w.tx.GetOne(kv.XCode, address.Bytes())
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
 		return nil
 	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change code [%x] %d %x txNum = %d\n", address, incarnation, codeHash, txNum)
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
 	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
@@ -245,13 +255,26 @@ func (w *StateReconWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	found, txNum := w.ac.MaxStorageTxNum(address.Bytes(), key.Bytes())
-	if !found {
-		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
+	if cap(w.composite) < 20+32 {
+		w.composite = make([]byte, 20+32)
+	} else {
+		w.composite = w.composite[:20+32]
+	}
+	copy(w.composite, address.Bytes())
+	copy(w.composite[20:], key.Bytes())
+	txKey, err := w.tx.GetOne(kv.XStorage, w.composite)
+	if err != nil {
+		return err
+	}
+	if txKey == nil {
 		return nil
 	}
-	if txNum != w.txNum {
-		//fmt.Printf("no change storage [%x] [%x] txNum = %d\n", address, *key, txNum)
+	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
+		return nil
+	}
+	found := w.ac.IsMaxStorageTxNum(address.Bytes(), key.Bytes(), w.txNum)
+	if !found {
+		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
 		return nil
 	}
 	if !value.IsZero() {

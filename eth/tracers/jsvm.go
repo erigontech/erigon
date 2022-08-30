@@ -1,8 +1,9 @@
 package tracers
 
 import (
-	"github.com/dop251/goja"
 	"unsafe"
+
+	"github.com/dop251/goja"
 )
 
 type JSVM struct {

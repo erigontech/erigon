@@ -3,10 +3,11 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 )
 
 func Bench3(erigon_url, geth_url string) {

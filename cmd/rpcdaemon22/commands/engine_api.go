@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
@@ -76,7 +77,7 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 	json := map[string]interface{}{
 		"status": x.Status.String(),
 	}
-	if x.LatestValidHash != nil {
+	if x.LatestValidHash != nil && x.Status != remote.EngineStatus_ACCEPTED {
 		json["latestValidHash"] = common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
 	}
 	if x.ValidationError != "" {
@@ -110,8 +111,25 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 		return nil, err
 	}
 
+	payloadStatus := convertPayloadStatus(reply.PayloadStatus)
+	if reply.PayloadStatus.Status == remote.EngineStatus_INVALID && payloadStatus["latestValidHash"] != nil {
+		tx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		defer tx.Rollback()
+		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
+		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
+		if err != nil {
+			return nil, err
+		}
+		if !isValidHashPos {
+			payloadStatus["latestValidHash"] = common.Hash{}
+		}
+	}
 	json := map[string]interface{}{
-		"payloadStatus": convertPayloadStatus(reply.PayloadStatus),
+		"payloadStatus": payloadStatus,
 	}
 	if reply.PayloadId != 0 {
 		encodedPayloadId := make([]byte, 8)
@@ -137,17 +155,23 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		}
 	}
 
+	if len(payload.LogsBloom) != 256 {
+		// Lengths of the other fields are ensured by their types (common.Hash or Address)
+		log.Warn("NewPayload unexpected LogsBloom length", "LogsBloom", payload.LogsBloom)
+		return nil, fmt.Errorf("invalid LogsBloom length")
+	}
+
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([][]byte, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
-		transactions[i] = ([]byte)(transaction)
+		transactions[i] = transaction
 	}
 	res, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom),
 		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
 		BlockNumber:   uint64(payload.BlockNumber),
 		GasLimit:      uint64(payload.GasLimit),
@@ -162,8 +186,24 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		log.Warn("NewPayload", "err", err)
 		return nil, err
 	}
+	payloadStatus := convertPayloadStatus(res)
+	if payloadStatus["latestValidHash"] != nil {
+		tx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
 
-	return convertPayloadStatus(res), nil
+		defer tx.Rollback()
+		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
+		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
+		if err != nil {
+			return nil, err
+		}
+		if !isValidHashPos {
+			payloadStatus["latestValidHash"] = common.Hash{}
+		}
+	}
+	return payloadStatus, nil
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
@@ -223,7 +263,12 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	}
 
 	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
-	if terminalTotalDifficulty != nil && terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
+
+	if terminalTotalDifficulty == nil {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
+	}
+
+	if terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 

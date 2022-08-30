@@ -159,7 +159,7 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
 	}
-	var toRemove []*Link = []*Link{link}
+	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
@@ -518,6 +518,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
+				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
@@ -542,6 +543,8 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		if err != nil {
 			return false, false, 0, err
 		}
+		// Some blocks may be marked as non-valid on PoS chain because they were far into the future.
+		delete(hd.badPoSHeaders, link.hash)
 		if td != nil {
 			if hd.seenAnnounces.Pop(link.hash) {
 				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
@@ -556,9 +559,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 				returnTd = td
 				lastD = link.header.Difficulty
 			}
-		}
-		if link.blockHeight == hd.latestMinedBlockNumber {
-			return false, true, 0, nil
 		}
 
 		if link.blockHeight > hd.highestInDb {
@@ -575,6 +575,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			if !child.persisted {
 				hd.moveLinkToQueue(child, InsertQueueID)
 			}
+		}
+		if link.blockHeight == hd.latestMinedBlockNumber {
+			return false, true, 0, nil
 		}
 	}
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
@@ -599,7 +602,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
 func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
-	var more bool = true
+	var more = true
 	var err error
 	var force bool
 	var blocksToTTD uint64
@@ -651,6 +654,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	for _, sh := range csHeaders {
 		header := sh.Header
 		headerHash := sh.Hash
+
 		if headerHash != hd.posAnchor.parentHash {
 			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
 				log.Info("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
@@ -1029,6 +1033,21 @@ func (hd *HeaderDownload) ExtractStats() Stats {
 	s := hd.stats
 	hd.stats = Stats{}
 	return s
+}
+
+func (hd *HeaderDownload) FirstPoSHeight() *uint64 {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.firstSeenHeightPoS
+}
+
+func (hd *HeaderDownload) SetFirstPoSHeight(blockHeight uint64) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	if hd.firstSeenHeightPoS == nil {
+		hd.firstSeenHeightPoS = new(uint64)
+		*hd.firstSeenHeightPoS = blockHeight
+	}
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {

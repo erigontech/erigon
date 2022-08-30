@@ -64,26 +64,28 @@ var (
 	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 	t - prune transaction by it's hash index
 	c - prune call traces (used by trace_filter method)
-	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90_000 
-	If item is NOT in the list - means NO pruning for this data.
-	Example: --prune=hrtc`,
+	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90000.
+	Similarly, --prune=t is shortcut for: --prune.t.older=90000 and --prune=c is shortcut for: --prune.c.older=90000.
+	However, --prune=r means to prune receipts before the Beacon Chain genesis (Consensus Layer might need receipts after that).
+	If an item is NOT on the list - means NO pruning for this data.
+	Example: --prune=htc`,
 		Value: "disabled",
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'h', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
 	}
 	PruneReceiptFlag = cli.Uint64Flag{
 		Name:  "prune.r.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'r', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain`,
 	}
 	PruneTxIndexFlag = cli.Uint64Flag{
 		Name:  "prune.t.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 't', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 't', then default is 90K)`,
 	}
 	PruneCallTracesFlag = cli.Uint64Flag{
 		Name:  "prune.c.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'c', then default is 90K)`,
 	}
 
 	PruneHistoryBeforeFlag = cli.Uint64Flag{
@@ -188,6 +190,7 @@ var (
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(
+		cfg.Genesis.Config.ChainID.Uint64(),
 		ctx.GlobalString(PruneFlag.Name),
 		ctx.GlobalUint64(PruneHistoryFlag.Name),
 		ctx.GlobalUint64(PruneReceiptFlag.Name),
@@ -276,7 +279,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			beforeC = *v
 		}
 
-		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		mode, err := prune.FromCli(cfg.Genesis.Config.ChainID.Uint64(), *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

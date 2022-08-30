@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 const (
@@ -54,7 +55,7 @@ func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl
 		return block.Header(), nil
 	}
 
-	blockNum, err := getBlockNumber(number, tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,7 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Valida
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	var changes []*bor.Validator
+	changes := make([]*bor.Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

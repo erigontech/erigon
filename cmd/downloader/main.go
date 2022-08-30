@@ -233,7 +233,7 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
-//nolint
+// nolint
 func removePieceCompletionStorage(snapDir string) {
 	_ = os.RemoveAll(filepath.Join(snapDir, "db"))
 	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db"))

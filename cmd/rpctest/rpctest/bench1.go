@@ -19,7 +19,9 @@ var routes map[string]string
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
+//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
 // fullTest - if false - then call only methods which RPCDaemon currently supports
 func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(erigonURL, gethURL)

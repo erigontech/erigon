@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"testing"
 	"testing/fstest"
+
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )

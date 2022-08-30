@@ -492,8 +492,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("add %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("add %d: expected receipt to be found", i)
+			}
 		}
 	}
 	// shared tx
@@ -502,8 +506,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("share %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("share %d: expected receipt to be found", i)
+			}
 		}
 	}
 }
@@ -753,7 +761,11 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		})
 		require.NoError(err)
 		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
-		require.Greater(found, uint64(0))
+		if m.HistoryV2 {
+			// receipts are not stored in erigon22
+		} else {
+			require.Greater(found, uint64(0))
+		}
 	} else {
 		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
 		require.NoError(err)
@@ -1002,20 +1014,21 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	tx, err := db.RwKV().BeginRo(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
-	st := state.New(state.NewPlainState(tx, 1))
+
+	st := m.NewHistoricalStateReader(1, tx)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainState(tx, 2))
+	st = m.NewHistoricalStateReader(2, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainState(tx, 3))
+	st = m.NewHistoricalStateReader(3, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -1136,8 +1149,8 @@ func TestLargeReorgTrieGC(t *testing.T) {
 // overtake the 'canon' chain until after it's passed canon by about 200 blocks.
 //
 // Details at:
-//  - https://github.com/ethereum/go-ethereum/issues/18977
-//  - https://github.com/ethereum/go-ethereum/pull/18988
+//   - https://github.com/ethereum/go-ethereum/issues/18977
+//   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
@@ -1677,20 +1690,19 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 
 // TestInitThenFailCreateContract tests a pretty notorious case that happened
 // on mainnet over blocks 7338108, 7338110 and 7338115.
-// - Block 7338108: address e771789f5cccac282f23bb7add5690e1f6ca467c is initiated
-//   with 0.001 ether (thus created but no code)
-// - Block 7338110: a CREATE2 is attempted. The CREATE2 would deploy code on
-//   the same address e771789f5cccac282f23bb7add5690e1f6ca467c. However, the
-//   deployment fails due to OOG during initcode execution
-// - Block 7338115: another tx checks the balance of
-//   e771789f5cccac282f23bb7add5690e1f6ca467c, and the snapshotter returned it as
-//   zero.
+//   - Block 7338108: address e771789f5cccac282f23bb7add5690e1f6ca467c is initiated
+//     with 0.001 ether (thus created but no code)
+//   - Block 7338110: a CREATE2 is attempted. The CREATE2 would deploy code on
+//     the same address e771789f5cccac282f23bb7add5690e1f6ca467c. However, the
+//     deployment fails due to OOG during initcode execution
+//   - Block 7338115: another tx checks the balance of
+//     e771789f5cccac282f23bb7add5690e1f6ca467c, and the snapshotter returned it as
+//     zero.
 //
 // The problem being that the snapshotter maintains a destructset, and adds items
 // to the destructset in case something is created "onto" an existing item.
 // We need to either roll back the snapDestructs, or not place it into snapDestructs
 // in the first place.
-//
 func TestInitThenFailCreateContract(t *testing.T) {
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1884,13 +1896,13 @@ func TestEIP2718Transition(t *testing.T) {
 
 // TestEIP1559Transition tests the following:
 //
-// 1. A tranaction whose feeCap is greater than the baseFee is valid.
-// 2. Gas accounting for access lists on EIP-1559 transactions is correct.
-// 3. Only the transaction's tip will be received by the coinbase.
-// 4. The transaction sender pays for both the tip and baseFee.
-// 5. The coinbase receives only the partially realized tip when
-//    feeCap - tip < baseFee.
-// 6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
+//  1. A tranaction whose feeCap is greater than the baseFee is valid.
+//  2. Gas accounting for access lists on EIP-1559 transactions is correct.
+//  3. Only the transaction's tip will be received by the coinbase.
+//  4. The transaction sender pays for both the tip and baseFee.
+//  5. The coinbase receives only the partially realized tip when
+//     feeCap - tip < baseFee.
+//  6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
 	t.Skip("needs fixing")
 	var (

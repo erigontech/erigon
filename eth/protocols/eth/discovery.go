@@ -18,6 +18,7 @@ package eth
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/p2p/enr"

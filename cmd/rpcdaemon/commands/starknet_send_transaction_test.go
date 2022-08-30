@@ -37,7 +37,7 @@ func TestErrorStarknetSendRawTransaction(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	for _, tt := range cases {
-		api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, starknetClient, txPool)
+		api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, nil, false), m.DB, starknetClient, txPool)
 
 		t.Run(tt.name, func(t *testing.T) {
 			hex, _ := hexutil.Decode(tt.tx)

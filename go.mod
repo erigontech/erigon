@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220808031639-342fb2579c49
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220830025126-1a42afe5f209
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -14,10 +14,10 @@ require (
 require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.10.0
-	github.com/VictoriaMetrics/metrics v1.20.1
+	github.com/VictoriaMetrics/metrics v1.22.2
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.2-0.20220427063716-a4894bb521c6
-	github.com/anacrolix/torrent v1.46.1-0.20220713100403-caa9400c52fe
+	github.com/anacrolix/torrent v1.46.1-0.20220808053819-61302332cfc5
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -47,7 +47,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pelletier/go-toml v1.9.5
-	github.com/pelletier/go-toml/v2 v2.0.2
+	github.com/pelletier/go-toml/v2 v2.0.3
 	github.com/pion/stun v0.3.5
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/rs/cors v1.8.2
@@ -62,7 +62,7 @@ require (
 	github.com/urfave/cli v1.22.9
 	github.com/valyala/fastjson v1.6.3
 	github.com/xsleonard/go-merkle v1.1.0
-	go.uber.org/atomic v1.9.0
+	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
 	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
@@ -70,9 +70,9 @@ require (
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	google.golang.org/grpc v1.48.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
-	google.golang.org/protobuf v1.28.0
+	google.golang.org/protobuf v1.28.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
-	modernc.org/sqlite v1.17.3
+	modernc.org/sqlite v1.18.1
 	pgregory.net/rapid v0.4.7
 )
 
@@ -160,8 +160,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
 	modernc.org/cc/v3 v3.36.0 // indirect
-	modernc.org/ccgo/v3 v3.16.6 // indirect
-	modernc.org/libc v1.16.7 // indirect
+	modernc.org/ccgo/v3 v3.16.8 // indirect
+	modernc.org/libc v1.16.19 // indirect
 	modernc.org/mathutil v1.4.1 // indirect
 	modernc.org/memory v1.1.1 // indirect
 	modernc.org/opt v0.1.1 // indirect

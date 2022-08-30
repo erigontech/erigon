@@ -72,7 +72,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(rpc.LatestBlockNumber), &tracers.TraceConfig{}, stream)
+	err := api.TraceBlockByNumber(context.Background(), rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
 	}

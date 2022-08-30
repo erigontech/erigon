@@ -544,7 +544,7 @@ func (h *handshakeState) runInitiator(conn io.ReadWriter, prv *ecdsa.PrivateKey,
 func (h *handshakeState) makeAuthMsg(prv *ecdsa.PrivateKey) (*authMsgV4, error) {
 	// Generate random initiator nonce.
 	h.initNonce = make([]byte, shaLen)
-	_, err := rand.Read(h.initNonce)
+	_, err := rand.Read(h.initNonce) // nolint: gosec
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +582,7 @@ func (h *handshakeState) handleAuthResp(msg *authRespV4) (err error) {
 func (h *handshakeState) makeAuthResp() (msg *authRespV4, err error) {
 	// Generate random nonce.
 	h.respNonce = make([]byte, shaLen)
-	if _, err = rand.Read(h.respNonce); err != nil {
+	if _, err = rand.Read(h.respNonce); err != nil { // nolint: gosec
 		return nil, err
 	}
 

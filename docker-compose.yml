@@ -34,7 +34,7 @@ services:
       erigon ${ERIGON_FLAGS-} --private.api.addr=0.0.0.0:9090
       --sentry.api.addr=sentry:9091 --downloader.api.addr=downloader:9093 --txpool.disable
       --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
-      --authrpc.jwtsecret=/home/erigon/.local/share/erigon/jwt.hex
+      --authrpc.jwtsecret=/home/erigon/.local/share/erigon/jwt.hex --datadir=/home/erigon/.local/share/erigon
     ports: [ "8551:8551" ]
     volumes:
       # It's ok to mount sub-dirs of "datadir" to different drives
@@ -44,23 +44,23 @@ services:
 
   sentry:
     <<: *default-erigon-service
-    command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091
+    command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091 --datadir=/home/erigon/.local/share/erigon
     ports: [ "30303:30303/tcp", "30303:30303/udp" ]
 
   downloader:
     <<: *default-erigon-service
-    command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
+    command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093 --datadir=/home/erigon/.local/share/erigon
     ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 
   txpool:
     <<: *default-erigon-service
-    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094
+    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094 --sentry.api.addr=sentry:9091 --datadir=/home/erigon/.local/share/erigon
 
   rpcdaemon:
     <<: *default-erigon-service
     command: |
       rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
-      --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094
+      --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094 --datadir=/home/erigon/.local/share/erigon
     ports: [ "8545:8545" ]
 
 

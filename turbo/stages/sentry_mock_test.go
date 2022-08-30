@@ -56,7 +56,7 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := true
-	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+	highestSeenHeader := chain.TopBlock.NumberU64()
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle := true
-		highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+		highestSeenHeader := chain.TopBlock.NumberU64()
 		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle := true
-	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+	highestSeenHeader := chain.TopBlock.NumberU64()
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = uint64(short.TopBlock.NumberU64())
+	highestSeenHeader = short.TopBlock.NumberU64()
 	initialCycle = false
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
+	highestSeenHeader = long1.TopBlock.NumberU64()
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
+	highestSeenHeader = short2.TopBlock.NumberU64()
 	initialCycle = false
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
@@ -396,7 +396,7 @@ func TestAnchorReplace(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader := uint64(long.TopBlock.NumberU64())
+	highestSeenHeader := long.TopBlock.NumberU64()
 	initialCycle := true
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
@@ -501,7 +501,7 @@ func TestAnchorReplace2(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	highestSeenHeader := uint64(long.TopBlock.NumberU64())
+	highestSeenHeader := long.TopBlock.NumberU64()
 	initialCycle := true
 	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)

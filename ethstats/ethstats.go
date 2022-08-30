@@ -73,13 +73,14 @@ type Service struct {
 // websocket.
 //
 // From Gorilla websocket docs:
-//   Connections support one concurrent reader and one concurrent writer.
-//   Applications are responsible for ensuring that no more than one goroutine calls the write methods
-//     - NextWriter, SetWriteDeadline, WriteMessage, WriteJSON, EnableWriteCompression, SetCompressionLevel
-//   concurrently and that no more than one goroutine calls the read methods
-//     - NextReader, SetReadDeadline, ReadMessage, ReadJSON, SetPongHandler, SetPingHandler
-//   concurrently.
-//   The Close and WriteControl methods can be called concurrently with all other methods.
+//
+//	Connections support one concurrent reader and one concurrent writer.
+//	Applications are responsible for ensuring that no more than one goroutine calls the write methods
+//	  - NextWriter, SetWriteDeadline, WriteMessage, WriteJSON, EnableWriteCompression, SetCompressionLevel
+//	concurrently and that no more than one goroutine calls the read methods
+//	  - NextReader, SetReadDeadline, ReadMessage, ReadJSON, SetPongHandler, SetPingHandler
+//	concurrently.
+//	The Close and WriteControl methods can be called concurrently with all other methods.
 type connWrapper struct {
 	conn *websocket.Conn
 
@@ -364,7 +365,7 @@ func (s *Service) login(conn *connWrapper) error {
 	// Construct and send the login authentication
 	// infos := s.server.NodeInfo()
 
-	var protocols []string
+	protocols := make([]string, 0, len(s.servers))
 	for _, srv := range s.servers {
 		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
 	}
@@ -541,9 +542,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 		td = common.Big0
 	}
 	// Gather the block infos from the local blockchain
-	var (
-		txs []txStats
-	)
+	txs := make([]txStats, 0, len(block.Transactions()))
 	for _, tx := range block.Transactions() {
 		txs = append(txs, txStats{tx.Hash()})
 	}

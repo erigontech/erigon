@@ -3,11 +3,12 @@ package reports
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
-	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/observer/database"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
 )
 
 type SentryCandidatesReport struct {

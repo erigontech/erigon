@@ -60,7 +60,7 @@ func importChain(ctx *cli.Context) error {
 	stack := makeConfigNode(nodeCfg)
 	defer stack.Close()
 
-	ethereum, err := turboNode.RegisterEthService(stack, ethCfg, logger)
+	ethereum, err := eth.New(stack, ethCfg, logger)
 	if err != nil {
 		return err
 	}

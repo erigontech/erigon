@@ -70,8 +70,13 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 16), ctx: ctx, ctxCancel: cancel}
+
+	p.lock.RLock()
+	t := p.tasks
+	p.lock.RUnlock()
+
 	go func() { // each peer has own worker, then slow
-		for f := range p.tasks {
+		for f := range t {
 			f()
 		}
 	}()
@@ -637,7 +642,7 @@ func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerI
 	switch ss.Protocol.Version {
 	case eth.ETH66, eth.ETH67:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
-			RequestId: rand.Uint64(),
+			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 				Amount:  1,
 				Reverse: false,

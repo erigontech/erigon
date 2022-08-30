@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -470,20 +469,14 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	return nil
 }
 
-func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
+func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
-	for _, tx := range txs {
+	for _, txn := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
-			c, err := db.Cursor(kv.EthTx)
-			if err != nil {
-				kk, _, _ := c.Last()
-				c.Close()
-				return fmt.Errorf("txId=%d, baseTxId=%d, lastInDb=%d, %w", txId, baseTxId, binary.BigEndian.Uint64(kk), err)
-			}
-			return err
+		if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
+			return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 		}
 		txId++
 	}
@@ -647,21 +640,21 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	return senders, nil
 }
 
-func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
 	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		return err
+		return false, 0, err
 	}
 	if exists {
-		return nil
+		return false, 0, nil
 	}
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
-		return err
+		return false, 0, err
 	}
 	data := types.BodyForStorage{
 		BaseTxId: baseTxId,
@@ -669,12 +662,13 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		Uncles:   body.Uncles,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("WriteBodyForStorage: %w", err)
+		return false, 0, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
+	lastTxnNum = baseTxId + uint64(len(body.Transactions)) + 2
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
-		return fmt.Errorf("WriteRawTransactions: %w", err)
+		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
-	return nil
+	return true, lastTxnNum, nil
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
@@ -718,7 +712,7 @@ func deleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum, lastTxnNum uint64)) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -760,6 +754,10 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		bodyForStorage.BaseTxId = newBaseId
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
+		}
+		if cb != nil {
+			lastTxnNum := bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount)
+			cb(blockNum, lastTxnNum)
 		}
 
 		select {
@@ -1635,36 +1633,6 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 func WriteSnapshots(tx kv.RwTx, list []string) error {
 	res, _ := json.Marshal(list)
 	return tx.Put(kv.DatabaseInfo, SapshotsKey, res)
-}
-
-// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
-func EnforceSnapshotsInvariant(tx kv.RwTx, snListInFolder []string) (filtered []string, err error) {
-	snList, err := ReadSnapshots(tx)
-	if err != nil {
-		return filtered, err
-	}
-	exists := map[string]string{}
-
-	for _, fName := range snListInFolder {
-		exists[fName] = ""
-	}
-
-	for _, fName := range snList {
-		if _, ok := exists[fName]; !ok {
-			delete(exists, fName)
-			continue
-		}
-		filtered = append(filtered, fName)
-		delete(exists, fName)
-	}
-	for fName := range exists {
-		filtered = append(filtered, fName)
-	}
-	slices.Sort(filtered)
-	if err = WriteSnapshots(tx, filtered); err != nil {
-		return filtered, err
-	}
-	return filtered, nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size

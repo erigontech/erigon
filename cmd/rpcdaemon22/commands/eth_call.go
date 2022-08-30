@@ -10,10 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -25,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -76,40 +76,18 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
-	if blockLabel, ok := blockNrOrHash.Number(); ok {
-		blockNum, err := getBlockNumber(blockLabel, tx)
-		if err != nil {
-			return nil, err
-		}
-		return rawdb.ReadHeaderByNumber(tx, blockNum), nil
+// headerByNumberOrHash - intent to read recent headers only
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
+	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
 	}
-	if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err := rawdb.ReadHeaderByHash(tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			return nil, errors.New("header for hash not found")
-		}
-
-		if blockNrOrHash.RequireCanonical {
-			can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-			if err != nil {
-				return nil, err
-			}
-			if can != hash {
-				return nil, errors.New("hash is not currently canonical")
-			}
-		}
-
-		h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
-		if h == nil {
-			return nil, errors.New("header found, but block body is missing")
-		}
-		return h, nil
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("invalid arguments; neither block nor hash specified")
+	// header can be nil
+	return header, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -147,9 +125,25 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		h, err := headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
 		if err != nil {
 			return 0, err
+		}
+		if h == nil {
+			// if a block number was supplied and there is no header return 0
+			if blockNrOrHash != nil {
+				return 0, nil
+			}
+
+			// block number not supplied, so we haven't found a pending block, read the latest block instead
+			bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+			h, err = headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
+			if err != nil {
+				return 0, err
+			}
+			if h == nil {
+				return 0, nil
+			}
 		}
 		hi = h.GasLimit
 	}
@@ -340,7 +334,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber)
+		stateReader = state.NewPlainState(tx, blockNumber+1)
 	}
 
 	header := block.Header()
@@ -391,8 +385,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+
+		var msg types.Message
+
+		var baseFee *uint256.Int = nil
+		// check if EIP-1559
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+
+		msg, err = args.ToMessage(api.GasCap, baseFee)
 		if err != nil {
 			return nil, err
 		}

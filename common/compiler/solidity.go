@@ -22,10 +22,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/log/v3"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Solidity contains information about the solidity compiler.

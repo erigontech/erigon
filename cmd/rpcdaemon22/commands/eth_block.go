@@ -208,8 +208,24 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	var borTx types.Transaction
+	var borTxHash common.Hash
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
+		if borTx != nil {
+			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
+		}
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -255,7 +271,21 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	var borTx types.Transaction
+	var borTxHash common.Hash
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx != nil {
+			borTxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		}
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
@@ -284,19 +314,22 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		n := hexutil.Uint(len(b.Transactions()))
 		return &n, nil
 	}
-	blockNum, err := getBlockNumber(blockNr, tx)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	body, _, txAmount, err := rawdb.ReadBodyByNumber(tx, blockNum)
+	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if body == nil {
+
+	if txAmount == 0 {
 		return nil, nil
 	}
-	n := hexutil.Uint(txAmount)
-	return &n, nil
+
+	numOfTx := hexutil.Uint(txAmount)
+
+	return &numOfTx, nil
 }
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
@@ -306,15 +339,20 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 	defer tx.Rollback()
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
+	if err != nil {
+		return nil, err
+	}
+	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
-	if num == nil {
+	if txAmount == 0 {
 		return nil, nil
 	}
-	body, _, txAmount := rawdb.ReadBody(tx, blockHash, *num)
-	if body == nil {
-		return nil, nil
-	}
-	n := hexutil.Uint(txAmount)
-	return &n, nil
+
+	numOfTx := hexutil.Uint(txAmount)
+
+	return &numOfTx, nil
 }

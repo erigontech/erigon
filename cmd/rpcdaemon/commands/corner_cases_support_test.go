@@ -20,7 +20,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	defer db.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false),
 		db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 

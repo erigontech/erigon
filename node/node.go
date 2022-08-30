@@ -244,7 +244,7 @@ func (n *Node) openDataDir() error {
 		return convertFileLockError(err)
 	}
 	if !locked {
-		return fmt.Errorf("%w: %s\n", ErrDataDirUsed, instdir)
+		return fmt.Errorf("%w: %s", ErrDataDirUsed, instdir)
 	}
 	n.dirLock = l
 	return nil
@@ -325,6 +325,8 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		}
 		if label == kv.ChainDB {
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		return opts.Open()
 	}

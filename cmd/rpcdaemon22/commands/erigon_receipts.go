@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -13,8 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
-	"sort"
-	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -53,14 +53,14 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 }
 
 // GetLogs implements erigon_getLogs. Return an array of logs that matches the filter conditions
-func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	start := time.Now()
 	var begin, end uint64
-	logs := []*types.Log{}
+	erigonLogs := types.ErigonLogs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		return logs, beginErr
+		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -105,9 +105,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
-		fromTxNum = api._txNums[begin-1]
+		fromTxNum = api._txNums.MinOf(begin)
 	}
-	toTxNum = api._txNums[end] // end is an inclusive bound
+	toTxNum = api._txNums.MaxOf(end) // end is an inclusive bound
 
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
@@ -141,21 +141,22 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 
 	if txNumbers.GetCardinality() == 0 {
-		return logs, nil
+		return erigonLogs, nil
 	}
 	var lastBlockNum uint64
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader23(ac, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
-		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
-			return api._txNums[i] > txNum
-		}))
+		ok, blockNum := api._txNums.Find(txNum)
+		if !ok {
+			return nil, nil
+		}
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				return nil, err
@@ -167,7 +168,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums[blockNum-1]
+			startTxNum = api._txNums.MinOf(blockNum)
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
@@ -196,18 +197,19 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil, err
 		}
 		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
-		for _, log := range filtered {
+		for i, log := range filtered {
 			log.BlockNumber = blockNum
-			log.Timestamp = timestamp
 			log.BlockHash = lastBlockHash
 			log.TxHash = txHash
 			log.Index = 0
+
+			erigonLogs[i].Log = *log
+			erigonLogs[i].Timestamp = timestamp
 		}
-		logs = append(logs, filtered...)
 	}
 	stats := api._agg.GetAndResetStats()
 	log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
-	return logs, nil
+	return erigonLogs, nil
 }
 
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.

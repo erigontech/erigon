@@ -103,10 +103,10 @@ func New(snapDir string, verbosity lg.Level, dbg bool, natif nat.Interface, down
 		}
 	}
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
-		b := int(2 * DefaultPieceSize)
-		if downloadRate.Bytes() > DefaultPieceSize {
+		b := 2 * DefaultNetworkChunkSize
+		if downloadRate.Bytes() > DefaultNetworkChunkSize {
 			b = int(2 * downloadRate.Bytes())
 		}
 		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), b) // default: unlimited

@@ -1,17 +1,24 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"sort"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // GetHeaderByNumber implements erigon_getHeaderByNumber. Returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
@@ -31,7 +38,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	blockNum, err := getBlockNumber(blockNumber, tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNumber), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +47,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	if err != nil {
 		return nil, err
 	}
+
 	if header == nil {
 		return nil, fmt.Errorf("block header not found: %d", blockNum)
 	}
@@ -85,7 +93,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeader == nil {
-		return nil, errors.New("genesis header not found")
+		return nil, errors.New("no genesis header found")
 	}
 
 	firstHeaderTime := firstHeader.Time
@@ -127,7 +135,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if resultingHeader == nil {
-		return nil, fmt.Errorf("no header found with block num %d", blockNum)
+		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
 	}
 
 	if resultingHeader.Time > uintTimestamp {
@@ -165,4 +173,66 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 		}
 	}
 	return response, err
+}
+
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := tx.Cursor(kv.AccountChangeSet)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	startkey := dbutils.EncodeBlockNumber(blockNumber)
+
+	decodeFn := changeset.Mapper[kv.AccountChangeSet].Decode
+
+	balancesMapping := make(map[common.Address]*hexutil.Big)
+
+	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
+	if err != nil {
+		return nil, err
+	}
+
+	for dbKey, dbValue, _ := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, _ = c.Next() {
+		_, addressBytes, v, err := decodeFn(dbKey, dbValue)
+		if err != nil {
+			return nil, err
+		}
+
+		var oldAcc accounts.Account
+		if err = oldAcc.DecodeForStorage(v); err != nil {
+			return nil, err
+		}
+		oldBalance := oldAcc.Balance
+
+		address := common.BytesToAddress(addressBytes)
+
+		newAcc, err := newReader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+
+		newBalance := uint256.NewInt(0)
+		if newAcc != nil {
+			newBalance = &newAcc.Balance
+		}
+
+		if !oldBalance.Eq(newBalance) {
+			newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
+			balancesMapping[address] = newBalanceDesc
+		}
+	}
+
+	return balancesMapping, nil
 }

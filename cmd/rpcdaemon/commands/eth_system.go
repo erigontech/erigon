@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -115,13 +116,16 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	}
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 	tipcap, err := oracle.SuggestTipCap(ctx)
+	gasResult := big.NewInt(0)
+
+	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
 	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
-		tipcap.Add(tipcap, head.BaseFee)
+		gasResult.Add(tipcap, head.BaseFee)
 	}
-	return (*hexutil.Big)(tipcap), err
+	return (*hexutil.Big)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.

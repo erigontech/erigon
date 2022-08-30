@@ -72,9 +72,9 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	var begin, end uint64
-	logs := []*types.Log{}
+	logs := types.Logs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
@@ -83,15 +83,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		number := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
-		if number == nil {
+		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = *number
-		end = *number
+		begin = header.Number.Uint64()
+		end = header.Number.Uint64()
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -116,14 +119,24 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
+	if end > roaring.MaxUint32 {
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		if begin > latest {
+			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
+		}
+		end = latest
+	}
 
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
-
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
+
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
@@ -205,14 +218,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			log.TxHash = body.Transactions[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
-
-		borLogs := rawdb.ReadBorReceiptLogs(tx, blockHash, blockNumber, txIndex+1, logIndex)
-		if borLogs != nil {
-			borLogs = filterLogs(borLogs, crit.Addresses, crit.Topics)
-			if len(borLogs) > 0 {
-				logs = append(logs, borLogs...)
-			}
-		}
 	}
 
 	return logs, nil
@@ -252,6 +257,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			result = bitmapForORing
 			continue
 		}
+
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil

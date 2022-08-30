@@ -2,9 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
-	"sync"
 )
 
 var (

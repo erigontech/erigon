@@ -20,11 +20,7 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	txsCh := make(chan []types.Transaction, 1)
 	id := api.filters.SubscribePendingTxs(txsCh)
 	go func() {
-		for {
-			txs, ok := <-txsCh
-			if !ok {
-				return
-			}
+		for txs := range txsCh {
 			api.filters.AddPendingTxs(id, txs)
 		}
 	}()
@@ -39,11 +35,7 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	ch := make(chan *types.Header, 1)
 	id := api.filters.SubscribeNewHeads(ch)
 	go func() {
-		for {
-			block, ok := <-ch
-			if !ok {
-				return
-			}
+		for block := range ch {
 			api.filters.AddPendingBlock(id, block)
 		}
 	}()
@@ -58,11 +50,7 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	logs := make(chan *types.Log, 1)
 	id := api.filters.SubscribeLogs(logs, crit)
 	go func() {
-		for {
-			lg, ok := <-logs
-			if !ok {
-				return
-			}
+		for lg := range logs {
 			api.filters.AddLogs(id, lg)
 		}
 	}()
@@ -145,7 +133,6 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	go func() {
 		defer debug.LogPanic()
 		headers := make(chan *types.Header, 1)
-
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
 

@@ -9,6 +9,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -32,6 +33,9 @@ type BodiesCfg struct {
 	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
+
+	historyV2 bool
+	txNums    *exec22.TxNums
 }
 
 func StageBodiesCfg(
@@ -45,8 +49,10 @@ func StageBodiesCfg(
 	batchSize datasize.ByteSize,
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
+	historyV2 bool,
+	txNums *exec22.TxNums,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2, txNums: txNums}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -112,7 +118,11 @@ func BodiesForward(
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery); err != nil {
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) {
+		if cfg.historyV2 {
+			cfg.txNums.Append(blockNum, lastTxnNum)
+		}
+	}); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
 
@@ -192,8 +202,12 @@ Loop:
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			if err = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody); err != nil {
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			if err != nil {
 				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+			}
+			if cfg.historyV2 && ok {
+				cfg.txNums.Append(blockHeight, lastTxnNum)
 			}
 
 			if blockHeight > bodyProgress {
@@ -259,6 +273,11 @@ Loop:
 func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
+	if speed == 0 && wastedSpeed == 0 {
+		// Don't log "Wrote block ..." unless we're actually writing something
+		return
+	}
+
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
@@ -286,6 +305,9 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	badBlock := u.BadBlock != (common.Hash{})
 	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
 		return err
+	}
+	if cfg.historyV2 {
+		cfg.txNums.Unwind(u.UnwindPoint + 1)
 	}
 
 	if err = u.Done(tx); err != nil {

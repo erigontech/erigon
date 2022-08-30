@@ -173,20 +173,24 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
-	var buf []byte
-	g := sn.seg.MakeGetter()
-	blockNum := sn.idxBodyNumber.BaseDataID()
-	var b types.BodyForStorage
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, &b); err != nil {
-			return err
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
+	return sn.seg.WithReadAhead(func() error {
+		var buf []byte
+		g := sn.seg.MakeGetter()
+		blockNum := sn.ranges.from
+		var b types.BodyForStorage
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := rlp.DecodeBytes(buf, &b); err != nil {
+				return err
+			}
+			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+				return err
+			}
+			blockNum++
 		}
-		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
-		blockNum++
-	}
-	return nil
+		return nil
+	})
 }
 
 func (sn *TxnSegment) closeIdx() {
@@ -408,6 +412,9 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Txs.lock.RUnlock()
 	max := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
+		if seg.seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
@@ -415,6 +422,9 @@ func (s *RoSnapshots) Files() (list []string) {
 		list = append(list, fName)
 	}
 	for _, seg := range s.Headers.segments {
+		if seg.seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
@@ -422,12 +432,16 @@ func (s *RoSnapshots) Files() (list []string) {
 		list = append(list, fName)
 	}
 	for _, seg := range s.Txs.segments {
+		if seg.Seg == nil {
+			continue
+		}
 		if seg.ranges.from > max {
 			continue
 		}
 		_, fName := filepath.Split(seg.Seg.FilePath())
 		list = append(list, fName)
 	}
+	slices.Sort(list)
 	return list
 }
 
@@ -586,12 +600,14 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 	return ranges
 }
 
+func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
+func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
 	files, _, err := Segments(s.dir)
 	if err != nil {
 		return err
 	}
-	var list []string
+	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
@@ -871,45 +887,6 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	return res
 }
 
-func SegmentsList(dir string) (res []string, err error) {
-	files, _, err := Segments(dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		_, fName := filepath.Split(f.Path)
-		res = append(res, fName)
-	}
-	return res, nil
-}
-
-// EnforceSnapshotsInvariant if DB has record - then file exists, if file exists - DB has record.
-// it also does notify about changes after db commit
-func EnforceSnapshotsInvariant(db kv.RwDB, dir string, allSnapshots *RoSnapshots, notifier DBEventNotifier) (snList []string, err error) {
-	snListInFolder, err := SegmentsList(dir)
-	if err != nil {
-		return nil, err
-	}
-	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		snList, err = rawdb.EnforceSnapshotsInvariant(tx, snListInFolder)
-		if err != nil {
-			return err
-		}
-		return err
-	}); err != nil {
-		return snList, err
-	}
-	if allSnapshots != nil {
-		if err := allSnapshots.ReopenList(snList, true); err != nil {
-			return snList, err
-		}
-	}
-	if notifier != nil {
-		notifier.OnNewSnapshot()
-	}
-	return snList, nil
-}
-
 func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snap.Segments(dir)
 	if err != nil {
@@ -1117,7 +1094,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 
-	var downloadRequest []DownloadRequest
+	downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
 	for i := range rangesToMerge {
 		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
 	}
@@ -1570,7 +1547,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
+		panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1674,7 +1651,7 @@ RETRY:
 		}
 
 		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
+			panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
 		}
 
 		if err := txnHashIdx.Build(); err != nil {
@@ -2039,7 +2016,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		d.Close()
 	}
 	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d\n", f.Count(), expectedTotal)
+		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
 		return err
@@ -2111,4 +2088,40 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 		}
 	}
 	return req
+}
+
+type BodiesIterator struct{}
+
+func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
+	var blocksInSnapshtos uint64
+	if s != nil && s.cfg.Enabled {
+		blocksInSnapshtos = s.BlocksAvailable()
+	}
+
+	if s != nil && s.cfg.Enabled && from < blocksInSnapshtos {
+		if err := s.Bodies.View(func(bs []*BodySegment) error {
+			for _, b := range bs {
+				if err := b.Iterate(f); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+		}
+	}
+
+	for i := blocksInSnapshtos + 1; ; i++ {
+		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
+		if err != nil {
+			return err
+		}
+		if body == nil {
+			break
+		}
+		if err := f(i, baseTxId-1, uint64(txAmount)+2); err != nil {
+			return err
+		}
+	}
+	return nil
 }

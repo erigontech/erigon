@@ -19,7 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/state22"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -35,10 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-)
-
-const (
-	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
 )
 
 func init() {
@@ -106,7 +103,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, stagedsync.AggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -309,7 +306,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
-			ct := state22.NewCallTracer()
+			ct := exec22.NewCallTracer()
 			vmConfig.Tracer = ct
 			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 			if err != nil {

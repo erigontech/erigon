@@ -1,6 +1,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var DefaultMode = Mode{
@@ -21,15 +23,21 @@ var DefaultMode = Mode{
 	Experiments: Experiments{}, // all off
 }
 
+var (
+	mainnetDepositContractBlock uint64 = 11052984
+	sepoliaDepositContractBlock uint64 = 1273020
+	goerliDepositContractBlock  uint64 = 4367322
+)
+
 type Experiments struct {
 	TEVM bool
 }
 
-func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
+
 	if flags != "default" && flags != "disabled" {
-		mode.Initialised = true
 		for _, flag := range flags {
 			switch flag {
 			case 'h':
@@ -46,44 +54,46 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 		}
 	}
 
+	pruneBlockBefore := pruneBlockDefault(chainId)
+
 	if exactHistory > 0 {
-		mode.Initialised = true
 		mode.History = Distance(exactHistory)
 	}
 	if exactReceipts > 0 {
-		mode.Initialised = true
 		mode.Receipts = Distance(exactReceipts)
 	}
 	if exactTxIndex > 0 {
-		mode.Initialised = true
 		mode.TxIndex = Distance(exactTxIndex)
 	}
 	if exactCallTraces > 0 {
-		mode.Initialised = true
 		mode.CallTraces = Distance(exactCallTraces)
 	}
 
 	if beforeH > 0 {
-		mode.Initialised = true
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
-		mode.Initialised = true
+		if pruneBlockBefore != 0 {
+			log.Warn("specifying prune.before.r might break CL compatibility")
+			if beforeR > pruneBlockBefore {
+				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
+			}
+		}
 		mode.Receipts = Before(beforeR)
+	} else if exactReceipts == 0 && mode.Receipts.Enabled() && pruneBlockBefore != 0 {
+		// Default --prune=r to pruning receipts before the Beacon Chain genesis
+		mode.Receipts = Before(pruneBlockBefore)
 	}
 	if beforeT > 0 {
-		mode.Initialised = true
 		mode.TxIndex = Before(beforeT)
 	}
 	if beforeC > 0 {
-		mode.Initialised = true
 		mode.CallTraces = Before(beforeC)
 	}
 
 	for _, ex := range experiments {
 		switch ex {
 		case "tevm":
-			mode.Initialised = true
 			mode.Experiments.TEVM = true
 		case "":
 			// skip
@@ -91,8 +101,20 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 			return DefaultMode, fmt.Errorf("unexpected experiment found: %s", ex)
 		}
 	}
-
 	return mode, nil
+}
+
+func pruneBlockDefault(chainId uint64) uint64 {
+	switch chainId {
+	case 1 /* mainnet */ :
+		return mainnetDepositContractBlock
+	case 11155111 /* sepolia */ :
+		return sepoliaDepositContractBlock
+	case 5 /* goerli */ :
+		return goerliDepositContractBlock
+	}
+
+	return 0
 }
 
 func Get(db kv.Getter) (Mode, error) {
@@ -160,7 +182,9 @@ type BlockAmount interface {
 // Distance amount of blocks to keep in DB
 // but manual manipulation with such distance is very unsafe
 // for example:
-//    deleteUntil := currentStageProgress - pruningDistance
+//
+//	deleteUntil := currentStageProgress - pruningDistance
+//
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
@@ -285,6 +309,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if pruneMode.Initialised {
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
+			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
+				log.Error("--prune=r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
+					"Alternatively, enforce the old behaviour explicitly by --prune.r.older=90000 flag at the risk of breaking the Consensus Layer.")
+			}
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}

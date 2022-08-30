@@ -277,11 +277,7 @@ func Main(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
@@ -380,7 +376,7 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 
 	switch txJson.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr common.Address = common.Address{}
+		var toAddr = common.Address{}
 		if txJson.To != nil {
 			toAddr = *txJson.To
 		}
@@ -446,8 +442,9 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 // signUnsignedTransactions converts the input txs to canonical transactions.
 //
 // The transactions can have two forms, either
-//   1. unsigned or
-//   2. signed
+//  1. unsigned or
+//  2. signed
+//
 // For (1), r, s, v, need so be zero, and the `secretKey` needs to be set.
 // If so, we sign it here and now, with the given `secretKey`
 // If the condition above is not met, then it's considered a signed transaction.

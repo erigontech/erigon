@@ -18,77 +18,78 @@ import (
 )
 
 /*
- #[test]
-    fn block_reward_contract() {
-        let spec = Spec::new_test_round_block_reward_contract();
-        let tap = Arc::new(AccountProvider::transient_provider());
+#[test]
 
-        let addr1 = tap.insert_account(keccak("1").into(), &"1".into()).unwrap();
+	fn block_reward_contract() {
+	    let spec = Spec::new_test_round_block_reward_contract();
+	    let tap = Arc::new(AccountProvider::transient_provider());
 
-        let engine = &*spec.engine;
-        let genesis_header = spec.genesis_header();
-        let db1 = spec
-            .ensure_db_good(get_temp_state_db(), &Default::default())
-            .unwrap();
-        let db2 = spec
-            .ensure_db_good(get_temp_state_db(), &Default::default())
-            .unwrap();
+	    let addr1 = tap.insert_account(keccak("1").into(), &"1".into()).unwrap();
 
-        let last_hashes = Arc::new(vec![genesis_header.hash()]);
+	    let engine = &*spec.engine;
+	    let genesis_header = spec.genesis_header();
+	    let db1 = spec
+	        .ensure_db_good(get_temp_state_db(), &Default::default())
+	        .unwrap();
+	    let db2 = spec
+	        .ensure_db_good(get_temp_state_db(), &Default::default())
+	        .unwrap();
 
-        let client = generate_dummy_client_with_spec(Spec::new_test_round_block_reward_contract);
-        engine.register_client(Arc::downgrade(&client) as _);
+	    let last_hashes = Arc::new(vec![genesis_header.hash()]);
 
-        // step 2
-        let b1 = OpenBlock::new(
-            engine,
-            Default::default(),
-            false,
-            db1,
-            &genesis_header,
-            last_hashes.clone(),
-            addr1,
-            (3141562.into(), 31415620.into()),
-            vec![],
-            false,
-            None,
-        )
-        .unwrap();
-        let b1 = b1.close_and_lock().unwrap();
+	    let client = generate_dummy_client_with_spec(Spec::new_test_round_block_reward_contract);
+	    engine.register_client(Arc::downgrade(&client) as _);
 
-        // since the block is empty it isn't sealed and we generate empty steps
-        engine.set_signer(Some(Box::new((tap.clone(), addr1, "1".into()))));
-        assert_eq!(engine.generate_seal(&b1, &genesis_header), Seal::None);
-        engine.step();
+	    // step 2
+	    let b1 = OpenBlock::new(
+	        engine,
+	        Default::default(),
+	        false,
+	        db1,
+	        &genesis_header,
+	        last_hashes.clone(),
+	        addr1,
+	        (3141562.into(), 31415620.into()),
+	        vec![],
+	        false,
+	        None,
+	    )
+	    .unwrap();
+	    let b1 = b1.close_and_lock().unwrap();
 
-        // step 3
-        // the signer of the accumulated empty step message should be rewarded
-        let b2 = OpenBlock::new(
-            engine,
-            Default::default(),
-            false,
-            db2,
-            &genesis_header,
-            last_hashes.clone(),
-            addr1,
-            (3141562.into(), 31415620.into()),
-            vec![],
-            false,
-            None,
-        )
-        .unwrap();
-        let addr1_balance = b2.state.balance(&addr1).unwrap();
+	    // since the block is empty it isn't sealed and we generate empty steps
+	    engine.set_signer(Some(Box::new((tap.clone(), addr1, "1".into()))));
+	    assert_eq!(engine.generate_seal(&b1, &genesis_header), Seal::None);
+	    engine.step();
 
-        // after closing the block `addr1` should be reward twice, one for the included empty step
-        // message and another for block creation
-        let b2 = b2.close_and_lock().unwrap();
+	    // step 3
+	    // the signer of the accumulated empty step message should be rewarded
+	    let b2 = OpenBlock::new(
+	        engine,
+	        Default::default(),
+	        false,
+	        db2,
+	        &genesis_header,
+	        last_hashes.clone(),
+	        addr1,
+	        (3141562.into(), 31415620.into()),
+	        vec![],
+	        false,
+	        None,
+	    )
+	    .unwrap();
+	    let addr1_balance = b2.state.balance(&addr1).unwrap();
 
-        // the contract rewards (1000 + kind) for each benefactor/reward kind
-        assert_eq!(
-            b2.state.balance(&addr1).unwrap(),
-            addr1_balance + (1000 + 0) + (1000 + 2),
-        )
-    }
+	    // after closing the block `addr1` should be reward twice, one for the included empty step
+	    // message and another for block creation
+	    let b2 = b2.close_and_lock().unwrap();
+
+	    // the contract rewards (1000 + kind) for each benefactor/reward kind
+	    assert_eq!(
+	        b2.state.balance(&addr1).unwrap(),
+	        addr1_balance + (1000 + 0) + (1000 + 2),
+	    )
+	}
 */
 func TestRewardContract(t *testing.T) {
 	t.Skip("not ready yet")

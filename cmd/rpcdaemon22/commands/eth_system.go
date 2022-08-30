@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -13,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -22,7 +24,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := getLatestBlockNumber(tx)
+	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -114,13 +116,16 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	}
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 	tipcap, err := oracle.SuggestTipCap(ctx)
+	gasResult := big.NewInt(0)
+
+	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
 	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
-		tipcap.Add(tipcap, head.BaseFee)
+		gasResult.Add(tipcap, head.BaseFee)
 	}
-	return (*hexutil.Big)(tipcap), err
+	return (*hexutil.Big)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
@@ -198,7 +203,7 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi._blockReader.HeaderByNumber(ctx, b.tx, uint64(number.Int64()))
+	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}

@@ -116,7 +116,7 @@ func newTable(
 		initDone:   make(chan struct{}),
 		closeReq:   make(chan struct{}),
 		closed:     make(chan struct{}),
-		rand:       mrand.New(mrand.NewSource(0)),
+		rand:       mrand.New(mrand.NewSource(0)), // nolint: gosec
 		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
 
 		revalidateInterval: revalidateInterval,
@@ -159,7 +159,7 @@ func (tab *Table) ReadRandomNodes(buf []*enode.Node) (n int) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
-	var nodes []*enode.Node
+	nodes := make([]*enode.Node, 0, len(&tab.buckets))
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
 			nodes = append(nodes, unwrapNode(n))

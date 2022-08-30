@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -58,7 +60,8 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	dirs := datadir2.New(datadir)
+	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -70,7 +73,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -103,7 +106,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, stagedsync.AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
@@ -136,7 +139,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	readWrapper := state.NewHistoryReader22(h.MakeContext(), ri)
+	readWrapper := state.NewHistoryReader23(h.MakeContext(), ri)
 
 	for !interrupt {
 		select {
@@ -218,7 +221,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReader22, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReader23, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()

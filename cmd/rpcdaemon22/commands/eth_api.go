@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -101,14 +103,17 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
+	_historyV2     *bool
+	_historyV2Lock sync.RWMutex
+
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator
-	_txNums      []uint64
+	_txNums      *exec22.TxNums
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums []uint64, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums *exec22.TxNums, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -186,6 +191,25 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	return block, nil
 }
 
+func (api *BaseAPI) historyV2(tx kv.Tx) bool {
+	api._historyV2Lock.RLock()
+	historyV2 := api._historyV2
+	api._historyV2Lock.RUnlock()
+
+	if historyV2 != nil {
+		return *historyV2
+	}
+	enabled, err := rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
+		log.Warn("HisoryV2Enabled: read", "err", err)
+		return false
+	}
+	api._historyV2Lock.Lock()
+	api._historyV2 = &enabled
+	api._historyV2Lock.Unlock()
+	return enabled
+}
+
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
 	api._genesisLock.RLock()
 	cc, genesisBlock := api._chainConfig, api._genesis
@@ -216,17 +240,21 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil
-	}
-
-	n, err := getBlockNumber(number, tx)
+	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
+}
+
+func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	return api._blockReader.Header(context.Background(), tx, h, n)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -330,6 +358,30 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	signer := types.LatestSignerForChainID(chainId)
 	result.From, _ = tx.Sender(*signer)
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+// newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+	tx := opaqueTx.(*types.LegacyTx)
+	result := &RPCTransaction{
+		Type:     hexutil.Uint64(tx.Type()),
+		ChainID:  (*hexutil.Big)(new(big.Int)),
+		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
+		Gas:      hexutil.Uint64(tx.GetGas()),
+		Hash:     txHash,
+		Input:    hexutil.Bytes(tx.GetData()),
+		Nonce:    hexutil.Uint64(tx.GetNonce()),
+		From:     common.Address{},
+		To:       tx.GetTo(),
+		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
+	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))

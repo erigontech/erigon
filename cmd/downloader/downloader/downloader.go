@@ -224,10 +224,10 @@ func (d *Downloader) verify() error {
 func (d *Downloader) addSegments() error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	if err := BuildTorrentFilesIfNeed(context.Background(), d.cfg.DataDir); err != nil {
+	if err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir()); err != nil {
 		return err
 	}
-	files, err := seedableSegmentFiles(d.cfg.DataDir)
+	files, err := seedableSegmentFiles(d.SnapDir())
 	if err != nil {
 		return fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
@@ -299,7 +299,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	db, err = mdbx.NewMDBX(log.New()).
 		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 		Label(kv.DownloaderDB).
-		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
 		Path(filepath.Join(snapDir, "db")).
 		Open()

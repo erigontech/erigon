@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
@@ -19,7 +20,7 @@ import (
 
 func post(client *http.Client, url, request string, response interface{}) error {
 	start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) // nolint:bodyclose
 	if err != nil {
 		return fmt.Errorf("client failed to make post request: %v", err)
 	}
@@ -121,7 +122,7 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address, show 
 	var b rpctest.EthGetLogs
 
 	if res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b); res.Err != nil {
-		return fmt.Errorf("error fetching logs: %v\n", res.Err)
+		return fmt.Errorf("error fetching logs: %v", res.Err)
 	}
 
 	s, err := utils.ParseResponse(b)
@@ -141,7 +142,7 @@ func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) 
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
-		return 0, fmt.Errorf("error getting transaction count: %v\n", res.Err)
+		return 0, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 
 	if b.Error != nil {
@@ -168,7 +169,7 @@ func GetTransactionCount(reqId int, address common.Address, blockNum string) (rp
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
-		return b, fmt.Errorf("error getting transaction count: %v\n", res.Err)
+		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 
 	if b.Error != nil {

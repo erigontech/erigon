@@ -158,14 +158,14 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([][]byte, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
-		transactions[i] = ([]byte)(transaction)
+		transactions[i] = transaction
 	}
 	res, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom),
 		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
 		BlockNumber:   uint64(payload.BlockNumber),
 		GasLimit:      uint64(payload.GasLimit),

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/spf13/cobra"
 )

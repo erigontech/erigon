@@ -154,6 +154,7 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 }
 
 // SeekInBitmap - returns value in bitmap which is >= n
+//
 //nolint:deadcode
 func SeekInBitmap(m *roaring.Bitmap, n uint32) (found uint32, ok bool) {
 	i := m.Iterator()

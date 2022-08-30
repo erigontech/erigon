@@ -1,16 +1,18 @@
 package commands
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -37,8 +39,10 @@ func TestEthSubscribe(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	backend := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
+	ctx := context.Background()
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReader(), nil, nil, nil, false)
+	backendClient := direct.NewEthBackendClientDirect(backendServer)
+	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, snapshotsync.NewBlockReader())
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)
@@ -53,6 +57,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
+		fmt.Printf("Got header %d\n", header.Number.Uint64())
 		require.Equal(i, header.Number.Uint64())
 	}
 }

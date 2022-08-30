@@ -2,13 +2,14 @@ package commands
 
 import (
 	"context"
+	"reflect"
+	"strings"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
-	"reflect"
-	"strings"
 )
 
 type StarknetGrpcCallArgs struct {
@@ -85,7 +86,7 @@ func (api *StarknetImpl) Call(ctx context.Context, request StarknetCallRequest, 
 		return nil, err
 	}
 
-	var result []string
+	result := make([]string, 0, len(response.Result))
 	for _, v := range response.Result {
 		s := wrapperspb.String("")
 		v.UnmarshalTo(s)

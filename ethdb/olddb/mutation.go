@@ -195,7 +195,7 @@ func (m *mutation) Put(table string, k, v []byte) error {
 	m.size += int(unsafe.Sizeof(newMi)) + len(k) + len(v)
 	if i != nil {
 		oldMi := i.(*MutationItem)
-		m.size -= (int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value))
+		m.size -= int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value)
 	}
 	return nil
 }

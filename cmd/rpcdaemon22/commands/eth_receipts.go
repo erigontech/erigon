@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"sort"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -114,16 +115,22 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
+	if end > roaring.MaxUint32 {
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		if begin > latest {
+			return nil, fmt.Errorf("begin (%d) > latest (%d)", begin, latest)
+		}
+		end = latest
 	}
 
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
-		fromTxNum = api._txNums[begin-1]
+		fromTxNum = api._txNums.MinOf(begin)
 	}
-	toTxNum = api._txNums[end] // end is an inclusive bound
+	toTxNum = api._txNums.MaxOf(end) // end is an inclusive bound
 
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
@@ -134,6 +141,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if err != nil {
 		return nil, err
 	}
+
 	if topicsBitmap != nil {
 		txNumbers.And(topicsBitmap)
 	}
@@ -164,14 +172,20 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader23(ac, nil /* ReadIndices */)
 	iter := txNumbers.Iterator()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
-		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
-			return api._txNums[i] > txNum
-		}))
+		ok, blockNum := api._txNums.Find(txNum)
+		if !ok {
+			return nil, nil
+		}
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				return nil, err
@@ -183,7 +197,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums[blockNum-1]
+			startTxNum = api._txNums.MinOf(blockNum)
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)

@@ -3,10 +3,11 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"math/big"
 	"os/exec"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"

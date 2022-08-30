@@ -4,11 +4,12 @@ package discover
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 	"net"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 )
 
 // This test checks that calls with n replies may take up to n * respTimeout.

@@ -1,6 +1,7 @@
 package ethconsensusconfig
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
@@ -18,7 +19,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -57,7 +58,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.ParliaConfig:
 		if chainConfig.Parlia != nil {
-			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots)
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {

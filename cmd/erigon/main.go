@@ -3,9 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -69,10 +70,10 @@ func runErigon(cliCtx *cli.Context) {
 func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	fileExtension := filepath.Ext(filePath)
 
-	fileConfig := make(map[string]string)
+	fileConfig := make(map[string]interface{})
 
 	if fileExtension == ".yaml" {
-		yamlFile, err := ioutil.ReadFile(filePath)
+		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
@@ -81,7 +82,7 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 			return err
 		}
 	} else if fileExtension == ".toml" {
-		tomlFile, err := ioutil.ReadFile(filePath)
+		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
@@ -92,13 +93,24 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	} else {
 		return errors.New("config files only accepted are .yaml and .toml")
 	}
-
 	// sets global flags to value in yaml/toml file
 	for key, value := range fileConfig {
 		if !ctx.GlobalIsSet(key) {
-			err := ctx.GlobalSet(key, value)
-			if err != nil {
-				return err
+			if reflect.ValueOf(value).Kind() == reflect.Slice {
+				sliceInterface := value.([]interface{})
+				s := make([]string, len(sliceInterface))
+				for i, v := range sliceInterface {
+					s[i] = v.(string)
+				}
+				err := ctx.GlobalSet(key, strings.Join(s, ","))
+				if err != nil {
+					return err
+				}
+			} else {
+				err := ctx.GlobalSet(key, value.(string))
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

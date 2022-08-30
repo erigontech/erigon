@@ -1081,7 +1081,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 	} else {
 		for span.StartBlock > blockNum {
 			// Span wit low enough block number is not loaded
-			var spanID uint64 = span.ID - 1
+			var spanID = span.ID - 1
 			var heimdallSpan HeimdallSpan
 			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
@@ -1137,7 +1137,7 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	// get validators bytes
-	var validators []MinimalVal
+	validators := make([]MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
 		validators = append(validators, val.MinimalVal())
 	}
@@ -1147,7 +1147,7 @@ func (c *Bor) fetchAndCommitSpan(
 	}
 
 	// get producers bytes
-	var producers []MinimalVal
+	producers := make([]MinimalVal, 0, len(heimdallSpan.SelectedProducers))
 	for _, val := range heimdallSpan.SelectedProducers {
 		producers = append(producers, val.MinimalVal())
 	}
@@ -1330,7 +1330,7 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator)
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	var changes []*Validator
+	changes := make([]*Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower
