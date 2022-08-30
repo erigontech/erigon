@@ -19,6 +19,8 @@ github.com/VictoriaMetrics/fastcache v1.10.0 h1:5hDJnLsKLpnUEToub7ETuRu8RCkb40wo
 github.com/VictoriaMetrics/fastcache v1.10.0/go.mod h1:tjiYeEfYXCqacuvYw/7UoDIeJaNxq6132xHICNP77w8=
 github.com/VictoriaMetrics/metrics v1.22.1 h1:ExNLLZ0HLI41imYDaWbeVXfMB2+0W4ovBSk3It+Y9+c=
 github.com/VictoriaMetrics/metrics v1.22.1/go.mod h1:ArjwVz7WpgpegX/JpB0zpNF2h2232kErkEnzH1sxMmA=
+github.com/VictoriaMetrics/metrics v1.22.2 h1:A6LsNidYwkAHetxsvNFaUWjtzu5ltdgNEoS6i7Bn+6I=
+github.com/VictoriaMetrics/metrics v1.22.2/go.mod h1:rAr/llLpEnAdTehiNlUxKgnjcOuROSzpw0GvjpEbvFc=
 github.com/VividCortex/gohistogram v1.0.0/go.mod h1:Pf5mBqqDxYaXu3hDrrU+w6nw50o/4+TcAqDqk/vUH7g=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/afex/hystrix-go v0.0.0-20180502004556-fa1af6a1f4f5/go.mod h1:SkGFH1ia65gfNATL8TAiHDNxPzPdmEL5uirI2Uyuz6c=
@@ -394,6 +396,8 @@ github.com/ledgerwatch/erigon-lib v0.0.0-20220822084559-eab20101951d h1:67w77RJp
 github.com/ledgerwatch/erigon-lib v0.0.0-20220822084559-eab20101951d/go.mod h1:Sb+16YoG+izjT/6ZPxUZixa2gI2jLbi1rrxBCtc2QKg=
 github.com/ledgerwatch/erigon-lib v0.0.0-20220822153620-12575ec01436 h1:gCh/aTtDB2uYme3bMUoN/XiwfxW9bYS35TjKgT3d36o=
 github.com/ledgerwatch/erigon-lib v0.0.0-20220822153620-12575ec01436/go.mod h1:Sb+16YoG+izjT/6ZPxUZixa2gI2jLbi1rrxBCtc2QKg=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220830182903-93dea12208b4 h1:v0o5QaQ1ykqY0lzdZzI5jtdBs5Lwv3gc/axjI6ncNSE=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220830182903-93dea12208b4/go.mod h1:LRF+TmrtTi//SEqtlKTBjG63GegA7b4gGUbuCQy76bQ=
 github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1 h1:qRIJu6cs6fbI8L52DSdPF27j3sOrEriXz1zQSuQvYpA=
 github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.4.1 h1:/xGwlVulXnsO9Uq+tzaExc8OWmXXHU0dnLalpbnY5Bc=

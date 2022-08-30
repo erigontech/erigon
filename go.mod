@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220822153620-12575ec01436
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220830182903-93dea12208b4
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -14,7 +14,7 @@ require (
 require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.10.0
-	github.com/VictoriaMetrics/metrics v1.22.1
+	github.com/VictoriaMetrics/metrics v1.22.2
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.2-0.20220427063716-a4894bb521c6
 	github.com/anacrolix/torrent v1.46.1-0.20220808053819-61302332cfc5
