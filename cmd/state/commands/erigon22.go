@@ -2,7 +2,9 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"runtime"
 	"time"
@@ -60,7 +62,20 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	dirs := datadir2.New(datadir)
 
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
-	db, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
+	db22Path := path.Join(datadir, "db22")
+	if _, err = os.Stat(db22Path); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else if err = os.RemoveAll(db22Path); err != nil {
+		return err
+	}
+	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
+	if err != nil {
+		return err
+	}
+	defer chainDb.Close()
+	db, err := kv2.NewMDBX(logger).Path(db22Path).Open()
 	if err != nil {
 		return err
 	}
@@ -86,11 +101,11 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	txNums := exec22.TxNumsFromDB(allSnapshots, db)
+	txNums := exec22.TxNumsFromDB(allSnapshots, chainDb)
 
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots, db)
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots, chainDb)
 	sentryControlServer, err := sentry.NewMultiClient(
-		db,
+		chainDb,
 		"",
 		chainConfig,
 		common.Hash{},
