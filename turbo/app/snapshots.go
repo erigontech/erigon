@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -263,11 +264,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, snapshots, nil)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -293,8 +289,13 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 		log.Error("Error", "err", err)
 	}
 
-	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, nil, nil)
-	if err != nil {
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), dirs.Snap)
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return err
+	}
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteSnapshots(tx, allSnapshots.Files())
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -308,7 +309,18 @@ func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dir
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	isBor := chainConfig.Bor != nil
+	sprint := uint64(0)
+	if isBor {
+		sprint = chainConfig.Bor.Sprint
+	}
+
+	borCfg := types.BorConfigSprint{
+		IsBor:  isBor,
+		Sprint: sprint,
+	}
+
+	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo, borCfg); err != nil {
 		return err
 	}
 	return nil

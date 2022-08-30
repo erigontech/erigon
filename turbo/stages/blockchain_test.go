@@ -492,8 +492,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("add %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("add %d: expected receipt to be found", i)
+			}
 		}
 	}
 	// shared tx
@@ -502,8 +506,12 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
-			t.Errorf("share %d: expected receipt to be found", i)
+		if m.HistoryV2 {
+			// m.HistoryV2 doesn't store
+		} else {
+			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+				t.Errorf("share %d: expected receipt to be found", i)
+			}
 		}
 	}
 }
@@ -753,7 +761,11 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		})
 		require.NoError(err)
 		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
-		require.Greater(found, uint64(0))
+		if m.HistoryV2 {
+			// receipts are not stored in erigon22
+		} else {
+			require.Greater(found, uint64(0))
+		}
 	} else {
 		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
 		require.NoError(err)
@@ -1002,20 +1014,21 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	tx, err := db.RwKV().BeginRo(context.Background())
+	tx, err := db.RwKV().BeginRw(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
-	st := state.New(state.NewPlainState(tx, 1))
+
+	st := m.NewHistoricalStateReader(1, tx)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainState(tx, 2))
+	st = m.NewHistoricalStateReader(2, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainState(tx, 3))
+	st = m.NewHistoricalStateReader(3, tx)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }

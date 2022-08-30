@@ -117,8 +117,21 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
-		return err
+	{ //TODO: move it to dedicated stage
+		if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
+			return err
+		}
+		if !useExternalTx {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			var err error
+			tx, err = cfg.db.BeginRw(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+		}
 	}
 
 	var blockNumber uint64
@@ -133,14 +146,20 @@ func SpawnStageHeaders(
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
-	transitionedToPoS, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
+	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
+	if !transitionedToPoS {
+		var err error
+		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		if err != nil {
+			return err
+		}
+		if transitionedToPoS {
+			cfg.hd.SetFirstPoSHeight(blockNumber)
+		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		cfg.hd.SetFirstPoSHeight(blockNumber)
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
@@ -1176,12 +1195,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
 		return err
 	}
-	if err := cfg.snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
-	}
-	if cfg.dbEventNotifier != nil {
-		cfg.dbEventNotifier.OnNewSnapshot()
-	}
 
 	cfg.snapshots.LogStat()
 
@@ -1199,7 +1212,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				isBor := cfg.chainConfig.Bor != nil
+				sprint := uint64(0)
+				if isBor {
+					sprint = cfg.chainConfig.Bor.Sprint
+				}
+
+				borCfg := types.BorConfigSprint{
+					IsBor:  isBor,
+					Sprint: sprint,
+				}
+
+				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo, borCfg); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -1291,6 +1315,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
+		if err := cfg.snapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
+			cfg.dbEventNotifier.OnNewSnapshot()
+		}
 		return nil
 	}
 
@@ -1313,7 +1343,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB).Preverified
-	var downloadRequest []snapshotsync.DownloadRequest
+	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverified)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverified {
@@ -1370,8 +1400,10 @@ Loop:
 					continue
 				}
 				libcommon.ReadMemStats(&m)
+				downloadTimeLeft := calculateDownloadTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
+					"download-time", downloadTimeLeft,
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -1390,10 +1422,39 @@ Finish:
 		}
 	}
 
-	if dbEmpty {
-		if err = rawdb.WriteSnapshots(tx, snInDB); err != nil {
-			return err
+	if err := cfg.snapshots.ReopenFolder(); err != nil {
+		return err
+	}
+	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files()); err != nil {
+		return err
+	}
+	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
+
+	firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
 		}
 	}
+
 	return nil
+}
+
+func calculateDownloadTime(amountLeft, downloadRate uint64) string {
+	if downloadRate == 0 {
+		return "999hrs:99m:99s"
+	}
+	timeLeftInSeconds := amountLeft / downloadRate
+
+	hours := timeLeftInSeconds / 3600
+	minutes := (timeLeftInSeconds / 60) % 60
+	seconds := timeLeftInSeconds % 60
+
+	return fmt.Sprintf("%dhrs:%dm:%ds", hours, minutes, seconds)
 }

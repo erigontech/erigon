@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -246,7 +247,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	ff *rpchelper.Filters,
 	agg *libstate.Aggregator,
-	txNums []uint64,
+	txNums *exec22.TxNums,
 	err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("either remote db or local db must be specified")
@@ -346,6 +347,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+			allSnapshots.OptimisticReopenWithDB(db)
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
 					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
@@ -361,20 +363,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				}()
 			}
 			onNewSnapshot()
-			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
-			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-						txNums[blockNum] = baseTxNum + txAmount
-						return nil
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
+			txNums = exec22.TxNumsFromDB(allSnapshots, db)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			log.Info("Use --snapshots=false")
@@ -584,7 +573,7 @@ func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo) {
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.
 func isWebsocket(r *http.Request) bool {
-	return strings.ToLower(r.Header.Get("Upgrade")) == "websocket" &&
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket") &&
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 

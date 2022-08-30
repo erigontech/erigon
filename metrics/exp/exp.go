@@ -23,7 +23,7 @@ func Setup(address string) {
 	//}))
 	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
 	go func() {
-		if err := http.ListenAndServe(address, nil); err != nil {
+		if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
 			log.Error("Failure in running metrics server", "err", err)
 		}
 	}()

@@ -56,7 +56,7 @@ validate_docker_build_args:
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
-		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
+		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
 		--build-arg UID=${DOCKER_UID} \
@@ -202,6 +202,39 @@ git-submodules:
 	@# these lines will also fail if ran as root in a non-root user's checked out repository
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
+
+PACKAGE_NAME          := github.com/ledgerwatch/erigon
+GOLANG_CROSS_VERSION  ?= v1.18.1
+
+.PHONY: release-dry-run
+release-dry-run: git-submodules
+	@docker run \
+		--rm \
+		--privileged \
+		-e CGO_ENABLED=1 \
+		-e GITHUB_TOKEN \
+		-e DOCKER_USERNAME \
+		-e DOCKER_PASSWORD \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v `pwd`:/go/src/$(PACKAGE_NAME) \
+		-w /go/src/$(PACKAGE_NAME) \
+		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--rm-dist --skip-validate --skip-publish
+
+.PHONY: release
+release: git-submodules
+	@docker run \
+		--rm \
+		--privileged \
+		-e CGO_ENABLED=1 \
+		-e GITHUB_TOKEN \
+		-e DOCKER_USERNAME \
+		-e DOCKER_PASSWORD \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v `pwd`:/go/src/$(PACKAGE_NAME) \
+		-w /go/src/$(PACKAGE_NAME) \
+		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--rm-dist --skip-validate
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.

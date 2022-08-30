@@ -299,7 +299,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	db, err = mdbx.NewMDBX(log.New()).
 		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 		Label(kv.DownloaderDB).
-		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
 		Path(filepath.Join(snapDir, "db")).
 		Open()

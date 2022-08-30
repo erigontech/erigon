@@ -747,12 +747,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
+				log.Debug("slash successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 			}
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 		return nil, nil, err
 	}
+	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 	if len(systemTxs) > 0 {
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}
@@ -834,7 +836,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := p.delayForRamanujanFork(snap, header)
 
-	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
+	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex(), "headerHash", header.Hash().Hex(), "gasUsed", header.GasUsed, "block txn number", block.Transactions().Len(), "State Root", header.Root)
 
 	// Sign all the things!
 	sig, err := signFn(val, crypto.Keccak256(parliaRLP(header, p.chainConfig.ChainID)), p.chainConfig.ChainID)

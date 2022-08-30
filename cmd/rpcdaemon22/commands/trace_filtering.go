@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
@@ -235,9 +234,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	var fromTxNum, toTxNum uint64
 	if fromBlock > 0 {
-		fromTxNum = api._txNums[fromBlock-1]
+		fromTxNum = api._txNums.MinOf(fromBlock)
 	}
-	toTxNum = api._txNums[toBlock] // toBlock is an inclusive bound
+	toTxNum = api._txNums.MaxOf(toBlock) // toBlock is an inclusive bound
 
 	if fromBlock > toBlock {
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
@@ -316,14 +315,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(ac, nil /* ReadIndices */)
+	stateReader := state.NewHistoryReader23(ac, nil /* ReadIndices */)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()
 		// Find block number
-		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
-			return api._txNums[i] > txNum
-		}))
+		ok, blockNum := api._txNums.Find(txNum)
+		if !ok {
+			return nil
+		}
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				if first {
@@ -341,7 +341,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
 		}
-		if txNum+1 == api._txNums[blockNum] {
+		if txNum+1 == api._txNums.MaxOf(blockNum) {
 			body, _, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -436,7 +436,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums[blockNum-1]
+			startTxNum = api._txNums.MinOf(blockNum)
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)

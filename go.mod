@@ -47,7 +47,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pelletier/go-toml v1.9.5
-	github.com/pelletier/go-toml/v2 v2.0.2
+	github.com/pelletier/go-toml/v2 v2.0.3
 	github.com/pion/stun v0.3.5
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/rs/cors v1.8.2

@@ -72,9 +72,9 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	var begin, end uint64
-	logs := []*types.Log{}
+	logs := types.Logs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
@@ -275,7 +275,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var ok bool
 
 	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if !ok || blockNum == 0 {
+	if !ok {
 		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
 		// but 0 block number is used here to mean that the transaction is not found
 		return nil, nil

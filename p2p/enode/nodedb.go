@@ -101,7 +101,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 func newMemoryDB(logger log.Logger) (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = mdbx.NewMDBX(logger).InMem().Label(kv.SentryDB).WithTablessCfg(bucketsConfig).Open()
+	db.kv, err = mdbx.NewMDBX(logger).InMem().Label(kv.SentryDB).WithTableCfg(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	db, err = mdbx.NewMDBX(logger).
 		Path(path).
 		Label(kv.SentryDB).
-		WithTablessCfg(bucketsConfig).
+		WithTableCfg(bucketsConfig).
 		MapSize(1024 * datasize.MB).
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
