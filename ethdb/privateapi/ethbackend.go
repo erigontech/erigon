@@ -399,7 +399,6 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 	var parent *types.Header
 	var td *big.Int
 	if newPayload {
-		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
 		if err != nil {
 			return nil, err
@@ -412,11 +411,9 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		return nil, err
 	}
 
-	// Check if we already reached TTD.
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
+		log.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
-
 	}
 
 	if !s.hd.POSSync() {
