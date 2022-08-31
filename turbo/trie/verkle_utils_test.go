@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 )
 
@@ -19,18 +18,6 @@ func TestGetTreeKey(t *testing.T) {
 	n = n.Lsh(n, 129)
 	n.Add(n, uint256.NewInt(3))
 	GetTreeKey(addr[:], n, 1)
-}
-
-func TestConstantPoint(t *testing.T) {
-	var expectedPoly [1]verkle.Fr
-
-	cfg, _ := verkle.GetConfig()
-	verkle.FromLEBytes(&expectedPoly[0], []byte{2, 64})
-	expected := cfg.CommitToPoly(expectedPoly[:], 1)
-
-	if !verkle.Equal(expected, getTreePolyIndex0Point) {
-		t.Fatalf("Marshalled constant value is incorrect: %x != %x", expected.Bytes(), getTreePolyIndex0Point.Bytes())
-	}
 }
 
 func BenchmarkPedersenHash(b *testing.B) {
