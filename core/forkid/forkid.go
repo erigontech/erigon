@@ -145,6 +145,9 @@ func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter
 
 	// Create a validator that will filter out incompatible chains
 	return func(id ID) error {
+		if genesis == params.GnosisGenesisHash {
+			return nil
+		}
 		if genesis == params.SokolGenesisHash {
 			return nil
 		}
