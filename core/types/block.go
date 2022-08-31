@@ -18,6 +18,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -99,6 +101,10 @@ type Header struct {
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
 	Seal        []rlp.RawValue // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
+	// The verkle proof is ignored in legacy headers
+	Verkle        bool
+	VerkleProof   []byte                `json:"verkleProof"`
+	VerkleKeyVals []verkle.KeyValuePair `json:"verkleKeyVals"`
 }
 
 func (h Header) EncodingSize() int {
@@ -175,6 +181,30 @@ func (h Header) EncodingSize() int {
 		encodingSize += baseFeeLen
 	}
 
+	if h.Verkle {
+		// Encoding of Verkle Proof
+		encodingSize++
+		switch len(h.VerkleProof) {
+		case 0:
+		case 1:
+			if h.VerkleProof[0] >= 128 {
+				encodingSize++
+			}
+		default:
+			if len(h.VerkleProof) >= 56 {
+				encodingSize += (bits.Len(uint(len(h.VerkleProof))) + 7) / 8
+			}
+			encodingSize += len(h.VerkleProof)
+		}
+		encodingSize++
+
+		var tmpBuffer bytes.Buffer
+		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
+			panic(err)
+		}
+		encodingSize += tmpBuffer.Len()
+	}
+
 	return encodingSize
 }
 
@@ -191,6 +221,29 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		encodingSize += sealListLen
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
+	}
+	if h.Verkle {
+		// Encoding of Verkle Proof
+		encodingSize++
+		switch len(h.VerkleProof) {
+		case 0:
+		case 1:
+			if h.VerkleProof[0] >= 128 {
+				encodingSize++
+			}
+		default:
+			if len(h.VerkleProof) >= 56 {
+				encodingSize += (bits.Len(uint(len(h.VerkleProof))) + 7) / 8
+			}
+			encodingSize += len(h.VerkleProof)
+		}
+		encodingSize++
+
+		var tmpBuffer bytes.Buffer
+		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
+			return nil
+		}
+		encodingSize += tmpBuffer.Len()
 	}
 
 	encodingSize++
@@ -424,6 +477,16 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	if h.Verkle {
+		if err := EncodeString(h.VerkleProof, w, b[:]); err != nil {
+			return err
+		}
+
+		if err := rlp.Encode(w, h.VerkleKeyVals); err != nil {
+			return nil
+		}
+	}
+
 	return nil
 }
 
@@ -543,6 +606,17 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)
+	}
+
+	if h.Verkle {
+		if h.VerkleProof, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read VerkleProof: %w", err)
+		}
+		rawKv, err := s.Raw()
+		if err != nil {
+			return err
+		}
+		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
 	}
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
