@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -316,7 +315,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
 					if !bytes.Equal(k, item.key) {
 						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
 							return false
 						}
 					}
@@ -331,7 +330,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 			})
 		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
 				return e
 			}
 		}
