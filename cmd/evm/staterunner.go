@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
+	log "github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
@@ -93,8 +93,8 @@ func stateTestCmd(ctx *cli.Context) error {
 	}
 
 	// Iterate over all the stateTests, run them and aggregate the results
-	results := make([]StatetestResult, 0, len(stateTests))
-	if err := aggregateResultsFromStateTests(ctx, stateTests, results, tracer, debugger); err != nil {
+	results, err := aggregateResultsFromStateTests(ctx, stateTests, tracer, debugger)
+	if err != nil {
 		return err
 	}
 
@@ -106,24 +106,23 @@ func stateTestCmd(ctx *cli.Context) error {
 func aggregateResultsFromStateTests(
 	ctx *cli.Context,
 	stateTests map[string]tests.StateTest,
-	results []StatetestResult,
 	tracer vm.Tracer,
 	debugger *vm.StructLogger,
-) error {
+) ([]StatetestResult, error) {
 	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
 		Tracer: tracer,
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
-
 	db := memdb.New()
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())
 	if txErr != nil {
-		return txErr
+		return nil, txErr
 	}
 	defer tx.Rollback()
+	results := make([]StatetestResult, 0, len(stateTests))
 
 	for key, test := range stateTests {
 		for _, st := range test.Subtests() {
@@ -180,5 +179,5 @@ func aggregateResultsFromStateTests(
 			}
 		}
 	}
-	return nil
+	return results, nil
 }
