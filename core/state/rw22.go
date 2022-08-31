@@ -307,26 +307,29 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
-			if !bytes.HasPrefix(item.key, addr1) {
-				return false
-			}
-			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.Equal(k, item.key) {
-					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
-						return false
+		psChanges := rs.changes[kv.PlainState]
+		if psChanges != nil {
+			psChanges.AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+				if !bytes.HasPrefix(item.key, addr1) {
+					return false
+				}
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, item.key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+							return false
+						}
 					}
 				}
-			}
-			if e != nil {
-				return false
-			}
-			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-				return false
-			}
-			return true
-		})
+				if e != nil {
+					return false
+				}
+				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+					return false
+				}
+				return true
+			})
+		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
 			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
 				return e
