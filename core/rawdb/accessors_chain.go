@@ -1631,7 +1631,6 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 }
 
 func WriteSnapshots(tx kv.RwTx, list []string) error {
-	log.Info("writing snapshot to db")
 	res, err := json.Marshal(list)
 	if err != nil {
 		return err
