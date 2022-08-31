@@ -57,25 +57,6 @@ var (
 	GcOverflowMetric = metrics.NewCounter(`db_gc_overflow`) //nolint
 	GcPagesMetric    = metrics.NewCounter(`db_gc_pages`)    //nolint
 
-	TableScsLeaf      = metrics.NewCounter(`table_scs_leaf`)      //nolint
-	TableScsBranch    = metrics.NewCounter(`table_scs_branch`)    //nolint
-	TableScsEntries   = metrics.NewCounter(`table_scs_entries`)   //nolint
-	TableScsSize      = metrics.NewCounter(`table_scs_size`)      //nolint
-	TableStateLeaf    = metrics.NewCounter(`table_state_leaf`)    //nolint
-	TableStateBranch  = metrics.NewCounter(`table_state_branch`)  //nolint
-	TableStateEntries = metrics.NewCounter(`table_state_entries`) //nolint
-	TableStateSize    = metrics.NewCounter(`table_state_size`)    //nolint
-	TableLogLeaf      = metrics.NewCounter(`table_log_leaf`)      //nolint
-	TableLogBranch    = metrics.NewCounter(`table_log_branch`)    //nolint
-	TableLogOverflow  = metrics.NewCounter(`table_log_overflow`)  //nolint
-	TableLogEntries   = metrics.NewCounter(`table_log_entries`)   //nolint
-	TableLogSize      = metrics.NewCounter(`table_log_size`)      //nolint
-	TableTxLeaf       = metrics.NewCounter(`table_tx_leaf`)       //nolint
-	TableTxBranch     = metrics.NewCounter(`table_tx_branch`)     //nolint
-	TableTxOverflow   = metrics.NewCounter(`table_tx_overflow`)   //nolint
-	TableTxEntries    = metrics.NewCounter(`table_tx_entries`)    //nolint
-	TableTxSize       = metrics.NewCounter(`table_tx_size`)       //nolint
-
 )
 
 type DBVerbosityLvl int8
