@@ -1618,10 +1618,10 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	return header.Difficulty.Cmp(common.Big0) == 0, nil
 }
 
-var SapshotsKey = []byte("snapshots")
+var SnapshotsKey = []byte("snapshots")
 
 func ReadSnapshots(tx kv.Tx) ([]string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SapshotsKey)
+	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1631,8 +1631,12 @@ func ReadSnapshots(tx kv.Tx) ([]string, error) {
 }
 
 func WriteSnapshots(tx kv.RwTx, list []string) error {
-	res, _ := json.Marshal(list)
-	return tx.Put(kv.DatabaseInfo, SapshotsKey, res)
+	log.Info("writing snapshot to db")
+	res, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return tx.Put(kv.DatabaseInfo, SnapshotsKey, res)
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
