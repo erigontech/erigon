@@ -307,28 +307,26 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		if rs.changes[kv.PlainState] != nil {
-			rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
-				if !bytes.HasPrefix(item.key, addr1) {
-					return false
-				}
-				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-					if !bytes.Equal(k, item.key) {
-						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
-							return false
-						}
+		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+			if !bytes.HasPrefix(item.key, addr1) {
+				return false
+			}
+			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+				if !bytes.Equal(k, item.key) {
+					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+						return false
 					}
 				}
-				if e != nil {
-					return false
-				}
-				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-					return false
-				}
-				return true
-			})
-		}
+			}
+			if e != nil {
+				return false
+			}
+			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+				return false
+			}
+			return true
+		})
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
 			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
 				return e
@@ -623,7 +621,6 @@ func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.A
 }
 
 func (w *StateWriter22) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	fmt.Printf("UpdateAccountData: %x\n", address)
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
