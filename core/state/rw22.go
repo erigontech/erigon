@@ -307,26 +307,28 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
-			if !bytes.HasPrefix(item.key, addr1) {
-				return false
-			}
-			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.Equal(k, item.key) {
-					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
-						return false
+		if rs.changes[kv.PlainState] != nil {
+			rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+				if !bytes.HasPrefix(item.key, addr1) {
+					return false
+				}
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, item.key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+							return false
+						}
 					}
 				}
-			}
-			if e != nil {
-				return false
-			}
-			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-				return false
-			}
-			return true
-		})
+				if e != nil {
+					return false
+				}
+				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+					return false
+				}
+				return true
+			})
+		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
 			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
 				return e
@@ -461,10 +463,19 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 					return err
 				}
 			} else {
-				currentInc = 1
+				var address common.Address
+				copy(address[:], k)
+				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return err
+				}
+				if original != nil {
+					currentInc = original.Incarnation
+				} else {
+					currentInc = 1
+				}
+
 				if accumulator != nil {
-					var address common.Address
-					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
 				if err := next(k, k, nil); err != nil {
@@ -475,12 +486,10 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		}
 		if accumulator != nil {
 			var address common.Address
-			var incarnation uint64
 			var location common.Hash
 			copy(address[:], k[:length.Addr])
-			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
-			copy(location[:], k[length.Addr+length.Incarnation:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
+			copy(location[:], k[length.Addr:])
+			accumulator.ChangeStorage(address, currentInc, location, common.CopyBytes(v))
 		}
 		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
 		if len(v) > 0 {
@@ -614,6 +623,7 @@ func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.A
 }
 
 func (w *StateWriter22) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	fmt.Printf("UpdateAccountData: %x\n", address)
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
@@ -628,6 +638,7 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 }
 
 func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	fmt.Printf("UpdateAccountCode: %x\n", address)
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash.Bytes())
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
 	if len(code) > 0 {
@@ -640,6 +651,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 }
 
 func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts.Account) error {
+	fmt.Printf("DeleteAccount: %x\n", address)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address.Bytes())
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
 	if original.Incarnation > 0 {
@@ -655,6 +667,7 @@ func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts
 }
 
 func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	fmt.Printf("WriteAccountStorage: %x, %d, %x, %x\n", address, incarnation, *key, value.Bytes())
 	if *original == *value {
 		return nil
 	}
