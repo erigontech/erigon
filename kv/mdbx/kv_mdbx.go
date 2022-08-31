@@ -593,6 +593,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.DbPgopsSpill.Set(info.PageOps.Spill)
 	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
 	kv.DbPgopsWops.Set(info.PageOps.Wops)
+	kv.DbPgopsGcrtime.Update(info.PageOps.Gcrtime.Seconds())
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
@@ -611,49 +612,6 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.GcLeafMetric.Set(gc.LeafPages)
 	kv.GcOverflowMetric.Set(gc.OverflowPages)
 	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
-
-	{
-		st, err := tx.BucketStat(kv.PlainState)
-		if err != nil {
-			return
-		}
-		kv.TableStateLeaf.Set(st.LeafPages)
-		kv.TableStateBranch.Set(st.BranchPages)
-		kv.TableStateEntries.Set(st.Entries)
-		kv.TableStateSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
-	}
-	{
-		st, err := tx.BucketStat(kv.StorageChangeSet)
-		if err != nil {
-			return
-		}
-		kv.TableScsLeaf.Set(st.LeafPages)
-		kv.TableScsBranch.Set(st.BranchPages)
-		kv.TableScsEntries.Set(st.Entries)
-		kv.TableScsSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
-	}
-	{
-		st, err := tx.BucketStat(kv.EthTx)
-		if err != nil {
-			return
-		}
-		kv.TableTxLeaf.Set(st.LeafPages)
-		kv.TableTxBranch.Set(st.BranchPages)
-		kv.TableTxOverflow.Set(st.OverflowPages)
-		kv.TableTxEntries.Set(st.Entries)
-		kv.TableTxSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
-	}
-	{
-		st, err := tx.BucketStat(kv.Log)
-		if err != nil {
-			return
-		}
-		kv.TableLogLeaf.Set(st.LeafPages)
-		kv.TableLogBranch.Set(st.BranchPages)
-		kv.TableLogOverflow.Set(st.OverflowPages)
-		kv.TableLogEntries.Set(st.Entries)
-		kv.TableLogSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
-	}
 }
 
 // ListBuckets - all buckets stored as keys of un-named bucket
