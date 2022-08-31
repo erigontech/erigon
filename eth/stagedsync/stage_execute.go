@@ -243,12 +243,13 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}()
 	ctx = context.Background()
 
-	workersCount := cfg.workersCount
+	//workersCount := cfg.workersCount
+	workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
 	useExternalTx := tx != nil
-	if !useExternalTx && workersCount == 1 {
+	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -282,7 +283,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-	if !useExternalTx && workersCount == 1 {
+	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
@@ -311,24 +312,6 @@ func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
-	/*
-		// Truncate CallTraceSet
-		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-		c, err := tx.RwCursorDupSort(kv.CallTraceSet)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
-			if err != nil {
-				return err
-			}
-			err = c.DeleteCurrentDuplicates()
-			if err != nil {
-				return err
-			}
-		}
-	*/
 	return nil
 }
 
@@ -657,6 +640,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if accumulator != nil {
+					fmt.Printf("un ch acc: %x, %d, %x\n", address, acc.Incarnation, newV)
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
 				if err := next(k, k, newV); err != nil {
@@ -666,6 +650,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				if accumulator != nil {
 					var address commonold.Address
 					copy(address[:], k)
+					fmt.Printf("un del acc: %x\n", address)
 					accumulator.DeleteAccount(address)
 				}
 				if err := next(k, k, nil); err != nil {
@@ -681,6 +666,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 			copy(address[:], k[:length.Addr])
 			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
 			copy(location[:], k[length.Addr+length.Incarnation:])
+			fmt.Printf("un ch st: %x, %d, %x, %x\n", address, incarnation, location, common.Copy(v))
 			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
 		}
 		if len(v) > 0 {

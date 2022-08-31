@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -307,28 +307,31 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *lib
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
-			if !bytes.HasPrefix(item.key, addr1) {
-				return false
-			}
-			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.Equal(k, item.key) {
-					// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
-						return false
+		psChanges := rs.changes[kv.PlainState]
+		if psChanges != nil {
+			psChanges.AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+				if !bytes.HasPrefix(item.key, addr1) {
+					return false
+				}
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, item.key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+							return false
+						}
 					}
 				}
-			}
-			if e != nil {
-				return false
-			}
-			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-				return false
-			}
-			return true
-		})
+				if e != nil {
+					return false
+				}
+				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+					return false
+				}
+				return true
+			})
+		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
 				return e
 			}
 		}
@@ -425,7 +428,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	agg.SetTx(tx)
 	var currentInc uint64
 	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(k) == 20 {
+		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var acc accounts.Account
 				if err := accounts.Deserialise2(&acc, v); err != nil {
@@ -461,10 +464,19 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 					return err
 				}
 			} else {
-				currentInc = 1
+				var address common.Address
+				copy(address[:], k)
+				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return err
+				}
+				if original != nil {
+					currentInc = original.Incarnation
+				} else {
+					currentInc = 1
+				}
+
 				if accumulator != nil {
-					var address common.Address
-					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
 				if err := next(k, k, nil); err != nil {
@@ -475,12 +487,10 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		}
 		if accumulator != nil {
 			var address common.Address
-			var incarnation uint64
 			var location common.Hash
 			copy(address[:], k[:length.Addr])
-			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
-			copy(location[:], k[length.Addr+length.Incarnation:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
+			copy(location[:], k[length.Addr:])
+			accumulator.ChangeStorage(address, currentInc, location, common2.Copy(v))
 		}
 		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
 		if len(v) > 0 {
@@ -726,7 +736,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 		}
 	}
 	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, address.Bytes())
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common.CopyBytes(enc))
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -758,8 +768,8 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 			return nil, err
 		}
 	}
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, common.CopyBytes(r.composite))
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common.CopyBytes(enc))
+	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, common2.Copy(r.composite))
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
 	if r.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), r.txNum)
@@ -783,7 +793,7 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 		}
 	}
 	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, address.Bytes())
-	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common.CopyBytes(enc))
+	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common2.Copy(enc))
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -820,7 +830,7 @@ func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, 
 		}
 	}
 	r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
-	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, common.CopyBytes(enc))
+	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, common2.Copy(enc))
 	if len(enc) == 0 {
 		return 0, nil
 	}
