@@ -1,6 +1,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -35,8 +36,8 @@ type Experiments struct {
 func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
+
 	if flags != "default" && flags != "disabled" {
-		mode.Initialised = true
 		for _, flag := range flags {
 			switch flag {
 			case 'h':
@@ -56,24 +57,19 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 	pruneBlockBefore := pruneBlockDefault(chainId)
 
 	if exactHistory > 0 {
-		mode.Initialised = true
 		mode.History = Distance(exactHistory)
 	}
 	if exactReceipts > 0 {
-		mode.Initialised = true
 		mode.Receipts = Distance(exactReceipts)
 	}
 	if exactTxIndex > 0 {
-		mode.Initialised = true
 		mode.TxIndex = Distance(exactTxIndex)
 	}
 	if exactCallTraces > 0 {
-		mode.Initialised = true
 		mode.CallTraces = Distance(exactCallTraces)
 	}
 
 	if beforeH > 0 {
-		mode.Initialised = true
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
@@ -83,27 +79,21 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 				log.Warn("the specified prune.before.r block number is higher than the deposit contract contract block number", "highest block number", pruneBlockBefore)
 			}
 		}
-		mode.Initialised = true
 		mode.Receipts = Before(beforeR)
-	} else {
-		if exactReceipts == 0 && mode.Receipts.Enabled() {
-			mode.Initialised = true
-			mode.Receipts = Before(pruneBlockBefore)
-		}
+	} else if exactReceipts == 0 && mode.Receipts.Enabled() && pruneBlockBefore != 0 {
+		// Default --prune=r to pruning receipts before the Beacon Chain genesis
+		mode.Receipts = Before(pruneBlockBefore)
 	}
 	if beforeT > 0 {
-		mode.Initialised = true
 		mode.TxIndex = Before(beforeT)
 	}
 	if beforeC > 0 {
-		mode.Initialised = true
 		mode.CallTraces = Before(beforeC)
 	}
 
 	for _, ex := range experiments {
 		switch ex {
 		case "tevm":
-			mode.Initialised = true
 			mode.Experiments.TEVM = true
 		case "":
 			// skip
@@ -111,7 +101,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 			return DefaultMode, fmt.Errorf("unexpected experiment found: %s", ex)
 		}
 	}
-
 	return mode, nil
 }
 
@@ -320,6 +309,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if pruneMode.Initialised {
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
+			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
+				log.Error("--prune=r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
+					"Alternatively, enforce the old behaviour explicitly by --prune.r.older=90000 flag at the risk of breaking the Consensus Layer.")
+			}
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}

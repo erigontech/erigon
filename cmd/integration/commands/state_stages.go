@@ -147,6 +147,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
 	dirs := datadir.New(datadirCli)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -183,7 +184,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, agg())
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
@@ -274,10 +275,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if historyV2 {
-			stagedsync.ResetHashState(tx)
-			stagedsync.ResetIH(tx)
-		}
 		if err := stateStages.Run(db, tx, false); err != nil {
 			return err
 		}
@@ -484,6 +481,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := tool.ChainConfigFromDB(db)
 	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -499,7 +497,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	sync.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	exec22, err := rawdb.HistoryV2.Enabled(tx)
+	historyV2, err := rawdb.HistoryV2.Enabled(tx)
 	if err != nil {
 		return err
 	}
@@ -509,7 +507,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, exec22, dirs, getBlockReader(db), nil, genesis, 1, agg())
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {

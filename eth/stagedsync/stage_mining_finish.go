@@ -68,7 +68,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 
 	if block.Transactions().Len() > 0 {
 		log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-			"blocn_num", block.NumberU64(),
+			"block_num", block.NumberU64(),
 			"transactions", block.Transactions().Len(),
 			"gas_used", block.GasUsed(),
 			"gas_limit", block.GasLimit(),

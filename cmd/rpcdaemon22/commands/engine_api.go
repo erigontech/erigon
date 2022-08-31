@@ -155,6 +155,12 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		}
 	}
 
+	if len(payload.LogsBloom) != 256 {
+		// Lengths of the other fields are ensured by their types (common.Hash or Address)
+		log.Warn("NewPayload unexpected LogsBloom length", "LogsBloom", payload.LogsBloom)
+		return nil, fmt.Errorf("invalid LogsBloom length")
+	}
+
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([][]byte, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {

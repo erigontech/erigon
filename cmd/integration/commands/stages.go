@@ -511,7 +511,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig, historyV2 := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db)
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
 
@@ -521,7 +523,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db)), ctx); err != nil {
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db), historyV2, txNums), ctx); err != nil {
 				return err
 			}
 
@@ -655,6 +657,8 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
+	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
 		vmConfig.Tracer = nil
@@ -677,7 +681,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, agg())
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -816,7 +820,10 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	if historyV2 {
+		return fmt.Errorf("this stage is disable in --history.v2=true")
+	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
 	tx, err := db.BeginRw(ctx)
@@ -870,7 +877,10 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageCallTraces(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	if historyV2 {
+		return fmt.Errorf("this stage is disable in --history.v2=true")
+	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
 	tx, err := db.BeginRw(ctx)
@@ -930,7 +940,10 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	if historyV2 {
+		return fmt.Errorf("this stage is disable in --history.v2=true")
+	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
@@ -1027,7 +1040,12 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	}
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	isBor := chainConfig.Bor != nil
-	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, allSnapshots(db), isBor)
+	var sprint uint64
+	if isBor {
+		sprint = chainConfig.Bor.Sprint
+	}
+
+	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, allSnapshots(db), isBor, sprint)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)

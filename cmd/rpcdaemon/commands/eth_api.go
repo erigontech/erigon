@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -45,7 +46,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
@@ -108,11 +109,11 @@ type BaseAPI struct {
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator22
-	_txNums      []uint64
+	_txNums      *exec22.TxNums
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums []uint64, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512

@@ -335,7 +335,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
 
-	possibleStatus, err := s.getPayloadStatusFromHashIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
+	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -359,8 +359,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
-// Check if we can make out a status from the payload hash/head hash.
-func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
+func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -397,17 +397,27 @@ func (s *EthBackendServer) getPayloadStatusFromHashIfPossible(blockHash common.H
 	}
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
+	var td *big.Int
 	if newPayload {
-		// Obtain TD
 		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
 		if err != nil {
 			return nil, err
 		}
+		td, err = rawdb.ReadTdByHash(tx, parentHash)
+	} else {
+		td, err = rawdb.ReadTdByHash(tx, blockHash)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	// Check if we already reached TTD.
+	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+		log.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
+	}
+
 	if !s.hd.POSSync() {
-		log.Warn(fmt.Sprintf("[%s] TTD not reached yet", prefix), "hash", blockHash)
+		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
 	}
 
@@ -522,7 +532,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, err
 	}
 	log.Info("PoS block built successfully", "hash", block.Header().Hash(),
-		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", blockRlp)
+		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", common.Bytes2Hex(blockRlp))
 
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
@@ -550,7 +560,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	status, err := s.getPayloadStatusFromHashIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
 	if err != nil {
 		return nil, err
 	}

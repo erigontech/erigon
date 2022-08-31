@@ -37,7 +37,7 @@ func ListenSignals(stack io.Closer) {
 			Exit() // ensure trace and CPU profile data is flushed.
 			LoudPanic("boom")
 		case <-usr1:
-			pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
+			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
 		}
 	}
 }

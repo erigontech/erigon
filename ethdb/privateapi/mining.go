@@ -132,6 +132,7 @@ func (s *MiningServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
+	log.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err

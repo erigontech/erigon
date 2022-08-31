@@ -4,9 +4,9 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
-![Coverage](https://gist.githubusercontent.com/revittm/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
+![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
 
-![Hive](https://gist.githubusercontent.com/revittm/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
+![Hive](https://gist.githubusercontent.com/revitteth/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
 
 <!--ts-->
 
@@ -69,9 +69,21 @@ Usage
 
 ### Getting Started
 
+For building the latest alpha release (this will be suitable for most users just wanting to run a node):
 ```sh
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone https://github.com/ledgerwatch/erigon.git
 cd erigon
+git checkout alpha
+make erigon
+./build/bin/erigon
+```
+You can check [the list of releases](https://github.com/ledgerwatch/erigon/releases) for release notes.
+
+For building the bleeding edge development branch:
+```sh
+git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
+cd erigon
+git checkout devel
 make erigon
 ./build/bin/erigon
 ```
@@ -157,7 +169,7 @@ C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
   been reported some anti-virus programs detect those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or
   a variant of it). Although those are false positives we have no control over 100+ vendors of security products for
-  Windows and their respective detection algorythms and we understand this might make your experience with Windows
+  Windows and their respective detection algorithms and we understand this might make your experience with Windows
   builds uncomfortable. To workaround the issue you might either set exclusions for your antivirus specifically
   for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two
   options
@@ -219,23 +231,7 @@ http.api : ["eth","debug","net"]
 
 ### Beacon Chain (Consensus Layer)
 
-Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK. CL
-relies on availability of receipts – don't prune them: don't add character `r` to `--prune` flag. However, old receipts
- are not needed for CL and you can safely prune them with `--prune htc`.
-
- ## ETH2 Deposit Contract Block Number
-
- - Mainnnet: 11052984
- - Sepolia: 1273020
- - Goerli: 4367322
-
-
- ## ETH2 Deposit Contract Address
-
- - Mainnet: 0x00000000219ab540356cBB839Cbe05303d7705Fa
- - Sepolia: 0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D
- - Goerli: 0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b
-
+Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK.
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
 as well as `--authrpc.vhosts <CL host>`.
@@ -403,7 +399,7 @@ make docker-compose
 #       if you followed above instructions
 #
 # Note: uid/gid syntax below will automatically use uid/gid of running user so this syntax
-#       is intended to be ran via the dedicated user setup earlier
+#       is intended to be run via the dedicated user setup earlier
 #
 DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 
@@ -538,7 +534,7 @@ Send an email to `security [at] torquem.ch`.
 
 ### Team
 
-Core contributors (in alpabetical order of first names):
+Core contributors (in alphabetical order of first names):
 
 * Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
@@ -566,7 +562,7 @@ Thanks to:
 
 * All contributors of Go-Ethereum
 
-* Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
+* Our special respect and gratitude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
   up the great job!
 
 Happy testing! 🥤
@@ -584,7 +580,7 @@ Application
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
 because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
 because most of that `90%` is "OS pages cache".
-OS automatically free this cache any time it needs memory. Smaller "page cache size" may not impact performance of
+OS automatically frees this cache any time it needs memory. Smaller "page cache size" may not impact performance of
 Erigon at all.
 
 Next tools show correct memory usage of Erigon:
@@ -601,8 +597,8 @@ memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
 main Erigon optimisations: "reduce Disk random access".
-"Blocks Execution stage" still does much random reads - this is reason why it's slowest stage. We do not recommend run
-multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
+"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend running
+multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 

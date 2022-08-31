@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -24,6 +25,7 @@ type TxLookupCfg struct {
 	tmpdir    string
 	snapshots *snapshotsync.RoSnapshots
 	isBor     bool
+	borSprint uint64
 }
 
 func StageTxLookupCfg(
@@ -32,6 +34,7 @@ func StageTxLookupCfg(
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
 	isBor bool,
+	borSprint uint64,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
@@ -39,6 +42,7 @@ func StageTxLookupCfg(
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
 		isBor:     isBor,
+		borSprint: borSprint,
 	}
 }
 
@@ -116,10 +120,10 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 				return err
 			}
 		}
-
-		if cfg.isBor {
-			borPrefix := []byte("matic-bor-receipt-")
-			if err := next(k, crypto.Keccak256(append(append(borPrefix, k...), v...)), blockNumBytes); err != nil {
+		// we add state sync transactions every bor Sprint amount of blocks
+		if cfg.isBor && blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
+			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
+			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}

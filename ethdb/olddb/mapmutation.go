@@ -111,9 +111,6 @@ func (m *mapmutation) ReadSequence(bucket string) (res uint64, err error) {
 // Can only be called from the worker thread
 func (m *mapmutation) GetOne(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {
-		if value == nil {
-			return nil, nil
-		}
 		return value, nil
 	}
 	if m.db != nil {
