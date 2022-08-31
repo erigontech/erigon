@@ -5,20 +5,7 @@ import (
 	"math/big"
 	"math/rand"
 	"testing"
-
-	"github.com/holiman/uint256"
 )
-
-func TestGetTreeKey(t *testing.T) {
-	var addr [32]byte
-	for i := 0; i < 16; i++ {
-		addr[1+2*i] = 0xff
-	}
-	n := uint256.NewInt(1)
-	n = n.Lsh(n, 129)
-	n.Add(n, uint256.NewInt(3))
-	GetTreeKey(addr[:], n, 1)
-}
 
 func BenchmarkPedersenHash(b *testing.B) {
 	var addr, v [32]byte
