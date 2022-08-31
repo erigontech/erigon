@@ -63,12 +63,14 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 
 	limiter := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
 	db22Path := path.Join(datadir, "db22")
-	if _, err = os.Stat(db22Path); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if reset {
+		if _, err = os.Stat(db22Path); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(db22Path); err != nil {
 			return err
 		}
-	} else if err = os.RemoveAll(db22Path); err != nil {
-		return err
 	}
 	chainDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).RoTxsLimiter(limiter).Open()
 	if err != nil {
