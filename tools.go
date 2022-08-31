@@ -18,12 +18,10 @@ package tools
 
 import (
 	_ "github.com/ledgerwatch/interfaces"
-	_ "github.com/ledgerwatch/interfaces/consensus_engine"
 	_ "github.com/ledgerwatch/interfaces/downloader"
 	_ "github.com/ledgerwatch/interfaces/p2psentry"
 	_ "github.com/ledgerwatch/interfaces/remote"
 	_ "github.com/ledgerwatch/interfaces/starknet"
-	_ "github.com/ledgerwatch/interfaces/testing"
 	_ "github.com/ledgerwatch/interfaces/txpool"
 	_ "github.com/ledgerwatch/interfaces/types"
 	_ "github.com/ledgerwatch/interfaces/web3"
