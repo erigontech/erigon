@@ -243,12 +243,13 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}()
 	ctx = context.Background()
 
-	workersCount := cfg.workersCount
+	//workersCount := cfg.workersCount
+	workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
 	useExternalTx := tx != nil
-	if !useExternalTx && workersCount == 1 {
+	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -282,7 +283,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-	if !useExternalTx && workersCount == 1 {
+	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
