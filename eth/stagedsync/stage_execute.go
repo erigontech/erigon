@@ -355,7 +355,6 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon22 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	fmt.Printf("-- forward: %d\n", s.BlockNumber)
 	if cfg.exec22 {
 		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
@@ -567,7 +566,6 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	fmt.Printf("-- unwind: %d\n", u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}

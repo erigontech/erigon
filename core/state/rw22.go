@@ -638,7 +638,6 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 }
 
 func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	fmt.Printf("UpdateAccountCode: %x\n", address)
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash.Bytes())
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
 	if len(code) > 0 {
@@ -651,7 +650,6 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 }
 
 func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts.Account) error {
-	fmt.Printf("DeleteAccount: %x\n", address)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address.Bytes())
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
 	if original.Incarnation > 0 {
@@ -667,7 +665,6 @@ func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts
 }
 
 func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	fmt.Printf("WriteAccountStorage: %x, %d, %x, %x\n", address, incarnation, *key, value.Bytes())
 	if *original == *value {
 		return nil
 	}

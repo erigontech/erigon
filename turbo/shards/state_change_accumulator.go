@@ -2,7 +2,6 @@ package shards
 
 import (
 	"context"
-	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -57,7 +56,6 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs
 	} else {
 		a.latestChange.Direction = remote.Direction_FORWARD
 	}
-	fmt.Printf("StartChange: %d, %s\n", blockHeight, a.latestChange.Direction)
 	a.accountChangeIndex = make(map[common.Address]int)
 	a.storageChangeIndex = make(map[common.Address]map[common.Hash]int)
 	if txs != nil {
@@ -79,7 +77,6 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	fmt.Printf("ChangeAccount: %s, %x\n", accountChange.Action, address)
 	switch accountChange.Action {
 	case remote.Action_STORAGE:
 		accountChange.Action = remote.Action_UPSERT
@@ -102,7 +99,6 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
-	fmt.Printf("DeleteAccount: %s, %x\n", accountChange.Action, address)
 	if accountChange.Action != remote.Action_STORAGE {
 		panic("")
 	}
@@ -124,7 +120,6 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	fmt.Printf("ChangeCode: %s, %x\n", accountChange.Action, address)
 	switch accountChange.Action {
 	case remote.Action_STORAGE:
 		accountChange.Action = remote.Action_CODE
@@ -147,7 +142,6 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	fmt.Printf("ChangeStorage: %s, %x, %d, %x\n", accountChange.Action, address, incarnation, location)
 	if accountChange.Action == remote.Action_REMOVE {
 		panic("")
 	}
