@@ -8,7 +8,7 @@ linters:
     - unconvert
     - predeclared
 #    - wastedassign # go1.18
-#    - thelper
+    - thelper
     - gofmt
     - errcheck
     - gosimple

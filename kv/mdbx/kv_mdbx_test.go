@@ -27,6 +27,7 @@ import (
 )
 
 func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
+	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
@@ -53,6 +54,7 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 }
 
 func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]string, []string) {
+	t.Helper()
 	var keys []string
 	var values []string
 	var err error
@@ -553,6 +555,7 @@ func TestDupDelete(t *testing.T) {
 }
 
 func baseAutoConversion(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursor) {
+	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
 	db := NewMDBX(logger).Path(path).MustOpen()

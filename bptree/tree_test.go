@@ -28,6 +28,7 @@ import (
 )
 
 func assertTwoThreeTree(t *testing.T, tree *Tree23, expectedKeysLevelOrder []Felt) {
+	t.Helper()
 	treeValid, err := tree.IsValid()
 	assert.True(t, treeValid, "2-3-tree properties do not hold for tree: %v, error: %v", tree.KeysInLevelOrder(), err)
 	if expectedKeysLevelOrder != nil {
@@ -36,6 +37,7 @@ func assertTwoThreeTree(t *testing.T, tree *Tree23, expectedKeysLevelOrder []Fel
 }
 
 func require23Tree(t *testing.T, tree *Tree23, expectedKeysLevelOrder []Felt, input1, input2 []byte) {
+	t.Helper()
 	treeValid, err := tree.IsValid()
 	require.True(t, treeValid, "2-3-tree properties do not hold: input [%v %v] [%+q %+q], error: %v",
 		input1, input2, string(input1), string(input2), err)
