@@ -667,7 +667,7 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 	return
 }
 
-func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+func (back *BlockReaderWithSnapshots) txnByHash(ctx context.Context, tx kv.Getter, txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
@@ -697,7 +697,19 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		blockNum = reader2.Lookup(txnHash[:])
 
 		if sender == (common.Address{}) {
-			fmt.Printf("should be bor transaction but is this %s", txn.Hash())
+			var header *types.Header
+			header, err = back.HeaderByNumber(ctx, tx, blockNum)
+			if err != nil {
+				return
+			}
+
+			if header == nil {
+				return
+			}
+			borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
+			if borTxHash == txnHash {
+				return
+			}
 		}
 
 		// final txnHash check  - completely avoid false-positives
@@ -777,7 +789,7 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 	var txn types.Transaction
 	var blockNum uint64
 	if err := back.sn.Txs.View(func(segments []*TxnSegment) error {
-		txn, blockNum, _, err = back.txnByHash(txnHash, segments, nil)
+		txn, blockNum, _, err = back.txnByHash(ctx, tx, txnHash, segments, nil)
 		if err != nil {
 			return err
 		}

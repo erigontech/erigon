@@ -1691,8 +1691,15 @@ RETRY:
 					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
-			emptySender := make([]byte, 20)
-			if slot.IsBor && bytes.Equal(word[1:firstTxByteAndlengthOfAddress], emptySender) {
+
+			senderBytes := word[1:firstTxByteAndlengthOfAddress]
+			sender := *(*common.Address)(senderBytes)
+			fmt.Println("Is it bor?", slot.IsBor)
+			if slot.IsBor {
+				fmt.Println("Is sender empty", sender)
+			}
+			if slot.IsBor && (sender == common.Address{}) {
+				fmt.Println("IT IS BOR TX")
 				borTxHash := types.ComputeBorTxHash(blockNum, header.Hash())
 				if err := txnHashIdx.AddKey(borTxHash[:], offset); err != nil {
 					return err
