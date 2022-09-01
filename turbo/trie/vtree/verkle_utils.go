@@ -105,17 +105,6 @@ func GetTreeKeyCodeChunk(address []byte, chunk *uint256.Int) []byte {
 	return GetTreeKey(address, treeIndex, subIndex)
 }
 
-func GetTreeKeyCodeChunkWithEvaluatedAddress(addressPoint *verkle.Point, chunk *uint256.Int) []byte {
-	chunkOffset := new(uint256.Int).Add(CodeOffset, chunk)
-	treeIndex := new(uint256.Int).Div(chunkOffset, VerkleNodeWidth)
-	subIndexMod := new(uint256.Int).Mod(chunkOffset, VerkleNodeWidth).Bytes()
-	var subIndex byte
-	if len(subIndexMod) != 0 {
-		subIndex = subIndexMod[0]
-	}
-	return getTreeKeyWithEvaluatedAddess(addressPoint, treeIndex, subIndex)
-}
-
 func GetTreeKeyStorageSlot(address []byte, storageKey *uint256.Int) []byte {
 	pos := storageKey.Clone()
 	if storageKey.Cmp(codeStorageDelta) < 0 {
@@ -150,75 +139,6 @@ func PointToHash(evaluated *verkle.Point, suffix byte) []byte {
 	}
 	retb[31] = suffix
 	return retb[:]
-}
-
-func getTreeKeyWithEvaluatedAddess(evaluated *verkle.Point, treeIndex *uint256.Int, subIndex byte) []byte {
-	var poly [5]fr.Element
-
-	poly[0].SetZero()
-	poly[1].SetZero()
-	poly[2].SetZero()
-
-	// little-endian, 32-byte aligned treeIndex
-	var index [32]byte
-	for i, b := range treeIndex.Bytes() {
-		index[len(treeIndex.Bytes())-1-i] = b
-	}
-	verkle.FromLEBytes(&poly[3], index[:16])
-	verkle.FromLEBytes(&poly[4], index[16:])
-
-	cfg, _ := verkle.GetConfig()
-	ret := cfg.CommitToPoly(poly[:], 0)
-
-	// add the pre-evaluated address
-	ret.Add(ret, evaluated)
-
-	return PointToHash(ret, subIndex)
-
-}
-
-func EvaluateAddressPoint(address []byte) *verkle.Point {
-	if len(address) < 32 {
-		var aligned [32]byte
-		address = append(aligned[:32-len(address)], address...)
-	}
-	var poly [3]fr.Element
-
-	poly[0].SetZero()
-
-	// 32-byte address, interpreted as two little endian
-	// 16-byte numbers.
-	verkle.FromLEBytes(&poly[1], address[:16])
-	verkle.FromLEBytes(&poly[2], address[16:])
-
-	cfg, _ := verkle.GetConfig()
-	ret := cfg.CommitToPoly(poly[:], 0)
-
-	// add a constant point
-	ret.Add(ret, getTreePolyIndex0Point)
-
-	return ret
-}
-
-func GetTreeKeyStorageSlotWithEvaluatedAddress(evaluated *verkle.Point, storageKey *uint256.Int) []byte {
-	pos := storageKey.Clone()
-	if storageKey.Cmp(codeStorageDelta) < 0 {
-		pos.Add(HeaderStorageOffset, storageKey)
-	} else {
-		pos.Add(MainStorageOffset, storageKey)
-	}
-	treeIndex := new(uint256.Int).Div(pos, VerkleNodeWidth)
-	// calculate the sub_index, i.e. the index in the stem tree.
-	// Because the modulus is 256, it's the last byte of treeIndex
-	subIndexMod := new(uint256.Int).Mod(pos, VerkleNodeWidth).Bytes()
-	var subIndex byte
-	if len(subIndexMod) != 0 {
-		// uint256 is broken into 4 little-endian quads,
-		// each with native endianness. Extract the least
-		// significant byte.
-		subIndex = subIndexMod[0] & 0xFF
-	}
-	return getTreeKeyWithEvaluatedAddess(evaluated, treeIndex, subIndex)
 }
 
 const (
