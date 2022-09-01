@@ -684,16 +684,21 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
-		sender, txnRlp := buf[1:1+20], buf[1+20:]
+		senderByte, txnRlp := buf[1:1+20], buf[1+20:]
+		sender := *(*common.Address)(senderByte)
 
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
 		if err != nil {
 			return
 		}
-		txn.SetSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
+
+		if sender == (common.Address{}) {
+			fmt.Printf("should be bor transaction but is this %s", txn.Hash())
+		}
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
