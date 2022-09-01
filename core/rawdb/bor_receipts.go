@@ -117,6 +117,11 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 		if err := tx.Delete(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex))); err != nil {
 			log.Crit("Failed to delete bor log", "err", err)
 		}
+
+		borTxHash := types.ComputeBorTxHash(number, hash)
+		if err := tx.Delete(kv.BorTxLookup, borTxHash[:]); err != nil {
+			log.Crit("Failed to delete bor transaction related to receipt", "error", err)
+		}
 	}
 
 	if err := tx.Delete(kv.BorReceipts, key); err != nil {
