@@ -78,8 +78,7 @@ func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
 				if err != nil {
 					return err
 				}
-				// TODO(Giulio2002): Chunkify code
-				// ----
+				// Chunkify contract code and build keys for each chunks and insert them in the tree
 				chunkedCode, err := vtree.ChunkifyCode(code)
 				if err != nil {
 					return err
