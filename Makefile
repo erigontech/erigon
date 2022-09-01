@@ -53,7 +53,6 @@ grpc: protoc-all
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto \
-		starknet/cairo.proto \
 		txpool/txpool.proto txpool/mining.proto
 	rm -rf vendor
 
