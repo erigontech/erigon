@@ -1694,6 +1694,7 @@ RETRY:
 
 			senderBytes := word[1:firstTxByteAndlengthOfAddress]
 			sender := *(*common.Address)(senderBytes)
+			if slot.IsBor {
 			fmt.Println("Is it bor?", slot.IsBor)
 			if slot.IsBor {
 				fmt.Println("Is sender empty", sender)
