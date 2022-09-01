@@ -2,6 +2,7 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -148,7 +149,7 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash 
 // ReadBorTransaction returns a specific bor (fake) transaction by txn hash, along with
 // its added positional metadata.
 func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
-	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
+	blockNumber, err := ReadBorTxLookupEntry(db, borTxHash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
@@ -157,6 +158,19 @@ func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, com
 	}
 
 	return computeBorTransactionForBlockNumber(db, *blockNumber)
+}
+
+func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
+	blockNumBytes, err := db.GetOne(kv.BorTxLookup, borTxHash[:])
+	if err != nil {
+		return nil, err
+	}
+	if blockNumBytes == nil {
+		return nil, nil
+	}
+
+	blockNum := binary.LittleEndian.Uint64(blockNumBytes)
+	return &blockNum, nil
 }
 
 // ReadBorTransactionForBlockNumber returns a bor (fake) transaction by block number, along with
