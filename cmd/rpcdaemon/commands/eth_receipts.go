@@ -285,11 +285,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if !ok && cc.Bor == nil {
-		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
-		// but 0 block number is used here to mean that the transaction is not found
 		return nil, nil
 	}
 
+	// if not ok and cc.Bor != nil then we might have a bor transaction
 	if !ok {
 		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 		if err != nil {
