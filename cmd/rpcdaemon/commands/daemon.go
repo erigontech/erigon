@@ -18,9 +18,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
 	base := NewBaseApi(filters, stateCache, blockReader, agg, txNums, cfg.WithDatadir)
-	if cfg.TevmEnabled {
-		base.EnableTevmExperiment()
-	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)

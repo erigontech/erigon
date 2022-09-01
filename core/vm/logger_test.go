@@ -29,13 +29,11 @@ import (
 
 func TestStoreCapture(t *testing.T) {
 	var (
-		env = NewEVM(BlockContext{
-			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
-		}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+		env      = NewEVM(BlockContext{}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
 		stack    = stack.New()
-		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */, false)
+		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */)
 	)
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))

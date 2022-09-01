@@ -401,10 +401,6 @@ var (
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
 	}
 
-	TevmFlag = cli.BoolFlag{
-		Name:  "experimental.tevm",
-		Usage: "Enables Transpiled EVM experiment",
-	}
 	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",

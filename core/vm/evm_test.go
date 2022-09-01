@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"
@@ -13,9 +12,7 @@ import (
 
 func TestInterpreterReadonly(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		env := NewEVM(BlockContext{
-			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
-		}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{EnableTEMV: true})
+		env := NewEVM(BlockContext{}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
 		isEVMSliceTest := rapid.SliceOfN(rapid.Bool(), 1, -1).Draw(t, "tevm").([]bool)
 		readOnlySliceTest := rapid.SliceOfN(rapid.Bool(), len(isEVMSliceTest), len(isEVMSliceTest)).Draw(t, "readonly").([]bool)
@@ -26,20 +23,7 @@ func TestInterpreterReadonly(t *testing.T) {
 		*currentIdx = -1
 
 		evmInterpreter := &testVM{
-			readonlyGetSetter: env.interpreters[EVMType].(*EVMInterpreter),
-			isTEMV:            false,
-
-			recordedReadOnlies:  &readOnlies,
-			recordedIsEVMCalled: &isEVMCalled,
-
-			env:               env,
-			isEVMSliceTest:    isEVMSliceTest,
-			readOnlySliceTest: readOnlySliceTest,
-			currentIdx:        currentIdx,
-		}
-		tevmInterpreter := &testVM{
-			readonlyGetSetter: env.interpreters[TEVMType].(*TEVMInterpreter),
-			isTEMV:            true,
+			readonlyGetSetter: env.interpreter.(*EVMInterpreter),
 
 			recordedReadOnlies:  &readOnlies,
 			recordedIsEVMCalled: &isEVMCalled,
@@ -50,15 +34,13 @@ func TestInterpreterReadonly(t *testing.T) {
 			currentIdx:        currentIdx,
 		}
 
-		env.interpreters[EVMType] = evmInterpreter
-		env.interpreters[TEVMType] = tevmInterpreter
+		env.interpreter = evmInterpreter
 
 		dummyContract := NewContract(
 			&dummyContractRef{},
 			&dummyContractRef{},
 			new(uint256.Int),
 			0,
-			false,
 			false,
 		)
 
@@ -82,10 +64,6 @@ func TestInterpreterReadonly(t *testing.T) {
 		}
 
 		for i, readOnly := range readOnlies {
-			if isEVMCalled[i] != isEVMSliceTest[i] {
-				t.Fatalf("wrong VM was called in %d index, got EVM %t, expected EVM %t",
-					i, isEVMCalled[i], isEVMSliceTest[i])
-			}
 
 			if readOnly.outer != readOnlySliceTest[i] {
 				t.Fatalf("outer readOnly appeared in %d index, got readOnly %t, expected %t",
@@ -289,9 +267,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 			t.Run(testcase.testName+evmsTestcase.suffix, func(t *testing.T) {
 				readonlySliceTest := testcase.readonlySliceTest
 
-				env := NewEVM(BlockContext{
-					ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
-				}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{EnableTEMV: true})
+				env := NewEVM(BlockContext{}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
 				readonliesGot := make([]*readOnlyState, len(testcase.readonlySliceTest))
 				isEVMGot := make([]bool, len(evmsTestcase.emvs))
@@ -300,20 +276,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				*currentIdx = -1
 
 				evmInterpreter := &testVM{
-					readonlyGetSetter: env.interpreters[EVMType].(*EVMInterpreter),
-					isTEMV:            false,
-
-					recordedReadOnlies:  &readonliesGot,
-					recordedIsEVMCalled: &isEVMGot,
-
-					env:               env,
-					isEVMSliceTest:    evmsTestcase.emvs,
-					readOnlySliceTest: testcase.readonlySliceTest,
-					currentIdx:        currentIdx,
-				}
-				tevmInterpreter := &testVM{
-					readonlyGetSetter: env.interpreters[TEVMType].(*TEVMInterpreter),
-					isTEMV:            true,
+					readonlyGetSetter: env.interpreter.(*EVMInterpreter),
 
 					recordedReadOnlies:  &readonliesGot,
 					recordedIsEVMCalled: &isEVMGot,
@@ -324,15 +287,13 @@ func TestReadonlyBasicCases(t *testing.T) {
 					currentIdx:        currentIdx,
 				}
 
-				env.interpreters[EVMType] = evmInterpreter
-				env.interpreters[TEVMType] = tevmInterpreter
+				env.interpreter = evmInterpreter
 
 				dummyContract := NewContract(
 					&dummyContractRef{},
 					&dummyContractRef{},
 					new(uint256.Int),
 					0,
-					false,
 					false,
 				)
 
@@ -354,11 +315,6 @@ func TestReadonlyBasicCases(t *testing.T) {
 				var firstReadOnly int
 
 				for callIndex, readOnly := range readonliesGot {
-					if isEVMGot[callIndex] != evmsTestcase.emvs[callIndex] {
-						t.Fatalf("wrong VM was called in %d index, got EVM %t, expected EVM %t. Test EVMs %v; test readonly %v",
-							callIndex, isEVMGot[callIndex], evmsTestcase.emvs[callIndex], evmsTestcase.emvs, readonlySliceTest)
-					}
-
 					if readOnly.outer != readonlySliceTest[callIndex] {
 						t.Fatalf("outer readOnly appeared in %d index, got readOnly %t, expected %t. Test EVMs %v; test readonly %v",
 							callIndex, readOnly.outer, readonlySliceTest[callIndex], evmsTestcase.emvs, readonlySliceTest)
@@ -431,7 +387,6 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 		new(uint256.Int),
 		0,
 		false,
-		!st.isEVMCalled[*st.currentIdx],
 	)
 
 	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])
