@@ -1,4 +1,4 @@
-package trie
+package vtree
 
 import (
 	"crypto/sha256"
