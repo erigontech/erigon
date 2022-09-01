@@ -57,7 +57,7 @@ Additional info:
 
 ```shell
 # Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:  
-STOP_BEFORE_STAGE=Execution ./build/bin/erigon --snapshots=false --datadir=<your_datadir> 
+STOP_AFTER_STAGE=Senders ./build/bin/erigon --snapshots=false --datadir=<your_datadir> 
 # But for security - better have fully-synced Erigon
 
 

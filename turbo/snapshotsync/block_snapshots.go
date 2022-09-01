@@ -1648,7 +1648,7 @@ RETRY:
 		}
 
 		headerBuf, _ = headerGetter.Next(headerBuf[:0])
-		if err := rlp.DecodeBytes(headerBuf, header); err != nil {
+		if err := rlp.DecodeBytes(headerBuf[1:], header); err != nil {
 			return err
 		}
 
@@ -1676,7 +1676,7 @@ RETRY:
 				}
 
 				headerBuf, _ = headerGetter.Next(headerBuf[:0])
-				if err := rlp.DecodeBytes(headerBuf, header); err != nil {
+				if err := rlp.DecodeBytes(headerBuf[1:], header); err != nil {
 					return err
 				}
 
