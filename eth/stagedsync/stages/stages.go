@@ -39,6 +39,7 @@ var (
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
+	Snapshots           SyncStage = "Snapshots"           // Snapshots
 	StorageHistoryIndex SyncStage = "StorageHistoryIndex" // Generating history index for storage
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index

@@ -27,6 +27,22 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			},
 		},
 		{
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageHeaders(s, u, ctx, tx, headers, firstCycle, test)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return HeadersUnwind(u, s, tx, headers, test)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return HeadersPrune(p, tx, headers, ctx)
+			},
+		},
+		{
 			ID:          stages.CumulativeIndex,
 			Description: "Write Cumulative Index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
