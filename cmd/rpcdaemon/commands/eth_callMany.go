@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
 	rpcapi "github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -149,12 +148,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum)
 	rules := chainConfig.Rules(blockNum)
 
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-
 	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
@@ -171,16 +164,15 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	}
 
 	blockCtx = vm.BlockContext{
-		CanTransfer:     core.CanTransfer,
-		Transfer:        core.Transfer,
-		GetHash:         getHash,
-		ContractHasTEVM: contractHasTEVM,
-		Coinbase:        parent.Coinbase,
-		BlockNumber:     parent.Number.Uint64(),
-		Time:            parent.Time,
-		Difficulty:      new(big.Int).Set(parent.Difficulty),
-		GasLimit:        parent.GasLimit,
-		BaseFee:         &baseFee,
+		CanTransfer: core.CanTransfer,
+		Transfer:    core.Transfer,
+		GetHash:     getHash,
+		Coinbase:    parent.Coinbase,
+		BlockNumber: parent.Number.Uint64(),
+		Time:        parent.Time,
+		Difficulty:  new(big.Int).Set(parent.Difficulty),
+		GasLimit:    parent.GasLimit,
+		BaseFee:     &baseFee,
 	}
 
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})

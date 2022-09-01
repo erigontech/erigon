@@ -401,16 +401,6 @@ var (
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
 	}
 
-	StarknetGrpcAddressFlag = cli.StringFlag{
-		Name:  "starknet.grpc.address",
-		Usage: "Starknet GRPC address",
-		Value: "127.0.0.1:6066",
-	}
-
-	TevmFlag = cli.BoolFlag{
-		Name:  "experimental.tevm",
-		Usage: "Enables Transpiled EVM experiment",
-	}
 	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",

@@ -33,7 +33,6 @@ func DoCall(
 	chainConfig *params.ChainConfig,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	contractHasTEVM func(hash common.Hash) (bool, error),
 	headerReader services.HeaderReader,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
@@ -85,7 +84,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM, headerReader)
+	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -109,7 +108,7 @@ func DoCall(
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, contractHasTEVM func(address common.Hash) (bool, error), headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
 	if header.Eip1559 {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -118,16 +117,15 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 	}
 	return vm.BlockContext{
-			CanTransfer:     core.CanTransfer,
-			Transfer:        core.Transfer,
-			GetHash:         getHashGetter(requireCanonical, tx, headerReader),
-			ContractHasTEVM: contractHasTEVM,
-			Coinbase:        header.Coinbase,
-			BlockNumber:     header.Number.Uint64(),
-			Time:            header.Time,
-			Difficulty:      new(big.Int).Set(header.Difficulty),
-			GasLimit:        header.GasLimit,
-			BaseFee:         &baseFee,
+			CanTransfer: core.CanTransfer,
+			Transfer:    core.Transfer,
+			GetHash:     getHashGetter(requireCanonical, tx, headerReader),
+			Coinbase:    header.Coinbase,
+			BlockNumber: header.Number.Uint64(),
+			Time:        header.Time,
+			Difficulty:  new(big.Int).Set(header.Difficulty),
+			GasLimit:    header.GasLimit,
+			BaseFee:     &baseFee,
 		},
 		vm.TxContext{
 			Origin:   msg.From(),

@@ -110,7 +110,6 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator22
 	_txNums      *exec22.TxNums
-	TevmEnabled  bool // experiment
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, singleNodeMode bool) *BaseAPI {
@@ -130,8 +129,6 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
 }
-
-func (api *BaseAPI) EnableTevmExperiment() { api.TevmEnabled = true }
 
 // nolint:unused
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
