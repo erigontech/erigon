@@ -98,6 +98,11 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 		return err
 	}
 
+	borTxHash := types.ComputeBorTxHash(number, hash)
+	if err := tx.Append(kv.BorTxLookup, borTxHash[:], dbutils.EncodeBlockNumber(number)); err != nil {
+		return err
+	}
+
 	return nil
 }
 
