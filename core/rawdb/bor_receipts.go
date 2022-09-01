@@ -99,11 +99,6 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 		return err
 	}
 
-	borTxHash := types.ComputeBorTxHash(number, hash)
-	if err := tx.Append(kv.BorTxLookup, borTxHash[:], dbutils.EncodeBlockNumber(number)); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -119,7 +114,7 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 		}
 
 		borTxHash := types.ComputeBorTxHash(number, hash)
-		if err := tx.Delete(kv.BorTxLookup, borTxHash[:]); err != nil {
+		if err := tx.Delete(kv.BorTxLookup, borTxHash.Bytes()); err != nil {
 			log.Crit("Failed to delete bor transaction related to receipt", "error", err)
 		}
 	}
