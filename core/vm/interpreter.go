@@ -91,6 +91,10 @@ type VM struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case evm.ChainRules().IsBerlin:
@@ -132,6 +136,10 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case vm.evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case vm.evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case vm.evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case vm.evm.ChainRules().IsBerlin:
