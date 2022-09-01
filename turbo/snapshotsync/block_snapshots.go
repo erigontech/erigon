@@ -1085,16 +1085,9 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	chainConfig := tool.ChainConfigFromDB(db)
 	isBor := chainConfig.Bor != nil
 	sprint := uint64(0)
-	var tx kv.Tx
-	var err error
 
 	if isBor {
 		sprint = chainConfig.Bor.Sprint
-		tx, err = db.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 
 	borCfg := types.BorConfigSprint{
@@ -1102,7 +1095,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		Sprint: sprint,
 	}
 
-	err = merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true, borCfg)
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true, borCfg)
 	if err != nil {
 		return err
 	}
