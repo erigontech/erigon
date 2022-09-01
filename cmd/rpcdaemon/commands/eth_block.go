@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -115,12 +114,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
+	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
 	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)

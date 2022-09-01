@@ -96,9 +96,8 @@ func TestEIP2200(t *testing.T) {
 
 			_ = s.CommitBlock(params.AllEthashProtocolChanges.Rules(0), state.NewPlainStateWriter(tx, tx, 0))
 			vmctx := BlockContext{
-				CanTransfer:     func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
-				Transfer:        func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
-				ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
+				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
 			}
 			vmenv := NewEVM(vmctx, TxContext{}, s, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 

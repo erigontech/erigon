@@ -152,14 +152,13 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		GasPrice: big.NewInt(1),
 	}
 	context := vm.BlockContext{
-		CanTransfer:     core.CanTransfer,
-		Transfer:        core.Transfer,
-		Coinbase:        common.Address{},
-		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
-		BlockNumber:     8000000,
-		Time:            5,
-		Difficulty:      big.NewInt(0x30000),
-		GasLimit:        uint64(6000000),
+		CanTransfer: core.CanTransfer,
+		Transfer:    core.Transfer,
+		Coinbase:    common.Address{},
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  big.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
 	}
 	alloc := core.GenesisAlloc{}
 
@@ -245,14 +244,13 @@ func TestCallTracer(t *testing.T) {
 				GasPrice: big.NewInt(int64(txn.GetPrice().Uint64())),
 			}
 			context := vm.BlockContext{
-				CanTransfer:     core.CanTransfer,
-				Transfer:        core.Transfer,
-				Coinbase:        test.Context.Miner,
-				BlockNumber:     uint64(test.Context.Number),
-				Time:            uint64(test.Context.Time),
-				Difficulty:      (*big.Int)(test.Context.Difficulty),
-				GasLimit:        uint64(test.Context.GasLimit),
-				ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+				CanTransfer: core.CanTransfer,
+				Transfer:    core.Transfer,
+				Coinbase:    test.Context.Miner,
+				BlockNumber: uint64(test.Context.Number),
+				Time:        uint64(test.Context.Time),
+				Difficulty:  (*big.Int)(test.Context.Difficulty),
+				GasLimit:    uint64(test.Context.GasLimit),
 			}
 
 			_, tx := memdb.NewTestTx(t)

@@ -17,7 +17,6 @@ type readonlyGetSetter interface {
 
 type testVM struct {
 	readonlyGetSetter
-	isTEMV bool
 
 	recordedReadOnlies  *[]*readOnlyState
 	recordedIsEVMCalled *[]bool
@@ -45,7 +44,7 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	currentReadOnly.in = evm.getReadonly()
 
 	(*evm.recordedReadOnlies)[currentIndex] = currentReadOnly
-	(*evm.recordedIsEVMCalled)[currentIndex] = !evm.isTEMV
+	(*evm.recordedIsEVMCalled)[currentIndex] = true
 
 	*evm.currentIdx++
 
@@ -56,7 +55,6 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 			new(uint256.Int),
 			0,
 			false,
-			!evm.isEVMSliceTest[*evm.currentIdx],
 		), nil, evm.readOnlySliceTest[*evm.currentIdx])
 		return res, err
 	}

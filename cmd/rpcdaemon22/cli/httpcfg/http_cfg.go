@@ -35,7 +35,6 @@ type HttpCfg struct {
 	DBReadConcurrency        int
 	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr            string
-	TevmEnabled              bool
 	StateCache               kvcache.CoherentConfig
 	Snap                     ethconfig.Snapshot
 	Sync                     ethconfig.Sync

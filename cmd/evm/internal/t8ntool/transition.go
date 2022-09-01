@@ -282,7 +282,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true, getTracer)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, true, getTracer)
 
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))

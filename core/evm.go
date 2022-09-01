@@ -30,7 +30,7 @@ import (
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address, contractHasTEVM func(contractHash common.Hash) (bool, error)) vm.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address) vm.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -52,12 +52,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 		prevRandDao = &header.MixDigest
 	}
 
-	if contractHasTEVM == nil {
-		contractHasTEVM = func(_ common.Hash) (bool, error) {
-			return false, nil
-		}
-	}
-
 	var transferFunc vm.TransferFunc
 	if engine != nil && engine.Type() == params.BorConsensus {
 		transferFunc = BorTransfer
@@ -66,17 +60,16 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 	}
 
 	return vm.BlockContext{
-		CanTransfer:     CanTransfer,
-		Transfer:        transferFunc,
-		GetHash:         blockHashFunc,
-		Coinbase:        beneficiary,
-		BlockNumber:     header.Number.Uint64(),
-		Time:            header.Time,
-		Difficulty:      new(big.Int).Set(header.Difficulty),
-		BaseFee:         &baseFee,
-		GasLimit:        header.GasLimit,
-		ContractHasTEVM: contractHasTEVM,
-		PrevRanDao:      prevRandDao,
+		CanTransfer: CanTransfer,
+		Transfer:    transferFunc,
+		GetHash:     blockHashFunc,
+		Coinbase:    beneficiary,
+		BlockNumber: header.Number.Uint64(),
+		Time:        header.Time,
+		Difficulty:  new(big.Int).Set(header.Difficulty),
+		BaseFee:     &baseFee,
+		GasLimit:    header.GasLimit,
+		PrevRanDao:  prevRandDao,
 	}
 }
 
