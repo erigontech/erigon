@@ -349,7 +349,7 @@ const (
 	// BOR
 
 	BorReceipts = "BorReceipt"
-	BorTxLookup = "BlockBorTransactionLookup"
+	BorTxLookup = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
 	BorSeparate = "BorSeparate"
 
 	// Downloader

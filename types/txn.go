@@ -96,12 +96,8 @@ type TxSlot struct {
 	AlAddrCount    int // Number of addresses in the access list
 	AlStorCount    int // Number of storage keys in the access list
 
-	IsBor bool // Wether or not the current parsed transaction is a bor transaction or not
-
 	Rlp []byte // TxPool set it to nil after save it to db
 }
-
-var emptyHash = make([]byte, 20)
 
 const (
 	LegacyTxType     int = 0
@@ -237,7 +233,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	// Next follows the destination address (if present)
 	dataPos, dataLen, err = rlp.String(payload, p)
-	var isEmptyHash bool
 	if err != nil {
 		return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
 	}
@@ -245,10 +240,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		return 0, fmt.Errorf("%w: unexpected length of to field: %d", ErrParseTxn, dataLen)
 	}
 
-	if dataLen != 0 {
-		hashBytes := payload[dataPos+1 : dataPos+dataLen]
-		isEmptyHash = bytes.Equal(hashBytes, emptyHash)
-	}
 	// Only note if To field is empty or not
 	slot.Creation = dataLen == 0
 	p = dataPos + dataLen
@@ -263,11 +254,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err)
 	}
 	slot.DataLen = dataLen
-	isDataEmpty := dataLen == 0
-
-	if ctx.withBor && isEmptyHash && isDataEmpty && legacy {
-		slot.IsBor = true
-	}
 
 	// Zero and non-zero bytes are priced differently
 	slot.DataNonZeroLen = 0
