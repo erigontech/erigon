@@ -307,6 +307,8 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
+	fmt.Println("BLOCK=====", block)
+
 	var txnIndex uint64
 	var txn types.Transaction
 	for idx, transaction := range block.Transactions() {
