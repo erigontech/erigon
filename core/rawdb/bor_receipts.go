@@ -164,7 +164,7 @@ func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
 		return nil, nil
 	}
 
-	blockNum := binary.LittleEndian.Uint64(blockNumBytes)
+	blockNum := binary.BigEndian.Uint64(blockNumBytes)
 	return &blockNum, nil
 }
 
