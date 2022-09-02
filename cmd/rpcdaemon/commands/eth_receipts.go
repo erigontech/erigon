@@ -307,7 +307,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	fmt.Println("BLOCK=====", block)
+	fmt.Printf("block %v+", block)
 
 	var txnIndex uint64
 	var txn types.Transaction
@@ -320,17 +320,21 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if txn == nil {
+		fmt.Println("Looking for Bor tx")
 		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if borTx == nil {
+			fmt.Println("Bor transaction was nil")
 			return nil, nil
 		}
 		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
 		if borReceipt == nil {
+			fmt.Println("Bor receipt was nil with transaction", borTx.Hash())
 			return nil, nil
 		}
+		fmt.Println("got bor receipt from transaction: ", borTx.Hash())
 		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
 	}
 
