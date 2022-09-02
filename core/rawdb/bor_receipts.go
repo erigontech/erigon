@@ -2,8 +2,8 @@ package rawdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -164,7 +164,7 @@ func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
 		return nil, nil
 	}
 
-	blockNum := binary.BigEndian.Uint64(blockNumBytes)
+	blockNum := new(big.Int).SetBytes(blockNumBytes).Uint64()
 	return &blockNum, nil
 }
 
