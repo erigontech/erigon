@@ -27,6 +27,20 @@ type regeneratePedersenStorageJob struct {
 	address          common.Address
 }
 
+type regeneratePedersenCodeJob struct {
+	address      common.Address
+	codeSizeHash common.Hash
+	code         []byte
+}
+
+type regeneratePedersenCodeOut struct {
+	chunks       [][]byte
+	address      common.Address
+	chunksKeys   []common.Hash
+	codeSizeHash common.Hash
+	codeSize     int
+}
+
 const batchSize = 10000
 
 func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regeneratePedersenAccountsJob, out chan *regeneratePedersenAccountsOut) {
@@ -77,6 +91,50 @@ func pedersenStorageWorker(ctx context.Context, logPrefix string, in, out chan *
 			storageKey:       job.storageKey,
 			address:          job.address,
 			storageValue:     job.storageValue,
+		}
+	}
+}
+
+func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regeneratePedersenCodeJob, out chan *regeneratePedersenCodeOut) {
+	var job *regeneratePedersenCodeJob
+	var ok bool
+	for {
+		select {
+		case job, ok = <-in:
+			if !ok {
+				return
+			}
+			if job == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+
+		var chunks [][]byte
+		var chunkKeys []common.Hash
+		if job.code == nil || len(job.code) == 0 {
+			out <- &regeneratePedersenCodeOut{
+				chunks:       chunks,
+				chunksKeys:   chunkKeys,
+				codeSizeHash: job.codeSizeHash,
+				codeSize:     0,
+				address:      job.address,
+			}
+		}
+		// Chunkify contract code and build keys for each chunks and insert them in the tree
+		chunkedCode := vtree.ChunkifyCode(job.code)
+		// Write code chunks
+		for i := 0; i < len(chunkedCode); i += 32 {
+			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
+			chunkKeys = append(chunkKeys, common.BytesToHash(vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))))
+		}
+		out <- &regeneratePedersenCodeOut{
+			chunks:       chunks,
+			chunksKeys:   chunkKeys,
+			codeSizeHash: job.codeSizeHash,
+			codeSize:     len(job.code),
+			address:      job.address,
 		}
 	}
 }
