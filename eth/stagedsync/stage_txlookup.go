@@ -122,7 +122,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		// we add state sync transactions every bor Sprint amount of blocks
 		if cfg.isBor && blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
-			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
+			if err := tx.Put(kv.BorTxLookup, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}
@@ -228,7 +228,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		}
 		if cfg.isBor {
 			borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
-			if err := tx.Append(kv.BorTxLookup, borTxHash.Bytes(), dbutils.EncodeBlockNumber(blocknum)); err != nil {
+			if err := tx.Delete(kv.BorTxLookup, borTxHash.Bytes()); err != nil {
 				return err
 			}
 		}
