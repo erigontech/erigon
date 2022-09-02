@@ -43,7 +43,7 @@ func main() {
 
 	log.Info("Opened Database", "datadir", *chaindata)
 
-	if err := RegeneratePedersenHashstate(txOut, tx, workersCount); err != nil {
+	if err := RegeneratePedersenHashstate(txOut, tx, *workersCount); err != nil {
 		log.Error("Error", "err", err.Error())
 	}
 }

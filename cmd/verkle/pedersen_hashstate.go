@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
@@ -29,6 +31,7 @@ import (
 }*/
 
 func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+	logPrefix := PedersenHashedAccounts
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
 
@@ -43,33 +46,70 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) 
 		return err
 	}
 	defer plainStateCursor.Close()
-	logInterval := time.NewTicker(30 * time.Second)
-	defer logInterval.Stop()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	jobs := make(chan *regeneratePedersenAccountsJob, batchSize)
+	out := make(chan *regeneratePedersenAccountsOut, batchSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(int(workersCount))
+	ctx, cancelWorkers := context.WithCancel(context.Background())
+	for i := 0; i < int(workersCount); i++ {
+		go func(threadNo int) {
+			defer debug.LogPanic()
+			defer wg.Done()
+			pedersenAccountWorker(ctx, logPrefix, jobs, out)
+		}(i)
+	}
+	defer cancelWorkers()
+	// Start Goroutine for collection
+	go func() {
+		defer debug.LogPanic()
+		defer cancelWorkers()
+		var ok bool
+		var o *regeneratePedersenAccountsOut
+		for {
+			select {
+			case o, ok = <-out:
+				if !ok {
+					return
+				}
+
+				if err := collector.Collect(o.versionHash[:], o.encodedAccount); err != nil {
+					panic(err)
+					return
+				}
+				if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
+					panic(err)
+					return
+				}
+			}
+		}
+	}()
 	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
 		if err != nil {
 			return err
 		}
 		if len(k) == 20 {
-			versionKey := vtree.GetTreeKeyVersion(k)
-
-			acc := accounts.NewAccount()
-			acc.DecodeForStorage(v)
-			vAcc := vtree.AccountToVerkleAccount(acc)
-			enc := make([]byte, vAcc.GetVerkleAccountSizeForStorage())
-			vAcc.EncodeVerkleAccountForStorage(enc)
-			if err := collector.Collect(versionKey[:], enc); err != nil {
+			var acc accounts.Account
+			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			if err := collectorLookup.Collect(k, versionKey[:]); err != nil {
-				return err
+			jobs <- &regeneratePedersenAccountsJob{
+				address: common.BytesToAddress(k),
+				account: acc,
 			}
 			select {
-			case <-logInterval.C:
+			case <-logEvery.C:
 				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "key", common.Bytes2Hex(k))
 			default:
 			}
 		}
 	}
+
+	close(jobs)
+	wg.Wait()
+	close(out)
 
 	collector.Load(outTx, PedersenHashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
