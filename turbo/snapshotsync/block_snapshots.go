@@ -1082,20 +1082,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
-	chainConfig := tool.ChainConfigFromDB(db)
-	isBor := chainConfig.Bor != nil
-	sprint := uint64(0)
-
-	if isBor {
-		sprint = chainConfig.Bor.Sprint
-	}
-
-	borCfg := types.BorConfigSprint{
-		IsBor:  isBor,
-		Sprint: sprint,
-	}
-
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true, borCfg)
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true)
 	if err != nil {
 		return err
 	}
@@ -1949,7 +1936,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool, borCfg types.BorConfigSprint) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1969,7 +1956,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			}
 			if doIndex {
 				p := &background.Progress{}
-
 				if err := buildIdx(ctx, f, m.chainID, m.tmpDir, p, m.lvl); err != nil {
 					return err
 				}
