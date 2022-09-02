@@ -5,14 +5,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-func SpawnStageDownloader(
+func SpawnStageSnapshots(
 	s *StageState,
-	u Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {

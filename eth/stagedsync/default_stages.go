@@ -11,24 +11,20 @@ import (
 func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
-			ID:          stages.Headers,
-			Description: "Download headers",
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, tx, headers, firstCycle, test)
+				return SpawnStageSnapshots(s, ctx, tx, headers, firstCycle)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return HeadersUnwind(u, s, tx, headers, test)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return HeadersPrune(p, tx, headers, ctx)
-			},
+			Unwind: nil, // TODO: Ask Alex for workaround since Unwind func can not be nil
+			Prune:  nil,
 		},
 		{
-			ID:          stages.Snapshots,
-			Description: "Download snapshots",
+			ID:          stages.Headers,
+			Description: "Download headers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				if badBlockUnwind {
 					return nil
