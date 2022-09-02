@@ -416,13 +416,16 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v, err := decode(dbKey, dbValue)
+		blockNum, k, v, err := decode(dbKey, dbValue)
 		if err != nil {
 			return err
 		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
+		}
+		if bytes.HasPrefix(newK, common.FromHex("04")) {
+			fmt.Printf("alex: %x, v=%x, blockNum=%d\n", newK, v, blockNum)
 		}
 		return next(dbKey, newK, v)
 	}
@@ -718,6 +721,11 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
+			}
+
+			if bytes.HasPrefix(newK, common.FromHex("04")) {
+				_, a := txNums.Find(txNum)
+				fmt.Printf("alex: %x, v=%x, txNum=%d, blockNum=%d\n", newK, v, txNum, a)
 			}
 			return collector.Collect(newK, v)
 		})

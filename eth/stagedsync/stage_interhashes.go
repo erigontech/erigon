@@ -68,6 +68,20 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		}
 		defer tx.Rollback()
 	}
+	fmt.Printf("-- ih f: %d\n", s.BlockNumber)
+	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+	//	fmt.Printf("ps: %x, %x\n", k, v)
+	//	return nil
+	//})
+	tx.ForPrefix(kv.HashedAccounts, common.FromHex("04"), func(k, v []byte) error {
+		fmt.Printf("ha: %x, %x\n", k, v)
+		return nil
+	})
+	tx.ForPrefix(kv.HashedStorage, common.FromHex("04"), func(k, v []byte) error {
+		fmt.Printf("hs: %x, %x\n", k, v)
+		return nil
+	})
+	fmt.Printf("-- ih f end: %d\n", s.BlockNumber)
 
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -366,14 +380,19 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			if err != nil {
 				return err
 			}
-			if err := acc.DecodeForStorage(value); err != nil {
-				return err
+			incarnation := uint64(1)
+			if len(value) == 0 {
+				if err := acc.DecodeForStorage(value); err != nil {
+					return err
+				}
+				incarnation = acc.Incarnation
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
+
 			return collector.Collect(newK, value)
 		})
 		return collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
@@ -614,20 +633,20 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 		}
 		defer tx.Rollback()
 	}
-	fmt.Printf("-- ih f: %d\n", s.BlockNumber)
-	tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-		fmt.Printf("ps: %x, %x\n", k, v)
-		return nil
-	})
-	tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
+	fmt.Printf("-- ih u: %d\n", s.BlockNumber)
+	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+	//	fmt.Printf("ps: %x, %x\n", k, v)
+	//	return nil
+	//})
+	tx.ForPrefix(kv.HashedAccounts, common.FromHex("04"), func(k, v []byte) error {
 		fmt.Printf("ha: %x, %x\n", k, v)
 		return nil
 	})
-	tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
+	tx.ForPrefix(kv.HashedStorage, common.FromHex("04"), func(k, v []byte) error {
 		fmt.Printf("hs: %x, %x\n", k, v)
 		return nil
 	})
-	fmt.Printf("-- ih f end: %d\n", s.BlockNumber)
+	fmt.Printf("-- ih u end: %d\n", s.BlockNumber)
 
 	syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, u.UnwindPoint)
 	if err != nil {
@@ -698,12 +717,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 	if hash != expectedRootHash {
-		for i := u.UnwindPoint - 50; i < u.UnwindPoint+150; i++ {
-			h, _ := cfg.blockReader.HeaderByNumber(context.Background(), db, i)
-			if h != nil {
-				fmt.Printf("roots: %d, %x, %x\n", h.Number, h.Hash().Bytes(), h.Root.Bytes())
-			}
-		}
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
