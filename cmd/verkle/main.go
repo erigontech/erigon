@@ -12,6 +12,7 @@ func main() {
 	ctx := context.Background()
 	chaindata := flag.String("chaindata", "chaindata", "path to the chaindata database file")
 	out := flag.String("out", "out", "path to the output chaindata database file")
+	workersCount := flag.Uint("workers", 5, "amount of goroutines")
 	flag.Parse()
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(3), log.StderrHandler))
 	db, err := mdbx.Open(*chaindata, log.Root(), true)
@@ -42,5 +43,7 @@ func main() {
 
 	log.Info("Opened Database", "datadir", *chaindata)
 
-	RegeneratePedersenHashstate(txOut, tx)
+	if err := RegeneratePedersenHashstate(txOut, tx, workersCount); err != nil {
+		log.Error("Error", "err", err.Error())
+	}
 }
