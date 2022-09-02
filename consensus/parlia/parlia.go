@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"io"
 	"math/big"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -1232,7 +1233,7 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from)
 	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),

@@ -271,8 +271,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_issuance                            | Yes     | Erigon only                                |
 | erigon_GetBlockByTimestamp                 | Yes     | Erigon only                                |
 |                                            |         |                                            |
-| starknet_call                              | Yes     | Starknet only                              |
-|                                            |         |                                            |
 | bor_getSnapshot                            | Yes     | Bor only                                   |
 | bor_getAuthor                              | Yes     | Bor only                                   |
 | bor_getSnapshotAtHash                      | Yes     | Bor only                                   |

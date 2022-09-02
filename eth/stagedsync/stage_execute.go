@@ -134,7 +134,6 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	contractHasTEVM func(contractHash commonold.Hash) (bool, error),
 	initialCycle bool,
 	effectiveEngine consensus.Engine,
 ) error {
@@ -154,7 +153,7 @@ func executeBlock(
 		return vm.NewStructLogger(&vm.LogConfig{}), nil
 	}
 
-	callTracer := calltracer.NewCallTracer(contractHasTEVM)
+	callTracer := calltracer.NewCallTracer()
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
 
@@ -165,9 +164,9 @@ func executeBlock(
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
 	if isPoSa {
-		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, false, getTracer)
 	} else {
-		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM, false, getTracer)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, false, getTracer)
 	}
 	if err != nil {
 		return err
@@ -430,17 +429,11 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var contractHasTEVM func(contractHash commonold.Hash) (bool, error)
-
-		if cfg.vmConfig.EnableTEMV {
-			contractHasTEVM = ethdb.GetHasTEVM(tx)
-		}
-
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle, effectiveEngine); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, effectiveEngine); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
