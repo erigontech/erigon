@@ -3,6 +3,7 @@ package rawdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -171,6 +172,7 @@ func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
 // ReadBorTransactionForBlockNumber returns a bor (fake) transaction by block number, along with
 // its added positional metadata.
 func ReadBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+	fmt.Println("==HAS RECEIPT==", HasBorReceipts(db, blockNumber))
 	if !HasBorReceipts(db, blockNumber) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
