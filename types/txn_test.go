@@ -98,6 +98,11 @@ func TestTransactionSignatureValidity2(t *testing.T) {
 	rlp := common.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
 	_, err := ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, nil)
 	assert.Error(t, err)
+
+	// Only legacy transactions can happen before EIP-2
+	ctx.WithAllowPreEip2s(true)
+	_, err = ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, nil)
+	assert.Error(t, err)
 }
 
 func TestTxSlotsGrowth(t *testing.T) {
