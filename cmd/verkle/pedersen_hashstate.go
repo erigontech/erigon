@@ -28,13 +28,21 @@ func retrieveAccountKeys(address common.Address) (versionKey, balanceKey, codeSi
 }
 
 func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
-	pedersenHashstateBucket := "PedersenHashstate"
+	pedersenHashStateBucket := "PedersenHashState"
+	pedersenHashStorageBucket := "PedersenHashStorage"
 	start := time.Now()
 	log.Info("Started Generation of the Pedersen Hashed State")
-	if err := outTx.CreateBucket(pedersenHashstateBucket); err != nil {
+	if err := outTx.CreateBucket(pedersenHashStateBucket); err != nil {
 		return err
 	}
-	collector := etl.NewCollector("Pedersen Hashing", "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	if err := outTx.CreateBucket(pedersenHashStorageBucket); err != nil {
+		return err
+	}
+	stateCollector := etl.NewCollector("Pedersen State", "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer stateCollector.Close()
+
+	storageCollector := etl.NewCollector("Pedersen Storage", "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer storageCollector.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
 	if err != nil {
@@ -47,32 +55,32 @@ func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
 		}
 		if len(k) == 20 {
 			versionKey, balanceKey, codeSizeKey, codeHashKey, nonceKey := retrieveAccountKeys(common.BytesToAddress(k))
-			if err := collector.Collect(versionKey[:], []byte{0}); err != nil {
+			if err := stateCollector.Collect(versionKey[:], []byte{0}); err != nil {
 				return err
 			}
 			// Process nonce
-			nonceValue := make([]byte, 32)
+			nonceValue := make([]byte, 8)
 			acc := accounts.NewAccount()
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
 			binary.LittleEndian.PutUint64(nonceValue, acc.Nonce)
-			if err := collector.Collect(nonceKey[:], nonceValue); err != nil {
+			if err := stateCollector.Collect(nonceKey[:], nonceValue); err != nil {
 				return err
 			}
 			// Process Balance
+			balanceBytes := acc.Balance.ToBig().Bytes()
 			balanceValue := make([]byte, 32)
-			balanceBytes := acc.Balance.Bytes()
 			if len(balanceBytes) > 0 {
 				for i := range balanceBytes {
 					balanceValue[len(balanceBytes)-i-1] = balanceBytes[i]
 				}
 			}
-			if err := collector.Collect(balanceKey[:], balanceValue); err != nil {
+			if err := stateCollector.Collect(balanceKey[:], balanceValue); err != nil {
 				return err
 			}
 			// Process Code Size
-			codeSizeValue := make([]byte, 32)
+			codeSizeValue := make([]byte, 8)
 			if !accounts.IsEmptyCodeHash(acc.CodeHash) {
 				code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
 				if err != nil {
@@ -85,24 +93,24 @@ func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
 				}
 				// Write code chunks
 				for i := 0; i < len(chunkedCode); i += 32 {
-					collector.Collect(vtree.GetTreeKeyCodeChunk(k, uint256.NewInt(uint64(i)/32)), chunkedCode[i:i+32])
+					stateCollector.Collect(vtree.GetTreeKeyCodeChunk(k, uint256.NewInt(uint64(i)/32)), chunkedCode[i:i+32])
 				}
 
 				// Set code size
 				binary.LittleEndian.PutUint64(codeSizeValue, uint64(len(code)))
 			}
 
-			if err := collector.Collect(codeSizeKey[:], codeSizeValue); err != nil {
+			if err := stateCollector.Collect(codeSizeKey[:], codeSizeValue); err != nil {
 				return err
 			}
 			// Process Code Hash
-			if err := collector.Collect(codeHashKey[:], acc.CodeHash[:]); err != nil {
+			if err := stateCollector.Collect(codeHashKey[:], acc.CodeHash[:]); err != nil {
 				return err
 			}
 
-		} else {
+		} else if len(k) == 60 {
 			// Process storage
-			collector.Collect(vtree.GetTreeKeyStorageSlot(k[:20], new(uint256.Int).SetBytes(k[28:])), v)
+			storageCollector.Collect(vtree.GetTreeKeyStorageSlot(k[:20], new(uint256.Int).SetBytes(k[28:])), v)
 		}
 		select {
 		case <-logInterval.C:
@@ -110,7 +118,8 @@ func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
 		default:
 		}
 	}
-	collector.Load(outTx, pedersenHashstateBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
+	stateCollector.Load(outTx, pedersenHashStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
+	storageCollector.Load(outTx, pedersenHashStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
 
 	log.Info("Pedersen hashed state finished", "elapsed", time.Until(start))
 	return outTx.Commit()

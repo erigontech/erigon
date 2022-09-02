@@ -32,6 +32,7 @@ func main() {
 		log.Error("Error while opening db transaction", "err", err.Error())
 		return
 	}
+	defer txOut.Rollback()
 
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
