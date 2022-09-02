@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20220901134100-d9648b4c6910
-
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -173,4 +172,3 @@ require (
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect
 )
-
