@@ -1,19 +1,23 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func retrieveAccountKeys(address common.Address) (versionKey, balanceKey, codeSizeKey, codeHashKey, noncekey [32]byte) {
+/*func retrieveAccountKeys(address common.Address) (versionKey, balanceKey, codeSizeKey, codeHashKey, noncekey [32]byte) {
 	// Process the polynomial
 	versionkey := vtree.GetTreeKeyVersion(address[:])
 	copy(balanceKey[:], versionkey)
@@ -25,103 +29,357 @@ func retrieveAccountKeys(address common.Address) (versionKey, balanceKey, codeSi
 	copy(codeHashKey[:], versionkey)
 	codeHashKey[31] = vtree.CodeKeccakLeafKey
 	return
-}
+}*/
 
-func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx) error {
-	pedersenHashStateBucket := "PedersenHashState"
-	pedersenHashStorageBucket := "PedersenHashStorage"
+func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+	logPrefix := PedersenHashedAccounts
 	start := time.Now()
-	log.Info("Started Generation of the Pedersen Hashed State")
-	if err := outTx.CreateBucket(pedersenHashStateBucket); err != nil {
-		return err
-	}
-	if err := outTx.CreateBucket(pedersenHashStorageBucket); err != nil {
-		return err
-	}
-	stateCollector := etl.NewCollector("Pedersen State", "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer stateCollector.Close()
+	log.Info("Started Generation of Pedersen Hashed Accounts")
 
-	storageCollector := etl.NewCollector("Pedersen Storage", "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer storageCollector.Close()
+	collector := etl.NewCollector(PedersenHashedAccounts, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
+
+	collectorLookup := etl.NewCollector(PedersenHashedAccountsLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
-	logInterval := time.NewTicker(30 * time.Second)
+	defer plainStateCursor.Close()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	jobs := make(chan *regeneratePedersenAccountsJob, batchSize)
+	out := make(chan *regeneratePedersenAccountsOut, batchSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(int(workersCount))
+	ctx, cancelWorkers := context.WithCancel(context.Background())
+	for i := 0; i < int(workersCount); i++ {
+		go func(threadNo int) {
+			defer debug.LogPanic()
+			defer wg.Done()
+			pedersenAccountWorker(ctx, logPrefix, jobs, out)
+		}(i)
+	}
+	defer cancelWorkers()
+	// Start Goroutine for collection
+	go func() {
+		defer debug.LogPanic()
+		defer cancelWorkers()
+		var ok bool
+		var o *regeneratePedersenAccountsOut
+		for {
+			select {
+			case o, ok = <-out:
+				if !ok {
+					return
+				}
+
+				if err := collector.Collect(o.versionHash[:], o.encodedAccount); err != nil {
+					panic(err)
+					return
+				}
+				if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
+					panic(err)
+					return
+				}
+			}
+		}
+	}()
 	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
 		if err != nil {
 			return err
 		}
 		if len(k) == 20 {
-			versionKey, balanceKey, codeSizeKey, codeHashKey, nonceKey := retrieveAccountKeys(common.BytesToAddress(k))
-			if err := stateCollector.Collect(versionKey[:], []byte{0}); err != nil {
+			var acc accounts.Account
+			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			// Process nonce
-			nonceValue := make([]byte, 8)
+			jobs <- &regeneratePedersenAccountsJob{
+				address: common.BytesToAddress(k),
+				account: acc,
+			}
+			select {
+			case <-logEvery.C:
+				log.Info("[Pedersen Account Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
+			default:
+			}
+		}
+	}
+
+	close(jobs)
+	wg.Wait()
+	close(out)
+
+	collector.Load(outTx, PedersenHashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	collectorLookup.Load(outTx, PedersenHashedAccountsLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	log.Info("Finished generation of Pedersen Hashed Accounts", "elapsed", time.Since(start))
+
+	return nil
+}
+
+func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+	logPrefix := PedersenHashedStorage
+	start := time.Now()
+	log.Info("Started Generation of Pedersen Hashed Storage")
+
+	collector := etl.NewCollector(PedersenHashedStorage, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
+
+	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorLookup.Close()
+
+	plainStateCursor, err := readTx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	defer plainStateCursor.Close()
+
+	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
+	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
+	out := make(chan *regeneratePedersenStorageJob, batchSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(int(workersCount))
+	ctx, cancelWorkers := context.WithCancel(context.Background())
+	for i := 0; i < int(workersCount); i++ {
+		go func(threadNo int) {
+			defer debug.LogPanic()
+			defer wg.Done()
+			pedersenStorageWorker(ctx, logPrefix, jobs, out)
+		}(i)
+	}
+	defer cancelWorkers()
+	// Start Goroutine for collection
+	go func() {
+		defer debug.LogPanic()
+		defer cancelWorkers()
+		var ok bool
+		var o *regeneratePedersenStorageJob
+		for {
+			select {
+			case o, ok = <-out:
+				if !ok {
+					return
+				}
+
+				if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
+					panic(err)
+					return
+				}
+				if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
+					panic(err)
+					return
+				}
+			}
+		}
+	}()
+
+	var address common.Address
+	var incarnation uint64
+	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) == 60 {
+			if !bytes.Equal(address[:], k[:20]) || binary.BigEndian.Uint64(k[20:28]) != incarnation {
+				continue
+			}
+			jobs <- &regeneratePedersenStorageJob{
+				storageKey:   new(uint256.Int).SetBytes(k[28:]),
+				storageValue: v,
+				address:      address,
+			}
+			select {
+			case <-logInterval.C:
+				log.Info("[Pedersen Storage Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k[:20]))
+			default:
+			}
+		} else if len(k) == 20 {
 			acc := accounts.NewAccount()
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			binary.LittleEndian.PutUint64(nonceValue, acc.Nonce)
-			if err := stateCollector.Collect(nonceKey[:], nonceValue); err != nil {
-				return err
-			}
-			// Process Balance
-			balanceBytes := acc.Balance.ToBig().Bytes()
-			balanceValue := make([]byte, 32)
-			if len(balanceBytes) > 0 {
-				for i := range balanceBytes {
-					balanceValue[len(balanceBytes)-i-1] = balanceBytes[i]
+			incarnation = acc.Incarnation
+			address = common.BytesToAddress(k)
+		}
+	}
+
+	close(jobs)
+	wg.Wait()
+	close(out)
+
+	collector.Load(outTx, PedersenHashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	collectorLookup.Load(outTx, PedersenHashedStorageLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	log.Info("Finished generation of Pedersen Hashed Storage", "elapsed", time.Since(start))
+
+	return nil
+}
+
+func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+	logPrefix := PedersenHashedCode
+	start := time.Now()
+	log.Info("Started Generation of Pedersen Hashed Code")
+
+	collector := etl.NewCollector(PedersenHashedCode, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
+
+	collectorLookup := etl.NewCollector(PedersenHashedCodeLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorLookup.Close()
+
+	plainStateCursor, err := readTx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	defer plainStateCursor.Close()
+
+	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
+	jobs := make(chan *regeneratePedersenCodeJob, batchSize)
+	out := make(chan *regeneratePedersenCodeOut, batchSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(int(workersCount))
+	ctx, cancelWorkers := context.WithCancel(context.Background())
+	for i := 0; i < int(workersCount); i++ {
+		go func(threadNo int) {
+			defer debug.LogPanic()
+			defer wg.Done()
+			pedersenCodeWorker(ctx, logPrefix, jobs, out)
+		}(i)
+	}
+	defer cancelWorkers()
+	// Start Goroutine for collection
+	go func() {
+		defer debug.LogPanic()
+		defer cancelWorkers()
+		var ok bool
+		var o *regeneratePedersenCodeOut
+		for {
+			select {
+			case o, ok = <-out:
+				if !ok {
+					return
 				}
-			}
-			if err := stateCollector.Collect(balanceKey[:], balanceValue); err != nil {
-				return err
-			}
-			// Process Code Size
-			codeSizeValue := make([]byte, 8)
-			if !accounts.IsEmptyCodeHash(acc.CodeHash) {
-				code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
-				if err != nil {
-					return err
-				}
-				// Chunkify contract code and build keys for each chunks and insert them in the tree
-				chunkedCode, err := vtree.ChunkifyCode(code)
-				if err != nil {
-					return err
+
+				// Write Code Size
+				codeSizeBytes := make([]byte, 32)
+				binary.LittleEndian.PutUint32(codeSizeBytes, uint32(o.codeSize))
+
+				if err := collector.Collect(o.codeSizeHash[:], codeSizeBytes); err != nil {
+					panic(err)
+					return
 				}
 				// Write code chunks
-				for i := 0; i < len(chunkedCode); i += 32 {
-					stateCollector.Collect(vtree.GetTreeKeyCodeChunk(k, uint256.NewInt(uint64(i)/32)), chunkedCode[i:i+32])
+				if o.codeSize == 0 {
+					continue
 				}
-
-				// Set code size
-				binary.LittleEndian.PutUint64(codeSizeValue, uint64(len(code)))
+				for i := range o.chunks {
+					if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
+						panic(err)
+						return
+					}
+					// Build lookup [address + index]
+					lookupKey := make([]byte, 24)
+					copy(lookupKey, o.address[:])
+					binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
+					if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
+						panic(err)
+						return
+					}
+				}
 			}
+		}
+	}()
 
-			if err := stateCollector.Collect(codeSizeKey[:], codeSizeValue); err != nil {
-				return err
-			}
-			// Process Code Hash
-			if err := stateCollector.Collect(codeHashKey[:], acc.CodeHash[:]); err != nil {
-				return err
-			}
+	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) != 20 {
+			continue
+		}
+		versionKey, err := outTx.GetOne(PedersenHashedAccountsLookup, k)
+		if err != nil {
+			return err
+		}
+		codeSizeKey := make([]byte, 32)
+		copy(codeSizeKey[:], versionKey)
+		codeSizeKey[31] = vtree.CodeSizeLeafKey
 
-		} else if len(k) == 60 {
-			// Process storage
-			storageCollector.Collect(vtree.GetTreeKeyStorageSlot(k[:20], new(uint256.Int).SetBytes(k[28:])), v)
+		acc := accounts.NewAccount()
+		acc.DecodeForStorage(v)
+
+		if acc.IsEmptyCodeHash() {
+			jobs <- &regeneratePedersenCodeJob{
+				address:      common.BytesToAddress(k),
+				codeSizeHash: common.BytesToHash(codeSizeKey),
+				code:         nil,
+			}
+			continue
+		}
+
+		code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
+		if err != nil {
+			return err
+		}
+
+		jobs <- &regeneratePedersenCodeJob{
+			address:      common.BytesToAddress(k),
+			codeSizeHash: common.BytesToHash(codeSizeKey),
+			code:         common.CopyBytes(code),
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Pedersen Hashing] Current progress in Collection Phase", "key", common.Bytes2Hex(k))
+			log.Info("[Pedersen Code Hashing] Current progress in Collection Phase", "address", "0x"+common.Bytes2Hex(k))
 		default:
 		}
 	}
-	stateCollector.Load(outTx, pedersenHashStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
-	storageCollector.Load(outTx, pedersenHashStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
 
-	log.Info("Pedersen hashed state finished", "elapsed", time.Until(start))
+	close(jobs)
+	wg.Wait()
+	close(out)
+	collector.Load(outTx, PedersenHashedCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	collectorLookup.Load(outTx, PedersenHashedCodeLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"key", common.Bytes2Hex(k)}
+		}})
+	log.Info("Finished generation of Pedersen Hashed Code", "elapsed", time.Since(start))
+
+	return nil
+}
+
+func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+	for _, b := range ExtraBuckets {
+		if err := outTx.CreateBucket(b); err != nil {
+			return err
+		}
+	}
+	if err := regeneratePedersenAccounts(outTx, readTx, workersCount); err != nil {
+		return err
+	}
+	if err := regeneratePedersenStorage(outTx, readTx, workersCount); err != nil {
+		return err
+	}
+	if err := regeneratePedersenCode(outTx, readTx, workersCount); err != nil {
+		return err
+	}
 	return outTx.Commit()
-
 }
