@@ -19,8 +19,12 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 				}
 				return SpawnStageSnapshots(s, ctx, tx, headers, firstCycle)
 			},
-			Unwind: nil, // TODO: Ask Alex for workaround since Unwind func can not be nil
-			Prune:  nil,
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return nil
+			},
 		},
 		{
 			ID:          stages.Headers,
