@@ -152,7 +152,7 @@ const (
 )
 
 // ChunkifyCode generates the chunked version of an array representing EVM bytecode
-func ChunkifyCode(code []byte) ([]byte, error) {
+func ChunkifyCode(code []byte) []byte {
 	var (
 		chunkOffset = 0 // offset in the chunk
 		chunkCount  = len(code) / 31
@@ -199,5 +199,5 @@ func ChunkifyCode(code []byte) ([]byte, error) {
 		}
 	}
 
-	return chunks, nil
+	return chunks
 }
