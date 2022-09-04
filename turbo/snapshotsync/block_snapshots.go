@@ -975,7 +975,7 @@ func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo u
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
-	if blockTo <= blockFrom {
+	if to <= from {
 		return 0, 0, false
 	}
 	blockFrom = (from / 1_000) * 1_000
