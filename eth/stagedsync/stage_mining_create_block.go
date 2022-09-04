@@ -362,7 +362,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		transaction := transactions[0]
 		sender, ok := transaction.GetSender()
 		if !ok {
-			transactions = transactions[:1]
+			transactions = transactions[1:]
 			continue
 		}
 		var account accounts.Account
@@ -371,7 +371,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 			return nil, err
 		}
 		if !ok {
-			transactions = transactions[:1]
+			transactions = transactions[1:]
 			continue
 		}
 		// Check transaction nonce

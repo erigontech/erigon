@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220901134100-d9648b4c6910
-
+	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220902083702-215695f9392d
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -174,3 +174,9 @@ require (
 	modernc.org/token v1.0.0 // indirect
 )
 
+require (
+	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
+	github.com/crate-crypto/go-ipa v0.0.0-20220523130400-f11357ae11c7 // indirect
+	github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
+	gotest.tools/v3 v3.3.0 // indirect
+)

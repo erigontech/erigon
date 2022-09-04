@@ -84,6 +84,7 @@ func newCancunInstructionSet() JumpTable {
 // constantinople, istanbul, petersburg, berlin, london, paris, and shanghai instructions.
 func newShanghaiInstructionSet() JumpTable {
 	instructionSet := newLondonInstructionSet()
+	enable3855(&instructionSet) // PUSH0 instruction https://eips.ethereum.org/EIPS/eip-3855
 	return instructionSet
 }
 
@@ -91,7 +92,7 @@ func newShanghaiInstructionSet() JumpTable {
 // constantinople, istanbul, petersburg, berlin, and london instructions.
 func newLondonInstructionSet() JumpTable {
 	instructionSet := newBerlinInstructionSet()
-	enable3529(&instructionSet) // EIP-3529: Reduction in refunds https://eips.ethereum.org/EIPS/eip-3529
+	enable3529(&instructionSet) // Reduction in refunds https://eips.ethereum.org/EIPS/eip-3529
 	enable3198(&instructionSet) // Base fee opcode https://eips.ethereum.org/EIPS/eip-3198
 	return instructionSet
 }

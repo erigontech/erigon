@@ -110,6 +110,7 @@ COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
+COMMANDS += verkle
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

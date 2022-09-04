@@ -1166,3 +1166,5 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 	}
 	return nil
 }
+<<<<<<< HEAD
+=======
