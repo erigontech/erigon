@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -79,7 +78,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, types.BorConfigSprint{})
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
 	}
 
@@ -94,7 +93,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s.Ranges())
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, types.BorConfigSprint{})
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
 	}
 
