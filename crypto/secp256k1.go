@@ -28,11 +28,9 @@ var (
 )
 
 // See Appendix F "Signing Transactions" of the Yellow Paper
-func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool, bor bool) bool {
-	if !bor { // Polygon state sync transactions have zero r & s
-		if r.IsZero() || s.IsZero() {
-			return false
-		}
+func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) bool {
+	if r.IsZero() || s.IsZero() {
+		return false
 	}
 
 	// See EIP-2: Homestead Hard-fork Changes
