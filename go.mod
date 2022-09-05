@@ -30,7 +30,6 @@ require (
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.1
@@ -172,11 +171,4 @@ require (
 	modernc.org/opt v0.1.1 // indirect
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect
-)
-
-require (
-	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
-	github.com/crate-crypto/go-ipa v0.0.0-20220523130400-f11357ae11c7 // indirect
-	github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
-	gotest.tools/v3 v3.3.0 // indirect
 )

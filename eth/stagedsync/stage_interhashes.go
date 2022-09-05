@@ -366,10 +366,14 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			if err != nil {
 				return err
 			}
-			if err := acc.DecodeForStorage(value); err != nil {
-				return err
+			incarnation := uint64(1)
+			if len(value) != 0 {
+				if err := acc.DecodeForStorage(value); err != nil {
+					return err
+				}
+				incarnation = acc.Incarnation
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
