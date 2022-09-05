@@ -160,7 +160,12 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
-		return fmt.Errorf("unwind: %w", err)
+		return fmt.Errorf("unwind TxLookUp: %w", err)
+	}
+	if cfg.isBor {
+		if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
+			return fmt.Errorf("unwind BorTxLookUp: %w", err)
+		}
 	}
 	if err := u.Done(tx); err != nil {
 		return err
