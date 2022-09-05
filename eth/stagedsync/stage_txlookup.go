@@ -281,10 +281,6 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 
-		if !rawdb.HasBorReceipts(tx, blocknum) {
-			return nil
-		}
-
 		borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
 		if err := next(k, borTxHash.Bytes(), nil); err != nil {
 			return err
