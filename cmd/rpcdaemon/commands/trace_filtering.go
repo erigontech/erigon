@@ -574,6 +574,7 @@ func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
 	stateReader := state.NewHistoryReader22(ac)
+	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()

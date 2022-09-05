@@ -23,6 +23,7 @@ import (
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
+	t.Helper()
 	var err error
 	var p fastjson.Parser
 	response := b

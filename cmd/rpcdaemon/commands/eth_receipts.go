@@ -280,6 +280,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
 
 	ac := api._agg.MakeContext()
+	ac.SetTx(tx)
 
 	topicsBitmap, err := getTopicsBitmap2(ac, tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
@@ -317,6 +318,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
 	stateReader := state.NewHistoryReader22(ac)
+	stateReader.SetTx(tx)
 	iter := txNumbers.Iterator()
 
 	chainConfig, err := api.chainConfig(tx)
