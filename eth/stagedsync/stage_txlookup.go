@@ -195,6 +195,13 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 			return fmt.Errorf("prune: %w", err)
 		}
+
+		if cfg.isBor {
+			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
+				return fmt.Errorf("prune: %w", err)
+			}
+		}
+
 		if err = s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
@@ -226,11 +233,30 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 				return err
 			}
 		}
-		if cfg.isBor {
-			borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
-			if err := tx.Delete(kv.BorTxLookup, borTxHash.Bytes()); err != nil {
-				return err
-			}
+
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
+}
+
+// deleteTxLookupRange - [blockFrom, blockTo)
+func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+
+		if !rawdb.HasBorReceipts(tx, blocknum) {
+			return nil
+		}
+
+		borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
+		if err := next(k, borTxHash.Bytes(), nil); err != nil {
+			return err
 		}
 
 		return nil
