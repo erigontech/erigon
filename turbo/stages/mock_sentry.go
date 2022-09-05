@@ -665,3 +665,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewPlainStateReader(tx)
 }
+
+func (ms *MockSentry) HistoryV2Components() (*libstate.Aggregator22, *exec22.TxNums) {
+	return ms.agg, ms.txNums
+}
