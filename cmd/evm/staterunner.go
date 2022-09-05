@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	log "github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
