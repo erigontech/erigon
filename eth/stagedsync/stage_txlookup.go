@@ -163,7 +163,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
 	if cfg.isBor {
-		if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
+		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 			return fmt.Errorf("unwind BorTxLookUp: %w", err)
 		}
 	}
