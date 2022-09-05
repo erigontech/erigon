@@ -193,12 +193,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
-			return fmt.Errorf("prune: %w", err)
+			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
 		if cfg.isBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
-				return fmt.Errorf("prune: %w", err)
+				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}
 		}
 
