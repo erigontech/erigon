@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -726,7 +725,8 @@ func forkingPoint(
 func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, headerInserter *headerdownload.HeaderInserter, useExternalTx bool) (bool, error) {
 	if interrupt != engineapi.None {
 		if interrupt == engineapi.Stopping {
-			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+			close(cfg.hd.ShutdownCh)
+			return false, fmt.Errorf("server is stopping")
 		}
 		if interrupt == engineapi.Synced && cfg.hd.HeadersCollector() != nil {
 			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
