@@ -229,7 +229,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		HistoryV2: false,
+		HistoryV2: true,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -664,4 +664,8 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewPlainStateReader(tx)
+}
+
+func (ms *MockSentry) HistoryV2Components() (*libstate.Aggregator22, *exec22.TxNums) {
+	return ms.agg, ms.txNums
 }
