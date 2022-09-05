@@ -642,7 +642,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				if accumulator != nil {
 					var address commonold.Address
 					copy(address[:], k)
-					fmt.Printf("un del acc: %x\n", address)
 					accumulator.DeleteAccount(address)
 				}
 				if err := next(k, k, nil); err != nil {

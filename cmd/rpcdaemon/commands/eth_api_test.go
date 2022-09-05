@@ -21,10 +21,11 @@ import (
 func TestGetBalanceChangesInBlock(t *testing.T) {
 	assert := assert.New(t)
 	myBlockNum := rpc.BlockNumberOrHashWithNumber(0)
-
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false), db, nil)
+	db := m.DB
+	agg, txNums := m.HistoryV2Components()
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, txNums, false), db, nil)
 	balances, err := api.GetBalanceChangesInBlock(context.Background(), myBlockNum)
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
