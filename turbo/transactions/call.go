@@ -8,7 +8,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -17,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -31,8 +29,7 @@ func DoCall(
 	block *types.Block, overrides *ethapi.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
-	filters *rpchelper.Filters,
-	stateCache kvcache.Cache,
+	stateReader state.StateReader,
 	headerReader services.HeaderReader,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
@@ -42,10 +39,6 @@ func DoCall(
 			return state, block.Header(), nil
 		}
 	*/
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, filters, stateCache)
-	if err != nil {
-		return nil, err
-	}
 	state := state.New(stateReader)
 
 	header := block.Header()

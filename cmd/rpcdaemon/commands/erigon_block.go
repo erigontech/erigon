@@ -199,12 +199,15 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
 
-	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
+	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(tx), api._agg, api._txNums)
 	if err != nil {
 		return nil, err
 	}
 
-	for dbKey, dbValue, _ := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, _ = c.Next() {
+	for dbKey, dbValue, err := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
 		_, addressBytes, v, err := decodeFn(dbKey, dbValue)
 		if err != nil {
 			return nil, err

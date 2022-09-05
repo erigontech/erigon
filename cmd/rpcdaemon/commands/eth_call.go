@@ -57,7 +57,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, nil
 	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, api._blockReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(tx), api._agg, api._txNums)
+	if err != nil {
+		return nil, err
+	}
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, stateReader, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +220,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 			return false, nil, nil
 		}
 
+		stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, numOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg, api._txNums)
+		if err != nil {
+			return false, nil, err
+		}
 		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
-			api.GasCap, chainConfig, api.filters, api.stateCache, api._blockReader)
+			api.GasCap, chainConfig, stateReader, api._blockReader)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
