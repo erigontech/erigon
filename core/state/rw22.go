@@ -661,6 +661,9 @@ func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts
 	if original.Initialised {
 		w.accountDels[string(address.Bytes())] = original
 	}
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("DeleteAccount: %x\n", address.Bytes())
+	}
 	return nil
 }
 
@@ -673,10 +676,16 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	w.storagePrevs[string(composite)] = original.Bytes()
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("WriteAccountStorage: %x, %x, %x\n", address.Bytes(), key.Bytes(), value.Bytes())
+	}
 	return nil
 }
 
 func (w *StateWriter22) CreateContract(address common.Address) error {
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("CreateContract: %x\n", address.Bytes())
+	}
 	return nil
 }
 

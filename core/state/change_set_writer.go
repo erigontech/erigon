@@ -1,9 +1,11 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -115,6 +117,9 @@ func (w *ChangeSetWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	w.storageChanges[string(compositeKey)] = original.Bytes()
 	w.storageChanged[address] = true
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("wrc s: %d, %x, %x, %x\n", w.blockNumber, address.Bytes(), key.Bytes(), original.Bytes())
+	}
 
 	return nil
 }

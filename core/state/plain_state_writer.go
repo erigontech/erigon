@@ -1,9 +1,12 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -53,6 +56,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
+
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 
@@ -73,6 +77,9 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 }
 
 func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("DeleteAccount: %x\n", address.Bytes())
+	}
 	//fmt.Printf("delete,%x\n", address)
 	if w.csw != nil {
 		if err := w.csw.DeleteAccount(address, original); err != nil {
@@ -111,13 +118,20 @@ func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnati
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, *key, v)
 	}
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("WriteAccountStorage: %d, %x, %x, %x\n", w.ChangeSetWriter().blockNumber, address.Bytes(), key.Bytes(), v)
+	}
 	if len(v) == 0 {
 		return w.db.Delete(kv.PlainState, compositeKey)
 	}
+
 	return w.db.Put(kv.PlainState, compositeKey, v)
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {
+	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
+		fmt.Printf("CreateContract: %x\n", address.Bytes())
+	}
 	if w.csw != nil {
 		if err := w.csw.CreateContract(address); err != nil {
 			return err

@@ -425,7 +425,7 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 			return err
 		}
 		if bytes.HasPrefix(newK, common.FromHex("04")) {
-			fmt.Printf("alex: %x, v=%x, blockNum=%d\n", newK, v, blockNum)
+			fmt.Printf("alex: %x, plain=%x, v=%x, blockNum=%d\n", newK, k, v, blockNum)
 		}
 		return next(dbKey, newK, v)
 	}
@@ -715,7 +715,9 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 					return err
 				}
 				incarnation = acc.Incarnation
-				v = nil
+				//v = nil
+			} else {
+				//v = nil
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
