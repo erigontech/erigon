@@ -68,20 +68,6 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		}
 		defer tx.Rollback()
 	}
-	fmt.Printf("-- ih f: %d\n", s.BlockNumber)
-	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-	//	fmt.Printf("ps: %x, %x\n", k, v)
-	//	return nil
-	//})
-	tx.ForPrefix(kv.HashedAccounts, common.FromHex("04"), func(k, v []byte) error {
-		fmt.Printf("ha: %x, %x\n", k, v)
-		return nil
-	})
-	tx.ForPrefix(kv.HashedStorage, common.FromHex("04"), func(k, v []byte) error {
-		fmt.Printf("hs: %x, %x\n", k, v)
-		return nil
-	})
-	fmt.Printf("-- ih f end: %d\n", s.BlockNumber)
 
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -633,20 +619,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 		}
 		defer tx.Rollback()
 	}
-	fmt.Printf("-- ih u: %d\n", s.BlockNumber)
-	//tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-	//	fmt.Printf("ps: %x, %x\n", k, v)
-	//	return nil
-	//})
-	tx.ForPrefix(kv.HashedAccounts, common.FromHex("04"), func(k, v []byte) error {
-		fmt.Printf("ha: %x, %x\n", k, v)
-		return nil
-	})
-	tx.ForPrefix(kv.HashedStorage, common.FromHex("04"), func(k, v []byte) error {
-		fmt.Printf("hs: %x, %x\n", k, v)
-		return nil
-	})
-	fmt.Printf("-- ih u end: %d\n", s.BlockNumber)
 
 	syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, u.UnwindPoint)
 	if err != nil {
