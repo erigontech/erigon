@@ -367,7 +367,7 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 				return err
 			}
 			incarnation := uint64(1)
-			if len(value) == 0 {
+			if len(value) != 0 {
 				if err := acc.DecodeForStorage(value); err != nil {
 					return err
 				}
@@ -378,7 +378,6 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			if err != nil {
 				return err
 			}
-
 			return collector.Collect(newK, value)
 		})
 		return collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})

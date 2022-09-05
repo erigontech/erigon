@@ -712,9 +712,6 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 					return err
 				}
 				incarnation = acc.Incarnation
-				//v = nil
-			} else {
-				//v = nil
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
