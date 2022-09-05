@@ -7,7 +7,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -136,10 +135,6 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
 	v := value.Bytes()
-	if bytes.HasPrefix(address.Bytes(), common2.MustDecodeHex("2d")) {
-		fmt.Printf("WriteAccountStorage: %d, %x, %x, %x\n", dsw.ChangeSetWriter().blockNumber, address.Bytes(), key.Bytes(), v)
-	}
-
 	if len(v) == 0 {
 		return dsw.db.Delete(kv.HashedStorage, compositeKey)
 	}
