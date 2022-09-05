@@ -63,6 +63,11 @@ func main() {
 	defer tx.Rollback()
 
 	log.Info("Opened Database", "datadir", *chaindata)
+	for _, b := range ExtraBuckets {
+		if err := txOut.CreateBucket(b); err != nil {
+			panic(err)
+		}
+	}
 	switch *action {
 	case "PedersenHashState":
 		if err := RegeneratePedersenHashstate(txOut, tx, *workersCount); err != nil {
@@ -70,6 +75,10 @@ func main() {
 		}
 	case "analyseOut":
 		if err := analyseOut(txOut); err != nil {
+			log.Error("Error", "err", err.Error())
+		}
+	case "verkle":
+		if err := GenerateVerkleTree(txOut); err != nil {
 			log.Error("Error", "err", err.Error())
 		}
 	}

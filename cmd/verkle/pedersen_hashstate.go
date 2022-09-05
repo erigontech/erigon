@@ -277,7 +277,7 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 				}
 
 				// Write Code Size
-				codeSizeBytes := make([]byte, 32)
+				codeSizeBytes := make([]byte, 4)
 				binary.LittleEndian.PutUint32(codeSizeBytes, uint32(o.codeSize))
 
 				if err := collector.Collect(o.codeSizeHash[:], codeSizeBytes); err != nil {
@@ -313,6 +313,13 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 		if len(k) != 20 {
 			continue
 		}
+
+		acc := accounts.NewAccount()
+		acc.DecodeForStorage(v)
+
+		if acc.IsEmptyCodeHash() {
+			continue
+		}
 		versionKey, err := outTx.GetOne(PedersenHashedAccountsLookup, k)
 		if err != nil {
 			return err
@@ -320,18 +327,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 		codeSizeKey := make([]byte, 32)
 		copy(codeSizeKey[:], versionKey)
 		codeSizeKey[31] = vtree.CodeSizeLeafKey
-
-		acc := accounts.NewAccount()
-		acc.DecodeForStorage(v)
-
-		if acc.IsEmptyCodeHash() {
-			jobs <- &regeneratePedersenCodeJob{
-				address:      common.BytesToAddress(k),
-				codeSizeHash: common.BytesToHash(codeSizeKey),
-				code:         nil,
-			}
-			continue
-		}
 
 		code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
 		if err != nil {
@@ -353,32 +348,32 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 	close(jobs)
 	wg.Wait()
 	close(out)
-	collector.Load(outTx, PedersenHashedCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	if err := collector.Load(outTx, PedersenHashedCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
-		}})
-	collectorLookup.Load(outTx, PedersenHashedCodeLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+		}}); err != nil {
+		return err
+	}
+	if err := collectorLookup.Load(outTx, PedersenHashedCodeLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
-		}})
+		}}); err != nil {
+		return err
+	}
 	log.Info("Finished generation of Pedersen Hashed Code", "elapsed", time.Since(start))
 
 	return nil
 }
 
 func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
-	for _, b := range ExtraBuckets {
-		if err := outTx.CreateBucket(b); err != nil {
-			return err
-		}
-	}
-	if err := regeneratePedersenAccounts(outTx, readTx, workersCount); err != nil {
-		return err
-	}
-	if err := regeneratePedersenStorage(outTx, readTx, workersCount); err != nil {
+	/*if err := regeneratePedersenAccounts(outTx, readTx, workersCount); err != nil {
 		return err
 	}
 	if err := regeneratePedersenCode(outTx, readTx, workersCount); err != nil {
+		return err
+	}*/
+
+	if err := regeneratePedersenStorage(outTx, readTx, workersCount); err != nil {
 		return err
 	}
 	return outTx.Commit()

@@ -6,7 +6,10 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
 )
+
+var emptyCodeHash = crypto.Keccak256Hash(nil)
 
 type VerkleAccount struct {
 	Balance  *big.Int
@@ -55,17 +58,24 @@ func (a VerkleAccount) EncodeVerkleAccountForStorage(buf []byte) {
 		}
 		pos += nonceBytes + 1
 	}
-	copy(buf[pos:], a.CodeHash[:])
+
+	if a.CodeHash != emptyCodeHash {
+		fieldset |= 0x4
+		copy(buf[pos:], a.CodeHash[:])
+	}
 	buf[0] = fieldset
 }
 
 func (a VerkleAccount) GetVerkleAccountSizeForStorage() (length int) {
-	length = 1 + /*Code Hash*/ 32
+	length = 1
 	if a.Balance.Sign() > 0 {
 		length += len(a.Balance.Bytes()) + 1
 	}
 	if a.Nonce > 0 {
 		length += ((bits.Len64(a.Nonce) + 7) / 8) + 1
+	}
+	if a.CodeHash != emptyCodeHash {
+		length += 32
 	}
 	return
 }
@@ -73,7 +83,8 @@ func (a VerkleAccount) GetVerkleAccountSizeForStorage() (length int) {
 func DecodeVerkleAccountForStorage(buf []byte) VerkleAccount {
 	if len(buf) == 0 {
 		return VerkleAccount{
-			Balance: common.Big0,
+			Balance:  common.Big0,
+			CodeHash: emptyCodeHash,
 		}
 	}
 	fieldset := buf[0]
@@ -90,9 +101,21 @@ func DecodeVerkleAccountForStorage(buf []byte) VerkleAccount {
 		pos += int(buf[pos]) + 1
 	}
 
+	if fieldset&4 > 0 {
+		return VerkleAccount{
+			Balance:  balance,
+			Nonce:    nonce,
+			CodeHash: common.BytesToHash(buf[pos:]),
+		}
+	}
+
 	return VerkleAccount{
 		Balance:  balance,
 		Nonce:    nonce,
-		CodeHash: common.BytesToHash(buf[pos:]),
+		CodeHash: emptyCodeHash,
 	}
+}
+
+func (a VerkleAccount) IsEmptyCodeHash() bool {
+	return a.CodeHash == emptyCodeHash
 }

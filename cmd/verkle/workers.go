@@ -124,10 +124,25 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		}
 		// Chunkify contract code and build keys for each chunks and insert them in the tree
 		chunkedCode := vtree.ChunkifyCode(job.code)
+		offset := byte(0)
+		offsetOverflow := false
+		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
 			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
-			chunkKeys = append(chunkKeys, common.BytesToHash(vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))))
+			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
+				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
+				chunkKeys = append(chunkKeys, common.BytesToHash(currentKey))
+				offset = 1
+				offsetOverflow = false
+			} else {
+				codeKey := common.CopyBytes(currentKey)
+				codeKey[31] += offset
+				chunkKeys = append(chunkKeys, common.BytesToHash(codeKey))
+				offset += 1
+				// If offset overflows, handle it.
+				offsetOverflow = offset == 0
+			}
 		}
 		out <- &regeneratePedersenCodeOut{
 			chunks:       chunks,
