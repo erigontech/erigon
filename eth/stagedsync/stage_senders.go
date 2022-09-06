@@ -406,23 +406,3 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	}
 	return nil
 }
-
-func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
-	// if something already happens in background - noop
-	if cfg.blockRetire.Working() {
-		return nil
-	}
-	if res := cfg.blockRetire.Result(); res != nil {
-		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
-		}
-
-		if err := rawdb.WriteSnapshots(tx, cfg.blockRetire.Snapshots().Files()); err != nil {
-			return err
-		}
-	}
-
-	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
-
-	return nil
-}
