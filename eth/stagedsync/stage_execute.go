@@ -242,8 +242,8 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}()
 	ctx = context.Background()
 
-	//workersCount := cfg.workersCount
-	workersCount := 2
+	workersCount := cfg.workersCount
+	//workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
