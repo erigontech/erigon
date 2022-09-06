@@ -79,6 +79,13 @@ func StageLoop(
 	for {
 		start := time.Now()
 
+		select {
+		case <-hd.ShutdownCh:
+			return
+		default:
+			// continue
+		}
+
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
@@ -414,7 +421,7 @@ func NewStagedSync(ctx context.Context,
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				&vm.Config{},
 				notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
@@ -427,7 +434,6 @@ func NewStagedSync(ctx context.Context,
 				txNums,
 				agg,
 			),
-			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
@@ -488,7 +494,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				&vm.Config{},
 				notifications.Accumulator,
 				cfg.StateStream,
 				true,

@@ -98,7 +98,6 @@ geth: erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
-COMMANDS += cons
 COMMANDS += devnettest
 COMMANDS += downloader
 COMMANDS += hack
@@ -111,6 +110,7 @@ COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
+COMMANDS += verkle
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

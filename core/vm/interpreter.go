@@ -36,7 +36,6 @@ type Config struct {
 	TraceJumpDest bool   // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
-	EnableTEMV    bool   // true if execution with TEVM enable flag
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -91,6 +90,10 @@ type VM struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case evm.ChainRules().IsBerlin:
@@ -132,6 +135,10 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case vm.evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case vm.evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case vm.evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case vm.evm.ChainRules().IsBerlin:

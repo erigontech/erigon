@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	log "github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
@@ -56,9 +56,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		return errors.New("path-to-test argument required")
 	}
 	// Configure the go-ethereum logger
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// Configure the EVM logger
 	config := &vm.LogConfig{
