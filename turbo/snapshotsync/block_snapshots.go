@@ -813,6 +813,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 		select {
 		case err, ok := <-errs:
 			if !ok {
+				log.Info("[Snapshots] finished indexing", "time", time.Since(startIndexingTime).String())
 				return nil
 			}
 			if err != nil {
@@ -828,8 +829,6 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			log.Log(lvl, "[snapshots] Indexing", "progress", ps.String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
-	log.Info("[Snapshots] finished indexing", "time", time.Since(startIndexingTime).String())
-	return nil
 }
 
 func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []Range) {
