@@ -375,10 +375,8 @@ func TestHiveTrieRoot(t *testing.T) {
 	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
 	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
-	root, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)
-
-	require.Equal(t, common.HexToHash("a23dfe01c4fef6aa7d7816882e326cf9720d4ac2c5e7ef23a96cbef7e59b6e70"), root)
 
 	// Now add a new account
 	newAddress := common.HexToAddress("0xf76fefb6608ca3d826945a9571d1f8e53bb6f366")
@@ -390,8 +388,11 @@ func TestHiveTrieRoot(t *testing.T) {
 
 	var s StageState
 	s.BlockNumber = 0
-	newRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)
 
-	assert.Equal(t, common.HexToHash("ba3ec4f75a2245282352639bff5e5c7fee0e1c80101b2d540a74078c8054e4d0"), newRoot)
+	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	require.Nil(t, err)
+
+	assert.Equal(t, regeneratedRoot, incrementalRoot)
 }
