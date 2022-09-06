@@ -628,46 +628,6 @@ func (h *History) MakeContext() *HistoryContext {
 }
 func (hc *HistoryContext) SetTx(tx kv.Tx) { hc.tx = tx }
 
-func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txNum)
-	historyKeysCursor, err := tx.CursorDupSort(hc.h.indexKeysTable)
-	if err != nil {
-		return nil, false, fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
-	}
-	defer historyKeysCursor.Close()
-	valsC, err := tx.Cursor(hc.h.historyValsTable)
-	if err != nil {
-		return nil, false, err
-	}
-	defer valsC.Close()
-	v, err := historyKeysCursor.SeekBothRange(txKey[:], key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(v) > 0 {
-		key2, txnNumBytes := v[:len(v)-8], v[len(v)-8:]
-		_ = key2
-		_, vv, err := valsC.SeekExact(txnNumBytes)
-		if err != nil {
-			return nil, false, err
-		}
-		return vv, vv != nil, nil
-	}
-	return nil, false, nil
-}
-
-func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	enc, ok, err := hc.getNoStateFromDB(key, txNum, tx)
-	if err != nil {
-		return nil, false, err
-	}
-	if ok {
-		return enc, true, nil
-	}
-	return hc.GetNoState(key, txNum)
-}
-
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64
@@ -718,6 +678,133 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 			return v, true, nil
 		}
 		v, _ := g.NextUncompressed()
+		return v, true, nil
+	}
+	return nil, false, nil
+}
+
+// GetNoStateWithRecent searches history for a value of specified key before txNum
+// second return value is true if the value is found in the history (even if it is nil)
+func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	var search ctxItem
+	search.startTxNum = txNum
+	search.endTxNum = txNum
+	var foundTxNum uint64
+	var foundEndTxNum uint64
+	var foundStartTxNum uint64
+	var found bool
+	var anyItem bool // Whether any filesItem has been looked at in the loop below
+	var topState *ctxItem
+	hc.historyFiles.AscendGreaterOrEqual(&search, func(i *ctxItem) bool {
+		topState = i
+		return false
+	})
+	hc.indexFiles.AscendGreaterOrEqual(&search, func(item *ctxItem) bool {
+		anyItem = true
+		offset := item.reader.Lookup(key)
+		g := item.getter
+		g.Reset(offset)
+		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
+			eliasVal, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+			//start := time.Now()
+			n, ok := ef.Search(txNum)
+			//d.stats.EfSearchTime += time.Since(start)
+			if ok {
+				foundTxNum = n
+				foundEndTxNum = item.endTxNum
+				foundStartTxNum = item.startTxNum
+				found = true
+				return false
+			} else if item.endTxNum > txNum && item.endTxNum >= topState.endTxNum {
+				return false
+			}
+		}
+		return true
+	})
+	if found {
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
+		var historyItem *ctxItem
+		search.startTxNum = foundStartTxNum
+		search.endTxNum = foundEndTxNum
+		historyItem, ok := hc.historyFiles.Get(&search)
+		if !ok || historyItem == nil {
+			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
+		}
+		offset := historyItem.reader.Lookup2(txKey[:], key)
+		g := historyItem.getter
+		g.Reset(offset)
+		if hc.h.compressVals {
+			v, _ := g.Next(nil)
+			return v, true, nil
+		}
+		v, _ := g.NextUncompressed()
+		return v, true, nil
+	}
+
+	if anyItem {
+		// If there were no changes but there were history files, the value can be obtained from value files
+		var val []byte
+		hc.historyFiles.DescendLessOrEqual(topState, func(item *ctxItem) bool {
+			if item.reader.Empty() {
+				return true
+			}
+			offset := item.reader.Lookup(key)
+			g := item.getter
+			g.Reset(offset)
+			if g.HasNext() {
+				if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
+					if hc.h.compressVals {
+						val, _ = g.Next(nil)
+					} else {
+						val, _ = g.NextUncompressed()
+					}
+					return false
+				}
+			}
+			return true
+		})
+		return val, true, nil
+	}
+	// Value not found in history files, look in the recent history
+	if roTx == nil {
+		return nil, false, fmt.Errorf("roTx is nil")
+	}
+	return hc.getNoStateFromDB(key, txNum, roTx)
+}
+
+func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+	indexCursor, err := tx.CursorDupSort(hc.h.indexTable)
+	if err != nil {
+		return nil, false, err
+	}
+	defer indexCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txNum)
+	var foundTxNumVal []byte
+	if foundTxNumVal, err = indexCursor.SeekBothRange(key, txKey[:]); err != nil {
+		return nil, false, err
+	}
+	if foundTxNumVal != nil {
+		var historyKeysCursor kv.CursorDupSort
+		if historyKeysCursor, err = tx.CursorDupSort(hc.h.indexKeysTable); err != nil {
+			return nil, false, err
+		}
+		defer historyKeysCursor.Close()
+		var vn []byte
+		if vn, err = historyKeysCursor.SeekBothRange(foundTxNumVal, key); err != nil {
+			return nil, false, err
+		}
+		valNum := binary.BigEndian.Uint64(vn[len(vn)-8:])
+		if valNum == 0 {
+			// This is special valNum == 0, which is empty value
+			return nil, true, nil
+		}
+		var v []byte
+		if v, err = tx.GetOne(hc.h.historyValsTable, vn[len(vn)-8:]); err != nil {
+			return nil, false, err
+		}
 		return v, true, nil
 	}
 	return nil, false, nil
