@@ -195,7 +195,7 @@ type HistoryCollation struct {
 
 func (c HistoryCollation) Close() {
 	if c.historyComp != nil {
-		c.Close()
+		c.historyComp.Close()
 	}
 }
 
