@@ -1,4 +1,4 @@
-package trie
+package vtree
 
 import (
 	"github.com/crate-crypto/go-ipa/bandersnatch/fr"
@@ -105,17 +105,6 @@ func GetTreeKeyCodeChunk(address []byte, chunk *uint256.Int) []byte {
 	return GetTreeKey(address, treeIndex, subIndex)
 }
 
-func GetTreeKeyCodeChunkWithEvaluatedAddress(addressPoint *verkle.Point, chunk *uint256.Int) []byte {
-	chunkOffset := new(uint256.Int).Add(CodeOffset, chunk)
-	treeIndex := new(uint256.Int).Div(chunkOffset, VerkleNodeWidth)
-	subIndexMod := new(uint256.Int).Mod(chunkOffset, VerkleNodeWidth).Bytes()
-	var subIndex byte
-	if len(subIndexMod) != 0 {
-		subIndex = subIndexMod[0]
-	}
-	return getTreeKeyWithEvaluatedAddess(addressPoint, treeIndex, subIndex)
-}
-
 func GetTreeKeyStorageSlot(address []byte, storageKey *uint256.Int) []byte {
 	pos := storageKey.Clone()
 	if storageKey.Cmp(codeStorageDelta) < 0 {
@@ -152,71 +141,63 @@ func PointToHash(evaluated *verkle.Point, suffix byte) []byte {
 	return retb[:]
 }
 
-func getTreeKeyWithEvaluatedAddess(evaluated *verkle.Point, treeIndex *uint256.Int, subIndex byte) []byte {
-	var poly [5]fr.Element
+const (
+	PUSH1  = byte(0x60)
+	PUSH3  = byte(0x62)
+	PUSH4  = byte(0x63)
+	PUSH7  = byte(0x66)
+	PUSH21 = byte(0x74)
+	PUSH30 = byte(0x7d)
+	PUSH32 = byte(0x7f)
+)
 
-	poly[0].SetZero()
-	poly[1].SetZero()
-	poly[2].SetZero()
-
-	// little-endian, 32-byte aligned treeIndex
-	var index [32]byte
-	for i, b := range treeIndex.Bytes() {
-		index[len(treeIndex.Bytes())-1-i] = b
+// ChunkifyCode generates the chunked version of an array representing EVM bytecode
+func ChunkifyCode(code []byte) []byte {
+	var (
+		chunkOffset = 0 // offset in the chunk
+		chunkCount  = len(code) / 31
+		codeOffset  = 0 // offset in the code
+	)
+	if len(code)%31 != 0 {
+		chunkCount++
 	}
-	verkle.FromLEBytes(&poly[3], index[:16])
-	verkle.FromLEBytes(&poly[4], index[16:])
+	chunks := make([]byte, chunkCount*32)
+	for i := 0; i < chunkCount; i++ {
+		// number of bytes to copy, 31 unless
+		// the end of the code has been reached.
+		end := 31 * (i + 1)
+		if len(code) < end {
+			end = len(code)
+		}
 
-	cfg, _ := verkle.GetConfig()
-	ret := cfg.CommitToPoly(poly[:], 0)
+		// Copy the code itself
+		copy(chunks[i*32+1:], code[31*i:end])
 
-	// add the pre-evaluated address
-	ret.Add(ret, evaluated)
+		// chunk offset = taken from the
+		// last chunk.
+		if chunkOffset > 31 {
+			// skip offset calculation if push
+			// data covers the whole chunk
+			chunks[i*32] = 31
+			chunkOffset = 1
+			continue
+		}
+		chunks[32*i] = byte(chunkOffset)
+		chunkOffset = 0
 
-	return PointToHash(ret, subIndex)
-
-}
-
-func EvaluateAddressPoint(address []byte) *verkle.Point {
-	if len(address) < 32 {
-		var aligned [32]byte
-		address = append(aligned[:32-len(address)], address...)
+		// Check each instruction and update the offset
+		// it should be 0 unless a PUSHn overflows.
+		for ; codeOffset < end; codeOffset++ {
+			if code[codeOffset] >= PUSH1 && code[codeOffset] <= PUSH32 {
+				codeOffset += int(code[codeOffset] - PUSH1 + 1)
+				if codeOffset+1 >= 31*(i+1) {
+					codeOffset++
+					chunkOffset = codeOffset - 31*(i+1)
+					break
+				}
+			}
+		}
 	}
-	var poly [3]fr.Element
 
-	poly[0].SetZero()
-
-	// 32-byte address, interpreted as two little endian
-	// 16-byte numbers.
-	verkle.FromLEBytes(&poly[1], address[:16])
-	verkle.FromLEBytes(&poly[2], address[16:])
-
-	cfg, _ := verkle.GetConfig()
-	ret := cfg.CommitToPoly(poly[:], 0)
-
-	// add a constant point
-	ret.Add(ret, getTreePolyIndex0Point)
-
-	return ret
-}
-
-func GetTreeKeyStorageSlotWithEvaluatedAddress(evaluated *verkle.Point, storageKey *uint256.Int) []byte {
-	pos := storageKey.Clone()
-	if storageKey.Cmp(codeStorageDelta) < 0 {
-		pos.Add(HeaderStorageOffset, storageKey)
-	} else {
-		pos.Add(MainStorageOffset, storageKey)
-	}
-	treeIndex := new(uint256.Int).Div(pos, VerkleNodeWidth)
-	// calculate the sub_index, i.e. the index in the stem tree.
-	// Because the modulus is 256, it's the last byte of treeIndex
-	subIndexMod := new(uint256.Int).Mod(pos, VerkleNodeWidth).Bytes()
-	var subIndex byte
-	if len(subIndexMod) != 0 {
-		// uint256 is broken into 4 little-endian quads,
-		// each with native endianness. Extract the least
-		// significant byte.
-		subIndex = subIndexMod[0] & 0xFF
-	}
-	return getTreeKeyWithEvaluatedAddess(evaluated, treeIndex, subIndex)
+	return chunks
 }

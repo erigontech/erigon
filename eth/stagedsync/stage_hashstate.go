@@ -706,21 +706,14 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 			if err != nil {
 				return err
 			}
-			if err := acc.DecodeForStorage(val); err != nil {
-				return err
-			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
-			/*
-				incarnation := uint64(1)
-				if len(val) == 0 {
-					if err := acc.DecodeForStorage(val); err != nil {
-						return err
-					}
-					incarnation = acc.Incarnation
-					v = nil
+			incarnation := uint64(1)
+			if len(val) != 0 {
+				if err := acc.DecodeForStorage(val); err != nil {
+					return err
 				}
-				plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
-			*/
+				incarnation = acc.Incarnation
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err

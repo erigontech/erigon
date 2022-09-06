@@ -1020,15 +1020,15 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := m.NewHistoricalStateReader(1, tx)
+	st := state.New(m.NewHistoricalStateReader(1, tx))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = m.NewHistoricalStateReader(2, tx)
+	st = state.New(m.NewHistoricalStateReader(2, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = m.NewHistoricalStateReader(3, tx)
+	st = state.New(m.NewHistoricalStateReader(3, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }

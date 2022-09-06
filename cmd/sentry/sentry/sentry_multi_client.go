@@ -412,10 +412,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
-		defer tx.Rollback()
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback()
 		penalties, err := cs.Hd.ProcessHeadersPOS(csHeaders, tx, ConvertH512ToPeerID(peerID))
 		if err != nil {
 			return err

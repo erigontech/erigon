@@ -3,7 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220901202604-4b5047be9a95
+	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220905084759-b1c6dac7321d
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -29,7 +30,6 @@ require (
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.1
