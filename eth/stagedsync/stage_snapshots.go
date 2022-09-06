@@ -227,6 +227,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		}
 		break
 	}
+	downloadStartTime := time.Now()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var m runtime.MemStats
@@ -304,6 +305,8 @@ Finish:
 		}
 	}
 
+	downloadEndTime := time.Since(downloadStartTime)
+	log.Info("[Snapshots] download finished", "total-time", downloadEndTime)
 	return nil
 }
 
