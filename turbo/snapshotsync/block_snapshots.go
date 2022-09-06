@@ -776,6 +776,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	wg := &sync.WaitGroup{}
 	ps := background.NewProgressSet()
 	sem := semaphore.NewWeighted(int64(workers))
+	startIndexingTime := time.Now()
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
 			for index := range segments {
@@ -827,6 +828,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			log.Log(lvl, "[snapshots] Indexing", "progress", ps.String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
+	log.Info("[Snapshots] finished indexing", "time", time.Since(startIndexingTime).String())
 }
 
 func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []Range) {

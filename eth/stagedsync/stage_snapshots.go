@@ -253,6 +253,7 @@ Loop:
 						return err
 					}
 				}
+				log.Info("[Snapshots] download finished", "total-time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
@@ -304,9 +305,6 @@ Finish:
 			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
 		}
 	}
-
-	downloadEndTime := time.Since(downloadStartTime)
-	log.Info("[Snapshots] download finished", "total-time", downloadEndTime)
 	return nil
 }
 
