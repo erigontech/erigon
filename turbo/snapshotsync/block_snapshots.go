@@ -829,6 +829,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 		}
 	}
 	log.Info("[Snapshots] finished indexing", "time", time.Since(startIndexingTime).String())
+	return nil
 }
 
 func noGaps(in []snap.FileInfo) (out []snap.FileInfo, missingSnapshots []Range) {
