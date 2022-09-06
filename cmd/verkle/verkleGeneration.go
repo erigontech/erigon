@@ -8,15 +8,30 @@ import (
 	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func GenerateVerkleTree(tx kv.RwTx) error {
+func GenerateVerkleTree(cfg optionsCfg) error {
+	db, err := mdbx.Open(cfg.verkleDb, log.Root(), true)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := initDB(tx); err != nil {
+		return err
+	}
+
 	start := time.Now()
-	pairCollector := etl.NewCollector(VerkleTrie, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	pairCollector := etl.NewCollector(VerkleTrie, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer pairCollector.Close()
 	accCursor, err := tx.Cursor(PedersenHashedAccounts)
 	if err != nil {
@@ -110,7 +125,8 @@ func GenerateVerkleTree(tx kv.RwTx) error {
 		}
 	}
 
-	verkleCollector := etl.NewCollector(VerkleTrie, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	verkleCollector := etl.NewCollector(VerkleTrie, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer verkleCollector.Close()
 	// Verkle Tree to be built
 	root := verkle.New()
 	log.Info("Started Verkle Tree creation")

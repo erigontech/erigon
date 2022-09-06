@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -31,15 +32,15 @@ import (
 	return
 }*/
 
-func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 	logPrefix := PedersenHashedAccounts
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
 
-	collector := etl.NewCollector(PedersenHashedAccounts, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(PedersenHashedAccounts, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	collectorLookup := etl.NewCollector(PedersenHashedAccountsLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorLookup := etl.NewCollector(PedersenHashedAccountsLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
@@ -53,9 +54,9 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) 
 	jobs := make(chan *regeneratePedersenAccountsJob, batchSize)
 	out := make(chan *regeneratePedersenAccountsOut, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(workersCount))
+	wg.Add(int(cfg.workersCount))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(workersCount); i++ {
+	for i := 0; i < int(cfg.workersCount); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -125,15 +126,15 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workersCount uint) 
 	return nil
 }
 
-func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 	logPrefix := PedersenHashedStorage
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Storage")
 
-	collector := etl.NewCollector(PedersenHashedStorage, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(PedersenHashedStorage, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
@@ -148,9 +149,9 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workersCount uint) e
 	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
 	out := make(chan *regeneratePedersenStorageJob, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(workersCount))
+	wg.Add(int(cfg.workersCount))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(workersCount); i++ {
+	for i := 0; i < int(cfg.workersCount); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -174,6 +175,9 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workersCount uint) e
 				if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
 					panic(err)
 					return
+				}
+				if cfg.disabledLookups {
+					continue
 				}
 				if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
 					panic(err)
@@ -230,15 +234,15 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workersCount uint) e
 	return nil
 }
 
-func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
+func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 	logPrefix := PedersenHashedCode
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Code")
 
-	collector := etl.NewCollector(PedersenHashedCode, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(PedersenHashedCode, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	collectorLookup := etl.NewCollector(PedersenHashedCodeLookup, "/tmp/etl-temp", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorLookup := etl.NewCollector(PedersenHashedCodeLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
@@ -253,9 +257,9 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 	jobs := make(chan *regeneratePedersenCodeJob, batchSize)
 	out := make(chan *regeneratePedersenCodeOut, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(workersCount))
+	wg.Add(int(cfg.workersCount))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(workersCount); i++ {
+	for i := 0; i < int(cfg.workersCount); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -292,6 +296,9 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 					if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
 						panic(err)
 						return
+					}
+					if cfg.disabledLookups {
+						continue
 					}
 					// Build lookup [address + index]
 					lookupKey := make([]byte, 24)
@@ -365,16 +372,46 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workersCount uint) erro
 	return nil
 }
 
-func RegeneratePedersenHashstate(outTx kv.RwTx, readTx kv.Tx, workersCount uint) error {
-	/*if err := regeneratePedersenAccounts(outTx, readTx, workersCount); err != nil {
+func RegeneratePedersenHashstate(cfg optionsCfg) error {
+	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
+	if err != nil {
+		log.Error("Error while opening database", "err", err.Error())
 		return err
 	}
-	if err := regeneratePedersenCode(outTx, readTx, workersCount); err != nil {
-		return err
-	}*/
+	defer db.Close()
 
-	if err := regeneratePedersenStorage(outTx, readTx, workersCount); err != nil {
+	vDb, err := mdbx.Open(cfg.stateDb, log.Root(), false)
+	if err != nil {
+		log.Error("Error while opening db transaction", "err", err.Error())
 		return err
 	}
-	return outTx.Commit()
+	defer vDb.Close()
+
+	vTx, err := vDb.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer vTx.Rollback()
+
+	tx, err := db.BeginRo(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := initDB(vTx); err != nil {
+		return err
+	}
+
+	if err := regeneratePedersenAccounts(vTx, tx, cfg); err != nil {
+		return err
+	}
+	if err := regeneratePedersenCode(vTx, tx, cfg); err != nil {
+		return err
+	}
+
+	if err := regeneratePedersenStorage(vTx, tx, cfg); err != nil {
+		return err
+	}
+	return vTx.Commit()
 }

@@ -1,5 +1,7 @@
 package main
 
+import "github.com/ledgerwatch/erigon-lib/kv"
+
 const (
 	PedersenHashedAccounts       = "PedersenHashedAccounts"
 	PedersenHashedStorage        = "PedersenHashedStorage"
@@ -18,4 +20,13 @@ var ExtraBuckets = []string{
 	PedersenHashedAccountsLookup,
 	PedersenHashedStorageLookup,
 	VerkleTrie,
+}
+
+func initDB(tx kv.RwTx) error {
+	for _, b := range ExtraBuckets {
+		if err := tx.CreateBucket(b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
