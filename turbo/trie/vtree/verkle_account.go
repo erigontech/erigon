@@ -14,6 +14,7 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 type VerkleAccount struct {
 	Balance  *big.Int
 	Nonce    uint64
+	CodeSize uint64
 	CodeHash common.Hash
 }
 
@@ -59,8 +60,20 @@ func (a VerkleAccount) EncodeVerkleAccountForStorage(buf []byte) {
 		pos += nonceBytes + 1
 	}
 
-	if a.CodeHash != emptyCodeHash {
+	if a.CodeSize > 0 {
 		fieldset |= 0x4
+		codeSizeLen := (bits.Len64(a.CodeSize) + 7) / 8
+		buf[pos] = byte(codeSizeLen)
+		var codeSize = a.CodeSize
+		for i := codeSizeLen; i > 0; i-- {
+			buf[pos+i] = byte(codeSize)
+			codeSize >>= 8
+		}
+		pos += codeSizeLen + 1
+	}
+
+	if a.CodeHash != emptyCodeHash {
+		fieldset |= 0x8
 		copy(buf[pos:], a.CodeHash[:])
 	}
 	buf[0] = fieldset
@@ -73,6 +86,9 @@ func (a VerkleAccount) GetVerkleAccountSizeForStorage() (length int) {
 	}
 	if a.Nonce > 0 {
 		length += ((bits.Len64(a.Nonce) + 7) / 8) + 1
+	}
+	if a.CodeSize > 0 {
+		length += ((bits.Len64(a.CodeSize) + 7) / 8) + 1
 	}
 	if a.CodeHash != emptyCodeHash {
 		length += 32
@@ -101,11 +117,18 @@ func DecodeVerkleAccountForStorage(buf []byte) VerkleAccount {
 		pos += int(buf[pos]) + 1
 	}
 
+	codeSize := uint64(0)
 	if fieldset&4 > 0 {
+		codeSize = bytesToUint64(buf[pos+1 : pos+1+int(buf[pos])])
+		pos += int(buf[pos]) + 1
+	}
+
+	if fieldset&8 > 0 {
 		return VerkleAccount{
 			Balance:  balance,
 			Nonce:    nonce,
 			CodeHash: common.BytesToHash(buf[pos:]),
+			CodeSize: codeSize,
 		}
 	}
 
@@ -113,6 +136,7 @@ func DecodeVerkleAccountForStorage(buf []byte) VerkleAccount {
 		Balance:  balance,
 		Nonce:    nonce,
 		CodeHash: emptyCodeHash,
+		CodeSize: codeSize,
 	}
 }
 
