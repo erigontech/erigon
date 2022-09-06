@@ -253,7 +253,7 @@ Loop:
 						return err
 					}
 				}
-				log.Info("[Snapshots] download finished", "total-time", time.Since(downloadStartTime).String())
+				log.Info("[Snapshots] download finished", "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
