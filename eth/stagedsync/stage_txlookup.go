@@ -89,8 +89,15 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
 	if err = txnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
-		return err
+		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
+
+	if cfg.isBor {
+		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
+			return fmt.Errorf("borTxnLookupTransform: %w", err)
+		}
+	}
+
 	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
@@ -119,10 +126,29 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 				return err
 			}
 		}
+
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            quitCh,
+		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
+}
+
+// txnLookupTransform - [startKey, endKey)
+func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+	bigNum := new(big.Int)
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
+
 		// we add state sync transactions every bor Sprint amount of blocks
-		if cfg.isBor && blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
+		if blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
-			if err := tx.Put(kv.BorTxLookup, txnHash.Bytes(), blockNumBytes); err != nil {
+			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}
@@ -160,7 +186,12 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
-		return fmt.Errorf("unwind: %w", err)
+		return fmt.Errorf("unwind TxLookUp: %w", err)
+	}
+	if cfg.isBor {
+		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
+			return fmt.Errorf("unwind BorTxLookUp: %w", err)
+		}
 	}
 	if err := u.Done(tx); err != nil {
 		return err
@@ -193,8 +224,15 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
-			return fmt.Errorf("prune: %w", err)
+			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
+
+		if cfg.isBor {
+			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
+				return fmt.Errorf("prune BorTxLookUp: %w", err)
+			}
+		}
+
 		if err = s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
@@ -226,11 +264,26 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 				return err
 			}
 		}
-		if cfg.isBor {
-			borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
-			if err := tx.Delete(kv.BorTxLookup, borTxHash.Bytes()); err != nil {
-				return err
-			}
+
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
+}
+
+// deleteTxLookupRange - [blockFrom, blockTo)
+func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+
+		borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
+		if err := next(k, borTxHash.Bytes(), nil); err != nil {
+			return err
 		}
 
 		return nil
