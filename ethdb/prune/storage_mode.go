@@ -24,9 +24,9 @@ var DefaultMode = Mode{
 }
 
 var (
-	mainnetDepositContractBlock uint64 = 11052984
+	mainnetDepositContractBlock uint64 = 11185311
 	sepoliaDepositContractBlock uint64 = 1273020
-	goerliDepositContractBlock  uint64 = 4367322
+	goerliDepositContractBlock  uint64 = 4422009
 )
 
 type Experiments struct {
