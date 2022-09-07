@@ -323,32 +323,53 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 /* ====== PRUNING ====== */
-// retiring blocks in a single thread in the brackground
 func SnapshotsPrune(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
+		tx, err := cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	// if something already happens in background - noop
-	if cfg.blockRetire.Working() {
-		return nil
-	}
-	if res := cfg.blockRetire.Result(); res != nil {
-		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
+	sn := cfg.blockRetire.Snapshots()
+	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
+			return err
 		}
 
-		if err := rawdb.WriteSnapshots(tx, cfg.blockRetire.Snapshots().Files()); err != nil {
+		if err := retireBlocksInSingleBackgroundThread(s, cfg.blockRetire, ctx, tx); err != nil {
+			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
+		}
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
 
-	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
+	return nil
+}
+
+// retiring blocks in a single thread in the brackground
+func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
+	// if something already happens in background - noop
+	if blockRetire.Working() {
+		return nil
+	}
+	if res := blockRetire.Result(); res != nil {
+		if res.Err != nil {
+			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
+		}
+
+		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+			return err
+		}
+	}
+
+	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
 
 	return nil
 }
