@@ -623,8 +623,8 @@ var (
 		Value: metrics.DefaultConfig.Port,
 	}
 	HistoryV2Flag = cli.BoolFlag{
-		Name:  "history.v2",
-		Usage: "Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Name:  "experimental.history.v2",
+		Usage: "Not recommended, experimental: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
