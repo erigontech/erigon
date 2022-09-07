@@ -424,16 +424,12 @@ func TestIterateChanged(t *testing.T) {
 
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
-	defer func() {
-		roTx.Rollback()
-	}()
+	defer roTx.Rollback()
 	var keys, vals []string
 	ic := h.MakeContext()
 	ic.SetTx(tx)
 	it := ic.IterateChanged(2, 20, roTx)
-	defer func() {
-		it.Close()
-	}()
+	defer it.Close()
 	for it.HasNext() {
 		k, v := it.Next(nil, nil)
 		keys = append(keys, fmt.Sprintf("%x", k))
