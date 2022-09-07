@@ -194,17 +194,18 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
 	nonEmptyMarker := []byte{1}
 
-	var l OldestAppearedLoad
-	l.innerLoadFunc = load
 	agg.SetTx(p.tx)
+	var k, v []byte
+	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
 
 	txnFrom := txNums.MinOf(from + 1)
 	txnTo := uint64(math.MaxUint64)
 	if storage {
-		collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		defer collector.Close()
-
-		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
@@ -225,17 +226,17 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 					return err
 				}
 			}
-			return nil
-		})
-		if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+		}
+		if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 			return err
 		}
 		return nil
 	}
-	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
 
-	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	defer it.Close()
+	for it.HasNext() {
+		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -249,13 +250,10 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 				return err
 			}
 		}
-		return nil
-	})
-
-	if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+	}
+	if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
