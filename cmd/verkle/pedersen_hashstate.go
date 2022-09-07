@@ -71,12 +71,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) err
 		var ok bool
 		var o *regeneratePedersenAccountsOut
 		for {
-			select {
-			case o, ok = <-out:
-				if !ok {
-					return
-				}
-
+			for o := range out {
 				if err := collector.Collect(o.versionHash[:], o.encodedAccount); err != nil {
 					panic(err)
 					return
@@ -178,11 +173,7 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) erro
 		var ok bool
 		var o *regeneratePedersenStorageJob
 		for {
-			select {
-			case o, ok = <-out:
-				if !ok {
-					return
-				}
+			for o := range out {
 
 				if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
 					panic(err)
@@ -285,13 +276,7 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 		defer cancelWorkers()
 		var ok bool
 		var o *regeneratePedersenCodeOut
-		for {
-			select {
-			case o, ok = <-out:
-				if !ok {
-					return
-				}
-
+		for o := range out {
 				// Write code chunks
 				if o.codeSize == 0 {
 					continue
