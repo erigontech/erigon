@@ -352,13 +352,15 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 	txnTo := uint64(math.MaxUint64)
 	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
-	var l OldestAppearedLoad
-	l.innerLoadFunc = load
 	var deletedAccounts [][]byte
+	var k, v []byte
 
 	if storage {
 		acc := accounts.NewAccount()
-		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			value, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
@@ -376,12 +378,16 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			if err != nil {
 				return err
 			}
-			return collector.Collect(newK, value)
-		})
-		return collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+			if err := collector.Collect(newK, value); err != nil {
+				return err
+			}
+		}
+		return collector.Load(p.tx, "", load, etl.TransformArgs{Quit: p.quitCh})
 	}
-
-	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	defer it.Close()
+	for it.HasNext() {
+		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -415,10 +421,9 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		if err := collector.Collect(newK, value); err != nil {
 			return err
 		}
-		return nil
-	})
+	}
 
-	if err := collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
+	if err := collector.Load(p.tx, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
 		return err
 	}
 
