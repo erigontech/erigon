@@ -746,7 +746,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
-				hasWork = false
+				hasWork = true
 			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:
