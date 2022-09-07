@@ -130,7 +130,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
 		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
-		if err := rebuildIndices(ctx, chainDB, cfg, dirs, from, workers); err != nil {
+		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -300,7 +300,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -309,7 +309,7 @@ func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dir
 		return err
 	}
 
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil

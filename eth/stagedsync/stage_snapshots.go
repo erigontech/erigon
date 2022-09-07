@@ -104,7 +104,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
+	if err := WaitForDownloader(s, ctx, cfg, tx); err != nil {
 		return err
 	}
 
@@ -124,7 +124,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -214,7 +214,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
+func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		if err := cfg.snapshots.ReopenFolder(); err != nil {
 			return err
@@ -239,7 +239,7 @@ func WaitForDownloader(ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error 
 	}
 
 	if len(missingSnapshots) > 0 {
-		log.Warn("[Snapshots] downloading missing snapshots")
+		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
 	}
 
 	// send all hashes to the Downloader service
@@ -255,7 +255,7 @@ func WaitForDownloader(ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error 
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
 	}
 
-	log.Info("[Snapshots] Fetching torrent files metadata")
+	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", s.LogPrefix()))
 	for {
 		select {
 		case <-ctx.Done():
@@ -263,7 +263,7 @@ func WaitForDownloader(ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error 
 		default:
 		}
 		if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-			log.Error("[Snapshots] call downloader", "err", err)
+			log.Error(fmt.Sprintf("[%s] call downloader", s.LogPrefix()), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -295,23 +295,23 @@ Loop:
 						return err
 					}
 				}
-				log.Info("[Snapshots] download finished", "time", time.Since(downloadStartTime).String())
+				log.Info(fmt.Sprintf("[%s] download finished", s.LogPrefix()), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
-					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", s.LogPrefix(), stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
 				libcommon.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
-				log.Info("[Snapshots] download",
+				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download-time-left", downloadTimeLeft,
 					"total-download-time", time.Since(downloadStartTime).Round(time.Second).String(),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
 				)
-				log.Info("[Snapshots] download",
+				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
@@ -345,7 +345,7 @@ Finish:
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", s.LogPrefix()), "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
 		}
 	}
 	return nil
@@ -365,6 +365,8 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 /* ====== PRUNING ====== */
+// snapshots pruning sections works more as a retiring of blocks
+// retiring blocks means moving block data from db into snapshots
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
