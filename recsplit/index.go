@@ -89,6 +89,10 @@ func OpenIndex(indexFile string) (*Index, error) {
 	idx.recMask = (uint64(1) << (8 * idx.bytesPerRec)) - 1
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
+	if offset < 0 {
+		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFile)
+	}
+
 	// Bucket count, bucketSize, leafSize
 	idx.bucketCount = binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
