@@ -267,10 +267,16 @@ user_macos:
 	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
 ## coverage:                          run code coverage report and output total coverage %
+.PHONY: coverage
 coverage:
 	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+
+## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
+.PHONY: hive
+hive:
+	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
 
 ## help:                              print commands help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
-
