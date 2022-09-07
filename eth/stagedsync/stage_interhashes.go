@@ -384,7 +384,7 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		}
 		return collector.Load(p.tx, "", load, etl.TransformArgs{Quit: p.quitCh})
 	}
-	it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 	defer it.Close()
 	for it.HasNext() {
 		k, v = it.Next(k[:0], v[:0])
