@@ -323,7 +323,17 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 /* ====== PRUNING ====== */
-func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
+// retiring blocks in a single thread in the brackground
+func SnapshotsPrune(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	// if something already happens in background - noop
 	if cfg.blockRetire.Working() {
 		return nil

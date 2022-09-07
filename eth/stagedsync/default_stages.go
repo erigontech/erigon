@@ -23,7 +23,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return retireBlocksInSingleBackgroundThread(p, senders, ctx, tx)
+				return SnapshotsPrune(p, senders, ctx, tx)
 			},
 		},
 		{
