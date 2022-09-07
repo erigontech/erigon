@@ -11,7 +11,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -24,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -47,12 +45,9 @@ type HeadersCfg struct {
 	memoryOverlay     bool
 	tmpdir            string
 
-	snapshots          *snapshotsync.RoSnapshots
-	snapshotDownloader proto_downloader.DownloaderClient
-	blockReader        services.FullBlockReader
-	dbEventNotifier    snapshotsync.DBEventNotifier
-	forkValidator      *engineapi.ForkValidator
-	notifications      *Notifications
+	blockReader   services.FullBlockReader
+	forkValidator *engineapi.ForkValidator
+	notifications *Notifications
 }
 
 func StageHeadersCfg(
@@ -66,31 +61,25 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	memoryOverlay bool,
-	snapshots *snapshotsync.RoSnapshots,
-	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	tmpdir string,
-	dbEventNotifier snapshotsync.DBEventNotifier,
 	notifications *Notifications,
 	forkValidator *engineapi.ForkValidator) HeadersCfg {
 	return HeadersCfg{
-		db:                 db,
-		hd:                 headerDownload,
-		bodyDownload:       bodyDownload,
-		chainConfig:        chainConfig,
-		headerReqSend:      headerReqSend,
-		announceNewHashes:  announceNewHashes,
-		penalize:           penalize,
-		batchSize:          batchSize,
-		tmpdir:             tmpdir,
-		noP2PDiscovery:     noP2PDiscovery,
-		snapshots:          snapshots,
-		snapshotDownloader: snapshotDownloader,
-		blockReader:        blockReader,
-		dbEventNotifier:    dbEventNotifier,
-		forkValidator:      forkValidator,
-		notifications:      notifications,
-		memoryOverlay:      memoryOverlay,
+		db:                db,
+		hd:                headerDownload,
+		bodyDownload:      bodyDownload,
+		chainConfig:       chainConfig,
+		headerReqSend:     headerReqSend,
+		announceNewHashes: announceNewHashes,
+		penalize:          penalize,
+		batchSize:         batchSize,
+		tmpdir:            tmpdir,
+		noP2PDiscovery:    noP2PDiscovery,
+		blockReader:       blockReader,
+		forkValidator:     forkValidator,
+		notifications:     notifications,
+		memoryOverlay:     memoryOverlay,
 	}
 }
 
