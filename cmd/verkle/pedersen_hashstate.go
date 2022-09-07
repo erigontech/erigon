@@ -68,22 +68,18 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) err
 	go func() {
 		defer debug.LogPanic()
 		defer cancelWorkers()
-		var ok bool
-		var o *regeneratePedersenAccountsOut
-		for {
-			for o := range out {
-				if err := collector.Collect(o.versionHash[:], o.encodedAccount); err != nil {
-					panic(err)
-					return
-				}
-				if cfg.disabledLookups {
-					continue
-				}
+		for o := range out {
+			if err := collector.Collect(o.versionHash[:], o.encodedAccount); err != nil {
+				panic(err)
+				return
+			}
+			if cfg.disabledLookups {
+				continue
+			}
 
-				if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
-					panic(err)
-					return
-				}
+			if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
+				panic(err)
+				return
 			}
 		}
 	}()
@@ -170,22 +166,17 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) erro
 	go func() {
 		defer debug.LogPanic()
 		defer cancelWorkers()
-		var ok bool
-		var o *regeneratePedersenStorageJob
-		for {
-			for o := range out {
-
-				if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
-					panic(err)
-					return
-				}
-				if cfg.disabledLookups {
-					continue
-				}
-				if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
-					panic(err)
-					return
-				}
+		for o := range out {
+			if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
+				panic(err)
+				return
+			}
+			if cfg.disabledLookups {
+				continue
+			}
+			if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
+				panic(err)
+				return
 			}
 		}
 	}()
@@ -274,29 +265,26 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 	go func() {
 		defer debug.LogPanic()
 		defer cancelWorkers()
-		var ok bool
-		var o *regeneratePedersenCodeOut
 		for o := range out {
-				// Write code chunks
-				if o.codeSize == 0 {
+			// Write code chunks
+			if o.codeSize == 0 {
+				continue
+			}
+			for i := range o.chunks {
+				if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
+					panic(err)
+					return
+				}
+				if cfg.disabledLookups {
 					continue
 				}
-				for i := range o.chunks {
-					if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
-						panic(err)
-						return
-					}
-					if cfg.disabledLookups {
-						continue
-					}
-					// Build lookup [address + index]
-					lookupKey := make([]byte, 24)
-					copy(lookupKey, o.address[:])
-					binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
-					if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
-						panic(err)
-						return
-					}
+				// Build lookup [address + index]
+				lookupKey := make([]byte, 24)
+				copy(lookupKey, o.address[:])
+				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
+				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
+					panic(err)
+					return
 				}
 			}
 		}
