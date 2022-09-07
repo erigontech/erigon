@@ -71,10 +71,9 @@ func SpawnStageSnapshots(
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
 	initialCycle bool,
-) error {
+) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -88,12 +87,6 @@ func SpawnStageSnapshots(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 
 	return nil
