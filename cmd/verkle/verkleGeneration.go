@@ -66,17 +66,8 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
 		// Compute code size value
 		binary.LittleEndian.PutUint64(codeSize[:], acc.CodeSize)
-
-		// If code hash is empty then you can safely set code size to 0
-		if acc.IsEmptyCodeHash() {
-			codeSizeKey := common.CopyBytes(versionKey)
-			codeSizeKey[31] = vtree.CodeSizeLeafKey
-			if err := pairCollector.Collect(codeSizeKey[:], make([]byte, 32)); err != nil {
-				return err
-			}
-		}
 		// Collect all data
-		if err := pairCollector.Collect(versionKey[:], []byte{0}); err != nil {
+		if err := pairCollector.Collect(versionKey, []byte{0}); err != nil {
 			return err
 		}
 
@@ -108,7 +99,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		storageValue := new(uint256.Int).SetBytes(v)
 		formattedValue := storageValue.Bytes32()
 		// Collect formatted data
-		if err := pairCollector.Collect(storageKey[:], formattedValue[:]); err != nil {
+		if err := pairCollector.Collect(storageKey, formattedValue[:]); err != nil {
 			return err
 		}
 	}
@@ -124,7 +115,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
-		if err := pairCollector.Collect(k, v[:]); err != nil {
+		if err := pairCollector.Collect(k, v); err != nil {
 			return err
 		}
 	}
