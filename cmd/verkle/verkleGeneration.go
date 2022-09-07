@@ -46,13 +46,15 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		}
 		acc := vtree.DecodeVerkleAccountForStorage(v)
 		// Derive from versionkey all other keys
-		var codeHashKey, nonceKey, balanceKey, nonce, balance [32]byte
+		var codeHashKey, nonceKey, balanceKey, codeSizeKey, nonce, balance, codeSize [32]byte
 		copy(codeHashKey[:], versionKey[:31])
 		copy(nonceKey[:], versionKey[:31])
 		copy(balanceKey[:], versionKey[:31])
+		copy(codeSizeKey[:], versionKey[:31])
 		codeHashKey[31] = vtree.CodeKeccakLeafKey
 		nonceKey[31] = vtree.NonceLeafKey
 		balanceKey[31] = vtree.BalanceLeafKey
+		codeSizeKey[31] = vtree.CodeSizeLeafKey
 		// Compute balance value
 		bbytes := acc.Balance.Bytes()
 		if len(bbytes) > 0 {
@@ -62,6 +64,8 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		}
 		// compute nonce value
 		binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
+		// Compute code size value
+		binary.LittleEndian.PutUint64(codeSize[:], acc.CodeSize)
 
 		// If code hash is empty then you can safely set code size to 0
 		if acc.IsEmptyCodeHash() {
@@ -83,6 +87,9 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 			return err
 		}
 		if err := pairCollector.Collect(codeHashKey[:], acc.CodeHash[:]); err != nil {
+			return err
+		}
+		if err := pairCollector.Collect(codeSizeKey[:], codeSize[:]); err != nil {
 			return err
 		}
 	}
@@ -117,10 +124,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
-		// Convert all keys to 32 bytes (some are 4 byte little endian long)
-		var value [32]byte
-		copy(value[:], v)
-		if err := pairCollector.Collect(k, value[:]); err != nil {
+		if err := pairCollector.Collect(k, v[:]); err != nil {
 			return err
 		}
 	}

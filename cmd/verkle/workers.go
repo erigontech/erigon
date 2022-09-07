@@ -5,13 +5,12 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
 
 type regeneratePedersenAccountsJob struct {
 	address common.Address
-	account accounts.Account
+	account vtree.VerkleAccount
 }
 
 type regeneratePedersenAccountsOut struct {
@@ -28,17 +27,15 @@ type regeneratePedersenStorageJob struct {
 }
 
 type regeneratePedersenCodeJob struct {
-	address      common.Address
-	codeSizeHash common.Hash
-	code         []byte
+	address common.Address
+	code    []byte
 }
 
 type regeneratePedersenCodeOut struct {
-	chunks       [][]byte
-	address      common.Address
-	chunksKeys   []common.Hash
-	codeSizeHash common.Hash
-	codeSize     int
+	chunks     [][]byte
+	address    common.Address
+	chunksKeys []common.Hash
+	codeSize   int
 }
 
 const batchSize = 10000
@@ -59,9 +56,8 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 			return
 		}
 
-		vAcc := vtree.AccountToVerkleAccount(job.account)
-		encoded := make([]byte, vAcc.GetVerkleAccountSizeForStorage())
-		vAcc.EncodeVerkleAccountForStorage(encoded)
+		encoded := make([]byte, job.account.GetVerkleAccountSizeForStorage())
+		job.account.EncodeVerkleAccountForStorage(encoded)
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
 			versionHash:    common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
@@ -115,11 +111,10 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		var chunkKeys []common.Hash
 		if job.code == nil || len(job.code) == 0 {
 			out <- &regeneratePedersenCodeOut{
-				chunks:       chunks,
-				chunksKeys:   chunkKeys,
-				codeSizeHash: job.codeSizeHash,
-				codeSize:     0,
-				address:      job.address,
+				chunks:     chunks,
+				chunksKeys: chunkKeys,
+				codeSize:   0,
+				address:    job.address,
 			}
 		}
 		// Chunkify contract code and build keys for each chunks and insert them in the tree
@@ -145,11 +140,10 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 			}
 		}
 		out <- &regeneratePedersenCodeOut{
-			chunks:       chunks,
-			chunksKeys:   chunkKeys,
-			codeSizeHash: job.codeSizeHash,
-			codeSize:     len(job.code),
-			address:      job.address,
+			chunks:     chunks,
+			chunksKeys: chunkKeys,
+			codeSize:   len(job.code),
+			address:    job.address,
 		}
 	}
 }

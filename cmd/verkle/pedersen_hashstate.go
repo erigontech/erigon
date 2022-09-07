@@ -81,6 +81,10 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) err
 					panic(err)
 					return
 				}
+				if cfg.disabledLookups {
+					continue
+				}
+
 				if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
 					panic(err)
 					return
@@ -97,9 +101,17 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) err
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
+			vAcc := vtree.AccountToVerkleAccount(acc)
+			if !acc.IsEmptyCodeHash() {
+				code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
+				if err != nil {
+					return err
+				}
+				vAcc.CodeSize = uint64(len(code))
+			}
 			jobs <- &regeneratePedersenAccountsJob{
 				address: common.BytesToAddress(k),
-				account: acc,
+				account: vAcc,
 			}
 			select {
 			case <-logEvery.C:
@@ -280,14 +292,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 					return
 				}
 
-				// Write Code Size
-				codeSizeBytes := make([]byte, 4)
-				binary.LittleEndian.PutUint32(codeSizeBytes, uint32(o.codeSize))
-
-				if err := collector.Collect(o.codeSizeHash[:], codeSizeBytes); err != nil {
-					panic(err)
-					return
-				}
 				// Write code chunks
 				if o.codeSize == 0 {
 					continue
@@ -327,13 +331,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 		if acc.IsEmptyCodeHash() {
 			continue
 		}
-		versionKey, err := outTx.GetOne(PedersenHashedAccountsLookup, k)
-		if err != nil {
-			return err
-		}
-		codeSizeKey := make([]byte, 32)
-		copy(codeSizeKey[:], versionKey)
-		codeSizeKey[31] = vtree.CodeSizeLeafKey
 
 		code, err := readTx.GetOne(kv.Code, acc.CodeHash[:])
 		if err != nil {
@@ -341,9 +338,8 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg) error {
 		}
 
 		jobs <- &regeneratePedersenCodeJob{
-			address:      common.BytesToAddress(k),
-			codeSizeHash: common.BytesToHash(codeSizeKey),
-			code:         common.CopyBytes(code),
+			address: common.BytesToAddress(k),
+			code:    common.CopyBytes(code),
 		}
 		select {
 		case <-logInterval.C:
