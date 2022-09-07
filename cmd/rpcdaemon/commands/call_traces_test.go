@@ -23,6 +23,7 @@ import (
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
+	t.Helper()
 	var err error
 	var p fastjson.Parser
 	response := b
@@ -44,15 +45,16 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 
 func TestCallTraceOneByOne(t *testing.T) {
 	m := stages.Mock(t)
-	defer m.DB.Close()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
+
+	agg, txNums := m.HistoryV2Components()
 	api := NewTraceAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false),
+		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false),
 		m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
@@ -79,7 +81,6 @@ func TestCallTraceOneByOne(t *testing.T) {
 
 func TestCallTraceUnwind(t *testing.T) {
 	m := stages.Mock(t)
-	defer m.DB.Close()
 	var chainA, chainB *core.ChainPack
 	var err error
 	chainA, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
@@ -98,7 +99,9 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chainB: %v", err)
 	}
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false), m.DB, &httpcfg.HttpCfg{})
+
+	agg, txNums := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false), m.DB, &httpcfg.HttpCfg{})
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
@@ -116,8 +119,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, buf.Bytes()))
+
 	if err = m.InsertChain(chainB.Slice(0, 12)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
@@ -132,6 +135,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, buf.Bytes()))
+
 	if err = m.InsertChain(chainB.Slice(12, 20)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
@@ -151,14 +155,14 @@ func TestCallTraceUnwind(t *testing.T) {
 
 func TestFilterNoAddresses(t *testing.T) {
 	m := stages.Mock(t)
-	defer m.DB.Close()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false), m.DB, &httpcfg.HttpCfg{})
+	agg, txNums := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -182,9 +186,8 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
-	defer m.DB.Close()
-
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), nil, nil, false), m.DB, &httpcfg.HttpCfg{})
+	agg, txNums := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 

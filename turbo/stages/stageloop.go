@@ -79,6 +79,13 @@ func StageLoop(
 	for {
 		start := time.Now()
 
+		select {
+		case <-hd.ShutdownCh:
+			return
+		default:
+			// continue
+		}
+
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)

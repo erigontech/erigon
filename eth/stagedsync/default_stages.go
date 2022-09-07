@@ -11,6 +11,22 @@ import (
 func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageSnapshots(s, ctx, tx, headers, firstCycle)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return nil
+			},
+		},
+		{
 			ID:          stages.Headers,
 			Description: "Download headers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {

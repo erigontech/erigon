@@ -736,7 +736,7 @@ func (c *AccTrieCursor) FirstNotCoveredPrefix() []byte {
 }
 
 func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasTree bool, err error) {
-	c.SkipState = true
+	c.SkipState = false // There can be accounts with keys less than the first key in AccTrie
 	_, c.nextCreated = c.canUse([]byte{})
 	c.prev = append(c.prev[:0], c.cur...)
 	c.prefix = prefix

@@ -336,7 +336,9 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	defer tx.Rollback()
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
 	if err != nil {
-		return nil, err
+		// (Compatibility) Every other node just return `null` for when the block does not exist.
+		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
+		return nil, nil
 	}
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {

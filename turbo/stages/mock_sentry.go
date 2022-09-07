@@ -649,15 +649,23 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
+func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
 	if ms.HistoryV2 {
 		aggCtx := ms.agg.MakeContext()
 		aggCtx.SetTx(tx)
 		r := state.NewHistoryReader22(aggCtx)
 		r.SetTx(tx)
 		r.SetTxNum(ms.txNums.MinOf(blockNum))
-		return state.New(r)
+		return r
 	}
 
-	return state.New(state.NewPlainState(tx, blockNum))
+	return state.NewPlainState(tx, blockNum)
+}
+
+func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+	return state.NewPlainStateReader(tx)
+}
+
+func (ms *MockSentry) HistoryV2Components() (*libstate.Aggregator22, *exec22.TxNums) {
+	return ms.agg, ms.txNums
 }

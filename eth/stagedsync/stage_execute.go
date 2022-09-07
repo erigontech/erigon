@@ -242,8 +242,8 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}()
 	ctx = context.Background()
 
-	//workersCount := cfg.workersCount
-	workersCount := 2
+	workersCount := cfg.workersCount
+	//workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
@@ -633,7 +633,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if accumulator != nil {
-					fmt.Printf("un ch acc: %x, %d, %x\n", address, acc.Incarnation, newV)
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
 				if err := next(k, k, newV); err != nil {
@@ -643,7 +642,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				if accumulator != nil {
 					var address commonold.Address
 					copy(address[:], k)
-					fmt.Printf("un del acc: %x\n", address)
 					accumulator.DeleteAccount(address)
 				}
 				if err := next(k, k, nil); err != nil {
