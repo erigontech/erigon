@@ -248,6 +248,8 @@ func filledHistory(t *testing.T) (string, kv.RwDB, *History, uint64) {
 				var v [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
+				k[0] = 1   //mark key to simplify debug
+				v[0] = 255 //mark value to simplify debug
 				err = h.AddPrevValue(k[:], nil, prevVal[keyNum])
 				require.NoError(t, err)
 				prevVal[keyNum] = v[:]
@@ -280,6 +282,7 @@ func checkHistoryHistory(t *testing.T, db kv.RwDB, h *History, txs uint64) {
 			//fmt.Printf("label=%s\n", label)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
+			k[0], v[0] = 0x01, 0xff
 			val, ok, err := hc.GetNoState(k[:], txNum+1)
 			//require.Equal(t, ok, txNum < 976)
 			if ok {
@@ -403,4 +406,108 @@ func TestHistoryScanFiles(t *testing.T) {
 	h.SetTxNum(txNum)
 	// Check the history
 	checkHistoryHistory(t, db, h, txs)
+}
+
+func TestIterateChanged(t *testing.T) {
+	_, db, h, _ := filledHistory(t)
+	defer db.Close()
+	defer func() {
+		h.Close()
+	}()
+	var err error
+	var tx kv.RwTx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		roTx.Rollback()
+	}()
+	var keys, vals []string
+	ic := h.MakeContext()
+	ic.SetTx(tx)
+	it := ic.IterateChanged(2, 20, roTx)
+	defer func() {
+		it.Close()
+	}()
+	for it.HasNext() {
+		k, v := it.Next(nil, nil)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+	it.Close()
+	require.Equal(t, []string{
+		"0100000000000001",
+		"0100000000000002",
+		"0100000000000003",
+		"0100000000000004",
+		"0100000000000005",
+		"0100000000000006",
+		"0100000000000007",
+		"0100000000000008",
+		"0100000000000009",
+		"010000000000000a",
+		"010000000000000b",
+		"010000000000000c",
+		"010000000000000d",
+		"010000000000000e",
+		"010000000000000f",
+		"0100000000000010",
+		"0100000000000011",
+		"0100000000000012",
+		"0100000000000013"}, keys)
+	require.Equal(t, []string{
+		"ff00000000000001",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		""}, vals)
+	it = ic.IterateChanged(995, 1000, roTx)
+	keys, vals = keys[:0], vals[:0]
+	for it.HasNext() {
+		k, v := it.Next(nil, nil)
+		keys = append(keys, fmt.Sprintf("%x", k))
+		vals = append(vals, fmt.Sprintf("%x", v))
+	}
+	it.Close()
+	require.Equal(t, []string{
+		"0100000000000001",
+		"0100000000000002",
+		"0100000000000003",
+		"0100000000000004",
+		"0100000000000005",
+		"0100000000000006",
+		"0100000000000009",
+		"010000000000000c",
+		"010000000000001b",
+	}, keys)
+
+	require.Equal(t, []string{
+		"ff000000000003e2",
+		"ff000000000001f1",
+		"ff0000000000014b",
+		"ff000000000000f8",
+		"ff000000000000c6",
+		"ff000000000000a5",
+		"ff0000000000006e",
+		"ff00000000000052",
+		"ff00000000000024"}, vals)
 }

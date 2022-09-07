@@ -40,8 +40,8 @@ import (
 )
 
 type InvertedIndex struct {
-	indexKeysTable string // txnNum_u64 -> key
-	indexTable     string // indexKey_userDefined -> txnNum_u64 , Needs to be table with DupSort
+	indexKeysTable string // txnNum_u64 -> key (k+auto_increment)
+	indexTable     string // k -> txnNum_u64 , Needs to be table with DupSort
 
 	dir             string // Directory where static files are created
 	aggregationStep uint64
