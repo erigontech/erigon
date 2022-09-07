@@ -311,6 +311,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 }
 
 var DefaultForwardOrder = UnwindOrder{
+	stages.Snapshots,
 	stages.Headers,
 	stages.BlockHashes,
 	stages.Bodies,
@@ -338,6 +339,7 @@ type PruneOrder []stages.SyncStage
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
+	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
@@ -370,6 +372,7 @@ var StateUnwindOrder = UnwindOrder{
 
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
+	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
