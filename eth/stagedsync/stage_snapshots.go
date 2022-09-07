@@ -370,7 +370,7 @@ func calculateTime(amountLeft, rate uint64) string {
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err := cfg.db.BeginRw(ctx)
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
