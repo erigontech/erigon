@@ -306,7 +306,7 @@ Loop:
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
-					"download-time", downloadTimeLeft,
+					"download-time-left", downloadTimeLeft,
 					"total-download-time", time.Since(downloadStartTime).Round(time.Second).String(),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
