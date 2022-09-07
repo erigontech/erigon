@@ -18,16 +18,58 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type SnapshotsCfg struct {
+	db          kv.RwDB
+	hd          *headerdownload.HeaderDownload
+	chainConfig params.ChainConfig
+
+	tmpdir string
+
+	snapshots          *snapshotsync.RoSnapshots
+	blockRetire        *snapshotsync.BlockRetire
+	snapshotDownloader proto_downloader.DownloaderClient
+	blockReader        services.FullBlockReader
+	dbEventNotifier    snapshotsync.DBEventNotifier
+}
+
+func StageSnapshotsCfg(
+	db kv.RwDB,
+	hd *headerdownload.HeaderDownload,
+	chainConfig params.ChainConfig,
+	tmpdir string,
+	snapshots *snapshotsync.RoSnapshots,
+	blockRetire *snapshotsync.BlockRetire,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	blockReader services.FullBlockReader,
+	dbEventNotifier snapshotsync.DBEventNotifier,
+) SnapshotsCfg {
+
+	return SnapshotsCfg{
+		db:                 db,
+		hd:                 hd,
+		chainConfig:        chainConfig,
+		tmpdir:             tmpdir,
+		snapshots:          snapshots,
+		blockRetire:        blockRetire,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
+		dbEventNotifier:    dbEventNotifier,
+	}
+}
 
 func SpawnStageSnapshots(
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
-	cfg HeadersCfg,
+	cfg SnapshotsCfg,
 	initialCycle bool,
 ) error {
 	useExternalTx := tx != nil
@@ -57,7 +99,7 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
 	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
 	}
@@ -172,7 +214,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
+func WaitForDownloader(ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		if err := cfg.snapshots.ReopenFolder(); err != nil {
 			return err
@@ -323,7 +365,7 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 /* ====== PRUNING ====== */
-func SnapshotsPrune(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err := cfg.db.BeginRw(ctx)

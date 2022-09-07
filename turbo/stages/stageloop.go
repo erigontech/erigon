@@ -378,6 +378,16 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
+			stagedsync.StageSnapshotsCfg(
+				db,
+				controlServer.Hd,
+				*controlServer.ChainConfig,
+				dirs.Tmp,
+				snapshots,
+				blockRetire,
+				snapDownloader,
+				blockReader,
+				notifications.Events),
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
