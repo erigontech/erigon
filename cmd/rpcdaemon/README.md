@@ -275,6 +275,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |
 | debug_accountAt                            | Yes     | Private Erigon debug module          |
+| debug_calLMany                             | Yes     | Erigon Method PR#4567.               |
 | debug_getModifiedAccountsByNumber          | Yes     |                                      |
 | debug_getModifiedAccountsByHash            | Yes     |                                      |
 | debug_storageRangeAt                       | Yes     |                                      |
