@@ -861,12 +861,13 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, t
 			return nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
 	}
-
+	// We gasBailOut if we are in Parlia
+	gasBailOut := rules.IsParlia
 	traces, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, false /* gasBailout */, txIndex)
+	}, header, gasBailOut /* gasBailout */, txIndex)
 
 	if cmErr != nil {
 		return nil, cmErr
