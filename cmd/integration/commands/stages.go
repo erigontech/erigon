@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -511,7 +511,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig, historyV2 := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db)
+	chainConfig, historyV2 := fromdb.ChainConfig(db), fromdb.HistoryV2(db)
 	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -545,7 +545,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig := fromdb.ChainConfig(db)
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -641,7 +641,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
-	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
+	chainConfig, historyV2, pm := fromdb.ChainConfig(db), fromdb.HistoryV2(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
@@ -711,7 +711,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
@@ -765,7 +765,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
 	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
@@ -820,7 +820,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	if historyV2 {
 		return fmt.Errorf("this stage is disable in --history.v2=true")
 	}
@@ -877,7 +877,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageCallTraces(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	if historyV2 {
 		return fmt.Errorf("this stage is disable in --history.v2=true")
 	}
@@ -940,7 +940,7 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV2 := datadir.New(datadirCli), tool.PruneModeFromDB(db), tool.HistoryV2FromDB(db)
+	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	if historyV2 {
 		return fmt.Errorf("this stage is disable in --history.v2=true")
 	}
@@ -1013,9 +1013,9 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTxLookup(db kv.RwDB, ctx context.Context) error {
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
+	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 
 	tx, err := db.BeginRw(ctx)
@@ -1152,7 +1152,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
-	dirs, historyV2, pm := datadir.New(datadirCli), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
+	dirs, historyV2, pm := datadir.New(datadirCli), fromdb.HistoryV2(db), fromdb.PruneMode(db)
 	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	vmConfig := &vm.Config{}
@@ -1248,7 +1248,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB) error {
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig := fromdb.ChainConfig(db)
 	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneFlag, pruneH, pruneR, pruneT, pruneC,
 		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
 	if err != nil {
