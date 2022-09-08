@@ -201,6 +201,7 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
+		compositeKey := make([]byte, common.HashLength+common.HashLength)
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
 		for it.HasNext() {
@@ -213,22 +214,20 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			if err != nil {
 				return err
 			}
-			compositeKey := make([]byte, common.HashLength+common.HashLength)
+			compositeKey = compositeKey[:0]
 			copy(compositeKey, addrHash[:])
 			copy(compositeKey[common.HashLength:], secKey[:])
-			if len(v) == 0 {
-				if err := load(compositeKey, nil); err != nil {
-					return err
-				}
-			} else {
-				if err := load(compositeKey, nonEmptyMarker); err != nil {
-					return err
-				}
+			if len(v) != 0 {
+				v = nonEmptyMarker
+			}
+			if err := load(compositeKey, v); err != nil {
+				return err
 			}
 		}
 		return nil
 	}
 
+	//t := time.Now()
 	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 	defer it.Close()
 	for it.HasNext() {
@@ -247,6 +246,8 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			}
 		}
 	}
+	//indb, infile := it.Stat()
+	//fmt.Printf("--end: %d, %d, %s\n", indb, infile, time.Since(t))
 	return nil
 }
 
@@ -370,6 +371,7 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		}
 		return nil
 	}
+
 	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 	defer it.Close()
 
