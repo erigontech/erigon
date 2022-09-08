@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
+	"os"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -227,8 +229,8 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 		return nil
 	}
 
-	//t := time.Now()
-	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	t := time.Now()
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom-80_000, txnTo, p.tx)
 	defer it.Close()
 	for it.HasNext() {
 		k, v = it.Next(k[:0], v[:0])
@@ -246,8 +248,9 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			}
 		}
 	}
-	//indb, infile := it.Stat()
-	//fmt.Printf("--end: %d, %d, %s\n", indb, infile, time.Since(t))
+	indb, infile := it.Stat()
+	fmt.Printf("--end: %d, %d, %s\n", indb, infile, time.Since(t))
+	os.Exit(1)
 	return nil
 }
 
