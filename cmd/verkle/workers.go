@@ -5,18 +5,21 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
 
 type regeneratePedersenAccountsJob struct {
-	address common.Address
-	account vtree.VerkleAccount
+	address  common.Address
+	account  accounts.Account
+	codeSize uint64
 }
 
 type regeneratePedersenAccountsOut struct {
-	versionHash    common.Hash
-	address        common.Address
-	encodedAccount []byte
+	versionHash common.Hash
+	address     common.Address
+	account     accounts.Account
+	codeSize    uint64
 }
 
 type regeneratePedersenStorageJob struct {
@@ -56,13 +59,12 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 			return
 		}
 
-		encoded := make([]byte, job.account.GetVerkleAccountSizeForStorage())
-		job.account.EncodeVerkleAccountForStorage(encoded)
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
-			versionHash:    common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
-			encodedAccount: encoded,
-			address:        job.address,
+			versionHash: common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
+			account:     job.account,
+			address:     job.address,
+			codeSize:    job.codeSize,
 		}
 	}
 }
