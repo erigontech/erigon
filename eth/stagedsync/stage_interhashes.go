@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
-	"os"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -216,7 +214,6 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			if err != nil {
 				return err
 			}
-			compositeKey = compositeKey[:0]
 			copy(compositeKey, addrHash[:])
 			copy(compositeKey[common.HashLength:], secKey[:])
 			if len(v) != 0 {
@@ -229,8 +226,7 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 		return nil
 	}
 
-	t := time.Now()
-	it := agg.Accounts().MakeContext().IterateChanged(txnFrom-80_000, txnTo, p.tx)
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 	defer it.Close()
 	for it.HasNext() {
 		k, v = it.Next(k[:0], v[:0])
@@ -238,19 +234,13 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 		if err != nil {
 			return err
 		}
-		if len(v) == 0 {
-			if err := load(newK, nil); err != nil {
-				return err
-			}
-		} else {
-			if err := load(newK, nonEmptyMarker); err != nil {
-				return err
-			}
+		if len(v) != 0 {
+			v = nonEmptyMarker
+		}
+		if err := load(newK, v); err != nil {
+			return err
 		}
 	}
-	indb, infile := it.Stat()
-	fmt.Printf("--end: %d, %d, %s\n", indb, infile, time.Since(t))
-	os.Exit(1)
 	return nil
 }
 
