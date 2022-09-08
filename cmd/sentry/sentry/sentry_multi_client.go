@@ -20,7 +20,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -279,7 +279,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 ) (*MultiClient, error) {
-	historyV2 := tool.HistoryV2FromDB(db)
+	historyV2 := fromdb.HistoryV2(db)
 
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */

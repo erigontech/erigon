@@ -715,10 +715,8 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 			}
 			incarnation := uint64(1)
 			if len(val) != 0 {
-				if err := acc.DecodeForStorage(val); err != nil {
-					return err
-				}
-				incarnation = acc.Incarnation
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(val)
+				incarnation = oldInc
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)

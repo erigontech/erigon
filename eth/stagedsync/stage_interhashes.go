@@ -347,16 +347,13 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load func(k, v []byte)) error {
 	txnFrom := txNums.MinOf(unwindTo)
 	txnTo := uint64(math.MaxUint64)
-	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
 	var deletedAccounts [][]byte
 	var k, v []byte
 
 	if storage {
-		acc := accounts.NewAccount()
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
 		for it.HasNext() {
@@ -368,24 +365,21 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 			}
 			incarnation := uint64(1)
 			if len(value) != 0 {
-				if err := acc.DecodeForStorage(value); err != nil {
-					return err
-				}
-				incarnation = acc.Incarnation
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+				incarnation = oldInc
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
-			if err := collector.Collect(newK, value); err != nil {
-				return err
-			}
+			load(newK, value)
 		}
-		return collector.Load(p.tx, "", load, etl.TransformArgs{Quit: p.quitCh})
+		return nil
 	}
 	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 	defer it.Close()
+
 	for it.HasNext() {
 		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
@@ -399,11 +393,8 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		}
 
 		if len(value) > 0 {
-			var oldAccount accounts.Account
-			if err = oldAccount.DecodeForStorage(value); err != nil {
-				return err
-			}
-			if oldAccount.Incarnation > 0 {
+			oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+			if oldInc > 0 {
 				if len(v) == 0 { // self-destructed
 					deletedAccounts = append(deletedAccounts, newK)
 				} else {
@@ -411,20 +402,14 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 					if err = accounts.Deserialise2(&newAccount, v); err != nil {
 						return err
 					}
-					if newAccount.Incarnation > oldAccount.Incarnation {
+					if newAccount.Incarnation > oldInc {
 						deletedAccounts = append(deletedAccounts, newK)
 					}
 				}
 			}
 		}
 
-		if err := collector.Collect(newK, value); err != nil {
-			return err
-		}
-	}
-
-	if err := collector.Load(p.tx, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-		return err
+		load(newK, value)
 	}
 
 	// delete Intermediate hashes of deleted accounts
@@ -651,9 +636,8 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	rl := trie.NewRetainList(0)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(db)
-		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		collect := func(k, v []byte) {
 			rl.AddKeyWithMarker(k, len(v) == 0)
-			return nil
 		}
 		if err := p.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint, false /* storage */, collect); err != nil {
 			return err

@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -1013,7 +1013,7 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
-	chainConfig := tool.ChainConfigFromDB(br.db)
+	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
@@ -1112,7 +1112,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 	if blocksPerFile == 0 {
 		return nil
 	}
-	chainConfig := tool.ChainConfigFromDB(chainDB)
+	chainConfig := fromdb.ChainConfig(chainDB)
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
 		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl); err != nil {
 			return err
@@ -1198,7 +1198,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	warmupCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	f, err := compress.NewCompressor(ctx, "Snapshot Txs", segmentFile, tmpDir, compress.MinPatternScore, workers, lvl)
