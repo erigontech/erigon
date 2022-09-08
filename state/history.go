@@ -771,17 +771,18 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 }
 
 func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
-	var hi HistoryIterator1
-	hi.hasNextInDb = true
-	hi.roTx = roTx
-	hi.indexTable = hc.h.indexTable
-	hi.idxKeysTable = hc.h.indexKeysTable
-	hi.valsTable = hc.h.historyValsTable
-	heap.Init(&hi.h)
+	hi := HistoryIterator1{
+		hasNextInDb:  true,
+		roTx:         roTx,
+		indexTable:   hc.h.indexTable,
+		idxKeysTable: hc.h.indexKeysTable,
+		valsTable:    hc.h.historyValsTable,
+	}
+
 	hc.indexFiles.Ascend(func(item *ctxItem) bool {
 		g := item.getter
 		g.Reset(0)
-		for g.HasNext() {
+		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 			hi.hasNextInFiles = true
@@ -807,7 +808,7 @@ type HistoryIterator1 struct {
 
 	hasNextInFiles                      bool
 	hasNextInDb                         bool
-	startTxKey                          [8]byte
+	startTxKey, txnKey                  [8]byte
 	startTxNum, endTxNum                uint64
 	roTx                                kv.Tx
 	idxCursor, txNum2kCursor            kv.CursorDupSort
@@ -830,40 +831,50 @@ func (hi *HistoryIterator1) advanceInFiles() {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
-		val, _ := top.g.NextUncompressed()
+		var idxVal []byte
+		if hi.compressVals {
+			idxVal, _ = top.g.Next(nil)
+		} else {
+			idxVal, _ = top.g.NextUncompressed()
+		}
 		if top.g.HasNext() {
-			top.key, _ = top.g.NextUncompressed()
+			if hi.compressVals {
+				top.key, _ = top.g.Next(nil)
+			} else {
+				top.key, _ = top.g.NextUncompressed()
+			}
 			heap.Push(&hi.h, top)
 		}
-		//fmt.Printf("a: %x, %x\n", key, hi.key)
-		if !bytes.Equal(key, hi.key) {
-			ef, _ := eliasfano32.ReadEliasFano(val)
-			if n, ok := ef.Search(hi.startTxNum); ok {
-				hi.key = key
-				var txKey [8]byte
-				binary.BigEndian.PutUint64(txKey[:], n)
-				var historyItem *ctxItem
-				var ok bool
-				var search ctxItem
-				search.startTxNum = top.startTxNum
-				search.endTxNum = top.endTxNum
-				if historyItem, ok = hi.hc.historyFiles.Get(&search); !ok {
-					panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.key))
-				}
-				offset := historyItem.reader.Lookup2(txKey[:], hi.key)
-				g := historyItem.getter
-				g.Reset(offset)
-				if hi.compressVals {
-					hi.nextFileVal, _ = g.Next(nil)
-				} else {
-					hi.nextFileVal, _ = g.NextUncompressed()
-				}
 
-				hi.nextFileKey = key
-				return
-			}
-
+		if bytes.Equal(key, hi.nextFileKey) {
+			continue
 		}
+		ef, _ := eliasfano32.ReadEliasFano(idxVal)
+		n, ok := ef.Search(hi.startTxNum)
+		if !ok {
+			continue
+		}
+		if n >= hi.endTxNum {
+			continue
+		}
+
+		hi.nextFileKey = key
+		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		search := ctxItem{startTxNum: top.startTxNum, endTxNum: top.endTxNum}
+		historyItem, ok := hi.hc.historyFiles.Get(&search)
+		if !ok {
+			panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextFileKey))
+		}
+		offset := historyItem.reader.Lookup2(hi.txnKey[:], hi.nextFileKey)
+		g := historyItem.getter
+		g.Reset(offset)
+		if hi.compressVals {
+			hi.nextFileVal, _ = g.Next(nil)
+		} else {
+			hi.nextFileVal, _ = g.NextUncompressed()
+		}
+		hi.nextFileKey = key
+		return
 	}
 	hi.hasNextInFiles = false
 }
