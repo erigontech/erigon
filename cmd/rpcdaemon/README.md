@@ -275,7 +275,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |
 | debug_accountAt                            | Yes     | Private Erigon debug module          |
-| debug_calLMany                             | Yes     | Erigon Method PR#4567.               |
 | debug_getModifiedAccountsByNumber          | Yes     |                                      |
 | debug_getModifiedAccountsByHash            | Yes     |                                      |
 | debug_storageRangeAt                       | Yes     |                                      |
@@ -283,6 +282,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)  |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)  |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)  |
+| debug_traceCallMany                        | Yes     | Erigon Method PR#4567.               |
 |                                            |         |                                      |
 | trace_call                                 | Yes     |                                      |
 | trace_callMany                             | Yes     |                                      |
