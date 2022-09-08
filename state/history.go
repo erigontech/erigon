@@ -780,6 +780,15 @@ func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx
 	}
 
 	hc.indexFiles.Ascend(func(item *ctxItem) bool {
+		if item.endTxNum >= endTxNum {
+			hi.hasNextInDb = false
+		}
+		if item.endTxNum <= startTxNum {
+			return true
+		}
+		if item.startTxNum >= endTxNum {
+			return false
+		}
 		g := item.getter
 		g.Reset(0)
 		if g.HasNext() {
@@ -816,7 +825,10 @@ type HistoryIterator1 struct {
 	h                                   ReconHeap
 
 	key, nextKey, nextVal, nextFileKey, nextFileVal, nextDbKey, nextDbVal []byte
+	advFileCnt, advDbCnt                                                  int
 }
+
+func (hi *HistoryIterator1) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
 
 func (hi *HistoryIterator1) Close() {
 	if hi.idxCursor != nil {
@@ -828,6 +840,7 @@ func (hi *HistoryIterator1) Close() {
 }
 
 func (hi *HistoryIterator1) advanceInFiles() {
+	hi.advFileCnt++
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
@@ -880,6 +893,7 @@ func (hi *HistoryIterator1) advanceInFiles() {
 }
 
 func (hi *HistoryIterator1) advanceInDb() {
+	hi.advDbCnt++
 	var k []byte
 	var err error
 	if hi.idxCursor == nil {
