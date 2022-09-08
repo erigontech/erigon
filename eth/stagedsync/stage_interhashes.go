@@ -191,16 +191,15 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load func(k, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
 	var k, v []byte
-	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
 
 	txnFrom := txNums.MinOf(from + 1)
 	txnTo := uint64(math.MaxUint64)
+
 	if storage {
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
@@ -218,17 +217,14 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			copy(compositeKey, addrHash[:])
 			copy(compositeKey[common.HashLength:], secKey[:])
 			if len(v) == 0 {
-				if err := collector.Collect(compositeKey, nil); err != nil {
+				if err := load(compositeKey, nil); err != nil {
 					return err
 				}
 			} else {
-				if err := collector.Collect(compositeKey, nonEmptyMarker); err != nil {
+				if err := load(compositeKey, nonEmptyMarker); err != nil {
 					return err
 				}
 			}
-		}
-		if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-			return err
 		}
 		return nil
 	}
@@ -242,17 +238,14 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			return err
 		}
 		if len(v) == 0 {
-			if err := collector.Collect(newK, nil); err != nil {
+			if err := load(newK, nil); err != nil {
 				return err
 			}
 		} else {
-			if err := collector.Collect(newK, nonEmptyMarker); err != nil {
+			if err := load(newK, nonEmptyMarker); err != nil {
 				return err
 			}
 		}
-	}
-	if err := collector.Load(nil, "", load, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-		return err
 	}
 	return nil
 }
@@ -522,7 +515,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	rl := trie.NewRetainList(0)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(db)
-		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		collect := func(k, v []byte) error {
 			if len(k) == 32 {
 				rl.AddKeyWithMarker(k, len(v) == 0)
 				return nil
