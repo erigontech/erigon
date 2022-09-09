@@ -1310,7 +1310,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
-			parseCtx.WithSender(len(senders) != 0)
+			parseCtx.WithSender(len(senders) == 0)
 			valueBuf, err = parse(tv, valueBuf, senders, j)
 			if err != nil {
 				return fmt.Errorf("%w, block: %d", err, blockNum)
