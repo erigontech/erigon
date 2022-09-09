@@ -824,8 +824,8 @@ type HistoryIterator1 struct {
 	indexTable, idxKeysTable, valsTable string
 	h                                   ReconHeap
 
-	key, nextKey, nextVal, nextFileKey, nextFileVal, nextDbKey, nextDbVal []byte
-	advFileCnt, advDbCnt                                                  int
+	nextKey, nextVal, nextFileKey, nextFileVal, nextDbKey, nextDbVal []byte
+	advFileCnt, advDbCnt                                             int
 }
 
 func (hi *HistoryIterator1) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }

@@ -31,9 +31,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testDbAndHistory(t testing.TB) (string, kv.RwDB, *History) {
-	t.Helper()
-	path := t.TempDir()
+func testDbAndHistory(tb testing.TB) (string, kv.RwDB, *History) {
+	tb.Helper()
+	path := tb.TempDir()
 	logger := log.New()
 	keysTable := "Keys"
 	indexTable := "Index"
@@ -48,9 +48,9 @@ func testDbAndHistory(t testing.TB) (string, kv.RwDB, *History) {
 		}
 	}).MustOpen()
 	ii, err := NewHistory(path, 16 /* aggregationStep */, "hist" /* filenameBase */, keysTable, indexTable, valsTable, settingsTable, false /* compressVals */)
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-	t.Cleanup(ii.Close)
+	require.NoError(tb, err)
+	tb.Cleanup(db.Close)
+	tb.Cleanup(ii.Close)
 	return path, db, ii
 }
 
@@ -222,11 +222,11 @@ func TestHistoryAfterPrune(t *testing.T) {
 	}
 }
 
-func filledHistory(t testing.TB) (string, kv.RwDB, *History, uint64) {
-	t.Helper()
-	path, db, h := testDbAndHistory(t)
+func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
+	tb.Helper()
+	path, db, h := testDbAndHistory(tb)
 	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
 	txs := uint64(1000)
@@ -245,20 +245,20 @@ func filledHistory(t testing.TB) (string, kv.RwDB, *History, uint64) {
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
 				err = h.AddPrevValue(k[:], nil, prevVal[keyNum])
-				require.NoError(t, err)
+				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
 		}
 		if txNum%10 == 0 {
 			err = tx.Commit()
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			h.SetTx(tx)
 		}
 	}
 	err = tx.Commit()
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	tx = nil
 	return path, db, h, txs
 }
@@ -323,8 +323,8 @@ func TestHistoryHistory(t *testing.T) {
 	checkHistoryHistory(t, db, h, txs)
 }
 
-func collateAndMergeHistory(t testing.TB, db kv.RwDB, h *History, txs uint64) {
-	t.Helper()
+func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
+	tb.Helper()
 	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
@@ -335,21 +335,21 @@ func collateAndMergeHistory(t testing.TB, db kv.RwDB, h *History, txs uint64) {
 	for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
 		func() {
 			roTx, err := db.BeginRo(context.Background())
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			defer roTx.Rollback()
 			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, roTx)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			roTx.Rollback()
 			sf, err := h.buildFiles(step, c)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			h.SetTx(tx)
 			err = h.prune(step, step*h.aggregationStep, (step+1)*h.aggregationStep)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			err = tx.Commit()
-			require.NoError(t, err)
+			require.NoError(tb, err)
 			tx = nil
 			var r HistoryRanges
 			maxEndTxNum := h.endTxNumMinimax()
@@ -357,10 +357,10 @@ func collateAndMergeHistory(t testing.TB, db kv.RwDB, h *History, txs uint64) {
 			for r = h.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = h.findMergeRange(maxEndTxNum, maxSpan) {
 				indexOuts, historyOuts, _ := h.staticFilesInRange(r)
 				indexIn, historyIn, err := h.mergeFiles(indexOuts, historyOuts, r, maxSpan)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 				h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 				err = h.deleteFiles(indexOuts, historyOuts)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 			}
 		}()
 	}
