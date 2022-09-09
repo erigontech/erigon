@@ -21,6 +21,7 @@ import (
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/holiman/uint256"
 
@@ -261,6 +262,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 	var subBalance = false
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
+		log.Warn("Insufficient funds", "address", st.msg.From().Hex(), "have", have, "want", want)
 		if !gasBailout {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
