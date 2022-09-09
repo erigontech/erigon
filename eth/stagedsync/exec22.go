@@ -456,15 +456,9 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		accountCollectorsX[i].Close()
 		accountCollectorsX[i] = nil
 	}
-	var brwTx kv.RwTx
-	defer func() {
-		if brwTx != nil {
-			brwTx.Rollback()
-		}
-	}()
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return brwTx.Put(kv.XAccount, k, v)
+			return tx.Put(kv.XAccount, k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
