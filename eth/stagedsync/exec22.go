@@ -457,12 +457,9 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		accountCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return tx.Put(kv.XAccount, k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		return nil
+		}, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -502,12 +499,9 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		storageCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return tx.Put(kv.XStorage, k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		return nil
+		}, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -549,12 +543,9 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		codeCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return tx.Put(kv.XCode, k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		return nil
+		}, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
