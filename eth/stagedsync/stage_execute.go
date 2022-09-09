@@ -274,6 +274,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
+	fmt.Printf("recon to : %t, txn=%d\n", initialCycle, cfg.agg.EndTxNumMinimax())
 	if initialCycle {
 		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
 		fmt.Printf("recon to : %d\n", reconstituteToBlock)

@@ -685,7 +685,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
+		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, true)
 		if err != nil {
 			return err
 		}
@@ -697,14 +697,14 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, nil, cfg, ctx, false)
+		err = stagedsync.PruneExecutionStage(p, nil, cfg, ctx, true)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, false)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true)
 	if err != nil {
 		return err
 	}
