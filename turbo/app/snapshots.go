@@ -300,9 +300,8 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-
 func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
-	chainConfig := tool.ChainConfigFromDB(db)
+	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
