@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"path"
 	"runtime"
 	"syscall"
 	"time"
@@ -15,9 +16,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	commonold "github.com/ledgerwatch/erigon/common"
@@ -44,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -252,9 +256,17 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
 		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
-		fmt.Printf("recon to : %d\n", reconstituteToBlock)
+		reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
+		os.RemoveAll(reconDbPath)
+		dir.MustExist(reconDbPath)
+		limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+		reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+		if err != nil {
+			return err
+		}
+
 		if reconstituteToBlock > s.BlockNumber {
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 		}

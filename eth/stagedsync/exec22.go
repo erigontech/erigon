@@ -377,7 +377,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 	}
 }
 
-func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB,
+func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB, db kv.RwDB,
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
@@ -462,15 +462,14 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			brwTx.Rollback()
 		}
 	}()
-	if brwTx, err = chainDb.BeginRw(ctx); err != nil {
-		return err
-	}
-	if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.XAccount, k, v)
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	if err = brwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return brwTx.Put(kv.XAccount, k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	accountCollectorX.Close()
@@ -508,15 +507,14 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		storageCollectorsX[i].Close()
 		storageCollectorsX[i] = nil
 	}
-	if brwTx, err = chainDb.BeginRw(ctx); err != nil {
-		return err
-	}
-	if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.XStorage, k, v)
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	if err = brwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return brwTx.Put(kv.XStorage, k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	storageCollectorX.Close()
@@ -556,15 +554,14 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		codeCollectorsX[i].Close()
 		codeCollectorsX[i] = nil
 	}
-	if brwTx, err = chainDb.BeginRw(ctx); err != nil {
-		return err
-	}
-	if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		return brwTx.Put(kv.XCode, k, v)
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	if err = brwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return brwTx.Put(kv.XCode, k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	codeCollectorX.Close()
@@ -585,7 +582,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		}
 	}()
 	for i := 0; i < workerCount; i++ {
-		if roTxs[i], err = chainDb.BeginRo(ctx); err != nil {
+		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
 		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
@@ -640,20 +637,16 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
-						rwTx, err := chainDb.BeginRw(ctx)
-						if err != nil {
-							return err
-						}
-						defer rwTx.Rollback()
-
-						if err = rs.Flush(rwTx); err != nil {
-							return err
-						}
-						if err = rwTx.Commit(); err != nil {
+						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							if err = rs.Flush(tx); err != nil {
+								return err
+							}
+							return nil
+						}); err != nil {
 							return err
 						}
 						for i := 0; i < workerCount; i++ {
-							if roTxs[i], err = chainDb.BeginRo(ctx); err != nil {
+							if roTxs[i], err = db.BeginRo(ctx); err != nil {
 								return err
 							}
 							reconWorkers[i].SetTx(roTxs[i])
@@ -706,16 +699,12 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
 	}
-	rwTx, err := chainDb.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer rwTx.Rollback()
-
-	if err = rs.Flush(rwTx); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
+	if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+		if err = rs.Flush(tx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -724,7 +713,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	defer codeCollector.Close()
 	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
-	roTx, err := chainDb.BeginRo(ctx)
+	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -771,19 +760,18 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	}
 	cursor.Close()
 	roTx.Rollback()
-	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.PlainStateR); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.CodeR); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.PlainContractR); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.CodeR); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.PlainContractR); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	plainStateCollectors := make([]*etl.Collector, workerCount)
@@ -878,38 +866,34 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		}
 		plainContractCollectors[i].Close()
 	}
-	rwTx, err = chainDb.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer rwTx.Rollback()
-
-	if err = rwTx.ClearBucket(kv.PlainState); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.Code); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.PlainContractCode); err != nil {
-		return err
-	}
-	if err = plainStateCollector.Load(rwTx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	plainStateCollector.Close()
-	if err = codeCollector.Load(rwTx, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	codeCollector.Close()
-	if err = plainContractCollector.Load(rwTx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	plainContractCollector.Close()
-	if err := s.Update(rwTx, blockNum); err != nil {
-		return err
-	}
-	s.BlockNumber = blockNum
-	if err = rwTx.Commit(); err != nil {
+	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
+		if err = tx.ClearBucket(kv.PlainState); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.Code); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.PlainContractCode); err != nil {
+			return err
+		}
+		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainStateCollector.Close()
+		if err = codeCollector.Load(tx, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		codeCollector.Close()
+		if err = plainContractCollector.Load(tx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainContractCollector.Close()
+		if err := s.Update(tx, blockNum); err != nil {
+			return err
+		}
+		s.BlockNumber = blockNum
+		return nil
+	}); err != nil {
 		return err
 	}
 	return nil

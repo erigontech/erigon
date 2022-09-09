@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -65,13 +65,8 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer agg.Close()
 	reconDbPath := path.Join(datadir, "recondb")
-	if _, err = os.Stat(reconDbPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	} else if err = os.RemoveAll(reconDbPath); err != nil {
-		return err
-	}
+	os.RemoveAll(reconDbPath)
+	dir.MustExist(reconDbPath)
 	startTime := time.Now()
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
@@ -122,7 +117,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	var execStage *stagedsync.StageState
-	db.View(ctx, func(tx kv.Tx) error {
+	chainDb.View(ctx, func(tx kv.Tx) error {
 		execStage, err = stagedSync.StageState(stages.Execution, tx, chainDb)
 		if err != nil {
 			return err
@@ -135,6 +130,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		execStage,
 		dirs,
 		workers,
+		chainDb,
 		db,
 		blockReader, allSnapshots, txNums, log.New(),
 		agg, engine, chainConfig, genesis,
@@ -142,68 +138,64 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 
-	rwTx, err := chainDb.BeginRw(ctx)
-	if err != nil {
+	if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+		execStage, err = stagedSync.StageState(stages.Execution, tx, chainDb)
+		if err != nil {
+			return err
+		}
+		if err = execStage.Update(tx, block); err != nil {
+			return err
+		}
+		log.Info("Reconstitution complete", "duration", time.Since(startTime))
+		log.Info("Computing hashed state")
+		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.HashedStorage); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.ContractCode); err != nil {
+			return err
+		}
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, txNums, agg), ctx); err != nil {
+			return err
+		}
+		hashStage, err := stagedSync.StageState(stages.HashState, tx, chainDb)
+		if err != nil {
+			return err
+		}
+		if err = hashStage.Update(tx, block); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	execStage, err = stagedSync.StageState(stages.Execution, rwTx, chainDb)
-	if err != nil {
-		return err
-	}
-	if err = execStage.Update(rwTx, block); err != nil {
-		return err
-	}
-	log.Info("Reconstitution complete", "duration", time.Since(startTime))
-	log.Info("Computing hashed state")
-	tmpDir := cfg.Dirs.Tmp
-	if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err = rwTx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err = stagedsync.PromoteHashedStateCleanly("recon", rwTx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, txNums, agg), ctx); err != nil {
-		return err
-	}
-	hashStage, err := stagedSync.StageState(stages.HashState, rwTx, chainDb)
-	if err != nil {
-		return err
-	}
-	if err = hashStage.Update(rwTx, block); err != nil {
-		return err
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-	if rwTx, err = chainDb.BeginRw(ctx); err != nil {
-		return err
-	}
-	var rootHash common.Hash
-	if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", rwTx, stagedsync.StageTrieCfg(chainDb, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, tmpDir, blockReader, nil /* HeaderDownload */, cfg.HistoryV2, txNums, agg), common.Hash{}, make(chan struct{}, 1)); err != nil {
-		return err
-	}
-	trieStage, err := stagedSync.StageState(stages.IntermediateHashes, rwTx, chainDb)
-	if err != nil {
-		return err
-	}
-	if err = trieStage.Update(rwTx, block); err != nil {
+	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
+		var rootHash common.Hash
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(chainDb, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */, cfg.HistoryV2, txNums, agg), common.Hash{}, make(chan struct{}, 1)); err != nil {
+			return err
+		}
+		trieStage, err := stagedSync.StageState(stages.IntermediateHashes, tx, chainDb)
+		if err != nil {
+			return err
+		}
+		if err = trieStage.Update(tx, block); err != nil {
+			return err
+		}
+
+		header, err := blockReader.HeaderByNumber(ctx, tx, execStage.BlockNumber)
+		if err != nil {
+			panic(err)
+		}
+
+		if rootHash != header.Root {
+			log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	header, err := blockReader.HeaderByNumber(ctx, rwTx, execStage.BlockNumber)
-	if err != nil {
-		panic(err)
-	}
-
-	if err = rwTx.Commit(); err != nil {
-		return err
-	}
-
-	if rootHash != header.Root {
-		log.Error("Incorrect root hash", "expected", fmt.Sprintf("%x", header.Root))
-	}
 	return nil
 }
