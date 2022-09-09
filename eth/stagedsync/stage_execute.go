@@ -298,7 +298,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	fmt.Printf("alex: %d\n", s.BlockNumber)
 	rs := state.NewState22()
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine,
