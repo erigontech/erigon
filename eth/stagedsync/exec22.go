@@ -122,7 +122,7 @@ func Exec22(ctx context.Context,
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
 	if parallel {
 		go func() {
-			applyTx, err := chainDb.BeginRw(ctx)
+			applyTx, err = chainDb.BeginRw(ctx)
 			if err != nil {
 				panic(err)
 			}
@@ -700,7 +700,6 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	defer roTx.Rollback()
 	cursor, err := roTx.Cursor(kv.PlainStateR)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer cursor.Close()
@@ -743,7 +742,6 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	roTx.Rollback()
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
-			panic(err)
 			return err
 		}
 		if err = tx.ClearBucket(kv.CodeR); err != nil {
