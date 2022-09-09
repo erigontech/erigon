@@ -123,7 +123,7 @@ func TestPutGet(t *testing.T) {
 	defer tx.Rollback()
 	defer c.Close()
 
-	require.Error(t, c.Put([]byte(""), []byte("value1.1")))
+	require.NoError(t, c.Put([]byte(""), []byte("value1.1")))
 
 	var v []byte
 	v, err := tx.GetOne("Table", []byte("key1"))

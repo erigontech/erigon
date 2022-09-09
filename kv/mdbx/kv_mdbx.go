@@ -1344,9 +1344,6 @@ func (c *MdbxCursor) deleteDupSort(key []byte) error {
 }
 
 func (c *MdbxCursor) PutNoOverwrite(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("mdbx doesn't support empty keys. bucket: %s", c.bucketName)
-	}
 	if c.bucketCfg.AutoDupSortKeysConversion {
 		panic("not implemented")
 	}
@@ -1355,10 +1352,6 @@ func (c *MdbxCursor) PutNoOverwrite(key []byte, value []byte) error {
 }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
-	if len(key) == 0 {
-		return fmt.Errorf("mdbx doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion {
 		if err := c.putDupSort(key, value); err != nil {
