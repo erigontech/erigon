@@ -122,12 +122,12 @@ func Exec22(ctx context.Context,
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
 	if parallel {
 		go func() {
-			applyTx, err = chainDb.BeginRw(ctx)
+			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
 				panic(err)
 			}
-			defer applyTx.Rollback()
-			agg.SetTx(applyTx)
+			defer tx.Rollback()
+			agg.SetTx(tx)
 			defer rs.Finish()
 			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
 				select {
@@ -138,7 +138,7 @@ func Exec22(ctx context.Context,
 						defer rwsLock.Unlock()
 						atomic.AddInt64(&resultsSize, txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+						processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
@@ -163,7 +163,7 @@ func Exec22(ctx context.Context,
 										drained = true
 									}
 								}
-								processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+								processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 								if rws.Len() == 0 {
 									break
 								}
@@ -188,19 +188,19 @@ func Exec22(ctx context.Context,
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
 							}
-							if err := rs.Flush(applyTx); err != nil {
+							if err := rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = applyTx.Commit(); err != nil {
+							if err = tx.Commit(); err != nil {
 								return err
 							}
 							for i := 0; i < len(reconWorkers); i++ {
 								reconWorkers[i].ResetTx(nil)
 							}
-							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
-							agg.SetTx(applyTx)
+							agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
@@ -210,7 +210,7 @@ func Exec22(ctx context.Context,
 					}
 				}
 			}
-			if err = applyTx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				panic(err)
 			}
 		}()
