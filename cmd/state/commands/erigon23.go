@@ -20,7 +20,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -103,7 +102,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, stagedsync.AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, ethconfig.HistoryV2AggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}

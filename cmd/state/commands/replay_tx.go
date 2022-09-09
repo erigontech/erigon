@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -105,7 +104,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	fmt.Printf("txNum = %d\n", txNum)
 	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, stagedsync.AggregationStep)
+	agg, err := libstate.NewAggregator22(aggPath, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}

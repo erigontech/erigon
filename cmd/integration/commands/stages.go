@@ -648,9 +648,10 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 	if reset {
 		if historyV2 {
-			dir.Recreate(path.Join(dirs.DataDir, "agg22"))
-			dir.Recreate(path.Join(dirs.DataDir, "db22"))
-			dir.Recreate(path.Join(dirs.DataDir, "erigon22"))
+
+			//dir.Recreate(path.Join(dirs.DataDir, "agg22"))
+			//dir.Recreate(path.Join(dirs.DataDir, "db22"))
+			//dir.Recreate(path.Join(dirs.DataDir, "erigon22"))
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, chain) }); err != nil {
 			return err
