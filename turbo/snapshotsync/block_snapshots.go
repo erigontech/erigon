@@ -764,9 +764,9 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
-	logEvery := time.NewTicker(60 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	segments, _, err := Segments(dir)
 	if err != nil {
@@ -776,6 +776,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 	wg := &sync.WaitGroup{}
 	ps := background.NewProgressSet()
 	sem := semaphore.NewWeighted(int64(workers))
+	startIndexingTime := time.Now()
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
 			for index := range segments {
@@ -812,6 +813,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 		select {
 		case err, ok := <-errs:
 			if !ok {
+				log.Info(fmt.Sprintf("[%s] finished indexing", logPrefix), "time", time.Since(startIndexingTime).String())
 				return nil
 			}
 			if err != nil {
@@ -824,7 +826,7 @@ func BuildMissedIndices(ctx context.Context, dir string, chainID uint256.Int, tm
 			if lvl >= log.LvlInfo {
 				common2.ReadMemStats(&m)
 			}
-			log.Log(lvl, "[snapshots] Indexing", "progress", ps.String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			log.Log(lvl, fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -17,13 +17,13 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageSnapshots(s, ctx, tx, headers, firstCycle)
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return nil
+				return SnapshotsPrune(p, snapshots, ctx, tx)
 			},
 		},
 		{
@@ -311,6 +311,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 }
 
 var DefaultForwardOrder = UnwindOrder{
+	stages.Snapshots,
 	stages.Headers,
 	stages.BlockHashes,
 	stages.Bodies,
@@ -338,6 +339,7 @@ type PruneOrder []stages.SyncStage
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
+	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
@@ -370,6 +372,7 @@ var StateUnwindOrder = UnwindOrder{
 
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
+	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,

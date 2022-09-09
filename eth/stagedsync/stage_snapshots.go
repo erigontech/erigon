@@ -18,21 +18,62 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type SnapshotsCfg struct {
+	db          kv.RwDB
+	hd          *headerdownload.HeaderDownload
+	chainConfig params.ChainConfig
+
+	tmpdir string
+
+	snapshots          *snapshotsync.RoSnapshots
+	blockRetire        *snapshotsync.BlockRetire
+	snapshotDownloader proto_downloader.DownloaderClient
+	blockReader        services.FullBlockReader
+	dbEventNotifier    snapshotsync.DBEventNotifier
+}
+
+func StageSnapshotsCfg(
+	db kv.RwDB,
+	hd *headerdownload.HeaderDownload,
+	chainConfig params.ChainConfig,
+	tmpdir string,
+	snapshots *snapshotsync.RoSnapshots,
+	blockRetire *snapshotsync.BlockRetire,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	blockReader services.FullBlockReader,
+	dbEventNotifier snapshotsync.DBEventNotifier,
+) SnapshotsCfg {
+
+	return SnapshotsCfg{
+		db:                 db,
+		hd:                 hd,
+		chainConfig:        chainConfig,
+		tmpdir:             tmpdir,
+		snapshots:          snapshots,
+		blockRetire:        blockRetire,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
+		dbEventNotifier:    dbEventNotifier,
+	}
+}
 
 func SpawnStageSnapshots(
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
-	cfg HeadersCfg,
+	cfg SnapshotsCfg,
 	initialCycle bool,
-) error {
+) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -46,23 +87,17 @@ func SpawnStageSnapshots(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
 	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
 	}
 
-	if err := WaitForDownloader(ctx, cfg, tx); err != nil {
+	if err := WaitForDownloader(s, ctx, cfg, tx); err != nil {
 		return err
 	}
 
@@ -82,7 +117,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -172,7 +207,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
+func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		if err := cfg.snapshots.ReopenFolder(); err != nil {
 			return err
@@ -197,7 +232,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 	}
 
 	if len(missingSnapshots) > 0 {
-		log.Warn("[Snapshots] downloading missing snapshots")
+		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
 	}
 
 	// send all hashes to the Downloader service
@@ -213,7 +248,7 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
 	}
 
-	log.Info("[Snapshots] Fetching torrent files metadata")
+	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", s.LogPrefix()))
 	for {
 		select {
 		case <-ctx.Done():
@@ -221,12 +256,13 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg, tx kv.RwTx) error {
 		default:
 		}
 		if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-			log.Error("[Snapshots] call downloader", "err", err)
+			log.Error(fmt.Sprintf("[%s] call downloader", s.LogPrefix()), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
 		break
 	}
+	downloadStartTime := time.Now()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	var m runtime.MemStats
@@ -252,21 +288,23 @@ Loop:
 						return err
 					}
 				}
+				log.Info(fmt.Sprintf("[%s] download finished", s.LogPrefix()), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
 				if stats.MetadataReady < stats.FilesTotal {
-					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", s.LogPrefix(), stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
 				libcommon.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
-				log.Info("[Snapshots] download",
+				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
-					"download-time", downloadTimeLeft,
+					"download-time-left", downloadTimeLeft,
+					"total-download-time", time.Since(downloadStartTime).Round(time.Second).String(),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
 				)
-				log.Info("[Snapshots] download",
+				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
@@ -300,10 +338,9 @@ Finish:
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn("[Snapshshots] Some blocks are not in snapshots and not in db", "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", s.LogPrefix()), "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
 		}
 	}
-
 	return nil
 }
 
@@ -318,4 +355,58 @@ func calculateTime(amountLeft, rate uint64) string {
 	seconds := timeLeftInSeconds % 60
 
 	return fmt.Sprintf("%dhrs:%dm:%ds", hours, minutes, seconds)
+}
+
+/* ====== PRUNING ====== */
+// snapshots pruning sections works more as a retiring of blocks
+// retiring blocks means moving block data from db into snapshots
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	sn := cfg.blockRetire.Snapshots()
+	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
+			return err
+		}
+
+		if err := retireBlocksInSingleBackgroundThread(s, cfg.blockRetire, ctx, tx); err != nil {
+			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
+		}
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// retiring blocks in a single thread in the brackground
+func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
+	// if something already happens in background - noop
+	if blockRetire.Working() {
+		return nil
+	}
+	if res := blockRetire.Result(); res != nil {
+		if res.Err != nil {
+			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
+		}
+
+		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+			return err
+		}
+	}
+
+	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
+
+	return nil
 }
