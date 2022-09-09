@@ -382,8 +382,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-
-	if cfg.prune.TxIndex.Enabled() {
+	sn := cfg.blockRetire.Snapshots()
+	if !(sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce) && cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
 			return err
