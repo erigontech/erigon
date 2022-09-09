@@ -423,12 +423,6 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var brwTx kv.RwTx
-	defer func() {
-		if brwTx != nil {
-			brwTx.Rollback()
-		}
-	}()
 	doneCount = 0
 	accountCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -462,6 +456,12 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		accountCollectorsX[i].Close()
 		accountCollectorsX[i] = nil
 	}
+	var brwTx kv.RwTx
+	defer func() {
+		if brwTx != nil {
+			brwTx.Rollback()
+		}
+	}()
 	if brwTx, err = chainDb.BeginRw(ctx); err != nil {
 		return err
 	}

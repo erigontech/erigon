@@ -136,7 +136,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		dirs,
 		workers,
 		db,
-		blockReader, allSnapshots, txNums, log.New("recon22"),
+		blockReader, allSnapshots, txNums, log.New(),
 		agg, engine, chainConfig, genesis,
 	); err != nil {
 		return err

@@ -247,6 +247,19 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
+
+	fmt.Printf("recon to : %t, txn=%d\n", initialCycle, cfg.agg.EndTxNumMinimax())
+	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
+	if initialCycle {
+		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
+		fmt.Printf("recon to : %d\n", reconstituteToBlock)
+		if reconstituteToBlock > s.BlockNumber {
+			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+				return err
+			}
+		}
+	}
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -256,7 +269,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		defer tx.Rollback()
 	}
 
-	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	prevStageProgress, err := senderStageProgress(tx, cfg.db)
 	if err != nil {
 		return err
@@ -272,17 +284,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
-	fmt.Printf("recon to : %t, txn=%d\n", initialCycle, cfg.agg.EndTxNumMinimax())
-	if initialCycle {
-		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
-		fmt.Printf("recon to : %d\n", reconstituteToBlock)
-		if reconstituteToBlock > s.BlockNumber {
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
-				return err
-			}
-		}
 	}
 
 	rs := state.NewState22()
