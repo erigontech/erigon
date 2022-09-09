@@ -126,9 +126,7 @@ func Exec22(ctx context.Context,
 			if err != nil {
 				panic(err)
 			}
-			defer func() {
-				applyTx.Rollback()
-			}()
+			defer applyTx.Rollback()
 			agg.SetTx(applyTx)
 			defer rs.Finish()
 			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
@@ -379,18 +377,17 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	block := s.BlockNumber
 
 	endTxNumMinimax := agg.EndTxNumMinimax()
-	fmt.Printf("Max txNum in files: %d\n", endTxNumMinimax)
 	ok, blockNum := txNums.Find(endTxNumMinimax)
 	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
 	}
+	toBlock := blockNum
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
 	if block+1 > blockNum {
 		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
 	}
-	fmt.Printf("Max blockNum = %d\n", blockNum)
 	blockNum = block + 1
 	txNum := txNums.MaxOf(blockNum - 1)
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
@@ -868,10 +865,10 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			return err
 		}
 		plainContractCollector.Close()
-		if err := s.Update(tx, blockNum); err != nil {
+		if err := s.Update(tx, toBlock); err != nil {
 			return err
 		}
-		s.BlockNumber = blockNum
+		s.BlockNumber = toBlock
 		return nil
 	}); err != nil {
 		return err
