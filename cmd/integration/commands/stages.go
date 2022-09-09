@@ -647,11 +647,11 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.Execution))
 
 	if reset {
-		if historyV2 {
-			dir.Recreate(path.Join(dirs.DataDir, "agg22"))
-			dir.Recreate(path.Join(dirs.DataDir, "db22"))
-			dir.Recreate(path.Join(dirs.DataDir, "erigon22"))
-		}
+		//if historyV2 {
+		//	dir.Recreate(path.Join(dirs.DataDir, "agg22"))
+		//	dir.Recreate(path.Join(dirs.DataDir, "db22"))
+		//	dir.Recreate(path.Join(dirs.DataDir, "erigon22"))
+		//}
 		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, chain) }); err != nil {
 			return err
 		}
@@ -684,7 +684,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
+		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, true)
 		if err != nil {
 			return err
 		}
@@ -696,14 +696,14 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, nil, cfg, ctx, false)
+		err = stagedsync.PruneExecutionStage(p, nil, cfg, ctx, true)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, false)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true)
 	if err != nil {
 		return err
 	}
