@@ -122,13 +122,11 @@ func Exec22(ctx context.Context,
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
 	if parallel {
 		go func() {
-			fmt.Printf("begin rw1\n")
 			applyTx, err := chainDb.BeginRw(ctx)
 			if err != nil {
 				panic(err)
 			}
 			defer func() {
-				fmt.Printf("rollback rw1\n")
 				applyTx.Rollback()
 			}()
 			agg.SetTx(applyTx)
@@ -195,14 +193,12 @@ func Exec22(ctx context.Context,
 							if err := rs.Flush(applyTx); err != nil {
 								return err
 							}
-							fmt.Printf("commit rw1\n")
 							if err = applyTx.Commit(); err != nil {
 								return err
 							}
 							for i := 0; i < len(reconWorkers); i++ {
 								reconWorkers[i].ResetTx(nil)
 							}
-							fmt.Printf("begin rw2\n")
 							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
@@ -216,7 +212,6 @@ func Exec22(ctx context.Context,
 					}
 				}
 			}
-			fmt.Printf("commit rw2\n")
 			if err = applyTx.Commit(); err != nil {
 				panic(err)
 			}
@@ -684,7 +679,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()
 	}
-	if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
@@ -705,6 +700,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	defer roTx.Rollback()
 	cursor, err := roTx.Cursor(kv.PlainStateR)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	defer cursor.Close()
@@ -747,6 +743,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	roTx.Rollback()
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
+			panic(err)
 			return err
 		}
 		if err = tx.ClearBucket(kv.CodeR); err != nil {
