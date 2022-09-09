@@ -619,13 +619,13 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 
 	txs = make([]types.Transaction, txsAmount)
 	senders = make([]common.Address, txsAmount)
-	reader := bytes.NewReader(buf)
 	if txsAmount == 0 {
 		return txs, senders, nil
 	}
 	txnOffset := txsSeg.IdxTxnHash.OrdinalLookup(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
 	gg := txsSeg.Seg.MakeGetter()
 	gg.Reset(txnOffset)
+	reader := bytes.NewReader(buf)
 	stream := rlp.NewStream(reader, 0)
 	for i := uint32(0); i < txsAmount; i++ {
 		if !gg.HasNext() {
