@@ -381,6 +381,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
 	}
+	fmt.Printf("Max blockNum = %d\n", blockNum)
 	toBlock := blockNum
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")

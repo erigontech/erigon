@@ -89,7 +89,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
-	txNums := exec22.TxNumsFromDB(allSnapshots, db)
+	txNums := exec22.TxNumsFromDB(allSnapshots, chainDb)
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
 		chainDb,
@@ -139,13 +139,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 
 	if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-		execStage, err = stagedSync.StageState(stages.Execution, tx, chainDb)
-		if err != nil {
-			return err
-		}
-		if err = execStage.Update(tx, block); err != nil {
-			return err
-		}
 		log.Info("Reconstitution complete", "duration", time.Since(startTime))
 		log.Info("Computing hashed state")
 		if err = tx.ClearBucket(kv.HashedAccounts); err != nil {
