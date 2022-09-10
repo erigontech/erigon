@@ -132,10 +132,9 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		block = execStage.BlockNumber + 1
 	}
 
-	workerCount := workers
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, nil, chainConfig, engine, &vm.Config{}, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, cfg.HistoryV2, dirs, blockReader, nil, genesis, workerCount, txNums, agg)
+		/*badBlockHalt=*/ false, cfg.HistoryV2, dirs, blockReader, nil, genesis, int(workers), txNums, agg)
 	maxBlockNum := allSnapshots.BlocksAvailable() + 1
 	if err := stagedsync.SpawnExecuteBlocksStage(execStage, stagedSync, nil, maxBlockNum, ctx, execCfg, true); err != nil {
 		return err
