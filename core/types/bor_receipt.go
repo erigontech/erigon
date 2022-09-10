@@ -12,6 +12,11 @@ import (
 
 const BorTxKeyPrefix string = "matic-bor-receipt-"
 
+type BorConfigSprint struct {
+	IsBor  bool
+	Sprint uint64
+}
+
 // BorReceiptKey =  num (uint64 big endian)
 func BorReceiptKey(number uint64) []byte {
 	return dbutils.EncodeBlockNumber(number)
