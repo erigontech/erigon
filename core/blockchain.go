@@ -314,6 +314,118 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
+	blockLogs := ibs.Logs()
+	execRs := &EphemeralExecResult{
+		TxRoot:      types.DeriveSha(includedTxs),
+		ReceiptRoot: receiptSha,
+		Bloom:       bloom,
+		LogsHash:    rlpHash(blockLogs),
+		Receipts:    receipts,
+		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
+		GasUsed:     math.HexOrDecimal64(*usedGas),
+		Rejected:    rejectedTxs,
+	}
+
+	return execRs, nil
+}
+
+// ExecuteBlockEphemerallyBor runs a block from provided stateReader and
+// writes the result to the provided stateWriter
+func ExecuteBlockEphemerallyBor(
+	chainConfig *params.ChainConfig,
+	vmConfig *vm.Config,
+	blockHashFunc func(n uint64) common.Hash,
+	engine consensus.Engine,
+	block *types.Block,
+	stateReader state.StateReader,
+	stateWriter state.WriterWithChangeSets,
+	epochReader consensus.EpochReader,
+	chainReader consensus.ChainHeaderReader,
+	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
+	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+) (*EphemeralExecResult, error) {
+
+	defer blockExecutionTimer.UpdateDuration(time.Now())
+	block.Uncles()
+	ibs := state.New(stateReader)
+	header := block.Header()
+
+	usedGas := new(uint64)
+	gp := new(GasPool)
+	gp.AddGas(block.GasLimit())
+
+	var (
+		rejectedTxs []*RejectedTx
+		includedTxs types.Transactions
+		receipts    types.Receipts
+	)
+
+	if !vmConfig.ReadOnly {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+			return nil, err
+		}
+	}
+
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	noop := state.NewNoopWriter()
+	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		writeTrace := false
+		if vmConfig.Debug && vmConfig.Tracer == nil {
+			tracer, err := getTracer(i, tx.Hash())
+			if err != nil {
+				return nil, fmt.Errorf("could not obtain tracer: %w", err)
+			}
+			vmConfig.Tracer = tracer
+			writeTrace = true
+		}
+
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		if writeTrace {
+			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
+				ftracer.Flush(tx)
+			}
+
+			vmConfig.Tracer = nil
+		}
+		if err != nil {
+			if !statelessExec {
+				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			}
+			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
+		} else {
+			includedTxs = append(includedTxs, tx)
+			if !vmConfig.NoReceipts {
+				receipts = append(receipts, receipt)
+			}
+		}
+	}
+
+	receiptSha := types.DeriveSha(receipts)
+	if !statelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
+	}
+
+	if !statelessExec && *usedGas != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+
+	var bloom types.Bloom
+	if !vmConfig.NoReceipts {
+		bloom = types.CreateBloom(receipts)
+		if !statelessExec && bloom != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		}
+	}
+	if !vmConfig.ReadOnly {
+		txs := block.Transactions()
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
+			return nil, err
+		}
+	}
 
 	var logs []*types.Log
 	for _, receipt := range receipts {
