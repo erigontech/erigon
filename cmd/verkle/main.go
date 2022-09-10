@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -18,7 +19,7 @@ type optionsCfg struct {
 }
 
 func analyseOut(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.verkleDb, log.Root(), true)
+	db, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
 	if err != nil {
 		return err
 	}
@@ -41,8 +42,7 @@ func analyseOut(cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
-
-		log.Info("Bucket Analysis", "name", bucket, "size", size)
+		log.Info("Bucket Analysis", "name", bucket, "size", datasize.ByteSize(size).HumanReadable())
 	}
 	return nil
 }
@@ -78,6 +78,10 @@ func main() {
 		}
 	case "verkle":
 		if err := GenerateVerkleTree(opt); err != nil {
+			log.Error("Error", "err", err.Error())
+		}
+	case "incremental":
+		if err := IncrementVerkleTree(opt); err != nil {
 			log.Error("Error", "err", err.Error())
 		}
 	default:

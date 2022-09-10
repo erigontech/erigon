@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -102,5 +103,12 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 
 	log.Info("Verkle Tree Generation completed", "elapsed", time.Since(start))
 
+	var progress uint64
+	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, progress); err != nil {
+		return err
+	}
 	return vTx.Commit()
 }
