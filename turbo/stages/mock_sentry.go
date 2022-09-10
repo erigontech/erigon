@@ -347,16 +347,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(
-				mock.DB,
-				mock.HeaderDownload(),
-				*mock.ChainConfig,
-				dirs.Tmp,
-				allSnapshots,
-				blockRetire,
-				snapshotsDownloader,
-				blockReader,
-				mock.Notifications.Events),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,
@@ -368,8 +358,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.BatchSize,
 				false,
 				false,
+				allSnapshots,
+				snapshotsDownloader,
 				blockReader,
 				dirs.Tmp,
+				mock.Notifications.Events,
 				mock.Notifications,
 				engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
