@@ -45,6 +45,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	}
 
 	collector := etl.NewCollector("VerkleTrie", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8))
+	defer collector.Close()
 
 	if err := regeneratePedersenAccounts(vTx, tx, cfg, collector); err != nil {
 		return err

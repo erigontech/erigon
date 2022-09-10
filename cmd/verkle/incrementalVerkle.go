@@ -49,7 +49,7 @@ func getPedersenStorageKey(tx kv.RwTx, address []byte, storageKey []byte) ([]byt
 
 func getPedersenCodeKey(tx kv.RwTx, address []byte, index *uint256.Int) ([]byte, error) {
 	lookupKey := make([]byte, 24)
-	copy(lookupKey, address[:])
+	copy(lookupKey, address)
 	binary.BigEndian.PutUint32(lookupKey[20:], uint32(index.Uint64()))
 	treeKey, err := tx.GetOne(PedersenHashedCodeLookup, lookupKey)
 	if err != nil {
@@ -103,7 +103,7 @@ func updateAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address
 			return 0, err
 		}
 		codeLen = uint64(len(code))
-		version, err := currentNode.Get(versionKey[:], resolverFunc)
+		version, err := currentNode.Get(versionKey, resolverFunc)
 		if err != nil {
 			return 0, err
 		}

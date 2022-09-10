@@ -113,7 +113,6 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, col
 
 			if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
 				panic(err)
-				return
 			}
 		}
 	}()
@@ -197,14 +196,12 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, coll
 		for o := range out {
 			if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
 				panic(err)
-				return
 			}
 			if cfg.disabledLookups {
 				continue
 			}
 			if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
 				panic(err)
-				return
 			}
 		}
 	}()
@@ -295,7 +292,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collect
 			for i := range o.chunks {
 				if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
 					panic(err)
-					return
 				}
 				if cfg.disabledLookups {
 					continue
@@ -306,7 +302,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collect
 				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
 				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
 					panic(err)
-					return
 				}
 			}
 		}
@@ -390,7 +385,7 @@ func RegeneratePedersenHashstate(cfg optionsCfg) error {
 	}
 
 	collector := etl.NewCollector("VerkleTrie", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8))
-
+	defer collector.Close()
 	if err := regeneratePedersenAccounts(vTx, tx, cfg, collector); err != nil {
 		return err
 	}
