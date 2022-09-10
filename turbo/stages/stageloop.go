@@ -476,7 +476,9 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				cfg.MemoryOverlay,
 				blockReader,
 				dirs.Tmp,
-				nil, nil), stagedsync.StageBodiesCfg(
+				nil, nil,
+			),
+			stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,
 				controlServer.SendBodyRequest,
