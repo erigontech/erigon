@@ -10,14 +10,16 @@ import (
 )
 
 type regeneratePedersenAccountsJob struct {
-	address common.Address
-	account accounts.Account
+	address  common.Address
+	account  accounts.Account
+	codeSize uint64
 }
 
 type regeneratePedersenAccountsOut struct {
-	versionHash    common.Hash
-	address        common.Address
-	encodedAccount []byte
+	versionHash common.Hash
+	address     common.Address
+	account     accounts.Account
+	codeSize    uint64
 }
 
 type regeneratePedersenStorageJob struct {
@@ -28,17 +30,15 @@ type regeneratePedersenStorageJob struct {
 }
 
 type regeneratePedersenCodeJob struct {
-	address      common.Address
-	codeSizeHash common.Hash
-	code         []byte
+	address common.Address
+	code    []byte
 }
 
 type regeneratePedersenCodeOut struct {
-	chunks       [][]byte
-	address      common.Address
-	chunksKeys   []common.Hash
-	codeSizeHash common.Hash
-	codeSize     int
+	chunks     [][]byte
+	address    common.Address
+	chunksKeys []common.Hash
+	codeSize   int
 }
 
 const batchSize = 10000
@@ -59,14 +59,12 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 			return
 		}
 
-		vAcc := vtree.AccountToVerkleAccount(job.account)
-		encoded := make([]byte, vAcc.GetVerkleAccountSizeForStorage())
-		vAcc.EncodeVerkleAccountForStorage(encoded)
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
-			versionHash:    common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
-			encodedAccount: encoded,
-			address:        job.address,
+			versionHash: common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
+			account:     job.account,
+			address:     job.address,
+			codeSize:    job.codeSize,
 		}
 	}
 }
@@ -115,26 +113,39 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		var chunkKeys []common.Hash
 		if job.code == nil || len(job.code) == 0 {
 			out <- &regeneratePedersenCodeOut{
-				chunks:       chunks,
-				chunksKeys:   chunkKeys,
-				codeSizeHash: job.codeSizeHash,
-				codeSize:     0,
-				address:      job.address,
+				chunks:     chunks,
+				chunksKeys: chunkKeys,
+				codeSize:   0,
+				address:    job.address,
 			}
 		}
 		// Chunkify contract code and build keys for each chunks and insert them in the tree
 		chunkedCode := vtree.ChunkifyCode(job.code)
+		offset := byte(0)
+		offsetOverflow := false
+		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
 			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
-			chunkKeys = append(chunkKeys, common.BytesToHash(vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))))
+			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
+				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
+				chunkKeys = append(chunkKeys, common.BytesToHash(currentKey))
+				offset = 1
+				offsetOverflow = false
+			} else {
+				codeKey := common.CopyBytes(currentKey)
+				codeKey[31] += offset
+				chunkKeys = append(chunkKeys, common.BytesToHash(codeKey))
+				offset += 1
+				// If offset overflows, handle it.
+				offsetOverflow = offset == 0
+			}
 		}
 		out <- &regeneratePedersenCodeOut{
-			chunks:       chunks,
-			chunksKeys:   chunkKeys,
-			codeSizeHash: job.codeSizeHash,
-			codeSize:     len(job.code),
-			address:      job.address,
+			chunks:     chunks,
+			chunksKeys: chunkKeys,
+			codeSize:   len(job.code),
+			address:    job.address,
 		}
 	}
 }
