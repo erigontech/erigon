@@ -507,7 +507,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
-				1,
+				cfg.Sync.ExecWorkerCount,
 				txNums,
 				agg,
 			),
