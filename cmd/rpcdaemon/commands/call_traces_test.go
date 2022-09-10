@@ -155,6 +155,9 @@ func TestCallTraceUnwind(t *testing.T) {
 
 func TestFilterNoAddresses(t *testing.T) {
 	m := stages.Mock(t)
+	if m.HistoryV2 {
+		t.Skip()
+	}
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)

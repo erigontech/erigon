@@ -297,6 +297,10 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
+	if workersCount > 1 {
+		tx.Rollback()
+		tx = nil
+	}
 
 	rs := state.NewState22()
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
@@ -305,7 +309,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
 	}
-	if !useExternalTx {
+	if !useExternalTx && tx != nil {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
