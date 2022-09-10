@@ -29,6 +29,7 @@ import (
 type SyncStage string
 
 var (
+	Snapshots           SyncStage = "Snapshots"           // Snapshots
 	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	CumulativeIndex     SyncStage = "CumulativeIndex"     // Calculate how much gas has been used up to each block.
 	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
@@ -39,7 +40,6 @@ var (
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
-	Snapshots           SyncStage = "Snapshots"           // Snapshots
 	StorageHistoryIndex SyncStage = "StorageHistoryIndex" // Generating history index for storage
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
@@ -53,6 +53,7 @@ var (
 )
 
 var AllStages = []SyncStage{
+	Snapshots,
 	Headers,
 	BlockHashes,
 	Bodies,

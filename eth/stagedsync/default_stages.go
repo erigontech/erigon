@@ -339,7 +339,6 @@ type PruneOrder []stages.SyncStage
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
-	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
