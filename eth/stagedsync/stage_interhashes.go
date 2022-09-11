@@ -191,20 +191,21 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNums, agg *state.Aggregator22, from, to uint64, storage bool, load func(k, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
-	var l OldestAppearedLoad
-	l.innerLoadFunc = load
 	agg.SetTx(p.tx)
+	var k, v []byte
 
 	txnFrom := txNums.MinOf(from + 1)
 	txnTo := uint64(math.MaxUint64)
-	if storage {
-		collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		defer collector.Close()
 
-		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	if storage {
+		compositeKey := make([]byte, common.HashLength+common.HashLength)
+		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
@@ -213,49 +214,33 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 			if err != nil {
 				return err
 			}
-			compositeKey := make([]byte, common.HashLength+common.HashLength)
 			copy(compositeKey, addrHash[:])
 			copy(compositeKey[common.HashLength:], secKey[:])
-			if len(v) == 0 {
-				if err := collector.Collect(compositeKey, nil); err != nil {
-					return err
-				}
-			} else {
-				if err := collector.Collect(compositeKey, nonEmptyMarker); err != nil {
-					return err
-				}
+			if len(v) != 0 {
+				v = nonEmptyMarker
 			}
-			return nil
-		})
-		if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-			return err
+			if err := load(compositeKey, v); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
-	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
 
-	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	defer it.Close()
+	for it.HasNext() {
+		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
-		if len(v) == 0 {
-			if err := collector.Collect(newK, nil); err != nil {
-				return err
-			}
-		} else {
-			if err := collector.Collect(newK, nonEmptyMarker); err != nil {
-				return err
-			}
+		if len(v) != 0 {
+			v = nonEmptyMarker
 		}
-		return nil
-	})
-
-	if err := collector.Load(nil, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-		return err
+		if err := load(newK, v); err != nil {
+			return err
+		}
 	}
-
 	return nil
 }
 
@@ -349,37 +334,42 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load etl.LoadFunc) error {
+func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load func(k, v []byte)) error {
 	txnFrom := txNums.MinOf(unwindTo)
 	txnTo := uint64(math.MaxUint64)
-	collector := etl.NewCollector(logPrefix, p.TempDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer collector.Close()
-	var l OldestAppearedLoad
-	l.innerLoadFunc = load
 	var deletedAccounts [][]byte
+	var k, v []byte
 
 	if storage {
-		acc := accounts.NewAccount()
-		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			value, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
-			if err := acc.DecodeForStorage(value); err != nil {
-				return err
+			incarnation := uint64(1)
+			if len(value) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+				incarnation = oldInc
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
-			return collector.Collect(newK, value)
-		})
-		return collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+			load(newK, value)
+		}
+		return nil
 	}
 
-	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	defer it.Close()
+
+	for it.HasNext() {
+		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -391,11 +381,8 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 		}
 
 		if len(value) > 0 {
-			var oldAccount accounts.Account
-			if err = oldAccount.DecodeForStorage(value); err != nil {
-				return err
-			}
-			if oldAccount.Incarnation > 0 {
+			oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+			if oldInc > 0 {
 				if len(v) == 0 { // self-destructed
 					deletedAccounts = append(deletedAccounts, newK)
 				} else {
@@ -403,21 +390,14 @@ func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator
 					if err = accounts.Deserialise2(&newAccount, v); err != nil {
 						return err
 					}
-					if newAccount.Incarnation > oldAccount.Incarnation {
+					if newAccount.Incarnation > oldInc {
 						deletedAccounts = append(deletedAccounts, newK)
 					}
 				}
 			}
 		}
 
-		if err := collector.Collect(newK, value); err != nil {
-			return err
-		}
-		return nil
-	})
-
-	if err := collector.Load(p.tx, "", l.LoadFunc, etl.TransformArgs{Quit: p.quitCh}); err != nil {
-		return err
+		load(newK, value)
 	}
 
 	// delete Intermediate hashes of deleted accounts
@@ -530,7 +510,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	rl := trie.NewRetainList(0)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(db)
-		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		collect := func(k, v []byte) error {
 			if len(k) == 32 {
 				rl.AddKeyWithMarker(k, len(v) == 0)
 				return nil
@@ -644,9 +624,8 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	rl := trie.NewRetainList(0)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(db)
-		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		collect := func(k, v []byte) {
 			rl.AddKeyWithMarker(k, len(v) == 0)
-			return nil
 		}
 		if err := p.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint, false /* storage */, collect); err != nil {
 			return err

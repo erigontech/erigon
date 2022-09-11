@@ -309,6 +309,7 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector               // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList       // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan engineapi.PayloadStatus // Responses (validation/execution status)
+	ShutdownCh           chan struct{}                // Channel to signal shutdown
 	pendingPayloadHash   common.Hash                  // Header whose status we still should send to PayloadStatusCh
 	pendingPayloadStatus *engineapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage // Forkchoice to process after unwind
@@ -344,6 +345,7 @@ func NewHeaderDownload(
 		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan engineapi.PayloadStatus, 1),
+		ShutdownCh:         make(chan struct{}),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
 	}

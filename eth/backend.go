@@ -49,7 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -169,7 +169,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var currentBlock *types.Block
 
-	config.HistoryV2 = tool.HistoryV2FromDB(chainKv)
+	config.HistoryV2 = fromdb.HistoryV2(chainKv)
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -583,7 +583,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, txNums, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots, ethBackendRPC, backend.txPool2GrpcServer, miningRPC)
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, txNums, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots, ethBackendRPC, backend.txPool2GrpcServer, miningRPC)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +592,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, agg, txNums, httpRpcCfg)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, agg, txNums, httpRpcCfg)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, httpRpcCfg)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
@@ -746,7 +746,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
-				hasWork = false
+				hasWork = true
 			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:

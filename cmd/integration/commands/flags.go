@@ -31,6 +31,7 @@ var (
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 
 	_forceSetHistoryV2 bool
+	workers            uint64
 )
 
 func must(err error) {
@@ -132,4 +133,8 @@ func withChain(cmd *cobra.Command) {
 
 func withHeimdall(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
+}
+
+func withWorkers(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&workers, "workers", 1, "")
 }

@@ -401,16 +401,6 @@ var (
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
 	}
 
-	StarknetGrpcAddressFlag = cli.StringFlag{
-		Name:  "starknet.grpc.address",
-		Usage: "Starknet GRPC address",
-		Value: "127.0.0.1:6066",
-	}
-
-	TevmFlag = cli.BoolFlag{
-		Name:  "experimental.tevm",
-		Usage: "Enables Transpiled EVM experiment",
-	}
 	MemoryOverlayFlag = cli.BoolTFlag{
 		Name:  "experimental.overlay",
 		Usage: "Enables In-Memory Overlay for PoS",
@@ -633,8 +623,8 @@ var (
 		Value: metrics.DefaultConfig.Port,
 	}
 	HistoryV2Flag = cli.BoolFlag{
-		Name:  "history.v2",
-		Usage: "Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Name:  "experimental.history.v2",
+		Usage: "Not recommended, experimental: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{

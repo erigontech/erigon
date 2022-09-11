@@ -67,10 +67,10 @@ type stJSON struct {
 }
 
 type stPostState struct {
-	Root            common.Hash   `json:"hash"`
-	Logs            common.Hash   `json:"logs"`
-	Tx              hexutil.Bytes `json:"txbytes"`
-	ExpectException string        `json:"expectException"`
+	Root            common.UnprefixedHash `json:"hash"`
+	Logs            common.UnprefixedHash `json:"logs"`
+	Tx              hexutil.Bytes         `json:"txbytes"`
+	ExpectException string                `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
 		Gas   int `json:"gas"`
@@ -172,10 +172,10 @@ func (t *StateTest) Run(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, v
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
-	if root != post.Root {
+	if root != common.Hash(post.Root) {
 		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(state.Logs()); logs != post.Logs {
+	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
 		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	return state, nil
@@ -230,9 +230,8 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
 	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, contractHasTEVM)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -436,8 +435,8 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
 
-		feeCap := big.Int(*tx.MaxPriorityFeePerGas)
-		tipCap := big.Int(*tx.MaxFeePerGas)
+		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
+		tipCap = big.Int(*tx.MaxFeePerGas)
 
 		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
@@ -449,6 +448,7 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
+	// TODO the conversion to int64 then uint64 then new int isn't working!
 	msg := types.NewMessage(
 		from,
 		to,
@@ -456,8 +456,8 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		value,
 		uint64(gasLimit),
 		gasPriceInt,
-		uint256.NewInt(uint64(feeCap.Int64())),
-		uint256.NewInt(uint64(tipCap.Int64())),
+		uint256.NewInt(feeCap.Uint64()),
+		uint256.NewInt(tipCap.Uint64()),
 		data,
 		accessList,
 		false)

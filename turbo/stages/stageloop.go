@@ -79,6 +79,13 @@ func StageLoop(
 	for {
 		start := time.Now()
 
+		select {
+		case <-hd.ShutdownCh:
+			return
+		default:
+			// continue
+		}
+
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
@@ -364,6 +371,11 @@ func NewStagedSync(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 	isBor := controlServer.ChainConfig.Bor != nil
+	var sprint uint64
+	if isBor {
+		sprint = controlServer.ChainConfig.Bor.Sprint
+	}
+
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
 			stagedsync.StageHeadersCfg(
@@ -409,7 +421,7 @@ func NewStagedSync(ctx context.Context,
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				&vm.Config{},
 				notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
@@ -422,13 +434,12 @@ func NewStagedSync(ctx context.Context,
 				txNums,
 				agg,
 			),
-			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV2, txNums, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, isBor),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, isBor, sprint),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, headCh, forkValidator), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -461,7 +472,9 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				blockReader,
 				dirs.Tmp,
 				notifications.Events,
-				nil, nil), stagedsync.StageBodiesCfg(
+				nil, nil,
+			),
+			stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,
 				controlServer.SendBodyRequest,
@@ -483,7 +496,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				&vm.Config{},
 				notifications.Accumulator,
 				cfg.StateStream,
 				true,
@@ -492,7 +505,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
-				1,
+				cfg.Sync.ExecWorkerCount,
 				txNums,
 				agg,
 			),

@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -89,21 +89,6 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
-			},
-		},
-		{
-			ID:                  stages.Translation,
-			Description:         "Transpile marked EVM contracts to TEVM",
-			Disabled:            !sm.Experiments.TEVM,
-			DisabledDescription: "Enable by adding `tevm` to --experiments",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnTranspileStage(s, tx, 0, trans, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindTranspileStage(u, s, tx, trans, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneTranspileStage(p, tx, trans, firstCycle, ctx)
 			},
 		},
 		{

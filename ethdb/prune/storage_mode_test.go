@@ -15,16 +15,16 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	prune, err := Get(tx)
 	assert.NoError(t, err)
 	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64),
-		Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{TEVM: false}}, prune)
+		Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
 
 	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2),
-		Before(3), Before(4), Experiments{TEVM: false}})
+		Before(3), Before(4), Experiments{}})
 	assert.NoError(t, err)
 
 	prune, err = Get(tx)
 	assert.NoError(t, err)
 	assert.Equal(t, Mode{true, Distance(1), Distance(2),
-		Before(3), Before(4), Experiments{TEVM: false}}, prune)
+		Before(3), Before(4), Experiments{}}, prune)
 }
 
 var distanceTests = []struct {

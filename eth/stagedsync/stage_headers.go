@@ -1212,7 +1212,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(ctx, "", cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil { // TODO: Get logPrefix and change it
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -1389,12 +1389,14 @@ Loop:
 					continue
 				}
 				libcommon.ReadMemStats(&m)
-				downloadTimeLeft := calculateDownloadTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
+				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download-time", downloadTimeLeft,
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
 					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
+				)
+				log.Info("[Snapshots] download",
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
@@ -1435,11 +1437,11 @@ Finish:
 	return nil
 }
 
-func calculateDownloadTime(amountLeft, downloadRate uint64) string {
-	if downloadRate == 0 {
+func calculateTime(amountLeft, rate uint64) string {
+	if rate == 0 {
 		return "999hrs:99m:99s"
 	}
-	timeLeftInSeconds := amountLeft / downloadRate
+	timeLeftInSeconds := amountLeft / rate
 
 	hours := timeLeftInSeconds / 3600
 	minutes := (timeLeftInSeconds / 60) % 60

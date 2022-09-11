@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -73,7 +72,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, stagedsync.AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -106,7 +105,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, stagedsync.AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
@@ -247,7 +246,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

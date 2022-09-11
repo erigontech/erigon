@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -105,7 +104,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	fmt.Printf("txNum = %d\n", txNum)
 	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, stagedsync.AggregationStep)
+	agg, err := libstate.NewAggregator22(aggPath, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -150,7 +149,6 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 		gp := new(core.GasPool).AddGas(txn.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(chainConfig, bn)}
-		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, nil, hash, number)
 			if err != nil {
@@ -162,7 +160,7 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 		logger := log.New()
 		engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 		txnHash := txn.Hash()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, contractHasTEVM)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 		ibs.Prepare(txnHash, blockHash, txIndex)
 		msg, err := txn.AsMessage(*types.MakeSigner(chainConfig, bn), header.BaseFee, rules)
 		if err != nil {

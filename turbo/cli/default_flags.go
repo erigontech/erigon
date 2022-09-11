@@ -67,8 +67,6 @@ var DefaultFlags = []cli.Flag{
 	utils.RpcAccessListFlag,
 	utils.RpcTraceCompatFlag,
 	utils.RpcGasCapFlag,
-	utils.StarknetGrpcAddressFlag,
-	utils.TevmFlag,
 	utils.MemoryOverlayFlag,
 	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,

@@ -74,7 +74,6 @@ func TestMergeSnapshots(t *testing.T) {
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
-
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s.Ranges())

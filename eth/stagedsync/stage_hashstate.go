@@ -669,14 +669,16 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 	txnTo := uint64(math.MaxUint64)
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
-	var l OldestAppearedLoad
-	l.innerLoadFunc = etl.IdentityLoadFunc
+	var k, v []byte
 
 	acc := accounts.NewAccount()
 	if codes {
-		agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			if len(v) == 0 {
-				return nil
+				continue
 			}
 			if err := accounts.Deserialise2(&acc, v); err != nil {
 				return err
@@ -684,7 +686,7 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 
 			incarnation := acc.Incarnation
 			if incarnation == 0 {
-				return nil
+				continue
 			}
 			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 			codeHash, err := p.tx.GetOne(kv.PlainContractCode, plainKey)
@@ -695,49 +697,53 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 			if err != nil {
 				return err
 			}
-			return collector.Collect(newK, codeHash)
-		})
-		return collector.Load(p.tx, kv.ContractCode, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+			if err = collector.Collect(newK, codeHash); err != nil {
+				return err
+			}
+		}
+		return collector.Load(p.tx, kv.ContractCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh})
 	}
 
 	if storage {
-		agg.Storage().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+		defer it.Close()
+		for it.HasNext() {
+			k, v = it.Next(k[:0], v[:0])
 			val, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
-			if err := acc.DecodeForStorage(val); err != nil {
-				return err
+			incarnation := uint64(1)
+			if len(val) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(val)
+				incarnation = oldInc
 			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], acc.Incarnation, k[20:])
-			/*
-				incarnation := uint64(1)
-				if len(val) == 0 {
-					if err := acc.DecodeForStorage(val); err != nil {
-						return err
-					}
-					incarnation = acc.Incarnation
-					v = nil
-				}
-				plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
-			*/
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
 			}
-			return collector.Collect(newK, v)
-		})
-		return collector.Load(p.tx, kv.HashedStorage, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+			if err := collector.Collect(newK, v); err != nil {
+				return err
+			}
+		}
+		return collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh})
 	}
 
-	agg.Accounts().MakeContext().Iterate(txnFrom, txnTo, func(txNum uint64, k, v []byte) error {
+	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
+	defer it.Close()
+	for it.HasNext() {
+		k, v = it.Next(k[:0], v[:0])
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
 		}
 
 		if len(v) == 0 {
-			return collector.Collect(newK, nil)
+			if err = collector.Collect(newK, nil); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := accounts.Deserialise2(&acc, v); err != nil {
 			return err
@@ -755,9 +761,8 @@ func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, 
 		if err := collector.Collect(newK, value); err != nil {
 			return err
 		}
-		return nil
-	})
-	return collector.Load(p.tx, kv.HashedAccounts, l.LoadFunc, etl.TransformArgs{Quit: p.quitCh})
+	}
+	return collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.quitCh})
 }
 
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {

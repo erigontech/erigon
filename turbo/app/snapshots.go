@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -130,7 +130,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
 		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
-		if err := rebuildIndices(ctx, chainDB, cfg, dirs, from, workers); err != nil {
+		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -300,15 +300,16 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
-	chainConfig := tool.ChainConfigFromDB(db)
+func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+
+	if err := snapshotsync.BuildMissedIndices(ctx, logPrefix, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil

@@ -30,7 +30,6 @@ var (
 )
 
 type Experiments struct {
-	TEVM bool
 }
 
 func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
@@ -93,8 +92,6 @@ func FromCli(chainId uint64, flags string, exactHistory, exactReceipts, exactTxI
 
 	for _, ex := range experiments {
 		switch ex {
-		case "tevm":
-			mode.Experiments.TEVM = true
 		case "":
 			// skip
 		default:
@@ -152,12 +149,6 @@ func Get(db kv.Getter) (Mode, error) {
 	if blockAmount != nil {
 		prune.CallTraces = blockAmount
 	}
-
-	v, err := db.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
-	if err != nil {
-		return prune, err
-	}
-	prune.Experiments.TEVM = len(v) == 1 && v[0] == 1
 
 	return prune, nil
 }
@@ -254,9 +245,6 @@ func (m Mode) String() string {
 			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
 		}
 	}
-	if m.Experiments.TEVM {
-		long += " --experiments.tevm=enabled"
-	}
 
 	return strings.TrimLeft(short+long, " ")
 }
@@ -282,11 +270,6 @@ func Override(db kv.RwTx, sm Mode) error {
 	}
 
 	err = set(db, kv.PruneCallTraces, sm.CallTraces)
-	if err != nil {
-		return err
-	}
-
-	err = setMode(db, kv.StorageModeTEVM, sm.Experiments.TEVM)
 	if err != nil {
 		return err
 	}
@@ -339,11 +322,6 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	err = setModeOnEmpty(db, kv.StorageModeTEVM, pm.Experiments.TEVM)
-	if err != nil {
-		return err
 	}
 
 	return nil

@@ -256,6 +256,11 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			return err
 		}
 
+		if string(stage.ID) == debug.StopAfterStage() { // stop process for debugging reasons
+			log.Warn("STOP_AFTER_STAGE env flag forced to stop app")
+			return libcommon.ErrStopped
+		}
+
 		s.NextStage()
 	}
 

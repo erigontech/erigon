@@ -20,7 +20,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -279,7 +279,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 ) (*MultiClient, error) {
-	historyV2 := tool.HistoryV2FromDB(db)
+	historyV2 := fromdb.HistoryV2(db)
 
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
@@ -412,10 +412,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
-		defer tx.Rollback()
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback()
 		penalties, err := cs.Hd.ProcessHeadersPOS(csHeaders, tx, ConvertH512ToPeerID(peerID))
 		if err != nil {
 			return err

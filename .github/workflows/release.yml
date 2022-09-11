@@ -1,5 +1,10 @@
 name: Release
 
+# Uncomment the following to let goreleaser automatically
+# create a GitHub release when a tag is pushed.
+# permissions:
+#   contents: write
+
 on:
   push:
     branches-ignore:
@@ -35,7 +40,7 @@ jobs:
         run: |
             make release
         env:
-          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
