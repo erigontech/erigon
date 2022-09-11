@@ -192,6 +192,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 			return err
 		}
+		// saving the stage progress of other stages that are contained inside of snapshots
+		_ = stages.SaveStageProgress(tx, stages.Headers, cfg.snapshots.BlocksAvailable())
 		_ = stages.SaveStageProgress(tx, stages.Bodies, cfg.snapshots.BlocksAvailable())
 		_ = stages.SaveStageProgress(tx, stages.BlockHashes, cfg.snapshots.BlocksAvailable())
 		_ = stages.SaveStageProgress(tx, stages.Senders, cfg.snapshots.BlocksAvailable())
