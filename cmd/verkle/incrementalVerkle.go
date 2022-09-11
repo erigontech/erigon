@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -63,123 +64,9 @@ func getPedersenCodeKey(tx kv.RwTx, address []byte, index *uint256.Int) ([]byte,
 	return treeKey, tx.Put(PedersenHashedStorageLookup, lookupKey, treeKey)
 }
 
-func updateAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address, encodedAccount []byte) (allocs uint64, err error) {
+func deleteCodeAndStorage(currentNode verkle.VerkleNode, address []byte, vTx kv.RwTx, tx kv.Tx) (allocs uint64, err error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return vTx.GetOne(VerkleTrie, root)
-	}
-
-	versionKey, err := getPedersenAccountKey(vTx, address)
-	if err != nil {
-		return 0, err
-	}
-	var codeHashKey, nonceKey, balanceKey, codeSizeKey [32]byte
-	copy(codeHashKey[:], versionKey[:31])
-	copy(nonceKey[:], versionKey[:31])
-	copy(balanceKey[:], versionKey[:31])
-	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
-
-	var acc accounts.Account
-	if err := acc.DecodeForStorage(encodedAccount); err != nil {
-		return 0, err
-	}
-	var nonce, balance, codeSize [32]byte
-	// Compute balance value
-	bbytes := acc.Balance.ToBig().Bytes()
-	if len(bbytes) > 0 {
-		for i, b := range bbytes {
-			balance[len(bbytes)-i-1] = b
-		}
-	}
-	// compute nonce value
-	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
-	codeLen := uint64(0)
-	if !acc.IsEmptyCodeHash() {
-		code, err := tx.GetOne(kv.Code, acc.CodeHash[:])
-		if err != nil {
-			return 0, err
-		}
-		codeLen = uint64(len(code))
-		version, err := currentNode.Get(versionKey, resolverFunc)
-		if err != nil {
-			return 0, err
-		}
-		if len(version) == 0 {
-			// Create the new code inside the verkle tree
-			chunkedCode := vtree.ChunkifyCode(code)
-			for i := 0; i < len(chunkedCode); i += 32 {
-				allocs += 64
-				chunk := chunkedCode[i : i+32]
-				index := uint256.NewInt(uint64(i) / 32)
-				treeKey, err := getPedersenCodeKey(vTx, address, index)
-				if err != nil {
-					return 0, err
-				}
-				if err := currentNode.Insert(treeKey, chunk, resolverFunc); err != nil {
-					return 0, err
-				}
-			}
-		}
-	}
-	// Compute code size value
-	binary.LittleEndian.PutUint64(codeSize[:], codeLen)
-	allocs += 33 + 64*4
-	if err := currentNode.Insert(versionKey, []byte{0}, resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(nonceKey[:], nonce[:], resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(codeHashKey[:], acc.CodeHash[:], resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(balanceKey[:], balance[:], resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(codeSizeKey[:], codeSize[:], resolverFunc); err != nil {
-		return 0, err
-	}
-	return allocs, nil
-}
-
-func deleteAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address []byte) (allocs uint64, err error) {
-	resolverFunc := func(root []byte) ([]byte, error) {
-		return vTx.GetOne(VerkleTrie, root)
-	}
-
-	versionKey, err := getPedersenAccountKey(vTx, address)
-	if err != nil {
-		return 0, err
-	}
-	var codeHashKey, nonceKey, balanceKey, codeSizeKey [32]byte
-	copy(codeHashKey[:], versionKey[:31])
-	copy(nonceKey[:], versionKey[:31])
-	copy(balanceKey[:], versionKey[:31])
-	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
-
-	// We need to wipe out all references in the tree to that address
-	allocs += 330 + 640*4
-	if err := currentNode.Insert(versionKey, nil, resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(nonceKey[:], nil, resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(codeHashKey[:], nil, resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(balanceKey[:], nil, resolverFunc); err != nil {
-		return 0, err
-	}
-	if err := currentNode.Insert(codeSizeKey[:], nil, resolverFunc); err != nil {
-		return 0, err
 	}
 	// Delete also code and storage slots that are connected to that account (iterating over lookups is simpe)
 	storageLookupCursor, err := vTx.Cursor(PedersenHashedStorageLookup)
@@ -212,8 +99,147 @@ func deleteAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address
 			return 0, err
 		}
 	}
+	return allocs, nil
+}
+
+func updateAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address, encodedAccount []byte) (allocs uint64, err error) {
+	resolverFunc := func(root []byte) ([]byte, error) {
+		return vTx.GetOne(VerkleTrie, root)
+	}
+
+	versionKey, err := getPedersenAccountKey(vTx, address)
+	if err != nil {
+		return 0, err
+	}
+	var codeHashKey, nonceKey, balanceKey, codeSizeKey [32]byte
+	copy(codeHashKey[:], versionKey[:31])
+	copy(nonceKey[:], versionKey[:31])
+	copy(balanceKey[:], versionKey[:31])
+	copy(codeSizeKey[:], versionKey[:31])
+	codeHashKey[31] = vtree.CodeKeccakLeafKey
+	nonceKey[31] = vtree.NonceLeafKey
+	balanceKey[31] = vtree.BalanceLeafKey
+	codeSizeKey[31] = vtree.CodeSizeLeafKey
+
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(encodedAccount); err != nil {
+		return 0, err
+	}
+	var nonce, balance [32]byte
+	// Compute balance value
+	bbytes := acc.Balance.ToBig().Bytes()
+	if len(bbytes) > 0 {
+		for i, b := range bbytes {
+			balance[len(bbytes)-i-1] = b
+		}
+	}
+	// compute nonce value
+	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
+	verkleIncarnation, err := ReadVerkleIncarnation(vTx, common.BytesToAddress(address))
+	if err != nil {
+		return 0, err
+	}
+
+	if verkleIncarnation != acc.Incarnation {
+		if acc.IsEmptyCodeHash() {
+			if err := currentNode.Insert(codeSizeKey[:], make([]byte, 32), resolverFunc); err != nil {
+				return 0, err
+			}
+			// Delete code and storage
+			newAllocs, err := deleteCodeAndStorage(currentNode, address, vTx, tx)
+			if err != nil {
+				return 0, err
+			}
+			allocs += newAllocs
+		} else {
+			var codeSize [32]byte
+			code, err := tx.GetOne(kv.Code, acc.CodeHash[:])
+			if err != nil {
+				return 0, err
+			}
+			binary.LittleEndian.PutUint64(codeSize[:], uint64(len(code)))
+			if err := currentNode.Insert(codeSizeKey[:], codeSize[:], resolverFunc); err != nil {
+				return 0, err
+			}
+			// First Delete code and storage
+			newAllocs, err := deleteCodeAndStorage(currentNode, address, vTx, tx)
+			if err != nil {
+				return 0, err
+			}
+			allocs += newAllocs
+			// Create the new code inside the verkle tree
+			chunkedCode := vtree.ChunkifyCode(code)
+			for i := 0; i < len(chunkedCode); i += 32 {
+				allocs += 64
+				chunk := chunkedCode[i : i+32]
+				index := uint256.NewInt(uint64(i) / 32)
+				treeKey, err := getPedersenCodeKey(vTx, address, index)
+				if err != nil {
+					return 0, err
+				}
+				if err := currentNode.Insert(treeKey, chunk, resolverFunc); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
+	// Compute code size value
+	allocs += 33 + 64*4
+	if err := currentNode.Insert(versionKey, []byte{0}, resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(nonceKey[:], nonce[:], resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(codeHashKey[:], acc.CodeHash[:], resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(balanceKey[:], balance[:], resolverFunc); err != nil {
+		return 0, err
+	}
 
 	return allocs, nil
+}
+
+func deleteAccount(tx kv.Tx, vTx kv.RwTx, currentNode verkle.VerkleNode, address []byte) (allocs uint64, err error) {
+	resolverFunc := func(root []byte) ([]byte, error) {
+		return vTx.GetOne(VerkleTrie, root)
+	}
+
+	versionKey, err := getPedersenAccountKey(vTx, address)
+	if err != nil {
+		return 0, err
+	}
+	var codeHashKey, nonceKey, balanceKey, codeSizeKey [32]byte
+	copy(codeHashKey[:], versionKey[:31])
+	copy(nonceKey[:], versionKey[:31])
+	copy(balanceKey[:], versionKey[:31])
+	copy(codeSizeKey[:], versionKey[:31])
+	codeHashKey[31] = vtree.CodeKeccakLeafKey
+	nonceKey[31] = vtree.NonceLeafKey
+	balanceKey[31] = vtree.BalanceLeafKey
+	codeSizeKey[31] = vtree.CodeSizeLeafKey
+
+	// We need to wipe out all references in the tree to that address
+	if err := currentNode.Insert(versionKey, nil, resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(nonceKey[:], nil, resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(codeHashKey[:], nil, resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(balanceKey[:], nil, resolverFunc); err != nil {
+		return 0, err
+	}
+	if err := currentNode.Insert(codeSizeKey[:], nil, resolverFunc); err != nil {
+		return 0, err
+	}
+
+	allocs, err = deleteCodeAndStorage(currentNode, address, vTx, tx)
+	allocs += 330 + 640*4
+	return allocs, err
 }
 
 func IncrementVerkleTree(cfg optionsCfg) error {
@@ -260,7 +286,7 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 		return err
 	}
 
-	batchSize := 512 * datasize.MB
+	batchSize := 128 * datasize.MB
 	var accumulated datasize.ByteSize = 0
 
 	fmt.Println(progress)
@@ -286,67 +312,36 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	}
 	defer storageCursor.Close()
 
+	marker := NewVerkleMarker()
+	defer marker.Close()
+
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return vTx.GetOne(VerkleTrie, root)
 	}
 
-	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(progress)); k != nil; k, v, err = storageCursor.Next() {
-		if err != nil {
-			return err
-		}
-		blockNumber, changesetKey, storageValue, err := changeset.DecodeStorage(k, v)
-		if err != nil {
-			return err
-		}
-		storageKey, err := getPedersenStorageKey(vTx, changesetKey[:20], changesetKey[28:])
-		if err != nil {
-			return err
-		}
-
-		if len(storageValue) > 0 {
-			storageValue32 := new(uint256.Int).SetBytes(storageValue).Bytes32()
-			if err := currentNode.Insert(storageKey, storageValue32[:], resolverFunc); err != nil {
-				return err
-			}
-			accumulated += 640
-		} else {
-			if err := currentNode.Insert(storageKey, nil, resolverFunc); err != nil {
-				return err
-			}
-			accumulated += 320
-		}
-		if accumulated > batchSize {
-			accumulated = 0
-			nodeCount := 0
-			currentNode.(*verkle.InternalNode).Flush(func(n verkle.VerkleNode) {
-				nodeCount++
-				rlp, err := n.Serialize()
-				if err != nil {
-					panic(err)
-				}
-				root := n.ComputeCommitment().Bytes()
-				if err := vTx.Put(VerkleTrie, root[:], rlp); err != nil {
-					panic(err)
-				}
-			})
-			log.Info("Flushed tree", "nodes", nodeCount, "blockNum", blockNumber)
-		}
-		select {
-		case <-logInterval.C:
-			log.Info("Creating Verkle Trie Incrementally", "phase", "storage", "blockNum", blockNumber, "batchSize", accumulated)
-		default:
-		}
-	}
-
+	accountProcessed := 0
 	for k, v, err := accountCursor.Seek(dbutils.EncodeBlockNumber(progress)); k != nil; k, v, err = accountCursor.Next() {
 		if err != nil {
 			return err
 		}
-		blockNumber, address, encodedAccount, err := changeset.DecodeAccounts(k, v)
+		blockNumber, address, _, err := changeset.DecodeAccounts(k, v)
 		if err != nil {
 			return err
 		}
 
+		marked, err := marker.IsMarked(address)
+		if err != nil {
+			return err
+		}
+
+		if marked {
+			continue
+		}
+
+		encodedAccount, err := tx.GetOne(kv.PlainState, address)
+		if err != nil {
+			return err
+		}
 		// Start
 		if len(encodedAccount) == 0 {
 			allocs, err := deleteAccount(tx, vTx, currentNode, address)
@@ -361,6 +356,11 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 			}
 			accumulated += datasize.ByteSize(allocs)
 		}
+		accountProcessed++
+
+		if err := marker.MarkAsDone(address); err != nil {
+			return err
+		}
 
 		if accumulated > batchSize {
 			accumulated = 0
@@ -380,7 +380,83 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Creating Verkle Trie Incrementally", "phase", "storage", "blockNum", blockNumber)
+			log.Info("Creating Verkle Trie Incrementally", "phase", "account", "blockNum", blockNumber, "accountsProcessed", accountProcessed)
+		default:
+		}
+	}
+
+	storageSlotsProcessed := 0
+
+	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(progress)); k != nil; k, v, err = storageCursor.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber, changesetKey, _, err := changeset.DecodeStorage(k, v)
+		if err != nil {
+			return err
+		}
+
+		var acc accounts.Account
+		has, err := rawdb.ReadAccount(tx, common.BytesToAddress(changesetKey[:20]), &acc)
+		if err != nil {
+			return err
+		}
+
+		storageIncarnation := binary.BigEndian.Uint64(changesetKey[20:28])
+		// Storage and code deletion is handled due to self-destruct is handled in accounts
+		if !has {
+			if err := marker.MarkAsDone(changesetKey); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if acc.Incarnation != storageIncarnation {
+			continue
+		}
+		storageKey, err := getPedersenStorageKey(vTx, changesetKey[:20], changesetKey[28:])
+		if err != nil {
+			return err
+		}
+
+		storageValue, err := tx.GetOne(kv.PlainState, changesetKey)
+		if err != nil {
+			return err
+		}
+
+		if len(storageValue) > 0 {
+			storageValue32 := new(uint256.Int).SetBytes(storageValue).Bytes32()
+			if err := currentNode.Insert(storageKey, storageValue32[:], resolverFunc); err != nil {
+				return err
+			}
+			accumulated += 1280
+		} else {
+			if err := currentNode.Insert(storageKey, nil, resolverFunc); err != nil {
+				return err
+			}
+			accumulated += 640
+		}
+		storageSlotsProcessed++
+		if accumulated > batchSize {
+			accumulated = 0
+			nodeCount := 0
+			currentNode.(*verkle.InternalNode).Flush(func(n verkle.VerkleNode) {
+				nodeCount++
+				rlp, err := n.Serialize()
+				if err != nil {
+					panic(err)
+				}
+				root := n.ComputeCommitment().Bytes()
+				if err := vTx.Put(VerkleTrie, root[:], rlp); err != nil {
+					panic(err)
+				}
+			})
+			log.Info("Flushed tree", "nodes", nodeCount, "blockNum", blockNumber)
+		}
+		select {
+		case <-logInterval.C:
+			log.Info("Creating Verkle Trie Incrementally", "phase", "storage", "blockNum", blockNumber, "batchSize", accumulated.HumanReadable(), "slotsProcessed", storageSlotsProcessed)
+			storageSlotsProcessed = 0
 		default:
 		}
 	}

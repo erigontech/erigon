@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220908070132-4fea8e9ba2fc
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220910215659-20179643988f
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
