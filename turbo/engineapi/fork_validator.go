@@ -60,10 +60,11 @@ type ForkValidator struct {
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64, validatePayload validatePayloadFunc) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock: make(map[common.Hash]forkSegment),
-		currentHeight:  currentHeight,
+		sideForksBlock:  make(map[common.Hash]forkSegment),
+		currentHeight:   currentHeight,
+		validatePayload: validatePayload,
 	}
 }
 
@@ -161,12 +162,14 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// Update fork head hash.
 		fv.extendingForkHeadHash = header.Hash()
+		fmt.Print("hi")
 		return fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil)
 	}
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
 		status = remote.EngineStatus_ACCEPTED
+		fmt.Print("hi2")
 		return
 	}
 	// Let's assemble the side fork backwards
@@ -174,6 +177,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	currentHash := header.ParentHash
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 	if criticalError != nil {
+		fmt.Print("hi3")
 		return
 	}
 
@@ -184,6 +188,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		var sb forkSegment
 		var ok bool
 		if sb, ok = fv.sideForksBlock[currentHash]; !ok {
+			fmt.Print("hi9")
 			// We miss some components so we did not check validity.
 			status = remote.EngineStatus_ACCEPTED
 			return
@@ -192,25 +197,30 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		bodiesChain = append([]*types.RawBody{sb.body}, bodiesChain...)
 		has, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(sb.header.Number.Uint64(), sb.header.Hash()))
 		if err != nil {
+			fmt.Print("hi8")
 			criticalError = err
 			return
 		}
 		// MakesBodyCanonical do not support PoS.
 		if has {
+			fmt.Print("hi6")
 			status = remote.EngineStatus_ACCEPTED
 			return
 		}
 		currentHash = sb.header.ParentHash
 		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
 		if criticalError != nil {
+			fmt.Print("hi7")
 			return
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
+		fmt.Print("hi4")
 		unwindPoint = 0
 	}
+	fmt.Print("hi5")
 	batch := memdb.NewMemoryBatch(tx)
 	defer batch.Rollback()
 	return fv.validateAndStorePayload(batch, header, body, unwindPoint, headersChain, bodiesChain)
