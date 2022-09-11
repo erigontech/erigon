@@ -349,7 +349,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageSnapshotsCfg(
 				mock.DB,
-				mock.HeaderDownload(),
+				mock.sentriesClient.Hd,
 				*mock.ChainConfig,
 				dirs.Tmp,
 				allSnapshots,
