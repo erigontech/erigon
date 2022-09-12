@@ -31,7 +31,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snap.Type, dir st
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snap.IdxFileName(from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snap.IdxFileName(from, to, string(name))),
 		LeafSize:   8,
 	})
 	require.NoError(t, err)
@@ -45,7 +45,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snap.Type, dir st
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snap.IdxFileName(from, to, snap.Transactions2Block.String())),
+			IndexFile:  filepath.Join(dir, snap.IdxFileName(from, to, string(snap.Transactions2Block))),
 			LeafSize:   8,
 		})
 		require.NoError(t, err)
