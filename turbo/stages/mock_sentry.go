@@ -259,7 +259,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 
-		mock.txNums = exec22.TxNumsFromDB(allSnapshots, db)
+		mock.txNums = &exec22.TxNums{}
+		db.View(ctx, func(tx kv.Tx) error { return mock.txNums.Restore(allSnapshots, tx) })
 	}
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
@@ -352,7 +353,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockRetire,
 				snapshotsDownloader,
 				blockReader,
-				mock.Notifications.Events),
+				mock.Notifications.Events,
+				mock.txNums),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,

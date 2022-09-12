@@ -81,6 +81,12 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if !f.Type().IsRegular() {
+			continue
+		}
 		if !snap.IsCorrectFileName(f.Name()) {
 			continue
 		}

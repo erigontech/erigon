@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
@@ -48,8 +48,11 @@ func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 	return int(blockNum) != len(s.nums), blockNum
 }
 
-func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
-	historyV2 := fromdb.HistoryV2(db)
+func (t *TxNums) Restore(s *snapshotsync.RoSnapshots, tx kv.Tx) error {
+	historyV2, err := rawdb.HistoryV2.Enabled(tx)
+	if err != nil {
+		return err
+	}
 	if !historyV2 {
 		return nil
 	}
@@ -58,34 +61,34 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 	if s != nil {
 		toBlock = s.BlocksAvailable()
 	}
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		p, err := stages.GetStageProgress(tx, stages.Bodies)
-		if err != nil {
-			return err
-		}
-		toBlock = cmp.Max(toBlock, p)
-		return nil
-	}); err != nil {
-		panic(err)
+	p, err := stages.GetStageProgress(tx, stages.Bodies)
+	if err != nil {
+		return err
 	}
+	toBlock = cmp.Max(toBlock, p)
 
-	txNums := &TxNums{nums: make([]uint64, toBlock+1)}
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		if err := (snapshotsync.BodiesIterator{}).ForEach(tx, s, 0, func(blockNum, baseTxNum, txAmount uint64) error {
-			if blockNum > toBlock {
-				return nil
-			}
-			txNums.nums[blockNum] = baseTxNum + txAmount - 1
+	t.nums = make([]uint64, toBlock+1)
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, s, func(blockNum, baseTxNum, txAmount uint64) error {
+		if blockNum > toBlock {
 			return nil
-		}); err != nil {
-			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 		}
+		t.nums[blockNum] = baseTxNum + txAmount - 1
 		return nil
+	}); err != nil {
+		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+	}
+	if t.nums[0] == 0 {
+		t.nums[0] = 1
+	}
+	return nil
+}
+
+func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
+	t := &TxNums{}
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return t.Restore(s, tx)
 	}); err != nil {
 		panic(err)
 	}
-	if txNums.nums[0] == 0 {
-		txNums.nums[0] = 1
-	}
-	return txNums
+	return t
 }

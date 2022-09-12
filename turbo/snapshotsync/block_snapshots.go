@@ -2105,13 +2105,13 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 
 type BodiesIterator struct{}
 
-func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(blockNum, baseTxNum, txAmount uint64) error) error {
+func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, f func(blockNum uint64, baseTxNum uint64, txAmount uint64) error) error {
 	var blocksInSnapshtos uint64
 	if s != nil && s.cfg.Enabled {
-		blocksInSnapshtos = s.BlocksAvailable()
+		blocksInSnapshtos = s.SegmentsMax()
 	}
 
-	if s != nil && s.cfg.Enabled && from < blocksInSnapshtos {
+	if s != nil && s.cfg.Enabled {
 		if err := s.Bodies.View(func(bs []*BodySegment) error {
 			for _, b := range bs {
 				if err := b.Iterate(f); err != nil {

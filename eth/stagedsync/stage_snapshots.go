@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -38,6 +39,7 @@ type SnapshotsCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
+	txNums             *exec22.TxNums
 }
 
 func StageSnapshotsCfg(
@@ -50,6 +52,7 @@ func StageSnapshotsCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	dbEventNotifier snapshotsync.DBEventNotifier,
+	txNums *exec22.TxNums,
 ) SnapshotsCfg {
 
 	return SnapshotsCfg{
@@ -62,6 +65,7 @@ func StageSnapshotsCfg(
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
+		txNums:             txNums,
 	}
 }
 
@@ -204,6 +208,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	cfg.txNums.Restore(cfg.snapshots, tx)
 	return nil
 }
 
