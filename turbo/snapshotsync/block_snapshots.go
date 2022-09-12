@@ -936,7 +936,7 @@ func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err er
 func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
-	return to - (to % snap.MIN_SEGMENT_SIZE) // round down to the nearest 1k
+	return to - (to % snap.Erigon21MinSegmentSize) // round down to the nearest 1k
 }
 
 type BlockRetire struct {
@@ -1075,7 +1075,7 @@ type DBEventNotifier interface {
 func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.Erigon21SegmentSize, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1896,7 +1896,7 @@ func (r Range) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to
 func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		if r.to-r.from >= snap.DEFAULT_SEGMENT_SIZE { // is complete .seg
+		if r.to-r.from >= snap.Erigon21SegmentSize { // is complete .seg
 			continue
 		}
 
@@ -2090,7 +2090,7 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 				})
 			}
 		} else {
-			if r.ranges.to-r.ranges.from != snap.DEFAULT_SEGMENT_SIZE {
+			if r.ranges.to-r.ranges.from != snap.Erigon21SegmentSize {
 				continue
 			}
 			for _, t := range snap.AllSnapshotTypes {

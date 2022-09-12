@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"path"
 	"runtime"
 	"time"
 
@@ -103,12 +102,14 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
 
-	aggDir := path.Join(dirs.DataDir, "agg22")
+	dir.MustExist(dirs.SnapHistory)
 	if reset {
-		dir.Recreate(aggDir)
+		dir.Recreate(dirs.SnapHistory)
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chain) }); err != nil {
+			return err
+		}
 	}
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+	agg, err := libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return err
 	}
