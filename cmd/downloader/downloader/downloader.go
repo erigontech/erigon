@@ -406,19 +406,3 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 		}
 	}
 }
-
-func HasSegFile(dir string) bool {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-		if filepath.Ext(f.Name()) == ".seg" {
-			return true
-		}
-	}
-	return false
-}

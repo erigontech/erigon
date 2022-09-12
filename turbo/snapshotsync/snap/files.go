@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,40 +18,13 @@ import (
 var Erigon21Extensions = []string{".seg", ".idx", ".dat"}
 var Erigon22Extensions = []string{".ef", ".efi", ".v", ".vi"}
 
-type Type int
+type Type string
 
 const (
-	Headers Type = iota
-	Bodies
-	Transactions
-	NumberOfTypes
+	Headers      Type = "headers"
+	Bodies       Type = "bodies"
+	Transactions Type = "transactions"
 )
-
-func (ft Type) String() string {
-	switch ft {
-	case Headers:
-		return "headers"
-	case Bodies:
-		return "bodies"
-	case Transactions:
-		return "transactions"
-	default:
-		panic(fmt.Sprintf("unknown file type: %d", ft))
-	}
-}
-
-func ParseFileType(s string) (Type, bool) {
-	switch s {
-	case "headers":
-		return Headers, true
-	case "bodies":
-		return Bodies, true
-	case "transactions":
-		return Transactions, true
-	default:
-		return NumberOfTypes, false
-	}
-}
 
 type IdxType string
 
@@ -60,7 +34,7 @@ const (
 
 func (it IdxType) String() string { return string(it) }
 
-var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
+var AllErigon21SnapshotTypes = []Type{Headers, Bodies, Transactions}
 
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
@@ -69,9 +43,9 @@ var (
 func FileName(from, to uint64, fileType string) string {
 	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, fileType)
 }
-func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
-func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
-func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
+func SegmentFileName(from, to uint64, t Type) string { return FileName(from, to, string(t)) + ".seg" }
+func DatFileName(from, to uint64, t Type) string     { return FileName(from, to, string(t)) + ".dat" }
+func IdxFileName(from, to uint64, t string) string   { return FileName(from, to, t) + ".idx" }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for _, f := range in {
@@ -95,12 +69,32 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
+func parseFileName22(dir, fileName string) (res FileInfo, err error) {
+	re := regexp.MustCompile("([[:lower:]]).([0-9]+)-([0-9]+).(v|ef)")
+	subs := re.FindStringSubmatch(fileName)
+	if len(subs) != 4 {
+		return res, fmt.Errorf("expected format: 'storage.0-1.v' got: %s. %w", fileName, ErrInvalidFileName)
+	}
+	from, err := strconv.ParseUint(subs[1], 10, 64)
+	if err != nil {
+		return res, fmt.Errorf("parsing startTxNum: %s. %w: %s", fileName, ErrInvalidFileName, err)
+	}
+	to, err := strconv.ParseUint(subs[2], 10, 64)
+	if err != nil {
+		return res, fmt.Errorf("parsing endTxNum: %s. %w: %s", fileName, ErrInvalidFileName, err)
+	}
+	ext := filepath.Ext(fileName)
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: Type(subs[0]), Ext: ext}, nil
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) < 4 {
-		return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
+		// storage.0-1.v
+		return parseFileName22(dir, fileName)
+		//return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
 	}
 	if parts[0] != "v1" {
 		return res, fmt.Errorf("version: %s. %w", parts[0], ErrInvalidFileName)
@@ -113,26 +107,18 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	if err != nil {
 		return
 	}
-	var snapshotType Type
-	ft, ok := ParseFileType(parts[3])
-	if !ok {
-		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
-	}
-	switch ft {
-	case Headers:
-		snapshotType = Headers
-	case Bodies:
-		snapshotType = Bodies
-	case Transactions:
-		snapshotType = Transactions
+	switch parts[3] {
+	case string(Headers):
+	case string(Bodies):
+	case string(Transactions):
 	default:
 		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
 	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: Type(parts[3]), Ext: ext}, nil
 }
 
-const DEFAULT_SEGMENT_SIZE = 500_000
-const MIN_SEGMENT_SIZE = 1_000
+const Erigon21SegmentSize = 500_000
+const Erigon21MinSegmentSize = 1_000
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -144,8 +130,12 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return common.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool          { return f.To-f.From == DEFAULT_SEGMENT_SIZE }
-func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Seedable() bool {
+	return (f.Ext == ".seg" && f.To-f.From == Erigon21SegmentSize) ||
+		(f.Ext == ".v" && f.To-f.From == 32) ||
+		(f.Ext == ".ef" && f.To-f.From == 32)
+}
+func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
@@ -188,6 +178,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 
 		meta, err := ParseFileName(dir, f.Name())
+		fmt.Printf("name: %s, %s\n", f.Name(), err)
 		if err != nil {
 			if errors.Is(err, ErrInvalidFileName) {
 				continue
@@ -236,7 +227,7 @@ func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
 			_ = os.Remove(f.Path + ".torrent")
 		} else {
 			if f.T == Transactions {
-				idxPath := IdxFileName(f.From, f.To, Transactions2Block.String())
+				idxPath := IdxFileName(f.From, f.To, string(Transactions2Block))
 				idxExt := filepath.Ext(idxPath)
 				keep[idxPath[0:len(idxPath)-len(idxExt)]] = struct{}{}
 			}

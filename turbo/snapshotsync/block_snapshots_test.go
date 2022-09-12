@@ -60,7 +60,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snap.Type, dir st
 func TestMergeSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
-		for _, snT := range snap.AllSnapshotTypes {
+		for _, snT := range snap.AllErigon21SnapshotTypes {
 			createTestSegmentFile(t, from, to, snT, dir)
 		}
 	}
