@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -289,7 +288,6 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	batchSize := 128 * datasize.MB
 	var accumulated datasize.ByteSize = 0
 
-	fmt.Println(progress)
 	var currentNode verkle.VerkleNode
 	if progress == 0 {
 		currentNode = verkle.New()
