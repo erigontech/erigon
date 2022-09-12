@@ -83,6 +83,9 @@ func parseFileName22(dir, fileName string) (res FileInfo, err error) {
 	if err != nil {
 		return res, fmt.Errorf("parsing endTxNum: %s. %w: %s", fileName, ErrInvalidFileName, err)
 	}
+	if from > to {
+		return res, fmt.Errorf("startTxNum > endTxNum: %s. %w", fileName, ErrInvalidFileName)
+	}
 	ext := filepath.Ext(fileName)
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: Type(subs[0]), Ext: ext}, nil
 }
