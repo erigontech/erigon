@@ -24,7 +24,18 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return 0, err
+	}
+
+	var blockNum uint64
+	if chainConfig.Bor != nil || chainConfig.Parlia != nil {
+		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
+	} else {
+		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
+	}
+
 	if err != nil {
 		return 0, err
 	}
