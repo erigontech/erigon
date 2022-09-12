@@ -65,7 +65,7 @@ func DeleteFilesOfType(dir string, exts ...string) {
 
 		for _, ext := range exts {
 			if filepath.Ext(file.Name()) == ext {
-				_ = os.Remove(file.Name())
+				_ = os.Remove(filepath.Join(dir, file.Name()))
 			}
 		}
 	}
