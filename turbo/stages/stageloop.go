@@ -279,15 +279,22 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		currentHeight := headersChain[i].Number.Uint64()
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
-		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
+		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
 		if err != nil {
 			return err
 		}
-		if ok {
-			if txNums != nil {
-				txNums.Append(currentHeight, lastTxnNum)
+		/*
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
+			if err != nil {
+				return err
 			}
-		}
+			if ok {
+
+				if txNums != nil {
+					txNums.Append(currentHeight, lastTxnNum)
+				}
+			}
+		*/
 		rawdb.WriteHeader(batch, currentHeader)
 		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
 			return err
@@ -325,15 +332,21 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 			return err
 		}
-		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
+		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
 		if err != nil {
 			return err
 		}
-		if ok {
-			if txNums != nil {
-				txNums.Append(height, lastTxnNum)
+		/*
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
+			if err != nil {
+				return err
 			}
-		}
+			if ok {
+				if txNums != nil {
+					txNums.Append(height, lastTxnNum)
+				}
+			}
+		*/
 	} else {
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
 			return err
