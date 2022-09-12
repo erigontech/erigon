@@ -379,7 +379,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	ok, blockNum := txNums.Find(endTxNumMinimax)
 	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d, %d, %d, %d", endTxNumMinimax, txNums.LastBlockNum(), txNums.MaxOf(txNums.LastBlockNum()), txNums.MaxOf(txNums.LastBlockNum()-1))
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
 	toBlock := blockNum

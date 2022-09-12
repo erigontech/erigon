@@ -95,9 +95,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) < 4 {
-		// storage.0-1.v
-		return parseFileName22(dir, fileName)
-		//return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
+		return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
 	}
 	if parts[0] != "v1" {
 		return res, fmt.Errorf("version: %s. %w", parts[0], ErrInvalidFileName)
@@ -181,7 +179,6 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 
 		meta, err := ParseFileName(dir, f.Name())
-		fmt.Printf("name: %s, %s\n", f.Name(), err)
 		if err != nil {
 			if errors.Is(err, ErrInvalidFileName) {
 				continue

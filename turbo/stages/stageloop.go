@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -98,6 +99,7 @@ func StageLoop(
 			}
 
 			log.Error("Staged Sync", "err", err)
+			os.Exit(1)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}

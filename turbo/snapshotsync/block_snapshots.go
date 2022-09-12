@@ -2114,6 +2114,7 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, from uint64, f func(bl
 	if s != nil && s.cfg.Enabled && from < blocksInSnapshtos {
 		if err := s.Bodies.View(func(bs []*BodySegment) error {
 			for _, b := range bs {
+				fmt.Printf("bbsn: %d\n", b.ranges)
 				if err := b.Iterate(f); err != nil {
 					return err
 				}
