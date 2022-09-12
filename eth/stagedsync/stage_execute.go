@@ -255,19 +255,16 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		workersCount = 1
 	}
 
-	fmt.Printf("recon to : %t, txn=%d\n", initialCycle, cfg.agg.EndTxNumMinimax())
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
 		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
 		reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
-		os.RemoveAll(reconDbPath)
-		dir.MustExist(reconDbPath)
+		dir.Recreate(reconDbPath)
 		limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
 		reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 		if err != nil {
 			return err
 		}
-
 		if reconstituteToBlock > s.BlockNumber {
 			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
