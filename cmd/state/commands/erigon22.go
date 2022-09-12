@@ -106,6 +106,9 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	dir.MustExist(dirs.Snap)
 	if reset {
 		dir.DeleteFilesOfType(dirs.Snap, snap.Erigon22Extensions...)
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetExec(tx, chain) }); err != nil {
+			return err
+		}
 	}
 	agg, err := libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
