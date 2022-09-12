@@ -7,7 +7,6 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/gballet/go-verkle"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -58,10 +57,10 @@ func NewVerkleTreeWriter(db kv.RwTx, tmpdir string) *VerkleTreeWriter {
 	}
 }
 
-func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, acc accounts.Account) error {
+func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, acc accounts.Account) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	var codeHashKey, nonceKey, balanceKey, codeSizeKey, nonce, balance [32]byte
+	var codeHashKey, nonceKey, balanceKey, codeSizeKey, nonce, balance, cs [32]byte
 	copy(codeHashKey[:], versionKey[:31])
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
@@ -78,6 +77,7 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, acc accounts.Account
 		}
 	}
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
+	binary.LittleEndian.PutUint64(cs[:], codeSize)
 
 	// Insert in the tree
 	if err := v.collector.Collect(versionKey, []byte{0}); err != nil {
@@ -93,32 +93,16 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, acc accounts.Account
 	if err := v.collector.Collect(balanceKey[:], balance[:]); err != nil {
 		return err
 	}
+	if err := v.collector.Collect(codeSizeKey[:], cs[:]); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (v *VerkleTreeWriter) UpdateStorage(storageKey []byte, storageValue uint256.Int) error {
+func (v *VerkleTreeWriter) Insert(key, value []byte) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	storageValueBytes := storageValue.Bytes32()
-	return v.collector.Collect(storageKey, storageValueBytes[:])
-}
-
-func (v *VerkleTreeWriter) DeleteContractData(storageKeys, codeKeys [][]byte) error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	for _, storageKey := range storageKeys {
-		if err := v.collector.Collect(storageKey, nil); err != nil {
-			return err
-		}
-	}
-
-	for _, codeKey := range codeKeys {
-		if err := v.collector.Collect(codeKey, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+	return v.collector.Collect(key, value)
 }
 
 func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][]byte) error {
@@ -188,17 +172,22 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 	verkleCollector := etl.NewCollector(VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer verkleCollector.Close()
 
-	nodeEncoded, err := v.db.GetOne(VerkleTrie, root[:])
-	if err != nil {
-		return err
+	var rootNode verkle.VerkleNode
+	if root != (common.Hash{}) {
+		nodeEncoded, err := v.db.GetOne(VerkleTrie, root[:])
+		if err != nil {
+			return err
+		}
+
+		rootNode, err = verkle.ParseNode(nodeEncoded, 0, root[:])
+		if err != nil {
+			return err
+		}
+	} else {
+		rootNode = verkle.New()
 	}
 
-	rootNode, err := verkle.ParseNode(nodeEncoded, 0, root[:])
-	if err != nil {
-		return err
-	}
-
-	insertionBeforeFlushing := 200_000 // 200k node to flush at a time (approximately, 256 MB)
+	insertionBeforeFlushing := 20_000_000 // 20M node to flush at a time (approximately, 256 MB)
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
