@@ -388,6 +388,7 @@ func NewStagedSync(ctx context.Context,
 				snapDownloader,
 				blockReader,
 				notifications.Events,
+				cfg.HistoryV2,
 				txNums),
 			stagedsync.StageHeadersCfg(
 				db,

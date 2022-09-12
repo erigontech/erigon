@@ -354,6 +354,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				snapshotsDownloader,
 				blockReader,
 				mock.Notifications.Events,
+				mock.HistoryV2,
 				mock.txNums),
 			stagedsync.StageHeadersCfg(
 				mock.DB,

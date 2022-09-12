@@ -39,6 +39,7 @@ type SnapshotsCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
+	historyV2          bool
 	txNums             *exec22.TxNums
 }
 
@@ -52,6 +53,7 @@ func StageSnapshotsCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	dbEventNotifier snapshotsync.DBEventNotifier,
+	historyV2 bool,
 	txNums *exec22.TxNums,
 ) SnapshotsCfg {
 
@@ -66,6 +68,7 @@ func StageSnapshotsCfg(
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
 		txNums:             txNums,
+		historyV2:          historyV2,
 	}
 }
 
@@ -208,7 +211,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	cfg.txNums.Restore(cfg.snapshots, tx)
+	if err := cfg.txNums.Restore(cfg.snapshots, tx); err != nil {
+		return err
+	}
 	return nil
 }
 
