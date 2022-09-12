@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -58,15 +57,14 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	ctx := context.Background()
-	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, ethconfig.HistoryV2AggregationStep)
+	dirs := datadir2.New(datadir)
+	agg, err := libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
 	defer agg.Close()
 	reconDbPath := path.Join(datadir, "recondb")
-	os.RemoveAll(reconDbPath)
-	dir.MustExist(reconDbPath)
+	dir.Recreate(reconDbPath)
 	startTime := time.Now()
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
@@ -81,7 +79,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	var blockReader services.FullBlockReader
-	dirs := datadir2.New(datadir)
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {

@@ -14,6 +14,9 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+var Erigon21Extensions = []string{".seg", ".idx", ".dat"}
+var Erigon22Extensions = []string{".ef", ".efi", ".v", ".vi"}
+
 type Type int
 
 const (
@@ -128,7 +131,6 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
 
-const MERGE_THRESHOLD = 2 // don't trigger merge if have too small amount of partial segments
 const DEFAULT_SEGMENT_SIZE = 500_000
 const MIN_SEGMENT_SIZE = 1_000
 

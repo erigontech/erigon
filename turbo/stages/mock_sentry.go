@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -256,9 +254,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 
 	if cfg.HistoryV2 {
-		aggDir := path.Join(dirs.DataDir, "agg22")
-		dir.MustExist(aggDir)
-		mock.agg, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+		mock.agg, err = libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
 		if err != nil {
 			panic(err)
 		}

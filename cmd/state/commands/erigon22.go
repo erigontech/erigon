@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"path"
 	"runtime"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -103,12 +103,11 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 	cfg.Dirs = datadir2.New(datadir)
 	cfg.Snapshot = allSnapshots.Cfg()
 
-	aggDir := path.Join(dirs.DataDir, "agg22")
+	dir.MustExist(dirs.Snap)
 	if reset {
-		dir.Recreate(aggDir)
+		dir.DeleteFilesOfType(dirs.Snap, snap.Erigon22Extensions...)
 	}
-	dir.MustExist(aggDir)
-	agg, err := libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+	agg, err := libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return err
 	}

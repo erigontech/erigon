@@ -1125,7 +1125,7 @@ var _aggSingleton *libstate.Aggregator22
 
 func agg() *libstate.Aggregator22 {
 	openAggOnce.Do(func() {
-		aggDir := path.Join(datadirCli, "agg22")
+		aggDir := path.Join(datadirCli, "snapshots")
 		dir.MustExist(aggDir)
 		var err error
 		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
