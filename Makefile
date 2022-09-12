@@ -281,6 +281,11 @@ hive:
 	docker pull thorax/hive:latest
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
 
+## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+.PHONY: automated-tests
+automated-tests:
+	./tests/automated-testing/run.sh
+
 ## help:                              print commands help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
