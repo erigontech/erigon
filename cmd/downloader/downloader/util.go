@@ -128,7 +128,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-var historyFileRegex = regexp.MustCompile("([[:lower:]]+).([0-9]+)-([0-9]+).(v|ef)")
+var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(v|ef)$")
 
 func seedableHistorySnapshots(dir string) ([]string, error) {
 	historyDir := filepath.Join(dir, "history")
