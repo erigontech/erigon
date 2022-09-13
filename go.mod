@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220908070132-4fea8e9ba2fc
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220912053753-1b5dd96e17df
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -76,6 +76,8 @@ require (
 	modernc.org/sqlite v1.18.1
 	pgregory.net/rapid v0.4.7
 )
+
+require github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
 
 require (
 	crawshaw.io/sqlite v0.3.3-0.20210127221821-98b1f83c5508 // indirect

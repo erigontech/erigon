@@ -109,13 +109,15 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
+	notBorAndParlia := cfg.chainConfig.Bor == nil && cfg.chainConfig.Parlia == nil
+
 	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
-	if unsettledForkChoice != nil { // some work left to do after unwind
+	if notBorAndParlia && unsettledForkChoice != nil { // some work left to do after unwind
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
 	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
-	if !transitionedToPoS {
+	if notBorAndParlia && !transitionedToPoS {
 		var err error
 		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {

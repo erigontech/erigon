@@ -241,8 +241,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 // call goroutines to shut down.
 func (h *handler) close(err error, inflightReq *requestOp) {
 	h.cancelAllRequests(err, inflightReq)
-	h.callWG.Wait()
 	h.cancelRoot()
+	h.callWG.Wait()
 	h.cancelServerSubscriptions(err)
 }
 
