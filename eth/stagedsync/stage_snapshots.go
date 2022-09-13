@@ -255,9 +255,9 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
-	//for _, p := range preverifiedBlockSnapshots {
-	//	downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
-	//}
+	for _, p := range preverifiedBlockSnapshots {
+		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+	}
 	if cfg.historyV2 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
 		for _, p := range preverifiedHistorySnapshots {
