@@ -224,10 +224,10 @@ func (d *Downloader) verify() error {
 func (d *Downloader) addSegments() error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	if err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir()); err != nil {
+	files, err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir())
+	if err != nil {
 		return err
 	}
-	files, err := seedableSegmentFiles(d.SnapDir())
 	if err != nil {
 		return fmt.Errorf("seedableSegmentFiles: %w", err)
 	}

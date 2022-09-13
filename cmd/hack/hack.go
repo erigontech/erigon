@@ -1021,8 +1021,6 @@ func chainConfig(name string) error {
 		chainConfig = params.RinkebyChainConfig
 	case "goerli":
 		chainConfig = params.GoerliChainConfig
-	case "kiln-devnet":
-		chainConfig = params.KilnDevnetChainConfig
 	case "bsc":
 		chainConfig = params.BSCChainConfig
 	case "sokol":

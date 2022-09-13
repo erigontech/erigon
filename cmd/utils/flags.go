@@ -1081,8 +1081,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "rinkeby")
 	case networkname.GoerliChainName:
 		return networkDataDirCheckingLegacy(datadir, "goerli")
-	case networkname.KilnDevnetChainName:
-		return networkDataDirCheckingLegacy(datadir, "kiln-devnet")
 	case networkname.SokolChainName:
 		return networkDataDirCheckingLegacy(datadir, "sokol")
 	case networkname.FermionChainName:

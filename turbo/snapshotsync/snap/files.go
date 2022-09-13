@@ -92,6 +92,11 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
+func IsCorrectHistoryFileName(name string) bool {
+	parts := strings.Split(name, ".")
+	return len(parts) == 3
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]

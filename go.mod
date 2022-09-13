@@ -77,6 +77,8 @@ require (
 	pgregory.net/rapid v0.4.7
 )
 
+require github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
+
 require (
 	crawshaw.io/sqlite v0.3.3-0.20210127221821-98b1f83c5508 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
