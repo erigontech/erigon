@@ -73,7 +73,7 @@ func (s *TxNums) Restore(sn *snapshotsync.RoSnapshots, tx kv.Tx) error {
 		if blockNum > toBlock {
 			return nil
 		}
-		if blockNum%10_000 == 0 {
+		if blockNum%100_000 == 0 {
 			log.Info("TxNums.Restore", "blockNum", blockNum)
 		}
 		s.nums[blockNum] = baseTxNum + txAmount - 1
