@@ -122,7 +122,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 }
 
 func (d *Domain) scanStateFiles(files []fs.DirEntry) {
-	re := regexp.MustCompile(d.filenameBase + ".([0-9]+)-([0-9]+).(kv|kvi)")
+	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).(kv|kvi)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()

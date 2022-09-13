@@ -389,6 +389,7 @@ func TestHistoryScanFiles(t *testing.T) {
 	h.Close()
 	h, err = NewHistory(path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals)
 	require.NoError(t, err)
+	defer h.Close()
 	h.SetTxNum(txNum)
 	// Check the history
 	checkHistoryHistory(t, db, h, txs)

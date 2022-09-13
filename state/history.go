@@ -79,7 +79,7 @@ func NewHistory(
 }
 
 func (h *History) scanStateFiles(files []fs.DirEntry) {
-	re := regexp.MustCompile(h.filenameBase + ".([0-9]+)-([0-9]+).(v|vi)")
+	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).(v|vi)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()

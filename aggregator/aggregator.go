@@ -950,7 +950,7 @@ func (a *Aggregator) scanStateFiles(files []fs.DirEntry) {
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		typeStrings[fType] = fType.String()
 	}
-	re := regexp.MustCompile("(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)")
+	re := regexp.MustCompile("^(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()
@@ -1041,7 +1041,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 		}
 	}
 	a.changesBtree = btree.New(32)
-	re := regexp.MustCompile(`(account|storage|code|commitment).(keys|before|after).([0-9]+)-([0-9]+).chg`)
+	re := regexp.MustCompile(`^(account|storage|code|commitment).(keys|before|after).([0-9]+)-([0-9]+).chg$`)
 	for _, f := range files {
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)

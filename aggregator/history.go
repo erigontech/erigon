@@ -77,7 +77,7 @@ func (h *History) scanStateFiles(files []fs.DirEntry, blockTo uint64) {
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		typeStrings[fType] = fType.String()
 	}
-	re := regexp.MustCompile("(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)")
+	re := regexp.MustCompile("^(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()

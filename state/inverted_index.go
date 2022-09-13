@@ -79,7 +79,7 @@ func NewInvertedIndex(
 }
 
 func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
-	re := regexp.MustCompile(ii.filenameBase + ".([0-9]+)-([0-9]+).(ef|efi)")
+	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).(ef|efi)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()
