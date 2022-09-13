@@ -34,7 +34,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 }
 
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number
-// erigon_blockNumber will return latest executed block number
+// erigon_blockNumber will return latest executed block number or any block number requested
 func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
