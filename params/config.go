@@ -259,6 +259,7 @@ type ChainConfig struct {
 	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
+	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -395,13 +396,14 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
 			c.MirrorSyncBlock,
 			c.BrunoBlock,
 			c.EulerBlock,
+			c.GibbsBlock,
 			engine,
 		)
 	}
@@ -537,6 +539,15 @@ func (c *ChainConfig) IsOnEuler(num *big.Int) bool {
 	return configNumEqual(c.EulerBlock, num)
 }
 
+// IsGibbs returns whether num is either equal to the euler fork block or greater.
+func (c *ChainConfig) IsGibbs(num *big.Int) bool {
+	return isForked(c.GibbsBlock, num.Uint64())
+}
+
+func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
+	return configNumEqual(c.GibbsBlock, num)
+}
+
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
 func (c *ChainConfig) IsMuirGlacier(num uint64) bool {
 	return isForked(c.MuirGlacierBlock, num)
@@ -625,6 +636,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "istanbulBlock", block: c.IstanbulBlock},
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
 		{name: "eulerBlock", block: c.EulerBlock, optional: true},
+		{name: "gibbsBlock", block: c.GibbsBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
 		{name: "londonBlock", block: c.LondonBlock},
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
@@ -730,6 +742,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.EulerBlock, newcfg.EulerBlock, head) {
 		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
+	}
+	if isForkIncompatible(c.GibbsBlock, newcfg.GibbsBlock, head) {
+		return newCompatError("Gibbs fork block", c.GibbsBlock, newcfg.GibbsBlock)
 	}
 	return nil
 }
