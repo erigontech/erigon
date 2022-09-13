@@ -50,7 +50,7 @@ type VerkleTreeWriter struct {
 func NewVerkleTreeWriter(db kv.RwTx, tmpdir string) *VerkleTreeWriter {
 	return &VerkleTreeWriter{
 		db:        db,
-		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize)),
+		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8)),
 		tmpdir:    tmpdir,
 	}
 }
@@ -115,12 +115,12 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 	return nil
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() error {
+func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if err := v.db.ClearBucket(VerkleTrie); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	verkleCollector := etl.NewCollector(VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -149,11 +149,11 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() error {
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	log.Info("Started Verkle Tree Flushing")
-	return verkleCollector.Load(v.db, VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	return root.ComputeCommitment().Bytes(), verkleCollector.Load(v.db, VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}})
