@@ -181,7 +181,6 @@ func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error
 		var b types.BodyForStorage
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			log.Info("BodySegment.Iterate", "blockNum", blockNum)
 			if err := rlp.DecodeBytes(buf, &b); err != nil {
 				return err
 			}
