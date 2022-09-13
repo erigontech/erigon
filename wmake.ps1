@@ -20,7 +20,6 @@ Param(
     [Alias("target")]
     [ValidateSet(
         "clean",
-        "cons",
         "db-tools",
         "devnettest",
         "downloader",
@@ -70,7 +69,6 @@ if ($BuildTargets.Count -gt 1) {
 
 if ($BuildTargets[0] -eq "all") {
     $BuildTargets = @(
-        "cons",
         "devnettest",
         "downloader",
         "erigon",

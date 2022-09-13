@@ -12,7 +12,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
@@ -123,6 +123,7 @@ func init() {
 	withMining(stateStags)
 	withChain(stateStags)
 	withHeimdall(stateStags)
+	withWorkers(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
@@ -139,13 +140,14 @@ func init() {
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
+	withWorkers(loopExecCmd)
 
 	rootCmd.AddCommand(loopExecCmd)
 }
 
 func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
-	chainConfig, historyV2, pm := tool.ChainConfigFromDB(db), tool.HistoryV2FromDB(db), tool.PruneModeFromDB(db)
+	chainConfig, historyV2, pm := fromdb.ChainConfig(db), fromdb.HistoryV2(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
 	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
@@ -184,7 +186,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV2, dirs, getBlockReader(db), nil, genesis, int(workers), txNums, agg())
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
@@ -410,17 +412,13 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
+	txNums, historyV2 := exec22.TxNumsFromDB(allSnapshots(db), db), fromdb.HistoryV2(db)
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	historyV2, err := rawdb.HistoryV2.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
-
 	sync.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.Translation, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxLookup, stages.Finish)
 	if err = sync.Run(db, tx, false); err != nil {
 		return err
@@ -479,9 +477,8 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig := tool.ChainConfigFromDB(db)
-	dirs, pm := datadir.New(datadirCli), tool.PruneModeFromDB(db)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	chainConfig := fromdb.ChainConfig(db)
+	txNums, dirs, pm := exec22.TxNumsFromDB(allSnapshots(db), db), datadir.New(datadirCli), fromdb.PruneMode(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -507,7 +504,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, 1, txNums, agg())
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, int(workers), txNums, agg())
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {

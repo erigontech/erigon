@@ -3,13 +3,17 @@ package stagedsync
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
@@ -17,15 +21,11 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
-)
-
-const (
-	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
-	//logInterval     = 30 * time.Second // time period to print aggregation stat to log
 )
 
 func NewProgress(prevOutputBlockNum uint64) *Progress {
@@ -122,12 +122,12 @@ func Exec22(ctx context.Context,
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
 	if parallel {
 		go func() {
-			applyTx, err := chainDb.BeginRw(ctx)
+			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
 				panic(err)
 			}
-			defer applyTx.Rollback()
-			agg.SetTx(applyTx)
+			defer tx.Rollback()
+			agg.SetTx(tx)
 			defer rs.Finish()
 			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
 				select {
@@ -138,7 +138,7 @@ func Exec22(ctx context.Context,
 						defer rwsLock.Unlock()
 						atomic.AddInt64(&resultsSize, txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+						processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
@@ -163,7 +163,7 @@ func Exec22(ctx context.Context,
 										drained = true
 									}
 								}
-								processResultQueue(&rws, &outputTxNum, rs, agg, applyTx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+								processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
 								if rws.Len() == 0 {
 									break
 								}
@@ -188,19 +188,19 @@ func Exec22(ctx context.Context,
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
 							}
-							if err := rs.Flush(applyTx); err != nil {
+							if err := rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = applyTx.Commit(); err != nil {
+							if err = tx.Commit(); err != nil {
 								return err
 							}
 							for i := 0; i < len(reconWorkers); i++ {
 								reconWorkers[i].ResetTx(nil)
 							}
-							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
-							agg.SetTx(applyTx)
+							agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
@@ -210,7 +210,7 @@ func Exec22(ctx context.Context,
 					}
 				}
 			}
-			if err = applyTx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				panic(err)
 			}
 		}()
@@ -368,4 +368,511 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}
+}
+
+func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB, db kv.RwDB,
+	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
+	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
+	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	block := s.BlockNumber
+
+	endTxNumMinimax := agg.EndTxNumMinimax()
+	ok, blockNum := txNums.Find(endTxNumMinimax)
+	if !ok {
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
+	}
+	fmt.Printf("Max blockNum = %d\n", blockNum)
+	toBlock := blockNum
+	if blockNum == 0 {
+		return fmt.Errorf("not enough transactions in the history data")
+	}
+	if block+1 > blockNum {
+		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
+	}
+	blockNum = block + 1
+	txNum := txNums.MaxOf(blockNum - 1)
+	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
+	var wg sync.WaitGroup
+	workCh := make(chan *state.TxTask, 128)
+	rs := state.NewReconState(workCh)
+	var fromKey, toKey []byte
+	bigCount := big.NewInt(int64(workerCount))
+	bigStep := big.NewInt(0x100000000)
+	bigStep.Div(bigStep, bigCount)
+	bigCurrent := big.NewInt(0)
+	fillWorkers := make([]*exec22.FillWorker, workerCount)
+	var doneCount uint64
+	for i := 0; i < workerCount; i++ {
+		fromKey = toKey
+		if i == workerCount-1 {
+			toKey = nil
+		} else {
+			bigCurrent.Add(bigCurrent, bigStep)
+			toKey = make([]byte, 4)
+			bigCurrent.FillBytes(toKey)
+		}
+		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
+		fillWorkers[i] = exec22.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
+	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	doneCount = 0
+	accountCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer accountCollectorX.Close()
+	for i := 0; i < workerCount; i++ {
+		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return accountCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		accountCollectorsX[i].Close()
+		accountCollectorsX[i] = nil
+	}
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return tx.Put(kv.XAccount, k, v)
+		}, etl.TransformArgs{})
+	}); err != nil {
+		return err
+	}
+	accountCollectorX.Close()
+	accountCollectorX = nil
+	doneCount = 0
+	storageCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer storageCollectorX.Close()
+	for i := 0; i < workerCount; i++ {
+		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return storageCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		storageCollectorsX[i].Close()
+		storageCollectorsX[i] = nil
+	}
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return tx.Put(kv.XStorage, k, v)
+		}, etl.TransformArgs{})
+	}); err != nil {
+		return err
+	}
+	storageCollectorX.Close()
+	storageCollectorX = nil
+	doneCount = 0
+	codeCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer codeCollectorX.Close()
+	var bitmap roaring64.Bitmap
+	for i := 0; i < workerCount; i++ {
+		bitmap.Or(fillWorkers[i].Bitmap())
+		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return codeCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		codeCollectorsX[i].Close()
+		codeCollectorsX[i] = nil
+	}
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return tx.Put(kv.XCode, k, v)
+		}, etl.TransformArgs{})
+	}); err != nil {
+		return err
+	}
+	codeCollectorX.Close()
+	codeCollectorX = nil
+	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
+	var lock sync.RWMutex
+	reconWorkers := make([]*exec22.ReconWorker, workerCount)
+	roTxs := make([]kv.Tx, workerCount)
+	chainTxs := make([]kv.Tx, workerCount)
+	defer func() {
+		for i := 0; i < workerCount; i++ {
+			if roTxs[i] != nil {
+				roTxs[i].Rollback()
+			}
+			if chainTxs[i] != nil {
+				chainTxs[i].Rollback()
+			}
+		}
+	}()
+	for i := 0; i < workerCount; i++ {
+		if roTxs[i], err = db.BeginRo(ctx); err != nil {
+			return err
+		}
+		if chainTxs[i], err = chainDb.BeginRo(ctx); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < workerCount; i++ {
+		reconWorkers[i] = exec22.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i].SetTx(roTxs[i])
+	}
+	wg.Add(workerCount)
+	count := uint64(0)
+	rollbackCount := uint64(0)
+	total := bitmap.GetCardinality()
+	for i := 0; i < workerCount; i++ {
+		go reconWorkers[i].Run()
+	}
+	commitThreshold := uint64(256 * 1024 * 1024)
+	prevCount := uint64(0)
+	prevRollbackCount := uint64(0)
+	prevTime := time.Now()
+	reconDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-reconDone:
+				return
+			case <-logEvery.C:
+				var m runtime.MemStats
+				common.ReadMemStats(&m)
+				sizeEstimate := rs.SizeEstimate()
+				count = rs.DoneCount()
+				rollbackCount = rs.RollbackCount()
+				currentTime := time.Now()
+				interval := currentTime.Sub(prevTime)
+				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+				progress := 100.0 * float64(count) / float64(total)
+				var repeatRatio float64
+				if count > prevCount {
+					repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
+				}
+				prevTime = currentTime
+				prevCount = count
+				prevRollbackCount = rollbackCount
+				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", common.ByteCount(sizeEstimate),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+				)
+				if sizeEstimate >= commitThreshold {
+					err := func() error {
+						lock.Lock()
+						defer lock.Unlock()
+						for i := 0; i < workerCount; i++ {
+							roTxs[i].Rollback()
+						}
+						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							if err = rs.Flush(tx); err != nil {
+								return err
+							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						for i := 0; i < workerCount; i++ {
+							if roTxs[i], err = db.BeginRo(ctx); err != nil {
+								return err
+							}
+							reconWorkers[i].SetTx(roTxs[i])
+						}
+						return nil
+					}()
+					if err != nil {
+						panic(err)
+					}
+				}
+			}
+		}
+	}()
+	var inputTxNum uint64
+	var header *types.Header
+	var txKey [8]byte
+	for bn := uint64(0); bn < blockNum; bn++ {
+		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
+			panic(err)
+		}
+		blockHash := header.Hash()
+		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, bn)
+		if err != nil {
+			panic(err)
+		}
+		txs := b.Transactions()
+		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			if bitmap.Contains(inputTxNum) {
+				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
+				txTask := &state.TxTask{
+					Header:    header,
+					BlockNum:  bn,
+					Block:     b,
+					TxNum:     inputTxNum,
+					TxIndex:   txIndex,
+					BlockHash: blockHash,
+					Final:     txIndex == len(txs),
+				}
+				if txIndex >= 0 && txIndex < len(txs) {
+					txTask.Tx = txs[txIndex]
+				}
+				workCh <- txTask
+			}
+			inputTxNum++
+		}
+	}
+	close(workCh)
+	wg.Wait()
+	reconDone <- struct{}{} // Complete logging and committing go-routine
+	for i := 0; i < workerCount; i++ {
+		roTxs[i].Rollback()
+	}
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err = rs.Flush(tx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer plainStateCollector.Close()
+	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer codeCollector.Close()
+	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer plainContractCollector.Close()
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+	cursor, err := roTx.Cursor(kv.PlainStateR)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	var k, v []byte
+	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+		if err = plainStateCollector.Collect(k[8:], v); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+	cursor.Close()
+	if cursor, err = roTx.Cursor(kv.CodeR); err != nil {
+		return err
+	}
+	defer cursor.Close()
+	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+		if err = codeCollector.Collect(k[8:], v); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+	cursor.Close()
+	if cursor, err = roTx.Cursor(kv.PlainContractR); err != nil {
+		return err
+	}
+	defer cursor.Close()
+	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
+		if err = plainContractCollector.Collect(k[8:], v); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+	cursor.Close()
+	roTx.Rollback()
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.CodeR); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.PlainContractR); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	plainStateCollectors := make([]*etl.Collector, workerCount)
+	codeCollectors := make([]*etl.Collector, workerCount)
+	plainContractCollectors := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		plainStateCollectors[i] = etl.NewCollector(fmt.Sprintf("plainState %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer plainStateCollectors[i].Close()
+		codeCollectors[i] = etl.NewCollector(fmt.Sprintf("code %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer codeCollectors[i].Close()
+		plainContractCollectors[i] = etl.NewCollector(fmt.Sprintf("plainContract %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer plainContractCollectors[i].Close()
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].FillStorage(plainStateCollectors[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	doneCount = 0
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		go fillWorkers[i].FillCode(codeCollectors[i], plainContractCollectors[i])
+	}
+	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	// Load all collections into the main collector
+	for i := 0; i < workerCount; i++ {
+		if err = plainStateCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return plainStateCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainStateCollectors[i].Close()
+		if err = codeCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return codeCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		codeCollectors[i].Close()
+		if err = plainContractCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return plainContractCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainContractCollectors[i].Close()
+	}
+	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
+		if err = tx.ClearBucket(kv.PlainState); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.Code); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.PlainContractCode); err != nil {
+			return err
+		}
+		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainStateCollector.Close()
+		if err = codeCollector.Load(tx, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		codeCollector.Close()
+		if err = plainContractCollector.Load(tx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		plainContractCollector.Close()
+		if err := s.Update(tx, toBlock); err != nil {
+			return err
+		}
+		s.BlockNumber = toBlock
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }

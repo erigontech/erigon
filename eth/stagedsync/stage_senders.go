@@ -382,17 +382,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-
 	sn := cfg.blockRetire.Snapshots()
-	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
-	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
-			return err
-		}
-		if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx, tx); err != nil {
-			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
-		}
-	} else if cfg.prune.TxIndex.Enabled() {
+	if !(sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce) && cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
 			return err
@@ -404,25 +395,5 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			return err
 		}
 	}
-	return nil
-}
-
-func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx context.Context, tx kv.RwTx) (err error) {
-	// if something already happens in background - noop
-	if cfg.blockRetire.Working() {
-		return nil
-	}
-	if res := cfg.blockRetire.Result(); res != nil {
-		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
-		}
-
-		if err := rawdb.WriteSnapshots(tx, cfg.blockRetire.Snapshots().Files()); err != nil {
-			return err
-		}
-	}
-
-	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
-
 	return nil
 }

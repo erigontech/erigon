@@ -31,7 +31,7 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx kv.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainState, error) {
+func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, dbtx kv.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainState, error) {
 	// Create the parent state database
 	reader := state.NewPlainState(dbtx, block.NumberU64())
 	statedb := state.New(reader)
@@ -43,7 +43,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 	signer := types.MakeSigner(cfg, block.NumberU64())
 
 	header := block.Header()
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, contractHasTEVM)
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 	for idx, tx := range block.Transactions() {

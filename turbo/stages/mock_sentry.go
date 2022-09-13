@@ -340,10 +340,31 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	isBor := mock.ChainConfig.Bor != nil
-
+	var sprint uint64
+	if isBor {
+		sprint = mock.ChainConfig.Bor.Sprint
+	}
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, false, allSnapshots, snapshotsDownloader, blockReader, dirs.Tmp, mock.Notifications.Events, mock.Notifications, engineapi.NewForkValidatorMock(1)),
+			stagedsync.StageHeadersCfg(
+				mock.DB,
+				mock.sentriesClient.Hd,
+				mock.sentriesClient.Bd,
+				*mock.ChainConfig,
+				sendHeaderRequest,
+				propagateNewBlockHashes,
+				penalize,
+				cfg.BatchSize,
+				false,
+				false,
+				allSnapshots,
+				snapshotsDownloader,
+				blockReader,
+				dirs.Tmp,
+				mock.Notifications.Events,
+				mock.Notifications,
+				engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -361,7 +382,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.txNums,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events), nil),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -382,13 +403,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.txNums,
 				mock.agg,
 			),
-			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
 			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV2, mock.txNums, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, mock.txNums, mock.agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, allSnapshots, isBor),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, allSnapshots, isBor, sprint),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil, nil),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
@@ -646,15 +666,23 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) *state.IntraBlockState {
+func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
 	if ms.HistoryV2 {
 		aggCtx := ms.agg.MakeContext()
 		aggCtx.SetTx(tx)
 		r := state.NewHistoryReader22(aggCtx)
 		r.SetTx(tx)
 		r.SetTxNum(ms.txNums.MinOf(blockNum))
-		return state.New(r)
+		return r
 	}
 
-	return state.New(state.NewPlainState(tx, blockNum))
+	return state.NewPlainState(tx, blockNum)
+}
+
+func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+	return state.NewPlainStateReader(tx)
+}
+
+func (ms *MockSentry) HistoryV2Components() (*libstate.Aggregator22, *exec22.TxNums) {
+	return ms.agg, ms.txNums
 }

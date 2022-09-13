@@ -11,21 +11,17 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CallTracer struct {
-	froms   map[common.Address]struct{}
-	tos     map[common.Address]bool // address -> isCreated
-	hasTEVM func(contractHash common.Hash) (bool, error)
+	froms map[common.Address]struct{}
+	tos   map[common.Address]bool // address -> isCreated
 }
 
-func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTracer {
+func NewCallTracer() *CallTracer {
 	return &CallTracer{
-		froms:   make(map[common.Address]struct{}),
-		tos:     make(map[common.Address]bool),
-		hasTEVM: hasTEVM,
+		froms: make(map[common.Address]struct{}),
+		tos:   make(map[common.Address]bool),
 	}
 }
 
@@ -38,15 +34,8 @@ func (ct *CallTracer) CaptureStart(evm *vm.EVM, depth int, from common.Address, 
 	}
 
 	if !created && create {
-		if len(code) > 0 && ct.hasTEVM != nil {
-			has, err := ct.hasTEVM(common.BytesToHash(crypto.Keccak256(code)))
-			if !has {
-				ct.tos[to] = true
-			}
-
-			if err != nil {
-				log.Warn("while CaptureStart", "err", err)
-			}
+		if len(code) > 0 {
+			ct.tos[to] = true
 		}
 	}
 }
@@ -87,7 +76,6 @@ func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmCo
 	var blockNumEnc [8]byte
 	binary.BigEndian.PutUint64(blockNumEnc[:], block.Number().Uint64())
 	var prev common.Address
-	var created bool
 	for j, addr := range list {
 		if j > 0 && prev == addr {
 			continue
@@ -99,12 +87,6 @@ func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmCo
 		}
 		if _, ok := ct.tos[addr]; ok {
 			v[length.Addr] |= 2
-		}
-		// TEVM marking still untranslated contracts
-		if vmConfig.EnableTEMV {
-			if created = ct.tos[addr]; created {
-				v[length.Addr] |= 4
-			}
 		}
 		if j == 0 {
 			if err := tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {

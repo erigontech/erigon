@@ -16,7 +16,7 @@ func main() {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := log.New()
-		db, borDb, backend, txPool, mining, starknet, stateCache, blockReader, ff, agg, txNums, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
+		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, txNums, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "err", err)
 			return nil
@@ -26,7 +26,7 @@ func main() {
 			defer borDb.Close()
 		}
 
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, starknet, ff, stateCache, blockReader, agg, txNums, *cfg)
+		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, txNums, *cfg)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil

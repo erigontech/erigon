@@ -359,8 +359,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
 		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:   ctx.GlobalBool(utils.RpcTraceCompatFlag.Name),
-		StarknetGRPCAddress:  ctx.GlobalString(utils.StarknetGrpcAddressFlag.Name),
-		TevmEnabled:          ctx.GlobalBool(utils.TevmFlag.Name),
 
 		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
 

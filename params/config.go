@@ -246,19 +246,22 @@ type ChainConfig struct {
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // EIP-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
-	// Parlia fork blocks
-	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
-	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
-	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
-
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
 	TerminalTotalDifficulty       *big.Int    `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool        `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	TerminalBlockNumber           *big.Int    `json:"terminalBlockNumber,omitempty"`           // Enforce particular terminal block; see TerminalBlockNumber in EIP-3675
 	TerminalBlockHash             common.Hash `json:"terminalBlockHash,omitempty"`             // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
 	MergeNetsplitBlock            *big.Int    `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+
+	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Shanghai switch block (nil = no fork, 0 = already activated)
+	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch block (nil = no fork, 0 = already activated)
+
+	// Parlia fork blocks
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
+	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -406,7 +409,7 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -424,6 +427,8 @@ func (c *ChainConfig) String() string {
 		c.GrayGlacierBlock,
 		c.TerminalTotalDifficulty,
 		c.MergeNetsplitBlock,
+		c.ShanghaiBlock,
+		c.CancunBlock,
 		engine,
 	)
 }
@@ -572,6 +577,16 @@ func (c *ChainConfig) IsGrayGlacier(num uint64) bool {
 	return isForked(c.GrayGlacierBlock, num)
 }
 
+// IsShanghai returns whether num is either equal to the Shanghai fork block or greater.
+func (c *ChainConfig) IsShanghai(num uint64) bool {
+	return isForked(c.ShanghaiBlock, num)
+}
+
+// IsCancun returns whether num is either equal to the Cancun fork block or greater.
+func (c *ChainConfig) IsCancun(num uint64) bool {
+	return isForked(c.CancunBlock, num)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64) *ConfigCompatError {
@@ -618,6 +633,8 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
+		{name: "shanghaiBlock", block: c.ShanghaiBlock},
+		{name: "cancunBlock", block: c.CancunBlock},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -693,6 +710,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
+	}
+	if isForkIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, head) {
+		return newCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
+	}
+	if isForkIncompatible(c.CancunBlock, newcfg.CancunBlock, head) {
+		return newCompatError("Cancun fork block", c.CancunBlock, newcfg.CancunBlock)
 	}
 
 	// Parlia forks
@@ -778,7 +801,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon                                      bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
 	IsParlia, IsStarknet                                    bool
 }
 
@@ -799,6 +822,8 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
+		IsShanghai:         c.IsShanghai(num),
+		IsCancun:           c.IsCancun(num),
 		IsParlia:           c.Parlia != nil,
 	}
 }

@@ -98,6 +98,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		var header *types.Header
 		var err error
 		request := true
+
 		if bd.deliveriesH[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveriesH[blockNum-bd.requestedLow]
@@ -105,6 +106,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
+
+			// check here if we have the block prefetched as this could have come in as part of a data race
+			// we want to avoid an infinite loop if the header was populated in deliveriesH before the block
+			// was added to the prefetched cache
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
+				request = false
+			}
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
@@ -119,28 +127,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				return nil, 0, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
-			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
-				// Block is prefetched, no need to request
-				bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
-				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
-
-				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-				if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
-					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
-				} else if parent != nil {
-					if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
-						td := new(big.Int).Add(block.Difficulty(), parent)
-						go blockPropagator(context.Background(), block, td)
-					}
-				} else {
-					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
-				}
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			} else {
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
-					block = rawdb.ReadBlock(tx, hash, blockNum)
+					block := rawdb.ReadBlock(tx, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash
 						copy(doubleHash[:], header.UncleHash.Bytes())
@@ -171,6 +164,33 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 	}
 	return bodyReq, blockNum, nil
+}
+
+// checks if we have the block prefetched, returns true if found and stored or false if not present
+func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
+	block := bd.prefetchedBlocks.Pop(hash)
+
+	if block == nil {
+		return false
+	}
+
+	// Block is prefetched, no need to request
+	bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
+	bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
+
+	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
+	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
+		log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
+	} else if parent != nil {
+		if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
+			td := new(big.Int).Add(block.Difficulty(), parent)
+			go blockPropagator(context.Background(), block, td)
+		}
+	} else {
+		log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
+	}
+
+	return true
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {

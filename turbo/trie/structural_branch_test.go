@@ -77,7 +77,7 @@ func TestIHCursor(t *testing.T) {
 	}, cursor, nil)
 	k, _, _, _ := ih.AtPrefix([]byte{})
 	require.Equal(common.FromHex("0001"), k)
-	require.True(ih.SkipState)
+	require.False(ih.SkipState)
 	require.Equal([]byte{}, ih.FirstNotCoveredPrefix())
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("0100"), k)
