@@ -224,13 +224,20 @@ func (d *Downloader) verify() error {
 func (d *Downloader) addSegments() error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	files, err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir())
+	_, err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir())
 	if err != nil {
 		return err
 	}
+	var files []string
+	//files, err := seedableSegmentFiles(d.SnapDir())
+	//if err != nil {
+	//	return fmt.Errorf("seedableSegmentFiles: %w", err)
+	//}
+	files2, err := seedableHistorySnapshots(d.SnapDir())
 	if err != nil {
 		return fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
+	files = append(files, files2...)
 	wg := &sync.WaitGroup{}
 	i := atomic.NewInt64(0)
 	for _, f := range files {
@@ -323,7 +330,6 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
-
 	return db, c, m, torrentClient, nil
 }
 

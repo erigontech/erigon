@@ -9,7 +9,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -887,6 +890,56 @@ func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 		res = append(res, f)
 	}
 	return res
+}
+
+var historyFileRegex = regexp.MustCompile("([[:lower:]]+).([0-9]+)-([0-9]+).(v|ef)")
+
+func HistorySnapshtos(dir string) ([]string, error) {
+	historyDir := filepath.Join(dir, "history")
+	dir2.MustExist(historyDir)
+	files, err := os.ReadDir(historyDir)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, 0, len(files))
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if !f.Type().IsRegular() {
+			continue
+		}
+		fileInfo, err := f.Info()
+		if err != nil {
+			return nil, err
+		}
+		if fileInfo.Size() == 0 {
+			continue
+		}
+		ext := filepath.Ext(f.Name())
+		if ext != ".v" && ext != ".ef" { // filter out only compressed files
+			continue
+		}
+
+		subs := historyFileRegex.FindStringSubmatch(f.Name())
+		if len(subs) != 5 {
+			continue
+		}
+
+		from, err := strconv.ParseUint(subs[2], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ParseFileName: %w", err)
+		}
+		to, err := strconv.ParseUint(subs[3], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ParseFileName: %w", err)
+		}
+		if to-from != 8 {
+			continue
+		}
+		res = append(res, filepath.Join("history", f.Name()))
+	}
+	return res, nil
 }
 
 func Segments(dir string) (res []snap.FileInfo, missingSnapshots []Range, err error) {

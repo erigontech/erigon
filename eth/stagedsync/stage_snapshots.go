@@ -242,24 +242,33 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 			return err
 		}
 	}
-
 	if len(missingSnapshots) > 0 {
 		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
 	}
+	snHistInDB, err := rawdb.ReadHistorySnapshots(tx)
+	if err != nil {
+		return err
+	}
 
 	// send all hashes to the Downloader service
-	preverified := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB).Preverified
-	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverified)+len(missingSnapshots))
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).Preverified
+	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
-	for _, p := range preverified {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+	//for _, p := range preverifiedBlockSnapshots {
+	//	downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+	//}
+	if cfg.historyV2 {
+		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
+		for _, p := range preverifiedHistorySnapshots {
+			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+		}
 	}
+
 	// builds missing snapshots request
 	for i := range missingSnapshots {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
 	}
-
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", s.LogPrefix()))
 	for {
 		select {

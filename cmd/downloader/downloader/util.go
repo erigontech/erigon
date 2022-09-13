@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
@@ -44,9 +46,20 @@ func AllTorrentPaths(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, 0, len(files))
+	histDir := filepath.Join(dir, "history")
+	files2, err := AllTorrentFiles(histDir)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, 0, len(files)+len(files2))
 	for _, f := range files {
 		torrentFilePath := filepath.Join(dir, f)
+		res = append(res, torrentFilePath)
+	}
+	fmt.Printf("files2: %s\n", files2)
+
+	for _, f := range files2 {
+		torrentFilePath := filepath.Join(histDir, f)
 		res = append(res, torrentFilePath)
 	}
 	return res, nil
@@ -59,7 +72,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, f := range files {
-		if !snap.IsCorrectFileName(f.Name()) {
+		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
 			continue
 		}
 		fileInfo, err := f.Info()
@@ -67,9 +80,6 @@ func AllTorrentFiles(dir string) ([]string, error) {
 			return nil, err
 		}
 		if fileInfo.Size() == 0 {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
 			continue
 		}
 		res = append(res, f.Name())
@@ -148,6 +158,7 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if len(subs) != 5 {
 			continue
 		}
+
 		from, err := strconv.ParseUint(subs[2], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
@@ -170,24 +181,21 @@ func buildTorrentIfNeed(fName, root string) (err error) {
 		return
 	}
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
-	if err := info.BuildFromFilePath(root); err != nil {
-		panic(err)
+	if err := info.BuildFromFilePath(fPath); err != nil {
 		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
+	info.Name = fName
 
 	return createTorrentFileFromInfo(root, info, nil)
 }
 
 // AddSegment - add existing .seg file, create corresponding .torrent if need
 func AddSegment(originalFileName, snapDir string, client *torrent.Client) (bool, error) {
-	f, err := snap.ParseFileName(snapDir, originalFileName)
-	if err != nil {
-		return false, fmt.Errorf("ParseFileName: %w", err)
-	}
-	if !f.TorrentFileExists() {
+	fPath := filepath.Join(snapDir, originalFileName)
+	if !common.FileExist(fPath + ".torrent") {
 		return false, nil
 	}
-	_, err = AddTorrentFile(f.Path+".torrent", client)
+	_, err := AddTorrentFile(fPath+".torrent", client)
 	if err != nil {
 		return false, fmt.Errorf("AddTorrentFile: %w", err)
 	}
@@ -207,13 +215,11 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	files = files[:0]
 	files = append(files, files2...)
-	fmt.Printf("files2: %s\n", files2)
+
 	errs := make(chan error, len(files)*2)
 	wg := &sync.WaitGroup{}
-	//workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
-	workers := 1
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
 	var sem = semaphore.NewWeighted(int64(workers))
 	for i, f := range files {
 		wg.Add(1)
@@ -369,6 +375,9 @@ func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*tor
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Printf("a: %s, %d\n", t.Info().Name, t.Info().Length)
+
 	t.DisallowDataDownload()
 	t.AllowDataUpload()
 	return t, nil
