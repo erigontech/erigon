@@ -175,35 +175,40 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 			out = append(out, *pt)
 		}
 	}
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	var tr ParityTrace
-	var rewardAction = &RewardTraceAction{}
-	rewardAction.Author = block.Coinbase()
-	rewardAction.RewardType = "block" // nolint: goconst
-	rewardAction.Value.ToInt().Set(minerReward.ToBig())
-	tr.Action = rewardAction
-	tr.BlockHash = &common.Hash{}
-	copy(tr.BlockHash[:], block.Hash().Bytes())
-	tr.BlockNumber = new(uint64)
-	*tr.BlockNumber = block.NumberU64()
-	tr.Type = "reward" // nolint: goconst
-	tr.TraceAddress = []int{}
-	out = append(out, tr)
-	for i, uncle := range block.Uncles() {
-		if i < len(uncleRewards) {
-			var tr ParityTrace
-			rewardAction = &RewardTraceAction{}
-			rewardAction.Author = uncle.Coinbase
-			rewardAction.RewardType = "uncle" // nolint: goconst
-			rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-			tr.Action = rewardAction
-			tr.BlockHash = &common.Hash{}
-			copy(tr.BlockHash[:], block.Hash().Bytes())
-			tr.BlockNumber = new(uint64)
-			*tr.BlockNumber = block.NumberU64()
-			tr.Type = "reward" // nolint: goconst
-			tr.TraceAddress = []int{}
-			out = append(out, tr)
+
+	difficulty := block.Header().Difficulty()
+	// block and uncle reward traces are not returned for PoS blocks
+	if difficulty > 0 {
+		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+		var tr ParityTrace
+		var rewardAction = &RewardTraceAction{}
+		rewardAction.Author = block.Coinbase()
+		rewardAction.RewardType = "block" // nolint: goconst
+		rewardAction.Value.ToInt().Set(minerReward.ToBig())
+		tr.Action = rewardAction
+		tr.BlockHash = &common.Hash{}
+		copy(tr.BlockHash[:], block.Hash().Bytes())
+		tr.BlockNumber = new(uint64)
+		*tr.BlockNumber = block.NumberU64()
+		tr.Type = "reward" // nolint: goconst
+		tr.TraceAddress = []int{}
+		out = append(out, tr)
+		for i, uncle := range block.Uncles() {
+			if i < len(uncleRewards) {
+				var tr ParityTrace
+				rewardAction = &RewardTraceAction{}
+				rewardAction.Author = uncle.Coinbase
+				rewardAction.RewardType = "uncle" // nolint: goconst
+				rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
+				tr.Action = rewardAction
+				tr.BlockHash = &common.Hash{}
+				copy(tr.BlockHash[:], block.Hash().Bytes())
+				tr.BlockNumber = new(uint64)
+				*tr.BlockNumber = block.NumberU64()
+				tr.Type = "reward" // nolint: goconst
+				tr.TraceAddress = []int{}
+				out = append(out, tr)
+			}
 		}
 	}
 
