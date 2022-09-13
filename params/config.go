@@ -259,6 +259,7 @@ type ChainConfig struct {
 	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
+	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -395,13 +396,14 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
 			c.MirrorSyncBlock,
 			c.BrunoBlock,
 			c.EulerBlock,
+			c.GibbsBlock,
 			engine,
 		)
 	}
@@ -584,6 +586,16 @@ func (c *ChainConfig) IsCancun(num uint64) bool {
 	return isForked(c.CancunBlock, num)
 }
 
+// IsGibbs returns whether num is either equal to the gibbs fork block or greater.
+func (c *ChainConfig) IsGibbs(num uint64) bool {
+	return isForked(c.GibbsBlock, num)
+}
+
+// IsOnGibbs returns whether num is equal to the gibbs fork block
+func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
+	return configNumEqual(c.GibbsBlock, num)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64) *ConfigCompatError {
@@ -730,6 +742,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.EulerBlock, newcfg.EulerBlock, head) {
 		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
+	}
+	if isForkIncompatible(c.GibbsBlock, newcfg.GibbsBlock, head) {
+		return newCompatError("gibbs fork block", c.GibbsBlock, newcfg.GibbsBlock)
 	}
 	return nil
 }
