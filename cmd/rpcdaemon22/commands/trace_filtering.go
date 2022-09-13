@@ -173,7 +173,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		}
 	}
 
-	difficulty := block.Header().Difficulty()
+	difficulty := block.Difficulty()
 	// block and uncle reward traces are not returned for PoS blocks
 	if difficulty > 0 {
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
