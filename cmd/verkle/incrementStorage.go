@@ -126,7 +126,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 		jobs <- &regeneratePedersenStorageJob{
 			address:      address,
 			storageKey:   storageKey,
-			storageValue: storageValueFormatted[:],
+			storageValue: storageValueFormatted,
 		}
 		if err := marker.MarkAsDone(changesetKey); err != nil {
 			return err

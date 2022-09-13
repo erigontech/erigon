@@ -22,6 +22,7 @@ func NewVerkleMarker() *VerkleMarker {
 	if err != nil {
 		panic(err)
 	}
+	defer tx.Rollback()
 
 	return &VerkleMarker{
 		db: markedSlotsDb,

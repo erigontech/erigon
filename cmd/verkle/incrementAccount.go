@@ -107,7 +107,7 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 				lookupKey := make([]byte, 24)
 				copy(lookupKey, o.address[:])
 				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
-				if err := collectorLookup.Collect(lookupKey, o.codeKeys[i][:]); err != nil {
+				if err := collectorLookup.Collect(lookupKey, o.codeKeys[i]); err != nil {
 					panic(err)
 				}
 			}
