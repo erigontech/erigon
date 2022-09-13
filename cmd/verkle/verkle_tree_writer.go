@@ -18,7 +18,6 @@ import (
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
 	var err error
 	totalInserted := 0
-	log.Info("Starting to flush verkle nodes")
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
 		if err != nil {
 			return
@@ -38,7 +37,6 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		default:
 		}
 	})
-	log.Info("Finished flushing process", "inserted", totalInserted)
 	return err
 }
 
@@ -161,7 +159,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() error {
 		}})
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
+func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return v.db.GetOne(VerkleTrie, root)
 	}
@@ -176,12 +174,12 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 	if root != (common.Hash{}) {
 		nodeEncoded, err := v.db.GetOne(VerkleTrie, root[:])
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		rootNode, err = verkle.ParseNode(nodeEncoded, 0, root[:])
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	} else {
 		rootNode = verkle.New()
@@ -203,7 +201,8 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 		}
 		return next(key, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
-	return flushVerkleNode(v.db, rootNode, logInterval, nil)
+	commitment := rootNode.ComputeCommitment().Bytes()
+	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
 }

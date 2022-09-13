@@ -15,18 +15,11 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
+func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
-	// START
-	var progress uint64
-	var err error
-	if progress, err = stages.GetStageProgress(vTx, stages.VerkleTrie); err != nil {
-		return err
-	}
 	logPrefix := "IncrementVerkleStorage"
 
 	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -68,7 +61,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 	}()
 	marker := NewVerkleMarker()
 	defer marker.Close()
-	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(progress)); k != nil; k, v, err = storageCursor.Next() {
+	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -147,7 +140,15 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 		return err
 	}
 	// Get root
-	/*h := rawdb.ReadHeaderByNumber(tx, progress)
-	return verkleWriter.CommitVerkleTree(h.Root)*/
-	return verkleWriter.CommitVerkleTree(common.Hash{})
+	root, err := ReadVerkleRoot(tx, from)
+	if err != nil {
+		return err
+	}
+	newRoot, err := verkleWriter.CommitVerkleTree(root)
+	if err != nil {
+		return err
+	}
+	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
+
+	return WriteVerkleRoot(vTx, to, newRoot)
 }
