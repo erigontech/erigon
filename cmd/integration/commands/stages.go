@@ -1132,6 +1132,10 @@ func agg() *libstate.Aggregator22 {
 		if err != nil {
 			panic(err)
 		}
+		err = _aggSingleton.ReopenFiles()
+		if err != nil {
+			panic(err)
+		}
 	})
 
 	return _aggSingleton

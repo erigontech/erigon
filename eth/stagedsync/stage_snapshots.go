@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -41,6 +42,7 @@ type SnapshotsCfg struct {
 	dbEventNotifier    snapshotsync.DBEventNotifier
 	historyV2          bool
 	txNums             *exec22.TxNums
+	agg                *state.Aggregator22
 }
 
 func StageSnapshotsCfg(
@@ -55,6 +57,7 @@ func StageSnapshotsCfg(
 	dbEventNotifier snapshotsync.DBEventNotifier,
 	historyV2 bool,
 	txNums *exec22.TxNums,
+	agg *state.Aggregator22,
 ) SnapshotsCfg {
 
 	return SnapshotsCfg{
@@ -69,6 +72,7 @@ func StageSnapshotsCfg(
 		dbEventNotifier:    dbEventNotifier,
 		txNums:             txNums,
 		historyV2:          historyV2,
+		agg:                agg,
 	}
 }
 
@@ -346,6 +350,10 @@ Finish:
 	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	if err := cfg.agg.ReopenFiles(); err != nil {
+		return err
+	}
+
 	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files()); err != nil {
 		return err
 	}

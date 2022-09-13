@@ -62,6 +62,10 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
+	}
 	defer agg.Close()
 	reconDbPath := path.Join(datadir, "recondb")
 	dir.Recreate(reconDbPath)

@@ -108,6 +108,10 @@ func ReplayTx(genesis *core.Genesis) error {
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
+	}
 	defer agg.Close()
 	ac := agg.MakeContext()
 	workCh := make(chan *state.TxTask)

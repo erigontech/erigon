@@ -435,6 +435,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		if err = agg.ReopenFiles(); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
+		}
+
 	}
 	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, txNums, err
 }
