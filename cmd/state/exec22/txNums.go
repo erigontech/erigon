@@ -48,7 +48,7 @@ func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 	return int(blockNum) != len(s.nums), blockNum
 }
 
-func (t *TxNums) Restore(s *snapshotsync.RoSnapshots, tx kv.Tx) error {
+func (s *TxNums) Restore(sn *snapshotsync.RoSnapshots, tx kv.Tx) error {
 	historyV2, err := rawdb.HistoryV2.Enabled(tx)
 	if err != nil {
 		return err
@@ -58,8 +58,8 @@ func (t *TxNums) Restore(s *snapshotsync.RoSnapshots, tx kv.Tx) error {
 	}
 
 	var toBlock uint64
-	if s != nil {
-		toBlock = s.BlocksAvailable()
+	if sn != nil {
+		toBlock = sn.BlocksAvailable()
 	}
 	p, err := stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
@@ -67,18 +67,18 @@ func (t *TxNums) Restore(s *snapshotsync.RoSnapshots, tx kv.Tx) error {
 	}
 	toBlock = cmp.Max(toBlock, p)
 
-	t.nums = make([]uint64, toBlock+1)
-	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, s, func(blockNum, baseTxNum, txAmount uint64) error {
+	s.nums = make([]uint64, toBlock+1)
+	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, sn, func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum > toBlock {
 			return nil
 		}
-		t.nums[blockNum] = baseTxNum + txAmount - 1
+		s.nums[blockNum] = baseTxNum + txAmount - 1
 		return nil
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 	}
-	if t.nums[0] == 0 {
-		t.nums[0] = 1
+	if s.nums[0] == 0 {
+		s.nums[0] = 1
 	}
 	return nil
 }

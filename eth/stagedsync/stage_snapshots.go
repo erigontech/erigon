@@ -269,6 +269,7 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	for i := range missingSnapshots {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
 	}
+
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", s.LogPrefix()))
 	for {
 		select {

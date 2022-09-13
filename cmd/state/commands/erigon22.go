@@ -109,7 +109,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 			return err
 		}
 	}
-	agg, err := libstate.NewAggregator22(dirs.Snap, ethconfig.HistoryV2AggregationStep)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
 	if err != nil {
 		return err
 	}
