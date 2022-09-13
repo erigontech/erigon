@@ -60,11 +60,10 @@ type ForkValidator struct {
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64, validatePayload validatePayloadFunc) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock:  make(map[common.Hash]forkSegment),
-		currentHeight:   currentHeight,
-		validatePayload: validatePayload,
+		sideForksBlock: make(map[common.Hash]forkSegment),
+		currentHeight:  currentHeight,
 	}
 }
 
