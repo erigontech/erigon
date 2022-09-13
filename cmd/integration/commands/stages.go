@@ -1187,7 +1187,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	allSn := allSnapshots(db)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine := initConsensusEngine(chainConfig, logger, allSn, cfg.Dirs.DataDir)
+	engine := initConsensusEngine(chainConfig, logger, allSn, cfg.Dirs.DataDir, db)
 
 	br := getBlockReader(db)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -1268,7 +1268,7 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots, datadir string) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots, datadir string, chainDb kv.RwDB) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	switch {
@@ -1283,7 +1283,7 @@ func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, sna
 		// Apply special hacks for BSC params
 		params.ApplyBinanceSmartChainParams()
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, chainDb)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
 		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots, true /* readonly */)
