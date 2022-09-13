@@ -47,9 +47,9 @@ func badKeysForAddress(tx kv.RwTx, address common.Address) ([][]byte, error) {
 		badKeys = append(badKeys, common.CopyBytes(treeKey))
 	}
 	return badKeys, nil
-
 }
-func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
+
+func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	// START
 	var progress uint64
@@ -89,7 +89,9 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
 		for o := range out {
 			// Remove all bad keys
 			for _, badKey := range o.badKeys {
-				verkleWriter.Insert(badKey, nil)
+				if err := verkleWriter.Insert(badKey, nil); err != nil {
+					panic(err)
+				}
 			}
 			if o.absentInState {
 				continue
@@ -122,6 +124,10 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
 		blockNumber, addressBytes, _, err := changeset.DecodeAccounts(k, v)
 		if err != nil {
 			return err
+		}
+
+		if blockNumber > to {
+			break
 		}
 		address := common.BytesToAddress(addressBytes)
 
@@ -187,13 +193,15 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
 		default:
 		}
 	}
-	/*if err := collectorLookup.Load(vTx, PedersenHashedCodeLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	close(jobs)
+	wg.Wait()
+	close(out)
+	if err := collectorLookup.Load(vTx, PedersenHashedCodeLookup, identityFuncForVerkleTree, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}}); err != nil {
-		fmt.Println("aa")
 		return err
-	}*/
+	}
 	// Get root
 	/*h := rawdb.ReadHeaderByNumber(tx, progress)
 	return verkleWriter.CommitVerkleTree(h.Root)*/

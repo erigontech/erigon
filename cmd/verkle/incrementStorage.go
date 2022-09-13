@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
+func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	// START
 	var progress uint64
@@ -76,13 +76,20 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
+
+		if blockNumber > to {
+			break
+		}
+
 		marked, err := marker.IsMarked(changesetKey)
 		if err != nil {
 			return err
 		}
+
 		if marked {
 			continue
 		}
+
 		address := common.BytesToAddress(changesetKey[:20])
 
 		var acc accounts.Account
@@ -130,12 +137,15 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg) error {
 		default:
 		}
 	}
-	/*if err := collectorLookup.Load(vTx, PedersenHashedStorageLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	close(jobs)
+	wg.Wait()
+	close(out)
+	if err := collectorLookup.Load(vTx, PedersenHashedStorageLookup, identityFuncForVerkleTree, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}}); err != nil {
 		return err
-	}*/
+	}
 	// Get root
 	/*h := rawdb.ReadHeaderByNumber(tx, progress)
 	return verkleWriter.CommitVerkleTree(h.Root)*/

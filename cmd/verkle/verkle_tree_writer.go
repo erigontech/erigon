@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker) error {
+func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
 	var err error
 	totalInserted := 0
 	log.Info("Starting to flush verkle nodes")
@@ -34,7 +34,7 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		totalInserted++
 		select {
 		case <-logInterval.C:
-			log.Info("Flushing Verkle nodes", "inserted", totalInserted)
+			log.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
 		default:
 		}
 	})
@@ -187,7 +187,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 		rootNode = verkle.New()
 	}
 
-	insertionBeforeFlushing := 20_000_000 // 20M node to flush at a time (approximately, 256 MB)
+	insertionBeforeFlushing := 4_000_000 // 4M node to flush at a time
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -196,20 +196,14 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 		}
 		insertions++
 		if insertions > insertionBeforeFlushing {
-			if err := flushVerkleNode(v.db, rootNode, logInterval); err != nil {
+			if err := flushVerkleNode(v.db, rootNode, logInterval, key); err != nil {
 				return err
 			}
 			insertions = 0
 		}
-		select {
-		case <-logInterval.C:
-			log.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(key))
-		default:
-		}
-
 		return next(key, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
 		return err
 	}
-	return flushVerkleNode(v.db, rootNode, logInterval)
+	return flushVerkleNode(v.db, rootNode, logInterval, nil)
 }

@@ -3,9 +3,15 @@ package main
 import (
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
+
+func identityFuncForVerkleTree(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	return next(k, k, value)
+}
 
 /*func readAccountKey(tx kv.RwTx, address []byte) ([]byte, error) {
 	return tx.GetOne(PedersenHashedAccountsLookup, address)
@@ -53,10 +59,16 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	if err := initDB(vTx); err != nil {
 		return err
 	}
-	if err := incrementAccount(vTx, tx, cfg); err != nil {
+
+	to, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
 		return err
 	}
-	if err := incrementStorage(vTx, tx, cfg); err != nil {
+
+	if err := incrementAccount(vTx, tx, cfg, to); err != nil {
+		return err
+	}
+	if err := incrementStorage(vTx, tx, cfg, to); err != nil {
 		return err
 	}
 	log.Info("Finished", "elapesed", time.Since(start))
