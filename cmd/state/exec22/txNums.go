@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type TxNums struct {
@@ -72,9 +71,6 @@ func (s *TxNums) Restore(sn *snapshotsync.RoSnapshots, tx kv.Tx) error {
 	if err := (snapshotsync.BodiesIterator{}).ForEach(tx, sn, func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum > toBlock {
 			return nil
-		}
-		if blockNum%10_000 == 0 {
-			log.Info("TxNums.Restore", "blockNum", blockNum)
 		}
 		s.nums[blockNum] = baseTxNum + txAmount - 1
 		return nil
