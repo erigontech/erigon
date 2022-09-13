@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -42,6 +43,10 @@ var Trackers = [][]string{
 }
 
 func AllTorrentPaths(dir string) ([]string, error) {
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		fmt.Printf("path: %s, %s\n", path, d.Name())
+		return nil
+	})
 	files, err := AllTorrentFiles(dir)
 	if err != nil {
 		return nil, err
@@ -56,8 +61,6 @@ func AllTorrentPaths(dir string) ([]string, error) {
 		torrentFilePath := filepath.Join(dir, f)
 		res = append(res, torrentFilePath)
 	}
-	fmt.Printf("files2: %s\n", files2)
-
 	for _, f := range files2 {
 		torrentFilePath := filepath.Join(histDir, f)
 		res = append(res, torrentFilePath)
@@ -372,8 +375,6 @@ func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*tor
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("a: %s, %d\n", t.Info().Name, t.Info().Length)
 
 	t.DisallowDataDownload()
 	t.AllowDataUpload()

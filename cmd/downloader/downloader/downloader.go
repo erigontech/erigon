@@ -234,7 +234,7 @@ func (d *Downloader) addSegments() error {
 	}
 	files2, err := seedableHistorySnapshots(d.SnapDir())
 	if err != nil {
-		return fmt.Errorf("seedableSegmentFiles: %w", err)
+		return fmt.Errorf("seedableHistorySnapshots: %w", err)
 	}
 	files = append(files, files2...)
 	wg := &sync.WaitGroup{}
@@ -329,6 +329,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
+
 	return db, c, m, torrentClient, nil
 }
 
