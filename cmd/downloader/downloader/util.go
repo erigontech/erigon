@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -43,10 +42,6 @@ var Trackers = [][]string{
 }
 
 func AllTorrentPaths(dir string) ([]string, error) {
-	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		fmt.Printf("path: %s, %s\n", path, d.Name())
-		return nil
-	})
 	files, err := AllTorrentFiles(dir)
 	if err != nil {
 		return nil, err
