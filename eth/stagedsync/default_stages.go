@@ -8,8 +8,24 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
+		{
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, firstCycle)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return SnapshotsPrune(p, snapshots, ctx, tx)
+			},
+		},
 		{
 			ID:          stages.Headers,
 			Description: "Download headers",
@@ -295,6 +311,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 }
 
 var DefaultForwardOrder = UnwindOrder{
+	stages.Snapshots,
 	stages.Headers,
 	stages.BlockHashes,
 	stages.Bodies,
@@ -354,6 +371,7 @@ var StateUnwindOrder = UnwindOrder{
 
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
+	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,

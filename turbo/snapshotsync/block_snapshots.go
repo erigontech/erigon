@@ -764,7 +764,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(ctx context.Context, logPrefix string, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
