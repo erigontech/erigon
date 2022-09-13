@@ -256,11 +256,8 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 }
 
 func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
-	f, err := snap.ParseFileName(root, info.Name)
-	if err != nil {
-		return fmt.Errorf("ParseFileName: %w", err)
-	}
-	if !f.NeedTorrentFile() {
+	fPath := filepath.Join(root, info.Name)
+	if common.FileExist(fPath + ".torrent") {
 		return nil
 	}
 	if err := createTorrentFileFromInfo(root, info, mi); err != nil {
