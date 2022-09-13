@@ -3,7 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
-
+    "math/big"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -175,7 +175,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 
 	difficulty := block.Difficulty()
 	// block and uncle reward traces are not returned for PoS blocks
-	if difficulty > 0 {
+	if difficulty.Cmp(big.NewInt(0)) != 0 {
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 		var tr ParityTrace
 		var rewardAction = &RewardTraceAction{}
