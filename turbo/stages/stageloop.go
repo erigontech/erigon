@@ -279,15 +279,22 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		currentHeight := headersChain[i].Number.Uint64()
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
-		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
+		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
 		if err != nil {
 			return err
 		}
-		if ok {
-			if txNums != nil {
-				txNums.Append(currentHeight, lastTxnNum)
+		/*
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
+			if err != nil {
+				return err
 			}
-		}
+			if ok {
+
+				if txNums != nil {
+					txNums.Append(currentHeight, lastTxnNum)
+				}
+			}
+		*/
 		rawdb.WriteHeader(batch, currentHeader)
 		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
 			return err
@@ -325,15 +332,21 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
 			return err
 		}
-		ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
+		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
 		if err != nil {
 			return err
 		}
-		if ok {
-			if txNums != nil {
-				txNums.Append(height, lastTxnNum)
+		/*
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
+			if err != nil {
+				return err
 			}
-		}
+			if ok {
+				if txNums != nil {
+					txNums.Append(height, lastTxnNum)
+				}
+			}
+		*/
 	} else {
 		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
 			return err
@@ -378,6 +391,16 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
+			stagedsync.StageSnapshotsCfg(
+				db,
+				controlServer.Hd,
+				*controlServer.ChainConfig,
+				dirs.Tmp,
+				snapshots,
+				blockRetire,
+				snapDownloader,
+				blockReader,
+				notifications.Events),
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
@@ -389,11 +412,8 @@ func NewStagedSync(ctx context.Context,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
 				cfg.MemoryOverlay,
-				snapshots,
-				snapDownloader,
 				blockReader,
 				dirs.Tmp,
-				notifications.Events,
 				notifications,
 				forkValidator),
 			stagedsync.StageCumulativeIndexCfg(db),
@@ -467,11 +487,8 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				cfg.BatchSize,
 				false,
 				cfg.MemoryOverlay,
-				snapshots,
-				nil,
 				blockReader,
 				dirs.Tmp,
-				notifications.Events,
 				nil, nil,
 			),
 			stagedsync.StageBodiesCfg(

@@ -3,8 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220910215659-20179643988f
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220912053753-1b5dd96e17df
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -30,6 +29,7 @@ require (
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
+	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.1
@@ -39,7 +39,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
-	github.com/holiman/uint256 v1.2.0
+	github.com/holiman/uint256 v1.2.1
 	github.com/huin/goupnp v1.0.3
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/json-iterator/go v1.1.12
@@ -76,6 +76,8 @@ require (
 	modernc.org/sqlite v1.18.1
 	pgregory.net/rapid v0.4.7
 )
+
+require github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
 
 require (
 	crawshaw.io/sqlite v0.3.3-0.20210127221821-98b1f83c5508 // indirect
