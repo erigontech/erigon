@@ -193,20 +193,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			toBlock = cmp.Max(toBlock, p)
 
 			var k, v [8]byte
-			// genesis
-			binary.BigEndian.PutUint64(k[:], 0)
-			binary.BigEndian.PutUint64(v[:], 1)
-			if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
-				return err
-			}
 			if err := cfg.snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 				for _, b := range bs {
 					if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 						if blockNum > toBlock {
 							return nil
 						}
-						if blockNum%1_000_000 == 0 {
-							log.Debug("TxNums.Restore", "blockNum", blockNum)
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-logEvery.C:
+							log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", s.LogPrefix()), "block_num", blockNum)
+						default:
 						}
 						maxTxNum := baseTxNum + txAmount - 1
 						binary.BigEndian.PutUint64(k[:], blockNum)
@@ -219,6 +217,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return nil
 			}); err != nil {
 				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			// genesis
+			binary.BigEndian.PutUint64(k[:], 0)
+			binary.BigEndian.PutUint64(v[:], 1)
+			if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
+				return err
 			}
 		}
 

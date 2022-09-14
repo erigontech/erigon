@@ -257,9 +257,16 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
-		_, reconstituteToBlock, err := rawdb.FindByMaxTxNum(tx, cfg.agg.EndTxNumMinimax())
-		if err != nil {
-			return err
+		var reconstituteToBlock uint64
+		if tx == nil {
+			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+				_, reconstituteToBlock, err = rawdb.FindByMaxTxNum(tx, cfg.agg.EndTxNumMinimax())
+				return err
+			}); err != nil {
+				return err
+			}
+		} else {
+			_, reconstituteToBlock, err = rawdb.FindByMaxTxNum(tx, cfg.agg.EndTxNumMinimax())
 		}
 		//_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
 		reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
