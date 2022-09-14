@@ -223,7 +223,7 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots)
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots, nil)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
@@ -352,7 +352,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Warn("[Snapshots] reopen", "err", err)
 						return
 					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+					if err := allSnapshots.ReopenList(reply.BlockFiles, true); err != nil {
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()

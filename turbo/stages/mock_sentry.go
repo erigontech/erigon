@@ -209,7 +209,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil)
+	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,

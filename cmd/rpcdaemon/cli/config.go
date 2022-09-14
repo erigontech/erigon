@@ -210,7 +210,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 
 func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
-	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots,
+	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots, agg *libstate.Aggregator22,
 	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
 ) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums *exec22.TxNums, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
@@ -223,7 +223,7 @@ func EmbeddedServices(ctx context.Context,
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots)
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots, agg)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
@@ -233,25 +233,6 @@ func EmbeddedServices(ctx context.Context,
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
-
-	if snapshots != nil && snapshots.Cfg().Enabled { // nolint: staticcheck
-		/*
-			txNums = make([]uint64, snapshots.BlocksAvailable()+1)
-			if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-						txNums[blockNum] = baseTxNum + txAmount
-						return nil
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return
-			}
-		*/
-	}
 
 	return
 }
@@ -375,7 +356,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Warn("[Snapshots] reopen", "err", err)
 						return
 					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+					if err := allSnapshots.ReopenList(reply.BlockFiles, true); err != nil {
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()
