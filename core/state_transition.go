@@ -255,10 +255,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
-	}
-	balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
-	if overflow {
-		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
+		if overflow {
+			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		}
 	}
 	var subBalance = false
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
