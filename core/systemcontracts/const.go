@@ -14,4 +14,5 @@ var (
 	GovHubContract             = common.HexToAddress("0x0000000000000000000000000000000000001007")
 	TokenManagerContract       = common.HexToAddress("0x0000000000000000000000000000000000001008")
 	CrossChainContract         = common.HexToAddress("0x0000000000000000000000000000000000002000")
+	StakingContract            = common.HexToAddress("0x0000000000000000000000000000000000002001")
 )

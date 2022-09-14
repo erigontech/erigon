@@ -33,7 +33,7 @@ import (
 }*/
 
 func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
-	logPrefix := PedersenHashedAccounts
+	logPrefix := "PedersenHashedAccounts"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
 
@@ -160,7 +160,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, col
 }
 
 func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
-	logPrefix := PedersenHashedStorage
+	logPrefix := "PedersenHashedStorage"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Storage")
 
@@ -251,7 +251,7 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, coll
 }
 
 func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
-	logPrefix := PedersenHashedCode
+	logPrefix := "PedersenHashedCode"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Code")
 
