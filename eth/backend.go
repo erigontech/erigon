@@ -254,15 +254,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			Accumulator: shards.NewAccumulator(chainConfig),
 		},
 	}
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
+	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
 	if err != nil {
 		return nil, err
 	}
+	backend.agg = agg
 
 	txNums := &exec22.TxNums{}
 	chainKv.View(ctx, func(tx kv.Tx) error { return txNums.Restore(allSnapshots, tx) })
 
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
 	backend.notifications.StateChangesConsumer = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -317,12 +318,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				}
 			}
 		}()
-	}
-
-	dir.MustExist(dirs.SnapHistory)
-	backend.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
-	if err != nil {
-		return nil, err
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
@@ -582,7 +577,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, txNums, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots, ethBackendRPC, backend.txPool2GrpcServer, miningRPC)
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, txNums, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots, backend.agg, ethBackendRPC, backend.txPool2GrpcServer, miningRPC)
 	if err != nil {
 		return nil, err
 	}
@@ -816,10 +811,10 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.Aggregator22, error) {
 	if !snConfig.Enabled {
 		blockReader := snapshotsync.NewBlockReader()
-		return blockReader, nil, nil
+		return blockReader, nil, nil, nil
 	}
 
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap)
@@ -834,21 +829,28 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			// start embedded Downloader
 			s.downloader, err = downloader.New(downloaderCfg)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			go downloader.MainLoop(ctx, s.downloader, true)
 			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 			if err != nil {
-				return nil, nil, fmt.Errorf("new server: %w", err)
+				return nil, nil, nil, fmt.Errorf("new server: %w", err)
 			}
 
 			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	return blockReader, allSnapshots, nil
+
+	dir.MustExist(dirs.SnapHistory)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return blockReader, allSnapshots, agg, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
