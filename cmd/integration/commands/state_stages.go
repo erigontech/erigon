@@ -149,7 +149,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV2, pm := fromdb.ChainConfig(db), fromdb.HistoryV2(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -412,7 +412,8 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
-	txNums, historyV2 := exec22.TxNumsFromDB(allSnapshots(db), db), fromdb.HistoryV2(db)
+	historyV2 := fromdb.HistoryV2(db)
+	txNums := &exec22.TxNums{}
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -478,7 +479,8 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
-	txNums, dirs, pm := exec22.TxNumsFromDB(allSnapshots(db), db), datadir.New(datadirCli), fromdb.PruneMode(db)
+	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
+	txNums := &exec22.TxNums{}
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

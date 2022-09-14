@@ -76,7 +76,7 @@ func Erigon22(execCtx context.Context, genesis *core.Genesis, logger log.Logger)
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	txNums := exec22.TxNumsFromDB(allSnapshots, db)
+	txNums := &exec22.TxNums{}
 
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(

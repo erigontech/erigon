@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -712,7 +713,7 @@ func deleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum, lastTxnNum uint64)) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum, lastTxnNum uint64) error) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -757,7 +758,9 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		}
 		if cb != nil {
 			lastTxnNum := bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount)
-			cb(blockNum, lastTxnNum)
+			if err = cb(blockNum, lastTxnNum); err != nil {
+				return err
+			}
 		}
 
 		select {
@@ -1718,4 +1721,90 @@ func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint6
 		}
 	}
 	return nil
+}
+
+func MaxTxNum(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], blockNum)
+	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+func MinTxNum(tx kv.Getter, blockNum uint64) (minTxNum uint64, err error) {
+	if blockNum == 0 {
+		return 0, nil
+	}
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], blockNum-1)
+	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(v) + 1, nil
+}
+func AppendMaxTxNum(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
+	lastK, err := LastKey(tx, kv.MaxTxNum)
+	if err != nil {
+		return err
+	}
+	lastBlockNum := binary.BigEndian.Uint64(lastK)
+	if lastBlockNum+1 != blockNum {
+		err := fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
+		panic(err)
+	}
+
+	var k, v [8]byte
+	binary.BigEndian.PutUint64(k[:], blockNum)
+	binary.BigEndian.PutUint64(v[:], maxTxNum)
+	if err := tx.Append(kv.MaxTxNum, k[:], v[:]); err != nil {
+		return err
+	}
+	return nil
+}
+func TruncateMaxTxNum(tx kv.RwTx, blockNum uint64) (err error) {
+	var seek [8]byte
+	binary.BigEndian.PutUint64(seek[:], blockNum)
+	c, err := tx.RwCursor(kv.MaxTxNum)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+
+	}
+	return nil
+}
+func FindByMaxTxNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum uint64, err error) {
+	var seek [8]byte
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return false, 0, err
+	}
+	defer c.Close()
+
+	cnt, err := c.Count()
+	if err != nil {
+		return false, 0, err
+	}
+
+	blockNum = uint64(sort.Search(int(cnt), func(i int) bool {
+		binary.BigEndian.PutUint64(seek[:], uint64(i))
+		_, v, _ := c.SeekExact(seek[:])
+		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
+	}))
+	if blockNum == cnt {
+		return false, 0, nil
+	}
+	return true, blockNum, nil
 }

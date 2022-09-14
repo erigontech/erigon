@@ -261,7 +261,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.agg = agg
 
 	txNums := &exec22.TxNums{}
-	chainKv.View(ctx, func(tx kv.Tx) error { return txNums.Restore(allSnapshots, tx) })
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
 	backend.notifications.StateChangesConsumer = kvRPC

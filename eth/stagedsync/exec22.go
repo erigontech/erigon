@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -114,12 +115,20 @@ func Exec22(ctx context.Context,
 	heap.Init(&rws)
 	var outputTxNum uint64
 	if block > 0 {
-		outputTxNum = txNums.MaxOf(block - 1)
+		maxTxNum, err := rawdb.MaxTxNum(applyTx, block-1)
+		if err != nil {
+			return err
+		}
+		outputTxNum = maxTxNum
 	}
 
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
-	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
+	maxTxNum, err := rawdb.MaxTxNum(applyTx, maxBlockNum)
+	if err != nil {
+		return err
+	}
+
 	if parallel {
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -217,7 +226,11 @@ func Exec22(ctx context.Context,
 	}
 	var inputTxNum uint64
 	if block > 0 {
-		inputTxNum = txNums.MaxOf(block - 1)
+		maxTxNum, err := rawdb.MaxTxNum(applyTx, block-1)
+		if err != nil {
+			return err
+		}
+		inputTxNum = maxTxNum
 	}
 
 	var header *types.Header
@@ -376,10 +389,19 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
 	block := s.BlockNumber
 
-	endTxNumMinimax := agg.EndTxNumMinimax()
-	ok, blockNum := txNums.Find(endTxNumMinimax)
+	var ok bool
+	var blockNum uint64
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		ok, blockNum, err = rawdb.FindByMaxTxNum(tx, agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
 	toBlock := blockNum
@@ -390,7 +412,17 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
 	}
 	blockNum = block + 1
-	txNum := txNums.MaxOf(blockNum - 1)
+
+	var txNum uint64
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		txNum, err = rawdb.MaxTxNum(tx, blockNum-1)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)

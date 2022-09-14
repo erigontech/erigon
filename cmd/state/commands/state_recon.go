@@ -90,7 +90,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
-	txNums := exec22.TxNumsFromDB(allSnapshots, chainDb)
+	txNums := &exec22.TxNums{}
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
 		chainDb,

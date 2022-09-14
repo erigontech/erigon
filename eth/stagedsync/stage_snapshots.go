@@ -176,6 +176,52 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}); err != nil {
 			return err
 		}
+
+		historyV2, err := rawdb.HistoryV2.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		if historyV2 {
+			var toBlock uint64
+			if cfg.snapshots != nil {
+				toBlock = cfg.snapshots.BlocksAvailable()
+			}
+			p, err := stages.GetStageProgress(tx, stages.Bodies)
+			if err != nil {
+				return err
+			}
+			toBlock = cmp.Max(toBlock, p)
+
+			var k, v [8]byte
+			// genesis
+			binary.BigEndian.PutUint64(k[:], 0)
+			binary.BigEndian.PutUint64(v[:], 1)
+			if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
+				return err
+			}
+			if err := cfg.snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+				for _, b := range bs {
+					if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
+						if blockNum > toBlock {
+							return nil
+						}
+						if blockNum%1_000_000 == 0 {
+							log.Debug("TxNums.Restore", "blockNum", blockNum)
+						}
+						maxTxNum := baseTxNum + txAmount - 1
+						binary.BigEndian.PutUint64(k[:], blockNum)
+						binary.BigEndian.PutUint64(v[:], maxTxNum)
+						return tx.Append(kv.MaxTxNum, k[:], v[:])
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+		}
+
 		if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return err
 		}
@@ -212,10 +258,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
-		return err
-	}
-
-	if err := cfg.txNums.Restore(cfg.snapshots, tx); err != nil {
 		return err
 	}
 	return nil

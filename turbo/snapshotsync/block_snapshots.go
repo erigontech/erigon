@@ -173,7 +173,7 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64) error) error {
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
 	return sn.seg.WithReadAhead(func() error {
 		var buf []byte
 		g := sn.seg.MakeGetter()

@@ -360,7 +360,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				}()
 			}
 			onNewSnapshot()
-			txNums = exec22.TxNumsFromDB(allSnapshots, db)
+			txNums = &exec22.TxNums{}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			log.Info("Use --snapshots=false")

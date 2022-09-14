@@ -233,10 +233,17 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	var fromTxNum, toTxNum uint64
+	var err error
 	if fromBlock > 0 {
-		fromTxNum = api._txNums.MinOf(fromBlock)
+		fromTxNum, err = rawdb.MinTxNum(dbtx, fromBlock)
+		if err != nil {
+			return err
+		}
 	}
-	toTxNum = api._txNums.MaxOf(toBlock) // toBlock is an inclusive bound
+	toTxNum, err = rawdb.MaxTxNum(dbtx, toBlock) // toBlock is an inclusive bound
+	if err != nil {
+		return err
+	}
 
 	if fromBlock > toBlock {
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
@@ -320,7 +327,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	for it.HasNext() {
 		txNum := it.Next()
 		// Find block number
-		ok, blockNum := api._txNums.Find(txNum)
+		ok, blockNum, err := rawdb.FindByMaxTxNum(dbtx, txNum)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
@@ -341,7 +351,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
 		}
-		if txNum+1 == api._txNums.MaxOf(blockNum) {
+		maxTxNum, err := rawdb.MaxTxNum(dbtx, blockNum)
+		if err != nil {
+			panic(err)
+		}
+		if txNum+1 == maxTxNum {
 			body, _, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -436,7 +450,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums.MinOf(blockNum)
+			startTxNum, err = rawdb.MinTxNum(dbtx, blockNum)
+			if err != nil {
+				return err
+			}
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)

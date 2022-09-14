@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -51,7 +50,6 @@ func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 }
 
 func (s *TxNums) Restore(sn *snapshotsync.RoSnapshots, tx kv.Tx) error {
-	fmt.Printf("alex: %s\n", dbg.Stack())
 	historyV2, err := rawdb.HistoryV2.Enabled(tx)
 	if err != nil {
 		return err

@@ -257,7 +257,11 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
-		_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
+		_, reconstituteToBlock, err := rawdb.FindByMaxTxNum(tx, cfg.agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+		//_, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
 		reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
 		dir.Recreate(reconDbPath)
 		limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
@@ -321,7 +325,11 @@ func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	if err := rs.Unwind(ctx, tx, cfg.txNums.MaxOf(u.UnwindPoint), cfg.agg, cfg.accumulator); err != nil {
+	txNum, err := rawdb.MaxTxNum(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, cfg.accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {

@@ -53,6 +53,9 @@ func ResetBlocks(tx kv.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.Headers, 1); err != nil {
 		return fmt.Errorf("saving Bodies progress failed: %w", err)
 	}
+	if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
+		return fmt.Errorf("saving Snapshots progress failed: %w", err)
+	}
 
 	// remove all canonical markers from this point
 	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
@@ -77,6 +80,9 @@ func ResetBlocks(tx kv.RwTx) error {
 		return err
 	}
 	if err := tx.ClearBucket(kv.EthTx); err != nil {
+		return err
+	}
+	if err := tx.ClearBucket(kv.MaxTxNum); err != nil {
 		return err
 	}
 	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {

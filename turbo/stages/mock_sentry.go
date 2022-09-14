@@ -260,7 +260,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 
 		mock.txNums = &exec22.TxNums{}
-		db.View(ctx, func(tx kv.Tx) error { return mock.txNums.Restore(allSnapshots, tx) })
 	}
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
@@ -679,7 +678,11 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		aggCtx.SetTx(tx)
 		r := state.NewHistoryReader22(aggCtx)
 		r.SetTx(tx)
-		r.SetTxNum(ms.txNums.MinOf(blockNum))
+		minTxNum, err := rawdb.MinTxNum(tx, blockNum)
+		if err != nil {
+			panic(err)
+		}
+		r.SetTxNum(minTxNum)
 		return r
 	}
 

@@ -513,7 +513,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig, historyV2 := fromdb.ChainConfig(db), fromdb.HistoryV2(db)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
@@ -658,7 +658,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
@@ -715,7 +715,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -769,7 +769,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1158,7 +1158,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
 	dirs, historyV2, pm := datadir.New(datadirCli), fromdb.HistoryV2(db), fromdb.PruneMode(db)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
+	txNums := &exec22.TxNums{}
 
 	vmConfig := &vm.Config{}
 

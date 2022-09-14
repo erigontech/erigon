@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -197,7 +198,10 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 	agg.SetTx(p.tx)
 	var k, v []byte
 
-	txnFrom := txNums.MinOf(from + 1)
+	txnFrom, err := rawdb.MinTxNum(p.tx, from+1)
+	if err != nil {
+		return err
+	}
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
@@ -335,7 +339,10 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 }
 
 func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load func(k, v []byte)) error {
-	txnFrom := txNums.MinOf(unwindTo)
+	txnFrom, err := rawdb.MinTxNum(p.tx, unwindTo)
+	if err != nil {
+		return err
+	}
 	txnTo := uint64(math.MaxUint64)
 	var deletedAccounts [][]byte
 	var k, v []byte
