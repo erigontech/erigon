@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-    "math/big"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"math/big"
 )
 
 // Transaction implements trace_transaction
