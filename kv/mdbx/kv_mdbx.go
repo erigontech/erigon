@@ -281,7 +281,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-		opts.roTxsLimiter = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1)))
+		opts.roTxsLimiter = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1)) - 1) // 1 less than max to allow unlocking to happen
 	}
 	db := &MdbxKV{
 		opts:         opts,
@@ -418,6 +418,15 @@ func (db *MdbxKV) Close() {
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if db.closed.Load() {
 		return nil, fmt.Errorf("db closed")
+	}
+
+	// don't try to acquire if the context is already done
+	done := ctx.Done()
+	select {
+	case <-done:
+		return nil, ctx.Err()
+	default:
+		// otherwise carry on
 	}
 
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
