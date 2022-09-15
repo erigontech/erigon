@@ -304,7 +304,7 @@ func startHandlingForkChoice(
 	}
 
 	if header == nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice missing header with hash %x", s.LogPrefix(), headerHash))
+		log.Info(fmt.Sprintf("[%s] Fork choice downloading missing header with hash %x", s.LogPrefix(), headerHash))
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 		} else {
