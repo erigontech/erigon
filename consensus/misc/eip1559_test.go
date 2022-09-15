@@ -58,6 +58,7 @@ func copyConfig(original *params.ChainConfig) *params.ChainConfig {
 		MirrorSyncBlock:         original.MirrorSyncBlock,
 		BrunoBlock:              original.BrunoBlock,
 		EulerBlock:              original.EulerBlock,
+		GibbsBlock:              original.GibbsBlock,
 		Ethash:                  original.Ethash,
 		Clique:                  original.Clique,
 		Aura:                    original.Aura,

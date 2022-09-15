@@ -313,6 +313,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_forks                               | Yes     | Erigon only                          |
 | erigon_issuance                            | Yes     | Erigon only                          |
 | erigon_GetBlockByTimestamp                 | Yes     | Erigon only                          |
+| erigon_BlockNumber                         | Yes     | Erigon only                          |
 |                                            |         |                                      |
 | bor_getSnapshot                            | Yes     | Bor only                             |
 | bor_getAuthor                              | Yes     | Bor only                             |

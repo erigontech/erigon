@@ -54,3 +54,11 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 	}
 	return 0, UnknownBlockError
 }
+
+func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, err
+	}
+	return blockNum, err
+}
