@@ -434,7 +434,7 @@ func handleNewPayload(
 		return nil, err
 	}
 	if parent == nil {
-		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
+		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
