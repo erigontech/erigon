@@ -214,7 +214,7 @@ Loop:
 				if err := rawdb.AppendMaxTxNum(tx, blockHeight, lastTxnNum); err != nil {
 					return err
 				}
-				cfg.txNums.Append(blockHeight, lastTxnNum)
+				//cfg.txNums.Append(blockHeight, lastTxnNum)
 			}
 
 			if blockHeight > bodyProgress {

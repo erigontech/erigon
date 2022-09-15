@@ -224,7 +224,6 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 			config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
 		}
 	}
-
 	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
@@ -478,6 +477,16 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
+
+	{
+		var k, v [8]byte
+		binary.BigEndian.PutUint64(k[:], 0)
+		binary.BigEndian.PutUint64(v[:], 1)
+		if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// We support ethash/serenity for issuance (for now)
 	if g.Config.Consensus != params.EtHashConsensus {
 		return block, statedb, nil
@@ -500,6 +509,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
 		return nil, nil, err
 	}
+
 	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, common.Big0)
 }
 
