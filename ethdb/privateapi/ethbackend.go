@@ -418,7 +418,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 
 	if !s.hd.POSSync() {
 		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
 	var canonicalHash common.Hash
@@ -466,7 +466,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 	} else {
 		if s.hd.PosStatus() != headerdownload.Idle {
 			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
-			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 
 		headHash := rawdb.ReadHeadBlockHash(tx)
