@@ -189,8 +189,14 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
-			return err
+		if len(value) == 0 {
+			if err := rootNode.Delete(common.CopyBytes(key), resolverFunc); err != nil {
+				return err
+			}
+		} else {
+			if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
+				return err
+			}
 		}
 		insertions++
 		if insertions > insertionBeforeFlushing {
