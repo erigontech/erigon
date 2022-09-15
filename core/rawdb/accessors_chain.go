@@ -1745,6 +1745,9 @@ func MinTxNum(tx kv.Getter, blockNum uint64) (minTxNum uint64, err error) {
 	if err != nil {
 		return 0, err
 	}
+	if len(v) == 0 {
+		return 0, nil
+	}
 	return binary.BigEndian.Uint64(v) + 1, nil
 }
 func AppendMaxTxNum(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {

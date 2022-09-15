@@ -396,6 +396,14 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		if err != nil {
 			return err
 		}
+		if !ok {
+			tx.ForEach(kv.MaxTxNum, nil, func(k, v []byte) error {
+				if binary.BigEndian.Uint64(k) > 8_000_000 {
+					fmt.Printf("%d,%d\n", binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v))
+				}
+				return nil
+			})
+		}
 		return nil
 	}); err != nil {
 		return err

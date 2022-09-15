@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -226,8 +227,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		HistoryV2: false,
+		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		//HistoryV2: true,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -254,8 +255,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 
 	if cfg.HistoryV2 {
+		dir.MustExist(dirs.SnapHistory)
 		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
 		if err != nil {
+			panic(err)
+		}
+		if err := mock.agg.ReopenFiles(); err != nil {
 			panic(err)
 		}
 
