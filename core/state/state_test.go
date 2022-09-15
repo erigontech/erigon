@@ -108,8 +108,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 		panic(err)
 	}
 	s.tx = tx
-	s.r = NewPlainState(tx, 0)
-	s.w = NewPlainState(tx, 0)
+	s.r = NewPlainState(tx, 1)
+	s.w = NewPlainState(tx, 1)
 	s.state = New(s.r)
 }
 
@@ -204,8 +204,8 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	w := NewPlainState(tx, 0)
-	state := New(NewPlainState(tx, 0))
+	w := NewPlainState(tx, 1)
+	state := New(NewPlainState(tx, 1))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -230,7 +230,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewPlainState(tx, 1)
+	w = NewPlainState(tx, 2)
 
 	err = state.CommitBlock(&params.Rules{}, w)
 	if err != nil {

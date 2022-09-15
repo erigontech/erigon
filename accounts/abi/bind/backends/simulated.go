@@ -169,9 +169,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()))
+		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1))
 	}
-	return state.New(state.NewPlainState(db, uint64(blockNumber.Int64())))
+	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.

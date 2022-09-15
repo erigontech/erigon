@@ -1090,7 +1090,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 		stateReader = state.NewCachedReader2(cacheView, dbtx) // this cache stays between RPC calls
 	} else {
-		stateReader = state.NewPlainState(dbtx, blockNumber)
+		stateReader = state.NewPlainState(dbtx, blockNumber+1)
 	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
