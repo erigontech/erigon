@@ -235,12 +235,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
-		fromTxNum, err = rawdb.MinTxNum(dbtx, fromBlock)
+		fromTxNum, err = rawdb.TxNums.Min(dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdb.MaxTxNum(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -327,7 +327,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	for it.HasNext() {
 		txNum := it.Next()
 		// Find block number
-		ok, blockNum, err := rawdb.FindByMaxTxNum(dbtx, txNum)
+		ok, blockNum, err := rawdb.TxNums.FindBlockNum(dbtx, txNum)
 		if err != nil {
 			return err
 		}
@@ -351,7 +351,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
 		}
-		maxTxNum, err := rawdb.MaxTxNum(dbtx, blockNum)
+		maxTxNum, err := rawdb.TxNums.Max(dbtx, blockNum)
 		if err != nil {
 			panic(err)
 		}
@@ -450,7 +450,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum, err = rawdb.MinTxNum(dbtx, blockNum)
+			startTxNum, err = rawdb.TxNums.Min(dbtx, blockNum)
 			if err != nil {
 				return err
 			}

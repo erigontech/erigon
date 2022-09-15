@@ -502,7 +502,7 @@ func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22,
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
 	}
 
-	txnFrom, err := rawdb.MinTxNum(p.tx, from+1)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
 	if err != nil {
 		return err
 	}
@@ -669,7 +669,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, codes bool) error {
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
-	txnFrom, err := rawdb.MinTxNum(p.tx, unwindTo)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
 	}

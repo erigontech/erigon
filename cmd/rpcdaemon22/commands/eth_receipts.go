@@ -127,12 +127,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
-		fromTxNum, err = rawdb.MinTxNum(tx, begin)
+		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
 		if err != nil {
 			return nil, err
 		}
 	}
-	toTxNum, err = rawdb.MinTxNum(tx, end) // end is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
-		ok, blockNum, err := rawdb.FindByMaxTxNum(tx, txNum)
+		ok, blockNum, err := rawdb.TxNums.FindBlockNum(tx, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -205,7 +205,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum, err = rawdb.MinTxNum(tx, blockNum)
+			startTxNum, err = rawdb.TxNums.Min(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}

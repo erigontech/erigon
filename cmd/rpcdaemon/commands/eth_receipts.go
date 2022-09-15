@@ -273,12 +273,12 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
-		fromTxNum, err = rawdb.MinTxNum(tx, begin)
+		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
 		if err != nil {
 			return nil, err
 		}
 	}
-	fromTxNum, err = rawdb.MaxTxNum(tx, end) // end is an inclusive bound
+	fromTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
-		ok, blockNum, err := rawdb.FindByMaxTxNum(tx, txNum)
+		ok, blockNum, err := rawdb.TxNums.FindBlockNum(tx, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -353,7 +353,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum, err = rawdb.MinTxNum(tx, blockNum) // end is an inclusive bound
+			startTxNum, err = rawdb.TxNums.Min(tx, blockNum) // end is an inclusive bound
 			if err != nil {
 				return nil, err
 			}

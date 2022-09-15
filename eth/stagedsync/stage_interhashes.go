@@ -198,7 +198,7 @@ func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, txNums *exec22.TxNum
 	agg.SetTx(p.tx)
 	var k, v []byte
 
-	txnFrom, err := rawdb.MinTxNum(p.tx, from+1)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 }
 
 func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, load func(k, v []byte)) error {
-	txnFrom, err := rawdb.MinTxNum(p.tx, unwindTo)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
 	}

@@ -1723,7 +1723,11 @@ func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint6
 	return nil
 }
 
-func MaxTxNum(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+type txNums struct{}
+
+var TxNums txNums
+
+func (txNums) Max(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
 	v, err := tx.GetOne(kv.MaxTxNum, k[:])
@@ -1735,7 +1739,7 @@ func MaxTxNum(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
-func MinTxNum(tx kv.Getter, blockNum uint64) (minTxNum uint64, err error) {
+func (txNums) Min(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
 	}
@@ -1750,19 +1754,18 @@ func MinTxNum(tx kv.Getter, blockNum uint64) (minTxNum uint64, err error) {
 	}
 	return binary.BigEndian.Uint64(v) + 1, nil
 }
-func AppendMaxTxNum(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
+
+func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	lastK, err := LastKey(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
 	}
 	var lastBlockNum uint64
-	//if len(lastK) > 0 {
 	lastBlockNum = binary.BigEndian.Uint64(lastK)
 	if lastBlockNum+1 != blockNum {
 		err := fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
 		panic(err)
 	}
-	//}
 
 	var k, v [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
@@ -1772,7 +1775,13 @@ func AppendMaxTxNum(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	}
 	return nil
 }
-func TruncateMaxTxNum(tx kv.RwTx, blockNum uint64) (err error) {
+func (txNums) WriteForGenesis(tx kv.RwTx, maxTxNum uint64) (err error) {
+	var k, v [8]byte
+	binary.BigEndian.PutUint64(k[:], 0)
+	binary.BigEndian.PutUint64(v[:], maxTxNum)
+	return tx.Put(kv.MaxTxNum, k[:], v[:])
+}
+func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
 	c, err := tx.RwCursor(kv.MaxTxNum)
@@ -1791,7 +1800,7 @@ func TruncateMaxTxNum(tx kv.RwTx, blockNum uint64) (err error) {
 	}
 	return nil
 }
-func FindByMaxTxNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum uint64, err error) {
+func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum uint64, err error) {
 	var seek [8]byte
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {

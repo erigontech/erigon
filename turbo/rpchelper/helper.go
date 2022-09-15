@@ -121,7 +121,7 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNum
 			aggCtx.SetTx(tx)
 			r := state.NewHistoryReader22(aggCtx)
 			r.SetTx(tx)
-			minTxNum, err := rawdb.MinTxNum(tx, blockNumber+1)
+			minTxNum, err := rawdb.TxNums.Min(tx, blockNumber+1)
 			if err != nil {
 				return nil, err
 			}

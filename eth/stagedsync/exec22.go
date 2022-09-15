@@ -115,7 +115,7 @@ func Exec22(ctx context.Context,
 	heap.Init(&rws)
 	var outputTxNum uint64
 	if block > 0 {
-		maxTxNum, err := rawdb.MaxTxNum(applyTx, block-1)
+		maxTxNum, err := rawdb.TxNums.Max(applyTx, block-1)
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,7 @@ func Exec22(ctx context.Context,
 
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
-	maxTxNum, err := rawdb.MaxTxNum(applyTx, maxBlockNum)
+	maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func Exec22(ctx context.Context,
 	}
 	var inputTxNum uint64
 	if block > 0 {
-		maxTxNum, err := rawdb.MaxTxNum(applyTx, block-1)
+		maxTxNum, err := rawdb.TxNums.Max(applyTx, block-1)
 		if err != nil {
 			return err
 		}
@@ -392,7 +392,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	var ok bool
 	var blockNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		ok, blockNum, err = rawdb.FindByMaxTxNum(tx, agg.EndTxNumMinimax())
+		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
@@ -425,7 +425,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 
 	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		txNum, err = rawdb.MaxTxNum(tx, blockNum-1)
+		txNum, err = rawdb.TxNums.Max(tx, blockNum-1)
 		if err != nil {
 			return err
 		}

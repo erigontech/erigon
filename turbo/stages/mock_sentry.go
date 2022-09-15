@@ -683,7 +683,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		aggCtx.SetTx(tx)
 		r := state.NewHistoryReader22(aggCtx)
 		r.SetTx(tx)
-		minTxNum, err := rawdb.MinTxNum(tx, blockNum)
+		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
 		if err != nil {
 			panic(err)
 		}

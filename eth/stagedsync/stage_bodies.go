@@ -120,7 +120,7 @@ func BodiesForward(
 	// do opposite here - without storing any meta-info.
 	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV2 {
-			if err := rawdb.AppendMaxTxNum(tx, blockNum, lastTxnNum); err != nil {
+			if err := rawdb.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
 			}
 			//cfg.txNums.Append(blockNum, lastTxnNum)
@@ -211,7 +211,7 @@ Loop:
 				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV2 && ok {
-				if err := rawdb.AppendMaxTxNum(tx, blockHeight, lastTxnNum); err != nil {
+				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return err
 				}
 				//cfg.txNums.Append(blockHeight, lastTxnNum)
@@ -314,7 +314,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		return err
 	}
 	if cfg.historyV2 {
-		if err := rawdb.TruncateMaxTxNum(tx, u.UnwindPoint+1); err != nil {
+		if err := rawdb.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
 			return err
 		}
 	}
