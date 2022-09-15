@@ -4,7 +4,10 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // Forks is a data type to record a list of forks passed by this node
@@ -28,4 +31,47 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	forksBlocks := forkid.GatherForks(chainConfig)
 
 	return Forks{genesis.Hash(), forksBlocks}, nil
+}
+
+// Post the merge eth_blockNumber will return latest forkChoiceHead block number
+// erigon_blockNumber will return latest executed block number or any block number requested
+func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var rpcBlockNum rpc.BlockNumber
+	if rpcBlockNumPtr == nil {
+		rpcBlockNum = rpc.LatestExecutedBlockNumber
+	}
+
+	var blockNum uint64
+	switch rpcBlockNum {
+	case rpc.LatestBlockNumber:
+		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+	case rpc.EarliestBlockNumber:
+		blockNum = 0
+	case rpc.SafeBlockNumber:
+		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+	case rpc.FinalizedBlockNumber:
+		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+	default:
+		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return hexutil.Uint64(blockNum), nil
 }
