@@ -215,7 +215,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 						maxTxNum := baseTxNum + txAmount - 1
 						binary.BigEndian.PutUint64(k[:], blockNum)
 						binary.BigEndian.PutUint64(v[:], maxTxNum)
-						return tx.Append(kv.MaxTxNum, k[:], v[:])
+						if err := tx.Append(kv.MaxTxNum, k[:], v[:]); err != nil {
+							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+						}
+						return nil
 					}); err != nil {
 						return err
 					}
