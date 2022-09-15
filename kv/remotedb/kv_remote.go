@@ -69,12 +69,17 @@ func (opts remoteOpts) WithBucketsConfig(f mdbx.TableCfgFunc) remoteOpts {
 }
 
 func (opts remoteOpts) Open() (*RemoteKV, error) {
+	targetSemCount := int64(runtime.GOMAXPROCS(-1)) - 1
+	if targetSemCount <= 1 {
+		targetSemCount = 2
+	}
+
 	db := &RemoteKV{
 		opts:         opts,
 		remoteKV:     opts.remoteKV,
 		log:          log.New("remote_db", opts.DialAddress),
 		buckets:      kv.TableCfg{},
-		roTxsLimiter: semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1)) - 1), // 1 less than max to allow unlocking
+		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
 	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
