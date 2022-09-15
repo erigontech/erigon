@@ -202,7 +202,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err := cfg.snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 				for _, b := range bs {
 					if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-						if blockNum > toBlock {
+						if blockNum == 0 || blockNum > toBlock {
 							return nil
 						}
 						select {
