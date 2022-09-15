@@ -121,7 +121,7 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 func (opts MdbxOpts) InMem() MdbxOpts {
 	opts.inMem = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.LifoReclaim | mdbx.WriteMap
-	opts.mapSize = 64 * datasize.MB
+	opts.mapSize = 512 * datasize.MB
 	return opts
 }
 
