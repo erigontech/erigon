@@ -57,16 +57,16 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot         common.Hash              `json:"stateRoot"`
-	TxRoot            common.Hash              `json:"txRoot"`
-	ReceiptRoot       common.Hash              `json:"receiptsRoot"`
-	LogsHash          common.Hash              `json:"logsHash"`
-	Bloom             types.Bloom              `json:"logsBloom"        gencodec:"required"`
-	Receipts          types.Receipts           `json:"receipts"`
-	Rejected          RejectedTxs              `json:"rejected,omitempty"`
-	Difficulty        *math.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
-	GasUsed           math.HexOrDecimal64      `json:"gasUsed"`
-	ReceiptForStorage *types.ReceiptForStorage `json:"-"`
+	StateRoot        common.Hash           `json:"stateRoot"`
+	TxRoot           common.Hash           `json:"txRoot"`
+	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
+	LogsHash         common.Hash           `json:"logsHash"`
+	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts         types.Receipts        `json:"receipts"`
+	Rejected         RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
+	StateSyncReceipt *types.Receipt        `json:"-"`
 }
 
 func ExecuteBlockEphemerallyForBSC(
@@ -433,33 +433,28 @@ func ExecuteBlockEphemerallyBor(
 	}
 
 	blockLogs := ibs.Logs()
-	var stateSyncReceipt *types.ReceiptForStorage
+	var stateSyncReceipt *types.Receipt
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
-		var stateSyncLogs []*types.Log
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
-			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+			stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
-			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
-
-			stateSyncReceipt = &types.ReceiptForStorage{
-				Status: types.ReceiptStatusSuccessful, // make receipt status successful
-				Logs:   stateSyncLogs,
-			}
+			// fill the state sync with the correct information
+			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 		}
 	}
 
 	execRs := &EphemeralExecResult{
-		TxRoot:            types.DeriveSha(includedTxs),
-		ReceiptRoot:       receiptSha,
-		Bloom:             bloom,
-		LogsHash:          rlpHash(blockLogs),
-		Receipts:          receipts,
-		Difficulty:        (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:           math.HexOrDecimal64(*usedGas),
-		Rejected:          rejectedTxs,
-		ReceiptForStorage: stateSyncReceipt,
+		TxRoot:           types.DeriveSha(includedTxs),
+		ReceiptRoot:      receiptSha,
+		Bloom:            bloom,
+		LogsHash:         rlpHash(blockLogs),
+		Receipts:         receipts,
+		Difficulty:       (*math.HexOrDecimal256)(header.Difficulty),
+		GasUsed:          math.HexOrDecimal64(*usedGas),
+		Rejected:         rejectedTxs,
+		StateSyncReceipt: stateSyncReceipt,
 	}
 
 	return execRs, nil

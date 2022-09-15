@@ -162,7 +162,7 @@ func executeBlock(
 	vmConfig.Tracer = callTracer
 
 	var receipts types.Receipts
-	var stateSyncReceipt *types.ReceiptForStorage
+	var stateSyncReceipt *types.Receipt
 	var execRs *core.EphemeralExecResult
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	isBor := cfg.chainConfig.Bor != nil
@@ -179,7 +179,7 @@ func executeBlock(
 		return err
 	}
 	receipts = execRs.Receipts
-	stateSyncReceipt = execRs.ReceiptForStorage
+	stateSyncReceipt = execRs.StateSyncReceipt
 
 	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {

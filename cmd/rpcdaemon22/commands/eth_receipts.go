@@ -325,7 +325,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		if borTx == nil {
 			return nil, nil
 		}
-		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		borReceipt, err := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		if err != nil {
+			return nil, err
+		}
 		return marshalReceipt(borReceipt, borTx, cc, block, hash), nil
 	}
 
