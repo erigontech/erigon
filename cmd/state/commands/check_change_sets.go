@@ -146,10 +146,10 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-		reader := state.NewPlainState(historyTx, blockNum)
+		reader := state.NewPlainState(historyTx, blockNum-1)
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
-		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
+		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum-1)
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter

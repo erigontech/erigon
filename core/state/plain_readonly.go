@@ -40,7 +40,6 @@ func (a *storageItem) Less(b btree.Item) bool {
 	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
 
-// State at the beginning of blockNr
 type PlainState struct {
 	accHistoryC, storageHistoryC kv.Cursor
 	accChangesC, storageChangesC kv.CursorDupSort
@@ -80,7 +79,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(k[:], addr[:])
-	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr+1)
 	if err != nil {
 		return err
 	}
@@ -107,7 +106,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr, func(kAddr, kLoc, vs []byte) (bool, error) {
+	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
 		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
@@ -152,7 +151,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 }
 
 func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +183,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
+	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr+1)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +213,7 @@ func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uin
 }
 
 func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
+	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+2)
 	if err != nil {
 		return 0, err
 	}

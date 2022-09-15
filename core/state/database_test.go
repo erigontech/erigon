@@ -902,8 +902,8 @@ func TestReproduceCrash(t *testing.T) {
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx := memdb.NewTestTx(t)
-	tsw := state.NewPlainStateWriter(tx, nil, 1)
-	intraBlockState := state.New(state.NewPlainState(tx, 1))
+	tsw := state.NewPlainStateWriter(tx, nil, 0)
+	intraBlockState := state.New(state.NewPlainState(tx, 0))
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
