@@ -377,16 +377,6 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		return nil, fmt.Errorf("headerdownload is nil")
 	}
 
-	if !s.hd.POSSync() {
-		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
-	}
-
-	if s.hd.PosStatus() != headerdownload.Idle {
-		log.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
-	}
-
 	tx, err := s.db.BeginRo(s.ctx)
 	if err != nil {
 		return nil, err
@@ -426,6 +416,11 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
 	}
 
+	if !s.hd.POSSync() {
+		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
+	}
+
 	var canonicalHash common.Hash
 	if header != nil {
 		canonicalHash, err = rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
@@ -463,9 +458,15 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		if header != nil && canonicalHash == blockHash {
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 		}
+
+		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
+			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+		}
 	} else {
-		if header == nil {
-			return nil, nil
+		if s.hd.PosStatus() != headerdownload.Idle {
+			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING, LatestValidHash: common.Hash{}}, nil
 		}
 
 		headHash := rawdb.ReadHeadBlockHash(tx)
