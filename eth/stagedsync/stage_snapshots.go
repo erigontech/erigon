@@ -192,11 +192,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 			toBlock = cmp.Max(toBlock, p)
 
-			var k, v [8]byte
-			// genesis
-			binary.BigEndian.PutUint64(k[:], 0)
-			binary.BigEndian.PutUint64(v[:], 1)
-			if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
+			if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 				return err
 			}
 			if err := cfg.snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
@@ -213,9 +209,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 						default:
 						}
 						maxTxNum := baseTxNum + txAmount - 1
-						binary.BigEndian.PutUint64(k[:], blockNum)
-						binary.BigEndian.PutUint64(v[:], maxTxNum)
-						if err := tx.Append(kv.MaxTxNum, k[:], v[:]); err != nil {
+
+						if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 						}
 						return nil

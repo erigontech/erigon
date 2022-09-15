@@ -462,6 +462,9 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
+	if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
+		return nil, nil, err
+	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
 		return nil, nil, err
 	}
@@ -476,15 +479,6 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	}
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
-	}
-
-	{
-		var k, v [8]byte
-		binary.BigEndian.PutUint64(k[:], 0)
-		binary.BigEndian.PutUint64(v[:], 1)
-		if err := tx.Put(kv.MaxTxNum, k[:], v[:]); err != nil {
-			return nil, nil, err
-		}
 	}
 
 	// We support ethash/serenity for issuance (for now)
