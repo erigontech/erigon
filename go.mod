@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220914040543-a764cc390922
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220916025106-c01c69f4c99f
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -16,6 +16,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.22.2
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.2-0.20220427063716-a4894bb521c6
+	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.46.1-0.20220808053819-61302332cfc5
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd v0.22.0-beta
@@ -91,7 +92,6 @@ require (
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.3.0 // indirect
 	github.com/anacrolix/stm v0.4.0 // indirect
-	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/upnp v0.1.3-0.20220123035249-922794e51c96 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
