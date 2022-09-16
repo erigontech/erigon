@@ -2,6 +2,7 @@ package exec22
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -77,11 +78,9 @@ func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wa
 
 func (rw *Worker22) Tx() kv.Tx { return rw.chainTx }
 func (rw *Worker22) ResetTx(chainTx kv.Tx) {
-	if rw.background && chainTx != nil {
-		if rw.chainTx != nil {
-			rw.chainTx.Rollback()
-			rw.chainTx = nil
-		}
+	if rw.background && rw.chainTx != nil {
+		rw.chainTx.Rollback()
+		rw.chainTx = nil
 	}
 	if chainTx != nil {
 		rw.chainTx = chainTx
@@ -305,8 +304,9 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 		reconWorkers[i] = NewWorker22(lock, background, chainDb, wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
-		for i := 0; i < workerCount; i++ {
-			reconWorkers[i].ResetTx(nil)
+		fmt.Printf("clear\n")
+		for _, w := range reconWorkers {
+			w.ResetTx(nil)
 		}
 	}
 	if workerCount > 1 {

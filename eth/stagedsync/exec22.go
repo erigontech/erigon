@@ -80,12 +80,19 @@ func Exec22(ctx context.Context,
 ) (err error) {
 
 	var block, stageProgress uint64
+	var outputTxNum, maxTxNum uint64
+	var count, repeatCount, triggerCount uint64
+	var resultsSize int64
+	var inputBlockNum, outputBlockNum uint64
+	var lock sync.RWMutex
+	var rws state.TxTaskQueue
+	var rwsLock sync.Mutex
+
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
 	}
 
-	var lock sync.RWMutex
 	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
 	// too keep consistency
 	// will improve it in future versions
@@ -99,22 +106,6 @@ func Exec22(ctx context.Context,
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
 		agg.SetTx(applyTx)
-	}
-	commitThreshold := uint64(1024 * 1024 * 1024)
-	resultsThreshold := int64(1024 * 1024 * 1024)
-	count := uint64(0)
-	repeatCount := uint64(0)
-	triggerCount := uint64(0)
-	resultsSize := int64(0)
-	progress := NewProgress(block)
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	var rws state.TxTaskQueue
-	var rwsLock sync.Mutex
-	rwsReceiveCond := sync.NewCond(&rwsLock)
-	heap.Init(&rws)
-	var outputTxNum, maxTxNum uint64
-	if !parallel {
 		maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
@@ -142,9 +133,13 @@ func Exec22(ctx context.Context,
 			return err
 		}
 	}
-
-	var inputBlockNum, outputBlockNum uint64
-
+	commitThreshold := uint64(1024 * 1024 * 1024)
+	resultsThreshold := int64(1024 * 1024 * 1024)
+	progress := NewProgress(block)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	rwsReceiveCond := sync.NewCond(&rwsLock)
+	heap.Init(&rws)
 	if parallel {
 		// Go-routine gathering results from the workers
 		go func() {
@@ -220,11 +215,11 @@ func Exec22(ctx context.Context,
 							if err = tx.Commit(); err != nil {
 								return err
 							}
-							for i := 0; i < len(reconWorkers); i++ {
-								reconWorkers[i].ResetTx(nil)
-							}
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
+							}
+							for i := 0; i < len(reconWorkers); i++ {
+								reconWorkers[i].ResetTx(nil)
 							}
 							agg.SetTx(tx)
 							return nil
@@ -243,11 +238,10 @@ func Exec22(ctx context.Context,
 	}
 	var inputTxNum uint64
 	if block > 0 {
-		maxTxNum, err := rawdb.TxNums.Max(applyTx, block-1)
+		inputTxNum, err = rawdb.TxNums.Max(applyTx, block-1)
 		if err != nil {
 			return err
 		}
-		inputTxNum = maxTxNum
 	}
 
 	var header *types.Header
