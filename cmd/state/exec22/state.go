@@ -2,7 +2,6 @@ package exec22
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -304,7 +303,6 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 		reconWorkers[i] = NewWorker22(lock, background, chainDb, wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
-		fmt.Printf("clear\n")
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
