@@ -1146,7 +1146,6 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	fmt.Printf("ReadBlockWithSenders hash=%x, number=%d\n", hash, number)
 	block := ReadBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
