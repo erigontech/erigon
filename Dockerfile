@@ -9,7 +9,7 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make all db-tools
+    make git-submodules all db-tools
 
 FROM docker.io/library/alpine:3.15
 
