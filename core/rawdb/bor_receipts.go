@@ -3,6 +3,7 @@ package rawdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -40,11 +41,11 @@ func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVal
 // ReadBorReceipt retrieves all the bor block receipts belonging to a block, including
 // its correspoinding metadata fields. If it is unable to populate these metadata
 // fields then nil is returned.
-func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) (*types.Receipt, error) {
+func ReadBorReceipt(db kv.Tx, number uint64) (*types.Receipt, error) {
 	// We're deriving many fields from the block body, retrieve beside the receipt
 	data, err := db.GetOne(kv.BorReceipts, borReceiptKey(number))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadBorReceipt failed getting bor receipt with blockNumber=%d, err=%s", number, err)
 	}
 	if data == nil {
 		return nil, nil
@@ -85,7 +86,7 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	key := borReceiptKey(number)
 
 	// we delete Bor Receipt log too
-	borReceipt, err := ReadBorReceipt(tx, hash, number)
+	borReceipt, err := ReadBorReceipt(tx, number)
 	if err != nil {
 		log.Crit("Failted to read bor receipt", "err", err)
 	}

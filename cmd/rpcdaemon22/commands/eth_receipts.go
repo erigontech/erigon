@@ -318,14 +318,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 			return nil, nil
 		}
 
-		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
+		borTx, _, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if borTx == nil {
 			return nil, nil
 		}
-		borReceipt, err := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		borReceipt, err := rawdb.ReadBorReceipt(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
