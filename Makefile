@@ -118,7 +118,7 @@ $(COMMANDS): %: %.cmd
 all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
-db-tools: git-submodules
+db-tools:
 	@echo "Building db-tools"
 
 	go mod vendor
