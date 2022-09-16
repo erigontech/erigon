@@ -105,7 +105,6 @@ COMMANDS += integration
 COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
-COMMANDS += rpcdaemon22
 COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
