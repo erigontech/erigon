@@ -274,6 +274,10 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		if criticalError != nil {
 			return
 		}
+		if bodyWithTxs == nil {
+			criticalError = fmt.Errorf("ForkValidator failed to recover block body: %d, %x", header.Number.Uint64(), header.Hash())
+			return
+		}
 		var encodedTxs [][]byte
 		buf := bytes.NewBuffer(nil)
 		for _, tx := range bodyWithTxs.Transactions {
