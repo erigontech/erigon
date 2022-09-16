@@ -112,14 +112,16 @@ func Exec22(ctx context.Context,
 	var rwsLock sync.Mutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
-	var outputTxNum uint64
+	var inputTxNum, outputTxNum uint64
 	if block > 0 {
-		outputTxNum = txNums.MaxOf(block - 1)
+		outputTxNum = txNums.MaxOf(execStage.BlockNumber)
+		inputTxNum = txNums.MaxOf(execStage.BlockNumber)
 	}
 
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
+	agg.SetTxNum(inputTxNum)
 	if parallel {
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -214,10 +216,6 @@ func Exec22(ctx context.Context,
 				panic(err)
 			}
 		}()
-	}
-	var inputTxNum uint64
-	if block > 0 {
-		inputTxNum = txNums.MaxOf(block - 1)
 	}
 
 	var header *types.Header
@@ -376,7 +374,6 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
-	block := s.BlockNumber
 
 	endTxNumMinimax := agg.EndTxNumMinimax()
 	ok, blockNum := txNums.Find(endTxNumMinimax)
@@ -384,15 +381,11 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
-	toBlock := blockNum
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
-	if block+1 > blockNum {
-		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
-	}
-	blockNum = block + 1
-	txNum := txNums.MaxOf(blockNum - 1)
+	blockNum--
+	txNum := txNums.MaxOf(blockNum)
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)
@@ -617,7 +610,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
-						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+						if err := db.Update(ctx, func(tx kv.RwTx) error {
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
@@ -643,7 +636,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	var inputTxNum uint64
 	var header *types.Header
 	var txKey [8]byte
-	for bn := uint64(0); bn < blockNum; bn++ {
+	for bn := uint64(0); bn <= blockNum; bn++ {
 		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
 			panic(err)
 		}
@@ -868,10 +861,10 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			return err
 		}
 		plainContractCollector.Close()
-		if err := s.Update(tx, toBlock); err != nil {
+		if err := s.Update(tx, blockNum); err != nil {
 			return err
 		}
-		s.BlockNumber = toBlock
+		s.BlockNumber = blockNum
 		return nil
 	}); err != nil {
 		return err

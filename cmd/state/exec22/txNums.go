@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
@@ -49,11 +48,6 @@ func (s *TxNums) Find(endTxNumMinimax uint64) (ok bool, blockNum uint64) {
 }
 
 func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
-	historyV2 := fromdb.HistoryV2(db)
-	if !historyV2 {
-		return nil
-	}
-
 	var toBlock uint64
 	if s != nil {
 		toBlock = s.BlocksAvailable()
@@ -75,7 +69,7 @@ func TxNumsFromDB(s *snapshotsync.RoSnapshots, db kv.RoDB) *TxNums {
 			if blockNum > toBlock {
 				return nil
 			}
-			txNums.nums[blockNum] = baseTxNum + txAmount - 1
+			txNums.nums[blockNum] = baseTxNum + txAmount
 			return nil
 		}); err != nil {
 			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
