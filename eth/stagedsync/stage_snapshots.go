@@ -131,7 +131,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
+	blocksAvailable := cfg.snapshots.BlocksAvailable()
+	if s.BlockNumber < blocksAvailable { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
@@ -169,7 +170,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+		ok, err := cfg.snapshots.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
 			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
 			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
 				return err
@@ -180,27 +181,34 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+			return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
 		}
-		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, cfg.snapshots.BlocksAvailable())
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blocksAvailable)
 		if err != nil {
 			return err
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 			return err
 		}
-		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+		if err = s.Update(tx, blocksAvailable); err != nil {
 			return err
 		}
-		// saving the stage progress of other stages that are contained inside of snapshots
-		_ = stages.SaveStageProgress(tx, stages.Headers, cfg.snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.Bodies, cfg.snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.BlockHashes, cfg.snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.Senders, cfg.snapshots.BlocksAvailable())
-		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+		// updating the progress of further stages (but only forward) that are contained inside of snapshots
+		for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
+			var progress uint64
+			if progress, err = stages.GetStageProgress(tx, stage); err != nil {
+				return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
+			}
+			if progress < blocksAvailable {
+				if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
+					return fmt.Errorf("advancing %s stage: %w", stage, err)
+				}
+			}
+		}
+		s.BlockNumber = blocksAvailable
 	}
 
-	if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+	if err := cfg.hd.AddHeadersFromSnapshot(tx, blocksAvailable, cfg.blockReader); err != nil {
 		return err
 	}
 

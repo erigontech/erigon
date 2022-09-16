@@ -518,7 +518,6 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 
 func ReadCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBody(db, hash, number)
-	fmt.Printf("block body %d %x, baseTxId = %d, txAmount = %d\n", number, hash, baseTxId, txAmount)
 	if body == nil {
 		return nil
 	}
@@ -1119,7 +1118,6 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 }
 
 func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	fmt.Printf("NonCanonicalBlockWithSenders hash=%x, number=%d\n", hash, number)
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
