@@ -60,7 +60,8 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 		}
 	}()
 	marker := NewVerkleMarker()
-	defer marker.Close()
+	defer marker.Rollback()
+
 	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
 			return err
@@ -113,7 +114,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 
 		if len(storageValue) > 0 {
 			storageValueFormatted = make([]byte, 32)
-			int256ToVerkleFormat(*new(uint256.Int).SetBytes(storageValue), storageValueFormatted[:])
+			int256ToVerkleFormat(new(uint256.Int).SetBytes(storageValue), storageValueFormatted)
 		}
 
 		jobs <- &regeneratePedersenStorageJob{

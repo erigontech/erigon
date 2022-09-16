@@ -107,7 +107,7 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 		}
 	}()
 	marker := NewVerkleMarker()
-	defer marker.Close()
+	defer marker.Rollback()
 
 	accountProcessed := 0
 	for k, v, err := accountCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = accountCursor.Next() {

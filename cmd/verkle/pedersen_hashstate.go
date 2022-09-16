@@ -259,7 +259,7 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 				lookupKey := make([]byte, 24)
 				copy(lookupKey, o.address[:])
 				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
-				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
+				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i]); err != nil {
 					panic(err)
 				}
 			}
