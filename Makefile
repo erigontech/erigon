@@ -119,20 +119,13 @@ $(COMMANDS): %: %.cmd
 all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
-db-tools: git-submodules
+db-tools:
 	@echo "Building db-tools"
 
-	@# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
-	rm -rf libmdbx
-	git submodule update --init --recursive --force libmdbx
-
-	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
-	cp libmdbx/mdbx_chk $(GOBIN)
-	cp libmdbx/mdbx_copy $(GOBIN)
-	cp libmdbx/mdbx_dump $(GOBIN)
-	cp libmdbx/mdbx_drop $(GOBIN)
-	cp libmdbx/mdbx_load $(GOBIN)
-	cp libmdbx/mdbx_stat $(GOBIN)
+	go mod vendor
+	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	cp vendor/github.com/torquem-ch/mdbx-go/mdbxdist/{mdbx_chk,mdbx_copy,mdbx_dump,mdbx_drop,mdbx_load,mdbx_stat} $(GOBIN)
+	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 ## test:                              run unit tests with a 50s timeout
