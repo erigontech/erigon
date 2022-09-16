@@ -123,6 +123,7 @@ db-tools:
 	@echo "Building db-tools"
 
 	go mod vendor
+	cd vendor/github.com/torquem-ch/mdbx-go && cat Makefile
 	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp vendor/github.com/torquem-ch/mdbx-go/mdbxdist/{mdbx_chk,mdbx_copy,mdbx_dump,mdbx_drop,mdbx_load,mdbx_stat} $(GOBIN)
 	rm -rf vendor
