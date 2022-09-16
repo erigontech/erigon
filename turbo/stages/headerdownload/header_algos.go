@@ -428,6 +428,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 
 	timeout = anchor.timeouts >= 10
 	if timeout {
+		log.Warn("[Downloader] Timeout", "requestId", hd.requestId, "peerID", common.Bytes2Hex(anchor.peerID[:]))
 		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
 		return
 	}
@@ -660,7 +661,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 				log.Info("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
 				return nil, nil
 			}
-			log.Warn("[Downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
+			log.Warn("[Downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
@@ -1281,7 +1282,6 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				var timeout bool
 				timeout, req, penalties = hd.requestMoreHeadersForPOS(currentTime)
 				if timeout {
-					log.Warn("[Downloader] Timeout", "requestId", hd.requestId)
 					hd.BeaconRequestList.Remove(hd.requestId)
 					hd.cleanUpPoSDownload()
 				}
