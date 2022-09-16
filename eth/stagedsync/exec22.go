@@ -267,7 +267,9 @@ loop:
 			} else if parallel {
 				rs.AddWork(txTask)
 			}
-			if !parallel {
+			if parallel {
+				stageProgress = blockNum
+			} else {
 				count++
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
