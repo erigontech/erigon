@@ -15,7 +15,7 @@
         "Syncing on an Invalid Terminal Execution - Sealed Nonce",
         "Syncing on an Invalid Terminal Execution - Balance Mismatch",
         "Stop processing gossiped Post-TTD PoW blocks",
-        "Terminal blocks are gossiped"
+        "Terminal blocks are gossiped (Common Ancestor Depth 5"
       ]
     }
   ]
