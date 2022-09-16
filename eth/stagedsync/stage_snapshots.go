@@ -193,19 +193,20 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err = s.Update(tx, blocksAvailable); err != nil {
 			return err
 		}
-		// updating the progress of further stages (but only forward) that are contained inside of snapshots
-		for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
-			var progress uint64
-			if progress, err = stages.GetStageProgress(tx, stage); err != nil {
-				return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
-			}
-			if progress < blocksAvailable {
-				if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
-					return fmt.Errorf("advancing %s stage: %w", stage, err)
-				}
+		s.BlockNumber = blocksAvailable
+	}
+	// updating the progress of further stages (but only forward) that are contained inside of snapshots
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
+		var progress uint64
+		var err error
+		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
+			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
+		}
+		if progress < blocksAvailable {
+			if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
+				return fmt.Errorf("advancing %s stage: %w", stage, err)
 			}
 		}
-		s.BlockNumber = blocksAvailable
 	}
 
 	if err := cfg.hd.AddHeadersFromSnapshot(tx, blocksAvailable, cfg.blockReader); err != nil {
