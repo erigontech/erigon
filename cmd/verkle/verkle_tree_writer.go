@@ -185,7 +185,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 		rootNode = verkle.New()
 	}
 
-	insertionBeforeFlushing := 4_000_000 // 4M node to flush at a time
+	insertionBeforeFlushing := 2_000_000 // 2M node to flush at a time
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
