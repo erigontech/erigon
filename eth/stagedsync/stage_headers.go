@@ -154,7 +154,7 @@ func HeadersPOS(
 	}
 
 	cfg.hd.SetPOSSync(true)
-	syncing := cfg.hd.PosStatus() == headerdownload.Syncing
+	syncing := cfg.hd.PosStatus() != headerdownload.Idle
 	if !syncing {
 		log.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", s.LogPrefix()))
 	}
