@@ -154,7 +154,6 @@ lintci-deps:
 clean:
 	go clean -cache
 	rm -fr build/*
-	cd libmdbx/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
