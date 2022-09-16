@@ -518,6 +518,7 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 
 func ReadCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	fmt.Printf("block body %d %x, baseTxId = %d, txAmount = %d\n", number, hash, baseTxId, txAmount)
 	if body == nil {
 		return nil
 	}
