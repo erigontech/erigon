@@ -186,6 +186,12 @@ var (
 		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
+
+	EvmCallTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.evmtimeout",
+		Usage: "Maximum amount of time to wait for the answer from EVM call.",
+		Value: rpccfg.DefaultEvmCallTimeout,
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -350,6 +356,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 			WriteTimeout: ctx.GlobalDuration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
 		},
+		EvmCallTimeout: ctx.GlobalDuration(EvmCallTimeoutFlag.Name),
 
 		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),

@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"time"
 )
 
 type HttpCfg struct {
@@ -47,4 +48,5 @@ type HttpCfg struct {
 	TraceRequests            bool   // Always trace requests in INFO level
 	HTTPTimeouts             rpccfg.HTTPTimeouts
 	AuthRpcTimeouts          rpccfg.HTTPTimeouts
+	EvmCallTimeout           time.Duration
 }

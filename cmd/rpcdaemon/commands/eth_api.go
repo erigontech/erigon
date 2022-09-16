@@ -5,6 +5,7 @@ import (
 	"context"
 	"math/big"
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -110,9 +111,11 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator22
 	_txNums      *exec22.TxNums
+
+	evmCallTimeout time.Duration
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, singleNodeMode bool, evmCallTimeout time.Duration) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -122,7 +125,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, _txNums: txNums}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, _txNums: txNums, evmCallTimeout: evmCallTimeout}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
