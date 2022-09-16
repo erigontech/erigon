@@ -523,7 +523,7 @@ func extractBodies(chaindata string, block uint64) error {
 				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
 			}
 		}
-		txId += uint64(txAmount)
+		txId += uint64(txAmount) + 2
 		//if i == 1 {
 		//	break
 		//}
