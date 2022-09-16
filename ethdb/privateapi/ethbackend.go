@@ -464,7 +464,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 	} else {
-		if s.hd.PosStatus() != headerdownload.Idle {
+		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
 			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
