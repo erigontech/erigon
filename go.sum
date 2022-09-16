@@ -627,6 +627,8 @@ github.com/tinylib/msgp v1.1.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDW
 github.com/tmc/grpc-websocket-proxy v0.0.0-20170815181823-89b8d40f7ca8/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
 github.com/torquem-ch/mdbx-go v0.25.4-0.20220916072729-90551655d8fc h1:EzrHYYatBgSNaiH1T42DQLteP42s5NQecCDHg8QFozY=
 github.com/torquem-ch/mdbx-go v0.25.4-0.20220916072729-90551655d8fc/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
+github.com/torquem-ch/mdbx-go v0.25.4-0.20220916074448-8908b54819d4 h1:1t0Hp4H6lMyib471p6Q0bCtbjZ+MdWq0wmDdhzapBaA=
+github.com/torquem-ch/mdbx-go v0.25.4-0.20220916074448-8908b54819d4/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
 github.com/ugorji/go v1.1.13/go.mod h1:jxau1n+/wyTGLQoCkjok9r5zFa/FxT6eI5HiHKQszjc=
 github.com/ugorji/go/codec v1.1.13 h1:013LbFhocBoIqgHeIHKlV4JWYhqogATYWZhIcH0WHn4=
 github.com/ugorji/go/codec v1.1.13/go.mod h1:oNVt3Dq+FO91WNQ/9JnHKQP2QJxTzoN7wCBFCq1OeuU=
