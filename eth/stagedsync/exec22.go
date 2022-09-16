@@ -127,12 +127,12 @@ func Exec22(ctx context.Context,
 		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
-			maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
+			maxTxNum, err = rawdb.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
 			}
 			if block > 0 {
-				maxTxNum, err = rawdb.TxNums.Max(applyTx, block-1)
+				maxTxNum, err = rawdb.TxNums.Max(tx, block-1)
 				if err != nil {
 					return err
 				}
