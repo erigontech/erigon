@@ -12,6 +12,7 @@ type VerkleMarker struct {
 	tx kv.RwTx
 }
 
+//nolint:gocritic
 func NewVerkleMarker() *VerkleMarker {
 	markedSlotsDb, err := mdbx.NewTemporaryMdbx()
 	if err != nil {
@@ -22,7 +23,6 @@ func NewVerkleMarker() *VerkleMarker {
 	if err != nil {
 		panic(err)
 	}
-	defer tx.Rollback()
 
 	return &VerkleMarker{
 		db: markedSlotsDb,
@@ -38,7 +38,7 @@ func (v *VerkleMarker) IsMarked(key []byte) (bool, error) {
 	return v.tx.Has(kv.Headers, key)
 }
 
-func (v *VerkleMarker) Close() {
+func (v *VerkleMarker) Rollback() {
 	v.tx.Rollback()
 	v.db.Close()
 }

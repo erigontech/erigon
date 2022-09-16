@@ -18,7 +18,6 @@ import (
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
 	var err error
 	totalInserted := 0
-	log.Info("Starting to flush verkle nodes")
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
 		if err != nil {
 			return
@@ -38,7 +37,6 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		default:
 		}
 	})
-	log.Info("Finished flushing process", "inserted", totalInserted)
 	return err
 }
 
@@ -52,7 +50,7 @@ type VerkleTreeWriter struct {
 func NewVerkleTreeWriter(db kv.RwTx, tmpdir string) *VerkleTreeWriter {
 	return &VerkleTreeWriter{
 		db:        db,
-		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize)),
+		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8)),
 		tmpdir:    tmpdir,
 	}
 }
@@ -69,13 +67,8 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, acc
 	nonceKey[31] = vtree.NonceLeafKey
 	balanceKey[31] = vtree.BalanceLeafKey
 	codeSizeKey[31] = vtree.CodeSizeLeafKey
-	// Pack balance and nonce in 32 bytes LE format
-	bbytes := acc.Balance.ToBig().Bytes()
-	if len(bbytes) > 0 {
-		for i, b := range bbytes {
-			balance[len(bbytes)-i-1] = b
-		}
-	}
+	// Process values
+	int256ToVerkleFormat(&acc.Balance, balance[:])
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
 	binary.LittleEndian.PutUint64(cs[:], codeSize)
 
@@ -117,12 +110,12 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 	return nil
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() error {
+func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if err := v.db.ClearBucket(VerkleTrie); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	verkleCollector := etl.NewCollector(VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -151,17 +144,17 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() error {
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	log.Info("Started Verkle Tree Flushing")
-	return verkleCollector.Load(v.db, VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	return root.ComputeCommitment().Bytes(), verkleCollector.Load(v.db, VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}})
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
+func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return v.db.GetOne(VerkleTrie, root)
 	}
@@ -176,23 +169,29 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 	if root != (common.Hash{}) {
 		nodeEncoded, err := v.db.GetOne(VerkleTrie, root[:])
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		rootNode, err = verkle.ParseNode(nodeEncoded, 0, root[:])
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	} else {
 		rootNode = verkle.New()
 	}
 
-	insertionBeforeFlushing := 4_000_000 // 4M node to flush at a time
+	insertionBeforeFlushing := 2_000_000 // 2M node to flush at a time
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
-			return err
+		if len(value) == 0 {
+			if err := rootNode.Delete(common.CopyBytes(key), resolverFunc); err != nil {
+				return err
+			}
+		} else {
+			if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
+				return err
+			}
 		}
 		insertions++
 		if insertions > insertionBeforeFlushing {
@@ -203,7 +202,8 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) error {
 		}
 		return next(key, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
-	return flushVerkleNode(v.db, rootNode, logInterval, nil)
+	commitment := rootNode.ComputeCommitment().Bytes()
+	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
 }
