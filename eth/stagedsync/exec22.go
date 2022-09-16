@@ -113,23 +113,40 @@ func Exec22(ctx context.Context,
 	var rwsLock sync.Mutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
-	var outputTxNum uint64
-	if block > 0 {
-		maxTxNum, err := rawdb.TxNums.Max(applyTx, block-1)
+	var outputTxNum, maxTxNum uint64
+	if !parallel {
+		maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
 		}
-		outputTxNum = maxTxNum
+		if block > 0 {
+			outputTxNum, err = rawdb.TxNums.Max(applyTx, block-1)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := chainDb.View(ctx, func(tx kv.Tx) error {
+			maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
+			if err != nil {
+				return err
+			}
+			if block > 0 {
+				maxTxNum, err = rawdb.TxNums.Max(applyTx, block-1)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	var inputBlockNum, outputBlockNum uint64
-	// Go-routine gathering results from the workers
-	maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
-	if err != nil {
-		return err
-	}
 
 	if parallel {
+		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
