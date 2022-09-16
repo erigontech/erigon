@@ -38,6 +38,7 @@ type Aggregator22 struct {
 	txNum           uint64
 	logPrefix       string
 	rwTx            kv.RwTx
+	maxTxNum        uint64
 }
 
 func NewAggregator22(
@@ -76,6 +77,7 @@ func NewAggregator22(
 		return nil, err
 	}
 	closeAgg = false
+	a.maxTxNum = a.EndTxNumMinimax()
 	return a, nil
 }
 
@@ -611,6 +613,9 @@ func (a *Aggregator22) ReadyToFinishTx() bool {
 }
 
 func (a *Aggregator22) FinishTx() error {
+	if (a.txNum + 1) <= a.maxTxNum+a.aggregationStep {
+		return nil
+	}
 	if (a.txNum+1)%a.aggregationStep != 0 {
 		return nil
 	}
