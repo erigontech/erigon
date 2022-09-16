@@ -148,6 +148,10 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if block == nil {
 		return nil, fmt.Errorf("could not find block %d", uint64(bn))
 	}
+	for txIndex, txn := range block.Transactions() {
+		s, _ := txn.GetSender()
+		fmt.Printf("txIndex %d, txhash %x, sender %x\n", txIndex, txn.Hash(), s)
+	}
 
 	parentNr := bn
 	if parentNr > 0 {

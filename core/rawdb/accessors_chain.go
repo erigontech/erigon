@@ -1118,6 +1118,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 }
 
 func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
+	fmt.Printf("NonCanonicalBlockWithSenders hash=%x, number=%d\n", hash, number)
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
@@ -1146,6 +1147,7 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
+	fmt.Printf("ReadBlockWithSenders hash=%x, number=%d\n", hash, number)
 	block := ReadBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
