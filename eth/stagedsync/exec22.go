@@ -112,14 +112,16 @@ func Exec22(ctx context.Context,
 	var rwsLock sync.Mutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
-	var outputTxNum uint64
+	var inputTxNum, outputTxNum uint64
 	if block > 0 {
-		outputTxNum = txNums.MaxOf(block - 1)
+		outputTxNum = txNums.MaxOf(execStage.BlockNumber)
+		inputTxNum = txNums.MaxOf(execStage.BlockNumber)
 	}
 
 	var inputBlockNum, outputBlockNum uint64
 	// Go-routine gathering results from the workers
 	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
+	agg.SetTxNum(inputTxNum)
 	if parallel {
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -215,11 +217,6 @@ func Exec22(ctx context.Context,
 			}
 		}()
 	}
-	var inputTxNum uint64
-	if block > 0 {
-		inputTxNum = txNums.MaxOf(block - 1)
-	}
-	agg.SetTxNum(inputTxNum)
 
 	var header *types.Header
 	var blockNum uint64
