@@ -169,28 +169,32 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	var currentBlock *types.Block
+	_ = config.Genesis.Alloc
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+	var chainConfig *params.ChainConfig
+	var genesis *types.Block
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			panic(err)
 		}
-		if h != (common.Hash{}) {
-			config.Genesis = nil // fallback to db content
+		genesisSpec := config.Genesis
+		if h != (common.Hash{}) { // fallback to db content
+			genesisSpec = nil
 		}
+		var genesisErr error
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
+		if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+			return genesisErr
+		}
+
 		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
-
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlockWithOverride(chainKv, config.Genesis, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
-		return nil, genesisErr
-	}
-
 	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())

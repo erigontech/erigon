@@ -224,6 +224,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 			config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
 		}
 	}
+
 	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
@@ -313,6 +314,7 @@ func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
+	_ = g.Alloc //nil-check
 	var root common.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
@@ -480,7 +482,6 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
-
 	// We support ethash/serenity for issuance (for now)
 	if g.Config.Consensus != params.EtHashConsensus {
 		return block, statedb, nil
@@ -503,7 +504,6 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
 		return nil, nil, err
 	}
-
 	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, common.Big0)
 }
 

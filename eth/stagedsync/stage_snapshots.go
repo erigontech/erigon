@@ -103,6 +103,8 @@ func SpawnStageSnapshots(
 	return nil
 }
 
+const ASSERT = true
+
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
 	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
@@ -140,6 +142,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				cfg.dbEventNotifier.OnNewSnapshot()
 			}
 		}
+	}
+
+	if ASSERT {
+		snapshotsync.AssertCount(cfg.snapshots.Dir())
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis

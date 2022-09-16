@@ -2138,3 +2138,38 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, f func(blockNum uint64
 	}
 	return nil
 }
+
+func AssertCount(snapDir string) {
+	segments, _, err := Segments(snapDir)
+	if err != nil {
+		panic(err)
+	}
+	for _, s := range segments {
+		if s.T != snap.Transactions {
+			continue
+		}
+		blockFrom, blockTo := s.From, s.To
+		_, expectedCount, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
+		if err != nil {
+			panic(err)
+		}
+		bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+		bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+		if err != nil {
+			panic(err)
+		}
+		defer bodiesSegment.Close()
+
+		segFileName := snap.SegmentFileName(blockFrom, blockTo, snap.Transactions)
+		segmentFilePath := filepath.Join(snapDir, segFileName)
+		d, err := compress.NewDecompressor(segmentFilePath)
+		if err != nil {
+			panic(err)
+		}
+		defer d.Close()
+		if uint64(d.Count()) != expectedCount {
+			panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
+		}
+	}
+
+}
