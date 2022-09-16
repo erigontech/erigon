@@ -68,12 +68,7 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, acc
 	balanceKey[31] = vtree.BalanceLeafKey
 	codeSizeKey[31] = vtree.CodeSizeLeafKey
 	// Pack balance and nonce in 32 bytes LE format
-	bbytes := acc.Balance.ToBig().Bytes()
-	if len(bbytes) > 0 {
-		for i, b := range bbytes {
-			balance[len(bbytes)-i-1] = b
-		}
-	}
+	int256ToVerkleFormat(acc.Balance, balance[:])
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
 	binary.LittleEndian.PutUint64(cs[:], codeSize)
 

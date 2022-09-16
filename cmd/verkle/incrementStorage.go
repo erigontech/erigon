@@ -112,8 +112,8 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 		var storageValueFormatted []byte
 
 		if len(storageValue) > 0 {
-			storageValueFormatted32 := new(uint256.Int).SetBytes(storageValue).Bytes32()
-			storageValueFormatted = storageValueFormatted32[:]
+			storageValueFormatted = make([]byte, 32)
+			int256ToVerkleFormat(*new(uint256.Int).SetBytes(storageValue), storageValueFormatted[:])
 		}
 
 		jobs <- &regeneratePedersenStorageJob{

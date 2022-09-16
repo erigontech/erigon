@@ -3,12 +3,22 @@ package main
 import (
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
+
+func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
+	bbytes := x.ToBig().Bytes()
+	if len(bbytes) > 0 {
+		for i, b := range bbytes {
+			buffer[len(bbytes)-i-1] = b
+		}
+	}
+}
 
 func GenerateVerkleTree(cfg optionsCfg) error {
 	start := time.Now()
