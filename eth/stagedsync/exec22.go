@@ -293,6 +293,7 @@ loop:
 			} else if parallel {
 				rs.AddWork(txTask)
 			}
+			stageProgress = blockNum
 			if !parallel {
 				count++
 				reconWorkers[0].RunTxTask(txTask)
@@ -307,7 +308,6 @@ loop:
 					return fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
 				}
 
-				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
 					progress.Log(rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
