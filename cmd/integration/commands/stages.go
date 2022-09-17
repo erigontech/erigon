@@ -469,18 +469,12 @@ func init() {
 }
 
 func stageSnapshots(db kv.RwDB, ctx context.Context) error {
+	_, _, sync, _, _ := newSync(ctx, db, nil)
+	sn, br := allSnapshots(db), getBlockReader(db)
+	dirs := datadir.New(datadirCli)
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		_, _, sync, _, _ := newSync(ctx, db, nil)
-		chainConfig, historyV2 := fromdb.ChainConfig(db), fromdb.HistoryV2(db)
-		dirs := datadir.New(datadirCli)
-		sn, br := allSnapshots(db), getBlockReader(db)
-
-		cfg := stagedsync.StageSnapshotsCfg(db, *chainConfig, dirs.Tmp, sn, nil, nil, br, nil, historyV2, nil)
 		s := stage(sync, tx, nil, stages.Snapshots)
-		if err := stagedsync.SpawnStageSnapshots(s, ctx, tx, cfg, true); err != nil {
-			return err
-		}
-		return nil
+		return stagedsync.FillDBFromSnapshots(s, ctx, tx, dirs.Tmp, sn, br)
 	})
 }
 
