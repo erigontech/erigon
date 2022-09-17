@@ -1213,6 +1213,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			traceResult.Trace = []*ParityTrace{}
 		}
 		results = append(results, traceResult)
+		// When txIndexNeeded is not -1, we are tracing specific transaction in the block and not the entire block, so we stop after we've traced
+		// the required transaction
+		if txIndexNeeded != -1 && txIndex == txIndexNeeded {
+			break
+		}
 	}
 	return results, nil
 }
