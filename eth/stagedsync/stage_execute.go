@@ -257,30 +257,32 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
+		var found bool
 		var reconstituteToBlock uint64
 		if tx == nil {
 			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-				_, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 				return err
 			}); err != nil {
 				return err
 			}
 		} else {
-			_, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 		}
-		//_, reconstituteToB
-		//lock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax())
-		reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
-		dir.Recreate(reconDbPath)
-		limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*10 + 1))
-		reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
-		if err != nil {
-			return err
-		}
-		if reconstituteToBlock > s.BlockNumber {
+
+		if found && reconstituteToBlock > s.BlockNumber {
+			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
+			dir.Recreate(reconDbPath)
+			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+			reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+			if err != nil {
+				return err
+			}
+
 			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
+			os.RemoveAll(reconDbPath)
 		}
 	}
 

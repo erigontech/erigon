@@ -76,7 +76,7 @@ func (s *TxNums) Restore(sn *snapshotsync.RoSnapshots, tx kv.Tx) error {
 		if blockNum%1_000_000 == 0 {
 			log.Debug("TxNums.Restore", "blockNum", blockNum)
 		}
-		s.nums[blockNum] = baseTxNum + txAmount - 1
+		s.nums[blockNum] = baseTxNum + txAmount
 		return nil
 	}); err != nil {
 		return fmt.Errorf("build txNum => blockNum mapping: %w", err)

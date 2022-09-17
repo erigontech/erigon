@@ -214,7 +214,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 							log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", s.LogPrefix()), "block_num", blockNum)
 						default:
 						}
-						maxTxNum := baseTxNum + txAmount - 1
+						maxTxNum := baseTxNum + txAmount
 
 						if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 							return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
