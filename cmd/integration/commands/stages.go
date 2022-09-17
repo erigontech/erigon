@@ -48,6 +48,22 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+var cmdStageSnapshots = &cobra.Command{
+	Use:   "stage_snapshots",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := common2.RootContext()
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		defer db.Close()
+
+		if err := stageSnapshots(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
@@ -318,6 +334,13 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
+	withDataDir(cmdStageSnapshots)
+	withReset(cmdStageSnapshots)
+	withChain(cmdStageSnapshots)
+	withHeimdall(cmdStageSnapshots)
+
+	rootCmd.AddCommand(cmdStageSnapshots)
+
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withReset(cmdStageHeaders)
@@ -443,6 +466,22 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
+}
+
+func stageSnapshots(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		_, _, sync, _, _ := newSync(ctx, db, nil)
+		chainConfig, historyV2 := fromdb.ChainConfig(db), fromdb.HistoryV2(db)
+		dirs := datadir.New(datadirCli)
+		sn, br := allSnapshots(db), getBlockReader(db)
+
+		cfg := stagedsync.StageSnapshotsCfg(db, *chainConfig, dirs.Tmp, sn, nil, nil, br, nil, historyV2, nil)
+		s := stage(sync, tx, nil, stages.Snapshots)
+		if err := stagedsync.SpawnStageSnapshots(s, ctx, tx, cfg, true); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func stageHeaders(db kv.RwDB, ctx context.Context) error {

@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -45,6 +46,7 @@ type HeadersCfg struct {
 	memoryOverlay     bool
 	tmpdir            string
 
+	snapshots     *snapshotsync.RoSnapshots
 	blockReader   services.FullBlockReader
 	forkValidator *engineapi.ForkValidator
 	notifications *Notifications
@@ -61,6 +63,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	memoryOverlay bool,
+	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
 	notifications *Notifications,
@@ -76,6 +79,7 @@ func StageHeadersCfg(
 		batchSize:         batchSize,
 		tmpdir:            tmpdir,
 		noP2PDiscovery:    noP2PDiscovery,
+		snapshots:         snapshots,
 		blockReader:       blockReader,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
@@ -100,6 +104,11 @@ func SpawnStageHeaders(
 			return err
 		}
 		defer tx.Rollback()
+	}
+	if initialCycle && cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+			return err
+		}
 	}
 
 	var blockNumber uint64
