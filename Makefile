@@ -105,12 +105,12 @@ COMMANDS += integration
 COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
-COMMANDS += rpcdaemon22
 COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
+COMMANDS += evm
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -119,20 +119,13 @@ $(COMMANDS): %: %.cmd
 all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
-db-tools: git-submodules
+db-tools:
 	@echo "Building db-tools"
 
-	@# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
-	rm -rf libmdbx
-	git submodule update --init --recursive --force libmdbx
-
-	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
-	cp libmdbx/mdbx_chk $(GOBIN)
-	cp libmdbx/mdbx_copy $(GOBIN)
-	cp libmdbx/mdbx_dump $(GOBIN)
-	cp libmdbx/mdbx_drop $(GOBIN)
-	cp libmdbx/mdbx_load $(GOBIN)
-	cp libmdbx/mdbx_stat $(GOBIN)
+	go mod vendor
+	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 ## test:                              run unit tests with a 50s timeout
@@ -155,13 +148,12 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.48.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.49.0
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
-	cd libmdbx/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
