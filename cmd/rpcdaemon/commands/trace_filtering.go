@@ -368,7 +368,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
-		if !isPos {
+		if !isPos && api._chainConfig.TerminalTotalDifficulty != nil {
 			isPos = block.Header().Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
 		}
 		txs := block.Transactions()

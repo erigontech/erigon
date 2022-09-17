@@ -616,6 +616,10 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
+		// no header to process
+		if value == nil {
+			return nil
+		}
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
