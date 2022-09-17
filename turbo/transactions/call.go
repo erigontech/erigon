@@ -20,8 +20,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const callTimeout = 5 * time.Minute
-
 func DoCall(
 	ctx context.Context,
 	args ethapi.CallArgs,
@@ -30,7 +28,7 @@ func DoCall(
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	stateReader state.StateReader,
-	headerReader services.HeaderReader,
+	headerReader services.HeaderReader, callTimeout time.Duration,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*

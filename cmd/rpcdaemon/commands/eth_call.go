@@ -61,7 +61,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	if err != nil {
 		return nil, err
 	}
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, stateReader, api._blockReader)
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 			return false, nil, err
 		}
 		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
-			api.GasCap, chainConfig, stateReader, api._blockReader)
+			api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

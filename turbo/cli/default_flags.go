@@ -76,6 +76,7 @@ var DefaultFlags = []cli.Flag{
 	AuthRpcReadTimeoutFlag,
 	AuthRpcWriteTimeoutFlag,
 	AuthRpcIdleTimeoutFlag,
+	EvmCallTimeoutFlag,
 
 	utils.SnapKeepBlocksFlag,
 	utils.SnapStopFlag,
