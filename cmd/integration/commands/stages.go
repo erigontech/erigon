@@ -48,22 +48,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-var cmdStageSnapshots = &cobra.Command{
-	Use:   "stage_snapshots",
-	Short: "",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := common2.RootContext()
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
-		defer db.Close()
-
-		if err := stageSnapshots(db, ctx); err != nil {
-			log.Error("Error", "err", err)
-			return err
-		}
-		return nil
-	},
-}
-
 var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
@@ -334,13 +318,6 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
-	withDataDir(cmdStageSnapshots)
-	withReset(cmdStageSnapshots)
-	withChain(cmdStageSnapshots)
-	withHeimdall(cmdStageSnapshots)
-
-	rootCmd.AddCommand(cmdStageSnapshots)
-
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withReset(cmdStageHeaders)
@@ -468,24 +445,15 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
-func stageSnapshots(db kv.RwDB, ctx context.Context) error {
-	_, _, sync, _, _ := newSync(ctx, db, nil)
-	sn, br := allSnapshots(db), getBlockReader(db)
-	dirs := datadir.New(datadirCli)
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		s := stage(sync, tx, nil, stages.Snapshots)
-		return stagedsync.FillDBFromSnapshots(s, ctx, tx, dirs.Tmp, sn, br)
-	})
-}
-
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
+	sn, br := allSnapshots(db), getBlockReader(db)
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
 			log.Info("This command only works with --unwind or --reset options")
 		}
 
 		if reset {
-			if err := reset2.ResetBlocks(tx); err != nil {
+			if err := reset2.ResetBlocks(tx, sn, br); err != nil {
 				return err
 			}
 			return nil

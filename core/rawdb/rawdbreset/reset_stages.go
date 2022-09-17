@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
@@ -42,7 +44,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx) error {
+func ResetBlocks(tx kv.RwTx, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -90,6 +92,13 @@ func ResetBlocks(tx kv.RwTx) error {
 	}
 	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
 		return err
+	}
+
+	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, "", snapshots, br); err != nil {
+			return err
+		}
+		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
 	}
 
 	return nil

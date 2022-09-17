@@ -142,7 +142,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
-		if err := FillDBFromSnapshots(s, ctx, tx, cfg.tmpdir, cfg.snapshots, cfg.blockReader); err != nil {
+		if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.tmpdir, cfg.snapshots, cfg.blockReader); err != nil {
+			return err
+		}
+		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 			return err
 		}
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
@@ -151,7 +154,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func FillDBFromSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, tmpdir string, snapshots *snapshotsync.RoSnapshots, blockReader services.HeaderAndCanonicalReader) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpdir string, snapshots *snapshotsync.RoSnapshots, blockReader services.HeaderAndCanonicalReader) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -178,7 +181,7 @@ func FillDBFromSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, tmpdir 
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
+			log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", logPrefix), "block_num", header.Number.Uint64())
 		default:
 		}
 		return nil
@@ -214,7 +217,7 @@ func FillDBFromSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, tmpdir 
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-logEvery.C:
-						log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", s.LogPrefix()), "block_num", blockNum)
+						log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", logPrefix), "block_num", blockNum)
 					default:
 					}
 					maxTxNum := baseTxNum + txAmount
@@ -255,9 +258,6 @@ func FillDBFromSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, tmpdir 
 		return err
 	}
 	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
-		return err
-	}
-	if err := s.Update(tx, snapshots.BlocksAvailable()); err != nil {
 		return err
 	}
 	// saving the stage progress of other stages that are contained inside of snapshots
