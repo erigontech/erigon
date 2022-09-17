@@ -350,13 +350,17 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 	}
 
 	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx); err != nil {
-		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+		log.Debug("Error while executing stage", "err", wrappedError)
+		return wrappedError
 	}
 
 	took := time.Since(start)
+	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
-		logPrefix := s.LogPrefix()
 		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
+	} else {
+		log.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{stage: stage.ID, took: took})
 	return nil
