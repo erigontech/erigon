@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -83,7 +82,6 @@ type ExecuteBlockCfg struct {
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
-	txNums       *exec22.TxNums
 }
 
 func StageExecuteBlocksCfg(
@@ -104,7 +102,6 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
-	txNums *exec22.TxNums,
 	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -124,7 +121,6 @@ func StageExecuteBlocksCfg(
 		genesis:       genesis,
 		exec22:        exec22,
 		workersCount:  workersCount,
-		txNums:        txNums,
 		agg:           agg,
 	}
 }
@@ -279,7 +275,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 				return err
 			}
 
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 			os.RemoveAll(reconDbPath)
@@ -318,7 +314,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	rs := state.NewState22()
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
-		cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine,
+		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err

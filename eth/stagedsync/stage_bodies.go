@@ -9,7 +9,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -35,24 +34,10 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 
 	historyV2 bool
-	txNums    *exec22.TxNums
 }
 
-func StageBodiesCfg(
-	db kv.RwDB,
-	bd *bodydownload.BodyDownload,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool),
-	penalise func(context.Context, []headerdownload.PenaltyItem),
-	blockPropagator adapter.BlockPropagator,
-	timeout int,
-	chanConfig params.ChainConfig,
-	batchSize datasize.ByteSize,
-	snapshots *snapshotsync.RoSnapshots,
-	blockReader services.FullBlockReader,
-	historyV2 bool,
-	txNums *exec22.TxNums,
-) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2, txNums: txNums}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig params.ChainConfig, batchSize datasize.ByteSize, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV2 bool) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction

@@ -1,11 +1,12 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -27,7 +28,7 @@ func TestNewFilters(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
 	assert.Nil(err)

@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
@@ -9,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
@@ -20,7 +21,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	defer db.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout),
 		db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 

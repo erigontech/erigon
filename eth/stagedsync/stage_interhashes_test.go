@@ -73,7 +73,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
@@ -194,7 +194,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReader()
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -256,7 +256,7 @@ func TestStorageDeletion(t *testing.T) {
 	// ----------------------------------------------------------------
 	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil)
 	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
@@ -374,7 +374,7 @@ func TestHiveTrieRoot(t *testing.T) {
 
 	historyV2 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil, nil)
+	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV2, nil)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)
 
