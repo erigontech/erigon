@@ -16,7 +16,6 @@
   "mirrorSyncBlock": 5184000,
   "brunoBlock": 13082000,
   "eulerBlock": 18907621,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "parlia": {
     "DBPath": "",
     "InMemory": false,
