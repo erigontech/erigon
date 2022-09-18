@@ -9,7 +9,7 @@
  jobs:
    hive-results:
      name: Hive results
-     runs-on: ubuntu-latest
+     runs-on: ubuntu-20.04
      if: github.event.workflow_run.conclusion != 'skipped'
 
      permissions:
