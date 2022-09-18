@@ -315,8 +315,9 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
-		cfg.hd.BeaconRequestList.Remove(requestId)
-		if !test {
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+		} else {
 			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, headerHash, s, cfg)
 		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
@@ -444,8 +445,8 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload: need to download parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
-		cfg.hd.BeaconRequestList.Remove(requestId)
 		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 		if !schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, headerHash /* downloaderTip */, s, cfg) {
