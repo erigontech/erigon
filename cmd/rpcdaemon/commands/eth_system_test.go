@@ -2,13 +2,13 @@ package commands
 
 import (
 	"context"
-	"math"
-	"math/big"
-	"testing"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"math"
+	"math/big"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -43,7 +43,7 @@ func TestGasPrice(t *testing.T) {
 			db := createGasPriceTestKV(t, testCase.chainSize)
 			defer db.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false)
+			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout)
 			eth := NewEthAPI(base, db, nil, nil, nil, 5000000)
 
 			ctx := context.Background()

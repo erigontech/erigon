@@ -96,8 +96,6 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-const ASSERT = true
-
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
 	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
@@ -137,134 +135,88 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if ASSERT {
-		snapshotsync.AssertCount(cfg.snapshots.Dir())
+	blocksAvailable := cfg.snapshots.BlocksAvailable()
+	if s.BlockNumber < blocksAvailable { // allow genesis
+		if err := s.Update(tx, blocksAvailable); err != nil {
+			return err
+		}
+		s.BlockNumber = blocksAvailable
 	}
+	// updating the progress of further stages (but only forward) that are contained inside of snapshots
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
+		var progress uint64
+		var err error
+		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
+			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
+		}
+		if progress < blocksAvailable {
+			if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
+				return fmt.Errorf("advancing %s stage: %w", stage, err)
+			}
+			switch stage {
+			case stages.Headers:
+				logEvery := time.NewTicker(logInterval)
+				defer logEvery.Stop()
 
-	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
-		if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.tmpdir, cfg.snapshots, cfg.blockReader); err != nil {
-			return err
-		}
-		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-			return err
-		}
-		s.BlockNumber = cfg.snapshots.BlocksAvailable()
-	}
+				h2n := etl.NewCollector("Snapshots", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+				defer h2n.Close()
+				h2n.LogLvl(log.LvlDebug)
 
-	return nil
-}
-
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpdir string, snapshots *snapshotsync.RoSnapshots, blockReader services.HeaderAndCanonicalReader) error {
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	h2n := etl.NewCollector("Snapshots", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer h2n.Close()
-	h2n.LogLvl(log.LvlDebug)
-
-	// fill some small tables from snapshots, in future we may store this data in snapshots also, but
-	// for now easier just store them in db
-	td := big.NewInt(0)
-	if err := snapshotsync.ForEachHeader(ctx, snapshots, func(header *types.Header) error {
-		blockNum, blockHash := header.Number.Uint64(), header.Hash()
-		td.Add(td, header.Difficulty)
-		if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-			return err
-		}
-		if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-			return err
-		}
-		if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", logPrefix), "block_num", header.Number.Uint64())
-		default:
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	historyV2, err := rawdb.HistoryV2.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	if historyV2 {
-		var toBlock uint64
-		if snapshots != nil {
-			toBlock = snapshots.BlocksAvailable()
-		}
-		p, err := stages.GetStageProgress(tx, stages.Bodies)
-		if err != nil {
-			return err
-		}
-		toBlock = cmp.Max(toBlock, p)
-
-		if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
-			return err
-		}
-		if err := snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-			for _, b := range bs {
-				if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-					if blockNum == 0 || blockNum > toBlock {
-						return nil
+				// fill some small tables from snapshots, in future we may store this data in snapshots also, but
+				// for now easier just store them in db
+				td := big.NewInt(0)
+				if err := snapshotsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
+					blockNum, blockHash := header.Number.Uint64(), header.Hash()
+					td.Add(td, header.Difficulty)
+					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+						return err
+					}
+					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+						return err
+					}
+					if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
+						return err
 					}
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-logEvery.C:
-						log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", logPrefix), "block_num", blockNum)
+						log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
 					default:
-					}
-					maxTxNum := baseTxNum + txAmount
-
-					if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 					}
 					return nil
 				}); err != nil {
 					return err
 				}
+				if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+					return err
+				}
+				canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+				if err != nil {
+					return err
+				}
+				if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+					return err
+				}
+			case stages.Bodies:
+				// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+				ok, err := cfg.snapshots.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
+					lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+					if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+						return err
+					}
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
+				}
 			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 		}
 	}
 
-	if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-	ok, err := snapshots.ViewTxs(snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
-		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("snapshot not found for block: %d", snapshots.BlocksAvailable())
-	}
-	canonicalHash, err := blockReader.CanonicalHash(ctx, tx, snapshots.BlocksAvailable())
-	if err != nil {
-		return err
-	}
-	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
-		return err
-	}
-	// saving the stage progress of other stages that are contained inside of snapshots
-	_ = stages.SaveStageProgress(tx, stages.Headers, snapshots.BlocksAvailable())
-	_ = stages.SaveStageProgress(tx, stages.Bodies, snapshots.BlocksAvailable())
-	_ = stages.SaveStageProgress(tx, stages.BlockHashes, snapshots.BlocksAvailable())
-	_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
 	return nil
 }
 

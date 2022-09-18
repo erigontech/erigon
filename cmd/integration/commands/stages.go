@@ -48,6 +48,22 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+var cmdStageSnapshots = &cobra.Command{
+	Use:   "stage_snapshots",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := common2.RootContext()
+		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		defer db.Close()
+
+		if err := stageSnapshots(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
@@ -318,6 +334,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
+	withDataDir(cmdStageSnapshots)
+	withReset(cmdStageSnapshots)
+
+	rootCmd.AddCommand(cmdStageSnapshots)
+
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withReset(cmdStageHeaders)
@@ -445,6 +466,22 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
+func stageSnapshots(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if reset {
+			if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
+				return fmt.Errorf("saving Snapshots progress failed: %w", err)
+			}
+		}
+		progress, err := stages.GetStageProgress(tx, stages.Snapshots)
+		if err != nil {
+			return fmt.Errorf("re-read Snapshots progress: %w", err)
+		}
+		log.Info("Progress", "snapshots", progress)
+		return nil
+	})
+}
+
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	sn, br := allSnapshots(db), getBlockReader(db)
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -471,11 +508,11 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
-			return fmt.Errorf("saving Bodies progress failed: %w", err)
+			return fmt.Errorf("saving Headers progress failed: %w", err)
 		}
 		progress, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
-			return fmt.Errorf("re-read Bodies progress: %w", err)
+			return fmt.Errorf("re-read Headers progress: %w", err)
 		}
 		{ // hard-unwind stage_body also
 			if err := rawdb.TruncateBlocks(ctx, tx, progress+1); err != nil {

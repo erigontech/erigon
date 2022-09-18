@@ -17,7 +17,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, agg *libstate.Aggregator22, txNums *exec22.TxNums, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
-	base := NewBaseApi(filters, stateCache, blockReader, agg, txNums, cfg.WithDatadir)
+	base := NewBaseApi(filters, stateCache, blockReader, agg, txNums, cfg.WithDatadir, cfg.EvmCallTimeout)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -118,7 +118,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
 	cfg httpcfg.HttpCfg) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, nil, nil, cfg.WithDatadir)
+	base := NewBaseApi(filters, stateCache, blockReader, nil, nil, cfg.WithDatadir, cfg.EvmCallTimeout)
 
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	engineImpl := NewEngineAPI(base, db, eth)

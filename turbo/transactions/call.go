@@ -3,12 +3,12 @@ package transactions
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -20,8 +20,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const callTimeout = 5 * time.Minute
-
 func DoCall(
 	ctx context.Context,
 	args ethapi.CallArgs,
@@ -30,7 +28,7 @@ func DoCall(
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	stateReader state.StateReader,
-	headerReader services.HeaderReader,
+	headerReader services.HeaderReader, callTimeout time.Duration,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
@@ -109,17 +107,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
-	return vm.BlockContext{
-			CanTransfer: core.CanTransfer,
-			Transfer:    core.Transfer,
-			GetHash:     getHashGetter(requireCanonical, tx, headerReader),
-			Coinbase:    header.Coinbase,
-			BlockNumber: header.Number.Uint64(),
-			Time:        header.Time,
-			Difficulty:  new(big.Int).Set(header.Difficulty),
-			GasLimit:    header.GasLimit,
-			BaseFee:     &baseFee,
-		},
+	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
 		vm.TxContext{
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),

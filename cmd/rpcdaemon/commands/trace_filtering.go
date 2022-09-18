@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"math/big"
 )
 
 // Transaction implements trace_transaction
@@ -324,6 +325,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
+	isPos := false
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
@@ -366,6 +368,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
+		if !isPos && api._chainConfig.TerminalTotalDifficulty != nil {
+			header := block.Header()
+			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
+		}
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
 		if tErr != nil {
@@ -415,6 +421,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				}
 			}
 		}
+
+		// if we are in POS
+		// we dont check for uncles or block rewards
+		if isPos {
+			continue
+		}
+
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
 			nSeen++

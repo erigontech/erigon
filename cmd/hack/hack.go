@@ -506,18 +506,35 @@ func extractBodies(chaindata string, block uint64) error {
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	i := 0
+	var txId uint64
 	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
+		var hash common.Hash
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
+			return err
+		}
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
-		i++
-		if i == 1 {
-			break
+		if hash != blockHash {
+			fmt.Printf("Non-canonical\n")
+			continue
 		}
+		i++
+		if txId == 0 {
+			txId = baseTxId
+		} else {
+			if txId != baseTxId {
+				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+			}
+		}
+		txId += uint64(txAmount) + 2
+		//if i == 1 {
+		//	break
+		//}
 	}
 	return nil
 }

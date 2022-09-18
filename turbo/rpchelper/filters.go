@@ -397,9 +397,11 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	}
 	f.topicsOriginal = crit.Topics
 	ff.logsSubs.addLogsFilters(f)
+	// if any filter in the aggregate needs all addresses or all topics then the global log subscription needs to
+	// allow all addresses or topics through
 	lfr := &remote.LogsFilterRequest{
-		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
-		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
+		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs >= 1,
+		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics >= 1,
 	}
 
 	addresses, topics := ff.logsSubs.getAggMaps()
@@ -430,9 +432,11 @@ func (ff *Filters) loadLogsRequester() any {
 
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	isDeleted := ff.logsSubs.removeLogsFilter(id)
+	// if any filters in the aggregate need all addresses or all topics then the request to the central
+	// log subscription needs to honour this
 	lfr := &remote.LogsFilterRequest{
-		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
-		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
+		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs >= 1,
+		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics >= 1,
 	}
 
 	addresses, topics := ff.logsSubs.getAggMaps()
@@ -539,21 +543,6 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 }
 
 func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
-	lg := &types.Log{
-		Address:     gointerfaces.ConvertH160toAddress(reply.Address),
-		Data:        reply.Data,
-		BlockNumber: reply.BlockNumber,
-		TxHash:      gointerfaces.ConvertH256ToHash(reply.TransactionHash),
-		TxIndex:     uint(reply.TransactionIndex),
-		BlockHash:   gointerfaces.ConvertH256ToHash(reply.BlockHash),
-		Index:       uint(reply.LogIndex),
-		Removed:     reply.Removed,
-	}
-	t := make([]common.Hash, 0)
-	for _, v := range reply.Topics {
-		t = append(t, gointerfaces.ConvertH256ToHash(v))
-	}
-	lg.Topics = t
 	ff.logsSubs.distributeLog(reply)
 }
 

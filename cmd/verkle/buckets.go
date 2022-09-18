@@ -4,6 +4,7 @@ import "github.com/ledgerwatch/erigon-lib/kv"
 
 const (
 	VerkleIncarnation            = "VerkleIncarnation"
+	VerkleRoots                  = "VerkleRoots"
 	PedersenHashedCodeLookup     = "PedersenHashedCodeLookup"
 	PedersenHashedAccountsLookup = "PedersenHashedAccountsLookup"
 	PedersenHashedStorageLookup  = "PedersenHashedStorageLookup"
@@ -16,6 +17,7 @@ var ExtraBuckets = []string{
 	PedersenHashedAccountsLookup,
 	PedersenHashedStorageLookup,
 	VerkleTrie,
+	VerkleRoots,
 }
 
 func initDB(tx kv.RwTx) error {

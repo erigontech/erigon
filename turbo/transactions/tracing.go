@@ -89,6 +89,7 @@ func TraceTx(
 	config *tracers.TraceConfig,
 	chainConfig *params.ChainConfig,
 	stream *jsoniter.Stream,
+	callTimeout time.Duration,
 ) error {
 	// Assemble the structured logger or the JavaScript tracer
 	var (

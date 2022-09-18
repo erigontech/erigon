@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -32,7 +31,7 @@ import (
 	return
 }*/
 
-func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
+func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedAccounts"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
@@ -66,48 +65,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, col
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
-			acc := o.account
-			versionKey := o.versionHash
-			var codeHashKey, nonceKey, balanceKey, codeSizeKey, nonce, balance, codeSize [32]byte
-			copy(codeHashKey[:], versionKey[:31])
-			copy(nonceKey[:], versionKey[:31])
-			copy(balanceKey[:], versionKey[:31])
-			copy(codeSizeKey[:], versionKey[:31])
-			codeHashKey[31] = vtree.CodeKeccakLeafKey
-			nonceKey[31] = vtree.NonceLeafKey
-			balanceKey[31] = vtree.BalanceLeafKey
-			codeSizeKey[31] = vtree.CodeSizeLeafKey
-			// Compute balance value
-			bbytes := acc.Balance.ToBig().Bytes()
-			if len(bbytes) > 0 {
-				for i, b := range bbytes {
-					balance[len(bbytes)-i-1] = b
-				}
-			}
-			// compute nonce value
-			binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
-			// Compute code size value
-			binary.LittleEndian.PutUint64(codeSize[:], o.codeSize)
-
-			if cfg.disabledLookups {
-				continue
-			}
-
-			// Collect all data
-			if err := collector.Collect(versionKey[:], []byte{0}); err != nil {
-				panic(err)
-			}
-
-			if err := collector.Collect(nonceKey[:], nonce[:]); err != nil {
-				panic(err)
-			}
-			if err := collector.Collect(balanceKey[:], balance[:]); err != nil {
-				panic(err)
-			}
-			if err := collector.Collect(codeHashKey[:], acc.CodeHash[:]); err != nil {
-				panic(err)
-			}
-			if err := collector.Collect(codeSizeKey[:], codeSize[:]); err != nil {
+			if err := verkleWriter.UpdateAccount(o.versionHash[:], o.codeSize, o.account); err != nil {
 				panic(err)
 			}
 
@@ -159,7 +117,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, col
 	return nil
 }
 
-func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
+func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedStorage"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Storage")
@@ -194,7 +152,7 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, coll
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
-			if err := collector.Collect(o.storageVerkleKey[:], o.storageValue); err != nil {
+			if err := verkleWriter.Insert(o.storageVerkleKey[:], o.storageValue); err != nil {
 				panic(err)
 			}
 			if cfg.disabledLookups {
@@ -250,7 +208,7 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, coll
 	return nil
 }
 
-func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collector *etl.Collector) error {
+func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedCode"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Code")
@@ -289,18 +247,19 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, collect
 			if o.codeSize == 0 {
 				continue
 			}
+			if err := verkleWriter.WriteContractCodeChunks(o.chunksKeys, o.chunks); err != nil {
+				panic(err)
+			}
+			if cfg.disabledLookups {
+				continue
+			}
 			for i := range o.chunks {
-				if err := collector.Collect(o.chunksKeys[i][:], o.chunks[i]); err != nil {
-					panic(err)
-				}
-				if cfg.disabledLookups {
-					continue
-				}
+
 				// Build lookup [address + index]
 				lookupKey := make([]byte, 24)
 				copy(lookupKey, o.address[:])
 				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
-				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i][:]); err != nil {
+				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i]); err != nil {
 					panic(err)
 				}
 			}
@@ -384,16 +343,16 @@ func RegeneratePedersenHashstate(cfg optionsCfg) error {
 		return err
 	}
 
-	collector := etl.NewCollector("VerkleTrie", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8))
-	defer collector.Close()
-	if err := regeneratePedersenAccounts(vTx, tx, cfg, collector); err != nil {
+	verleWriter := NewVerkleTreeWriter(vTx, cfg.tmpdir)
+
+	if err := regeneratePedersenAccounts(vTx, tx, cfg, verleWriter); err != nil {
 		return err
 	}
-	if err := regeneratePedersenCode(vTx, tx, cfg, collector); err != nil {
+	if err := regeneratePedersenCode(vTx, tx, cfg, verleWriter); err != nil {
 		return err
 	}
 
-	if err := regeneratePedersenStorage(vTx, tx, cfg, collector); err != nil {
+	if err := regeneratePedersenStorage(vTx, tx, cfg, verleWriter); err != nil {
 		return err
 	}
 	return vTx.Commit()

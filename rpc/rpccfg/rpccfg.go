@@ -35,3 +35,5 @@ var DefaultHTTPTimeouts = HTTPTimeouts{
 	WriteTimeout: 30 * time.Minute,
 	IdleTimeout:  120 * time.Second,
 }
+
+const DefaultEvmCallTimeout = 5 * time.Minute

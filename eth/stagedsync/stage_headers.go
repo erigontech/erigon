@@ -163,10 +163,11 @@ func HeadersPOS(
 	}
 
 	cfg.hd.SetPOSSync(true)
-	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
-
-	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
+	syncing := cfg.hd.PosStatus() != headerdownload.Idle
+	if !syncing {
+		log.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", s.LogPrefix()))
+	}
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
@@ -314,9 +315,8 @@ func startHandlingForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
-		if test {
-			cfg.hd.BeaconRequestList.Remove(requestId)
-		} else {
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		if !test {
 			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, headerHash, s, cfg)
 		}
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
@@ -444,8 +444,8 @@ func handleNewPayload(
 	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload: need to download parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if test {
-			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 		if !schedulePoSDownload(requestId, header.ParentHash, headerNumber-1, headerHash /* downloaderTip */, s, cfg) {
@@ -625,6 +625,10 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
+		// no header to process
+		if value == nil {
+			return nil
+		}
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
