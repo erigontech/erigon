@@ -130,7 +130,8 @@ type Ethereum struct {
 
 	downloaderClient proto_downloader.DownloaderClient
 
-	notifications *stagedsync.Notifications
+	notifications      *stagedsync.Notifications
+	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
@@ -538,12 +539,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	var headCh chan *types.Block
-	if config.Ethstats != "" {
-		headCh = make(chan *types.Block, 1)
-	}
-
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, headCh, txNums, backend.agg, backend.forkValidator)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, txNums, backend.agg, backend.forkValidator)
 	if err != nil {
 		return nil, err
 	}
@@ -574,6 +570,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
+		var headCh chan [][]byte
+		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
 		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
 			return nil, err
 		}
@@ -894,8 +892,8 @@ func (s *Ethereum) Start() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
-	if s.agg != nil {
-		s.agg.Close()
+	if s.unsubscribeEthstat != nil {
+		s.unsubscribeEthstat()
 	}
 	if s.downloader != nil {
 		s.downloader.Close()
@@ -925,6 +923,9 @@ func (s *Ethereum) Stop() error {
 	s.chainDB.Close()
 	if s.txPool2DB != nil {
 		s.txPool2DB.Close()
+	}
+	if s.agg != nil {
+		s.agg.Close()
 	}
 	return nil
 }
