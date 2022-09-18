@@ -50,7 +50,8 @@ type KvServer struct {
 
 	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
-	snapsthots         Snapsthots
+	blockSnapshots     Snapsthots
+	historySnapshots   Snapsthots
 	ctx                context.Context
 }
 
@@ -58,8 +59,8 @@ type Snapsthots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, kv kv.RoDB, snapshots Snapsthots) *KvServer {
-	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx, snapsthots: snapshots}
+func NewKvServer(ctx context.Context, kv kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots) *KvServer {
+	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx, blockSnapshots: snapshots, historySnapshots: historySnapshots}
 }
 
 // Version returns the service-side interface version number
@@ -304,10 +305,10 @@ func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeB
 }
 
 func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
-	if s.snapsthots == nil || reflect.ValueOf(s.snapsthots).IsNil() { // nolint
-		return &remote.SnapshotsReply{Files: []string{}}, nil
+	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
+		return &remote.SnapshotsReply{BlockFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
-	return &remote.SnapshotsReply{Files: s.snapsthots.Files()}, nil
+	return &remote.SnapshotsReply{BlockFiles: s.blockSnapshots.Files(), HistoryFiles: s.historySnapshots.Files()}, nil
 }
 
 type StateChangePubSub struct {

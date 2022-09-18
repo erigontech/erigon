@@ -94,19 +94,20 @@ func NewDomain(
 	prefixLen int,
 	compressVals bool,
 ) (*Domain, error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
 		prefixLen: prefixLen,
+		files:     btree.NewG[*filesItem](32, filesItemLess),
 	}
+	var err error
 	if d.History, err = NewHistory(dir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals); err != nil {
 		return nil, err
 	}
-	d.files = btree.NewG[*filesItem](32, filesItemLess)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
 	d.scanStateFiles(files)
 	if err = d.openFiles(); err != nil {
 		return nil, err
@@ -125,6 +126,9 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).(kv|kvi)$")
 	var err error
 	for _, f := range files {
+		if !f.Type().IsRegular() {
+			continue
+		}
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {

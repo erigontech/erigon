@@ -433,9 +433,8 @@ type ExecutionPayload struct {
 	ExtraData     []byte `protobuf:"bytes,11,opt,name=extraData,proto3" json:"extraData,omitempty"`
 	BaseFeePerGas *H256  `protobuf:"bytes,12,opt,name=baseFeePerGas,proto3" json:"baseFeePerGas,omitempty"`
 	BlockHash     *H256  `protobuf:"bytes,13,opt,name=blockHash,proto3" json:"blockHash,omitempty"`
-	//
-	//Array of transaction objects, each object is a byte list.
-	//See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
+	// Array of transaction objects, each object is a byte list.
+	// See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
 	Transactions [][]byte `protobuf:"bytes,14,rep,name=transactions,proto3" json:"transactions,omitempty"`
 }
 

@@ -201,6 +201,25 @@ type StatelessWriteTx interface {
 	Putter
 	Deleter
 
+	/*
+		// if need N id's:
+		baseId, err := tx.IncrementSequence(bucket, N)
+		if err != nil {
+		   return err
+		}
+		for i := 0; i < N; i++ {    // if N == 0, it will work as expected
+		    id := baseId + i
+		    // use id
+		}
+
+
+		// or if need only 1 id:
+		id, err := tx.IncrementSequence(bucket, 1)
+		if err != nil {
+		    return err
+		}
+		// use id
+	*/
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	Append(bucket string, k, v []byte) error
 	AppendDup(bucket string, k, v []byte) error

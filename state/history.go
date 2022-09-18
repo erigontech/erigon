@@ -57,24 +57,25 @@ func NewHistory(
 	settingsTable string,
 	compressVals bool,
 ) (*History, error) {
-	var h History
+	h := History{
+		files:            btree.NewG[*filesItem](32, filesItemLess),
+		historyValsTable: historyValsTable,
+		settingsTable:    settingsTable,
+		compressVals:     compressVals,
+	}
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
-	h.historyValsTable = historyValsTable
-	h.settingsTable = settingsTable
-	h.files = btree.NewG[*filesItem](32, filesItemLess)
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	h.scanStateFiles(files)
 	if err = h.openFiles(); err != nil {
-		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
+		return nil, fmt.Errorf("NewHistory.openFiles: %s, %w", filenameBase, err)
 	}
-	h.compressVals = compressVals
 	return &h, nil
 }
 
@@ -82,6 +83,10 @@ func (h *History) scanStateFiles(files []fs.DirEntry) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).(v|vi)$")
 	var err error
 	for _, f := range files {
+		if !f.Type().IsRegular() {
+			continue
+		}
+
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {
@@ -127,6 +132,11 @@ func (h *History) openFiles() error {
 			return false
 		}
 		idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep))
+		//if !dir.Exist(idxPath) {
+		//	if _, err = buildIndex(item.decompressor, idxPath, h.dir, item.decompressor.Count()/2, false /* values */); err != nil {
+		//		return false
+		//	}
+		//}
 		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return false
 		}
@@ -154,6 +164,18 @@ func (h *History) closeFiles() {
 func (h *History) Close() {
 	h.InvertedIndex.Close()
 	h.closeFiles()
+}
+
+func (h *History) Files() (res []string) {
+	h.files.Ascend(func(item *filesItem) bool {
+		if item.decompressor != nil {
+			_, fName := filepath.Split(item.decompressor.FilePath())
+			res = append(res, filepath.Join("history", fName))
+		}
+		return true
+	})
+	res = append(res, h.InvertedIndex.Files()...)
+	return res
 }
 
 func (h *History) AddPrevValue(key1, key2, original []byte) error {

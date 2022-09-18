@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
 )
@@ -186,7 +184,6 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 	dictSize := binary.BigEndian.Uint64(d.data[16:24])
 	data := d.data[24 : 24+dictSize]
-	log.Debug("decompress dictionary", "size", dictSize)
 
 	var depths []uint64
 	var patterns [][]byte
@@ -226,7 +223,6 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	pos := 24 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	data = d.data[pos+8 : pos+8+dictSize]
-	log.Debug("decompress positions dictionary", "size", dictSize)
 
 	var posDepths []uint64
 	var poss []uint64

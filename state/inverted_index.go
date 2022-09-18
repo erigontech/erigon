@@ -61,12 +61,13 @@ func NewInvertedIndex(
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
 		dir:             dir,
+		files:           btree.NewG[*filesItem](32, filesItemLess),
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 		indexKeysTable:  indexKeysTable,
 		indexTable:      indexTable,
 	}
-	ii.files = btree.NewG[*filesItem](32, filesItemLess)
+
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
@@ -82,6 +83,10 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).(ef|efi)$")
 	var err error
 	for _, f := range files {
+		if !f.Type().IsRegular() {
+			continue
+		}
+
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {
@@ -160,6 +165,17 @@ func (ii *InvertedIndex) closeFiles() {
 
 func (ii *InvertedIndex) Close() {
 	ii.closeFiles()
+}
+
+func (ii *InvertedIndex) Files() (res []string) {
+	ii.files.Ascend(func(item *filesItem) bool {
+		if item.decompressor != nil {
+			_, fName := filepath.Split(item.decompressor.FilePath())
+			res = append(res, filepath.Join("history", fName))
+		}
+		return true
+	})
+	return res
 }
 
 func (ii *InvertedIndex) SetTx(tx kv.RwTx) {
