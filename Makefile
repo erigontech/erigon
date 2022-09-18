@@ -132,6 +132,9 @@ db-tools:
 test:
 	$(GOTEST) --timeout 50s
 
+test22:
+	$(GOTEST) --timeout 50s -tags erigon22
+
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
