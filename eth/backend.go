@@ -169,7 +169,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	var currentBlock *types.Block
-	_ = config.Genesis.Alloc
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
@@ -326,7 +325,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, blockReader, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}

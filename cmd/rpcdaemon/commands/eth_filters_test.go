@@ -23,12 +23,13 @@ import (
 
 func TestNewFilters(t *testing.T) {
 	assert := assert.New(t)
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
 	assert.Nil(err)

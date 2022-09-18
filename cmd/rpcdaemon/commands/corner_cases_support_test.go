@@ -17,12 +17,12 @@ import (
 // see https://github.com/ledgerwatch/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
-	db := rpcdaemontest.CreateTestKV(t)
-	defer db.Close()
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout),
-		db, nil, nil, nil, 5000000)
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
+		m.DB, nil, nil, nil, 5000000)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
