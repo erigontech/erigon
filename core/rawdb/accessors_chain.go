@@ -1760,8 +1760,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	if err != nil {
 		return err
 	}
-	var lastBlockNum uint64
-	lastBlockNum = binary.BigEndian.Uint64(lastK)
+	lastBlockNum := binary.BigEndian.Uint64(lastK)
 	if lastBlockNum+1 != blockNum {
 		err := fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
 		panic(err)

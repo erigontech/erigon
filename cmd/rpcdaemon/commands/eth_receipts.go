@@ -278,7 +278,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			return nil, err
 		}
 	}
-	fromTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
 	if err != nil {
 		return nil, err
 	}
