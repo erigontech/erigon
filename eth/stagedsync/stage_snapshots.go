@@ -232,11 +232,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				if sn != nil {
 					toBlock = sn.BlocksAvailable()
 				}
-				p, err := stages.GetStageProgress(tx, stages.Bodies)
-				if err != nil {
-					return err
-				}
-				toBlock = cmp.Max(toBlock, p)
+				toBlock = cmp.Max(toBlock, progress)
 
 				if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
