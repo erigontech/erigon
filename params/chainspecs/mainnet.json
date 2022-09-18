@@ -18,5 +18,6 @@
   "arrowGlacierBlock": 13773000,
   "grayGlacierBlock": 15050000,
   "terminalTotalDifficulty": 58750000000000000000000,
+  "terminalTotalDifficultyPassed": true,
   "ethash": {}
 }
