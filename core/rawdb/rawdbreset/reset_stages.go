@@ -98,7 +98,7 @@ func ResetBlocks(tx kv.RwTx, snapshots *snapshotsync.RoSnapshots, br services.He
 		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, "", snapshots, br); err != nil {
 			return err
 		}
-		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
 	}
 
 	return nil
