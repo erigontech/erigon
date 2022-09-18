@@ -101,7 +101,7 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 // have .seg no .torrent => get .torrent from .seg
 func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.Client, snapDir string) (bool, error) {
 	// if we dont have the torrent file we build it if we have the .seg file
-	if err := BuildTorrentFileIfNeed(it.Path, snapDir); err != nil {
+	if err := buildTorrentIfNeed(it.Path, snapDir); err != nil {
 		return false, err
 	}
 

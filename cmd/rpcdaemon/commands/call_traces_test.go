@@ -3,6 +3,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"sync"
+	"testing"
+
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -11,8 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
-	"sync"
-	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -52,9 +53,9 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	agg, txNums := m.HistoryV2Components()
+	agg := m.HistoryV2Components()
 	api := NewTraceAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false, rpccfg.DefaultEvmCallTimeout),
+		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
 		m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
@@ -100,8 +101,8 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	agg, txNums := m.HistoryV2Components()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
+	agg := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
@@ -164,8 +165,8 @@ func TestFilterNoAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	agg, txNums := m.HistoryV2Components()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
+	agg := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -189,8 +190,8 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
-	agg, txNums := m.HistoryV2Components()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, txNums, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
+	agg := m.HistoryV2Components()
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 

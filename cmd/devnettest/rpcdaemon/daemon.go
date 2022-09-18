@@ -20,7 +20,7 @@ func RunDaemon() {
 		ctx := cmd.Context()
 		logger := log.New()
 		time.Sleep(100 * time.Millisecond)
-		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, txNums, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
+		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "err", err)
 			return nil
@@ -30,7 +30,7 @@ func RunDaemon() {
 			defer borDb.Close()
 		}
 
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, txNums, *cfg)
+		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil

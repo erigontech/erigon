@@ -15,7 +15,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -211,9 +210,9 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 
 func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
-	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots,
+	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots, agg *libstate.Aggregator22,
 	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
-) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters, txNums *exec22.TxNums, err error) {
+) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.NewDummy()
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -224,7 +223,7 @@ func EmbeddedServices(ctx context.Context,
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots)
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots, agg)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
@@ -235,25 +234,6 @@ func EmbeddedServices(ctx context.Context,
 	mining = direct.NewMiningClient(miningServer)
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 
-	if snapshots != nil && snapshots.Cfg().Enabled { // nolint: staticcheck
-		/*
-			txNums = make([]uint64, snapshots.BlocksAvailable()+1)
-			if err = snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-						txNums[blockNum] = baseTxNum + txAmount
-						return nil
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}); err != nil {
-				return
-			}
-		*/
-	}
-
 	return
 }
 
@@ -263,12 +243,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	db kv.RoDB, borDb kv.RoDB,
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
-	ff *rpchelper.Filters,
-	agg *libstate.Aggregator22,
-	txNums *exec22.TxNums,
-	err error) {
+	ff *rpchelper.Filters, agg *libstate.Aggregator22, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
@@ -279,10 +256,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
 		if compatErr := checkDbCompatibility(ctx, rwKv); compatErr != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, compatErr
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, compatErr
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
@@ -295,14 +272,14 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			// ensure db exist
 			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
 			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 			}
 			tmpDb.Close()
 		}
 		log.Trace("Creating consensus db", "path", borDbPath)
 		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
 		// Skip the compatibility check, until we have a schema in erigon-lib
 		borDb = borKv
@@ -336,27 +313,27 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			return nil
 		}); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 		}
 		if cc == nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
 		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.UseSnapshots
 	}
 
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("open tls cert: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("open tls cert: %w", err)
 	}
 	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
 	kvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
@@ -376,7 +353,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Warn("[Snapshots] reopen", "err", err)
 						return
 					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+					if err := allSnapshots.ReopenList(reply.BlockFiles, true); err != nil {
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()
@@ -402,7 +379,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
 
@@ -434,10 +411,14 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
 		dir.MustExist(e22Dir)
 		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		if err = agg.ReopenFiles(); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
+		}
+
 	}
-	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, txNums, err
+	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {

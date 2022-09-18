@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -15,9 +14,9 @@ import (
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums *exec22.TxNums, cfg httpcfg.HttpCfg) (list []rpc.API) {
+	blockReader services.FullBlockReader, agg *libstate.Aggregator, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
-	base := NewBaseApi(filters, stateCache, blockReader, agg, txNums, cfg.WithDatadir)
+	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 
