@@ -142,6 +142,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = blocksAvailable
 	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		var progress uint64
@@ -150,14 +152,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
 		if progress < blocksAvailable {
+
 			if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
 				return fmt.Errorf("advancing %s stage: %w", stage, err)
 			}
 			switch stage {
 			case stages.Headers:
-				logEvery := time.NewTicker(logInterval)
-				defer logEvery.Stop()
-
 				h2n := etl.NewCollector("Snapshots", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 				defer h2n.Close()
 				h2n.LogLvl(log.LvlDebug)
@@ -212,6 +212,54 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				}
 				if !ok {
 					return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
+				}
+
+				historyV2, err := rawdb.HistoryV2.Enabled(tx)
+				if err != nil {
+					return err
+				}
+				if historyV2 {
+					var toBlock uint64
+					snapshots := cfg.snapshots
+					if snapshots != nil {
+						toBlock = snapshots.BlocksAvailable()
+					}
+					p, err := stages.GetStageProgress(tx, stages.Bodies)
+					if err != nil {
+						return err
+					}
+					toBlock = cmp.Max(toBlock, p)
+
+					if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
+						return err
+					}
+					if err := snapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
+						for _, b := range bs {
+							if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
+								if blockNum == 0 || blockNum > toBlock {
+									return nil
+								}
+								select {
+								case <-ctx.Done():
+									return ctx.Err()
+								case <-logEvery.C:
+									log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", s.LogPrefix()), "block_num", blockNum)
+								default:
+								}
+								maxTxNum := baseTxNum + txAmount
+
+								if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+									return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+								}
+								return nil
+							}); err != nil {
+								return err
+							}
+						}
+						return nil
+					}); err != nil {
+						return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+					}
 				}
 			}
 		}
