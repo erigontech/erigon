@@ -154,9 +154,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
-		var progress uint64
-		var err error
-		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
 		if progress >= blocksAvailable {
