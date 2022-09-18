@@ -73,15 +73,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		}
 	}
 
-	block := rawdb.ReadCurrentBlock(tx)
-	if block != nil {
+	if cfg.headCh != nil {
+		block := rawdb.ReadCurrentBlock(tx)
 		log.Info(fmt.Sprintf("Sync loop completed at block-number=%d block-hash=%s", block.Number(), block.Hash()))
 
-		if cfg.headCh != nil {
-			select {
-			case cfg.headCh <- block:
-			default:
-			}
+		select {
+		case cfg.headCh <- block:
+		default:
 		}
 	}
 
