@@ -1848,20 +1848,20 @@ RETRY:
 
 func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
 	r := bytes.NewReader(nil)
+	stream := rlp.NewStream(r, 0)
+	word := make([]byte, 0, 2*4096)
 	err := s.Headers.View(func(snapshots []*HeaderSegment) error {
 		for _, sn := range snapshots {
-			ch := forEachAsync(ctx, sn.seg)
-			for it := range ch {
-				if it.err != nil {
-					return nil
-				}
-
-				header := new(types.Header)
-				r.Reset(it.word[1:])
-				if err := rlp.Decode(r, header); err != nil {
+			g := sn.seg.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				var header types.Header
+				r.Reset(word[1:])
+				stream.Reset(r, 0)
+				if err := stream.Decode(&header); err != nil {
 					return err
 				}
-				if err := walker(header); err != nil {
+				if err := walker(&header); err != nil {
 					return err
 				}
 			}
