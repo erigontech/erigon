@@ -15,6 +15,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -168,7 +169,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 			defer h2n.Close()
 			h2n.LogLvl(log.LvlDebug)
 
-			k := make([]byte, 8)
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
 			td := big.NewInt(0)
@@ -179,11 +179,10 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 					return err
 				}
-				binary.BigEndian.PutUint64(k, blockNum)
-				if err := tx.Put(kv.HeaderCanonical, k, blockHash[:]); err != nil {
-					return fmt.Errorf("failed to store number to hash mapping: %w", err)
+				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+					return err
 				}
-				if err := h2n.Collect(blockHash[:], k); err != nil {
+				if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
 					return err
 				}
 				select {
@@ -238,7 +237,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 					return err
 				}
 				if err := sn.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-					defer func(t time.Time) { fmt.Printf("stage_snapshots.go:241: %s\n", time.Since(t)) }(time.Now())
 					for _, b := range bs {
 						if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 							if blockNum == 0 || blockNum > toBlock {
