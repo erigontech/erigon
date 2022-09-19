@@ -1851,17 +1851,22 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	word := make([]byte, 0, 2*4096)
 	err := s.Headers.View(func(snapshots []*HeaderSegment) error {
 		for _, sn := range snapshots {
-			g := sn.seg.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				var header types.Header
-				r.Reset(word[1:])
-				if err := rlp.Decode(r, &header); err != nil {
-					return err
+			if err := sn.seg.WithReadAhead(func() error {
+				g := sn.seg.MakeGetter()
+				for g.HasNext() {
+					word, _ = g.Next(word[:0])
+					var header types.Header
+					r.Reset(word[1:])
+					if err := rlp.Decode(r, &header); err != nil {
+						return err
+					}
+					if err := walker(&header); err != nil {
+						return err
+					}
 				}
-				if err := walker(&header); err != nil {
-					return err
-				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		}
 		return nil
