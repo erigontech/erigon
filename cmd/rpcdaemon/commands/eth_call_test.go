@@ -3,10 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -32,12 +33,13 @@ import (
 )
 
 func TestEstimateGas(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -49,9 +51,10 @@ func TestEstimateGas(t *testing.T) {
 }
 
 func TestEthCallNonCanonical(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
@@ -73,7 +76,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	prune(t, db, pruneTo)
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -89,16 +92,16 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
-	db := rpcdaemontest.CreateTestKV(t)
-
-	tx, err := db.BeginRo(ctx)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
+	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
@@ -126,16 +129,16 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
-	db := rpcdaemontest.CreateTestKV(t)
-
-	tx, err := db.BeginRo(ctx)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
+	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
 	}
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
@@ -167,16 +170,16 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
-	db := rpcdaemontest.CreateTestKV(t)
-
-	tx, err := db.BeginRo(ctx)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
+	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 
@@ -205,16 +208,16 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
-	db := rpcdaemontest.CreateTestKV(t)
-
-	tx, err := db.BeginRo(ctx)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
+	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -256,16 +259,16 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
-	db := rpcdaemontest.CreateTestKV(t)
-
-	tx, err := db.BeginRo(ctx)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
+	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
 	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)

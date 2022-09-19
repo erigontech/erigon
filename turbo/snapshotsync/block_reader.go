@@ -505,7 +505,7 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	if !gg.HasNext() {
-		return nil, nil, nil
+		return nil, buf, nil
 	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
@@ -585,11 +585,11 @@ func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uin
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
 	if !gg.HasNext() {
-		return nil, nil, nil
+		return nil, buf, nil
 	}
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
-		return nil, nil, nil
+		return nil, buf, nil
 	}
 	b := &types.BodyForStorage{}
 	reader := bytes.NewReader(buf)

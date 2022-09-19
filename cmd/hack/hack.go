@@ -1198,10 +1198,6 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
-const (
-	AggregationStep = 3_125_000 /* number of transactions in smallest static file */
-)
-
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"

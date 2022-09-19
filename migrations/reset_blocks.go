@@ -52,7 +52,7 @@ var resetBlocks = Migration{
 			return err
 		}
 
-		if err := rawdbreset.ResetBlocks(tx); err != nil {
+		if err := rawdbreset.ResetBlocks(tx, nil, nil); err != nil {
 			return err
 		}
 

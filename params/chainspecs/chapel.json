@@ -17,7 +17,6 @@
   "brunoBlock": 13837000,
   "eulerBlock": 19203503,
   "gibbsBlock": 22800220,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "parlia": {
     "DBPath": "",
     "InMemory": false,

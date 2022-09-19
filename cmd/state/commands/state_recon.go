@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -16,7 +15,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -58,15 +56,18 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		interruptCh <- true
 	}()
 	ctx := context.Background()
-	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, ethconfig.HistoryV2AggregationStep)
+	dirs := datadir2.New(datadir)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
+	}
+	err = agg.ReopenFiles()
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
 	defer agg.Close()
 	reconDbPath := path.Join(datadir, "recondb")
-	os.RemoveAll(reconDbPath)
-	dir.MustExist(reconDbPath)
+	dir.Recreate(reconDbPath)
 	startTime := time.Now()
 	workerCount := runtime.NumCPU()
 	limiterB := semaphore.NewWeighted(int64(workerCount + 1))
@@ -81,7 +82,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	var blockReader services.FullBlockReader
-	dirs := datadir2.New(datadir)
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
@@ -89,7 +89,6 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	// Compute mapping blockNum -> last TxNum in that block
-	txNums := exec22.TxNumsFromDB(allSnapshots, chainDb)
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 	sentryControlServer, err := sentry.NewMultiClient(
 		chainDb,
@@ -112,7 +111,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Dirs = dirs
 	cfg.Snapshot = allSnapshots.Cfg()
-	stagedSync, err := stages2.NewStagedSync(context.Background(), chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, nil, txNums, agg, nil)
+	stagedSync, err := stages2.NewStagedSync(context.Background(), chainDb, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSnapshots, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -132,7 +131,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		workers,
 		chainDb,
 		db,
-		blockReader, allSnapshots, txNums, log.New(),
+		blockReader, allSnapshots, log.New(),
 		agg, engine, chainConfig, genesis,
 	); err != nil {
 		return err
@@ -150,7 +149,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 		if err = tx.ClearBucket(kv.ContractCode); err != nil {
 			return err
 		}
-		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, txNums, agg), ctx); err != nil {
+		if err = stagedsync.PromoteHashedStateCleanly("recon", tx, stagedsync.StageHashStateCfg(chainDb, cfg.Dirs, true, agg), ctx); err != nil {
 			return err
 		}
 		hashStage, err := stagedSync.StageState(stages.HashState, tx, chainDb)
@@ -166,7 +165,7 @@ func Recon(genesis *core.Genesis, logger log.Logger) error {
 	}
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
 		var rootHash common.Hash
-		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(chainDb, false /* checkRoot */, true /* saveHashesToDB */, false /* badBlockHalt */, dirs.Tmp, blockReader, nil /* HeaderDownload */, cfg.HistoryV2, txNums, agg), common.Hash{}, make(chan struct{}, 1)); err != nil {
+		if rootHash, err = stagedsync.RegenerateIntermediateHashes("recon", tx, stagedsync.StageTrieCfg(chainDb, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV2, agg), common.Hash{}, make(chan struct{}, 1)); err != nil {
 			return err
 		}
 		trieStage, err := stagedSync.StageState(stages.IntermediateHashes, tx, chainDb)

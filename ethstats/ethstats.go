@@ -62,7 +62,7 @@ type Service struct {
 	host string // Remote address of the monitoring service
 
 	quitCh <-chan struct{}
-	headCh <-chan *types.Block
+	headCh <-chan [][]byte
 
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
@@ -119,7 +119,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan *types.Block) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -227,8 +227,8 @@ func (s *Service) loop() {
 					if err = s.reportHistory(conn, list); err != nil {
 						log.Warn("Requested history report failed", "err", err)
 					}
-				case head := <-s.headCh:
-					if err = s.reportBlock(conn, head); err != nil {
+				case <-s.headCh:
+					if err = s.reportBlock(conn); err != nil {
 						log.Warn("Block stats report failed", "err", err)
 					}
 
@@ -415,7 +415,7 @@ func (s *Service) report(conn *connWrapper) error {
 	if err := s.reportLatency(conn); err != nil {
 		return err
 	}
-	if err := s.reportBlock(conn, nil); err != nil {
+	if err := s.reportBlock(conn); err != nil {
 		return err
 	}
 	if err := s.reportPending(conn); err != nil {
@@ -498,20 +498,16 @@ func (s uncleStats) MarshalJSON() ([]byte, error) {
 }
 
 // reportBlock retrieves the current chain head and reports it to the stats server.
-func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
+func (s *Service) reportBlock(conn *connWrapper) error {
 	roTx, err := s.chaindb.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
 	defer roTx.Rollback()
+
+	block := rawdb.ReadCurrentBlock(roTx)
 	if block == nil {
-		block, err = rawdb.ReadLastBlockSynced(roTx)
-		if err != nil {
-			return err
-		}
-		if block == nil {
-			return nil
-		}
+		return nil
 	}
 
 	td, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())

@@ -314,6 +314,7 @@ func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
+	_ = g.Alloc //nil-check
 	var root common.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
@@ -461,6 +462,9 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 		return nil, nil, err
 	}
 	if err := rawdb.WriteBlock(tx, block); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {

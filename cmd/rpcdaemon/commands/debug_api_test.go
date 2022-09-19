@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"testing"
+
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -13,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"testing"
 )
 
 var debugTraceTransactionTests = []struct {
@@ -39,11 +40,12 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout)
-	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
-	api := NewPrivateDebugAPI(baseApi, db, 0)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -86,11 +88,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 }
 
 func TestTraceBlockByHash(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout)
-	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
-	api := NewPrivateDebugAPI(baseApi, db, 0)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -120,11 +123,12 @@ func TestTraceBlockByHash(t *testing.T) {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout),
-		db, 0)
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
+		m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -152,11 +156,12 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV2Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false, rpccfg.DefaultEvmCallTimeout),
-		db, 0)
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
+		m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)

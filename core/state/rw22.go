@@ -237,7 +237,8 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)

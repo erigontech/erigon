@@ -19,7 +19,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -483,13 +482,14 @@ func stageSnapshots(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
+	sn, br := allSnapshots(db), getBlockReader(db)
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
 			log.Info("This command only works with --unwind or --reset options")
 		}
 
 		if reset {
-			if err := reset2.ResetBlocks(tx); err != nil {
+			if err := reset2.ResetBlocks(tx, sn, br); err != nil {
 				return err
 			}
 			return nil
@@ -550,7 +550,6 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig, historyV2 := fromdb.ChainConfig(db), fromdb.HistoryV2(db)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
@@ -561,7 +560,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db), historyV2, txNums), ctx); err != nil {
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(db), getBlockReader(db), historyV2), ctx); err != nil {
 				return err
 			}
 
@@ -695,7 +694,6 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
@@ -719,7 +717,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, int(workers), txNums, agg())
+		/*badBlockHalt=*/ false, historyV2, dirs, getBlockReader(db), nil, genesis, int(workers), agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, true)
@@ -752,7 +750,6 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -778,7 +775,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV2, txNums, agg())
+	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV2, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -806,7 +803,6 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	dirs, pm, historyV2 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV2(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -832,7 +828,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, txNums, agg())
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV2, agg())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
@@ -1162,10 +1158,14 @@ var _aggSingleton *libstate.Aggregator22
 
 func agg() *libstate.Aggregator22 {
 	openAggOnce.Do(func() {
-		aggDir := path.Join(datadirCli, "agg22")
+		aggDir := path.Join(datadirCli, "snapshots", "history")
 		dir.MustExist(aggDir)
 		var err error
 		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV2AggregationStep)
+		if err != nil {
+			panic(err)
+		}
+		err = _aggSingleton.ReopenFiles()
 		if err != nil {
 			panic(err)
 		}
@@ -1191,7 +1191,6 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	logger := log.New()
 	dirs, historyV2, pm := datadir.New(datadirCli), fromdb.HistoryV2(db), fromdb.PruneMode(db)
-	txNums := exec22.TxNumsFromDB(allSnapshots(db), db)
 
 	vmConfig := &vm.Config{}
 
@@ -1244,7 +1243,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, nil, txNums, agg(), nil)
+	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, agg(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1258,8 +1257,8 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil),
-			stagedsync.StageHashStateCfg(db, dirs, historyV2, txNums, agg()),
-			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV2, txNums, agg()),
+			stagedsync.StageHashStateCfg(db, dirs, historyV2, agg()),
+			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV2, agg()),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,

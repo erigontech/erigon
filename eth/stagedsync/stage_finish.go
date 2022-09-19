@@ -26,15 +26,13 @@ import (
 type FinishCfg struct {
 	db            kv.RwDB
 	tmpDir        string
-	headCh        chan *types.Block
 	forkValidator *engineapi.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, headCh chan *types.Block, forkValidator *engineapi.ForkValidator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engineapi.ForkValidator) FinishCfg {
 	return FinishCfg{
 		db:            db,
 		tmpDir:        tmpDir,
-		headCh:        headCh,
 		forkValidator: forkValidator,
 	}
 }
@@ -71,17 +69,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}
-	}
-
-	block := rawdb.ReadCurrentBlock(tx)
-	log.Info(fmt.Sprintf("Sync loop completed at block-number=%d block-hash=%s", block.Number(), block.Hash()))
-
-	if cfg.headCh != nil {
-		select {
-		case cfg.headCh <- block:
-		default:
-		}
-
 	}
 
 	if !useExternalTx {

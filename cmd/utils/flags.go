@@ -1480,8 +1480,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.Ethstats = ctx.GlobalString(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
-	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
-	cfg.HistoryV2 = ctx.GlobalIsSet(HistoryV2Flag.Name)
+	cfg.EnabledIssuance = ctx.GlobalBool(EnabledIssuance.Name)
+	cfg.HistoryV2 = ctx.GlobalBool(HistoryV2Flag.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}

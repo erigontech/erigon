@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -83,7 +82,6 @@ type ExecuteBlockCfg struct {
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
-	txNums       *exec22.TxNums
 }
 
 func StageExecuteBlocksCfg(
@@ -104,7 +102,6 @@ func StageExecuteBlocksCfg(
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
 	workersCount int,
-	txNums *exec22.TxNums,
 	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -124,7 +121,6 @@ func StageExecuteBlocksCfg(
 		genesis:       genesis,
 		exec22:        exec22,
 		workersCount:  workersCount,
-		txNums:        txNums,
 		agg:           agg,
 	}
 }
@@ -255,19 +251,31 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		workersCount = 1
 	}
 
-	fmt.Printf("recon to : %t, txn=%d\n", initialCycle, cfg.agg.EndTxNumMinimax())
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
-		if found, reconstituteToBlock := cfg.txNums.Find(cfg.agg.EndTxNumMinimax()); found && reconstituteToBlock > s.BlockNumber {
+		var found bool
+		var reconstituteToBlock uint64
+		if tx == nil {
+			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+				return err
+			}); err != nil {
+				return err
+			}
+		} else {
+			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+		}
+
+		if found && reconstituteToBlock > s.BlockNumber {
 			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
-			os.RemoveAll(reconDbPath)
-			dir.MustExist(reconDbPath)
+			dir.Recreate(reconDbPath)
 			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
 			reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 			if err != nil {
 				return err
 			}
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+
+			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 			os.RemoveAll(reconDbPath)
@@ -306,7 +314,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	rs := state.NewState22()
 	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
-		cfg.blockReader, allSnapshots, cfg.txNums, log.New(), cfg.agg, cfg.engine,
+		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
 		return err
@@ -323,7 +331,11 @@ func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	if err := rs.Unwind(ctx, tx, cfg.txNums.MaxOf(u.UnwindPoint), cfg.agg, cfg.accumulator); err != nil {
+	txNum, err := rawdb.TxNums.Min(tx, u.UnwindPoint+1)
+	if err != nil {
+		return err
+	}
+	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, cfg.accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
