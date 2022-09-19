@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -45,6 +46,7 @@ type HeadersCfg struct {
 	memoryOverlay     bool
 	tmpdir            string
 
+	snapshots     *snapshotsync.RoSnapshots
 	blockReader   services.FullBlockReader
 	forkValidator *engineapi.ForkValidator
 	notifications *Notifications
@@ -61,6 +63,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	memoryOverlay bool,
+	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
 	notifications *Notifications,
@@ -76,6 +79,7 @@ func StageHeadersCfg(
 		batchSize:         batchSize,
 		tmpdir:            tmpdir,
 		noP2PDiscovery:    noP2PDiscovery,
+		snapshots:         snapshots,
 		blockReader:       blockReader,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
@@ -100,6 +104,11 @@ func SpawnStageHeaders(
 			return err
 		}
 		defer tx.Rollback()
+	}
+	if initialCycle && cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+			return err
+		}
 	}
 
 	var blockNumber uint64
@@ -154,10 +163,11 @@ func HeadersPOS(
 	}
 
 	cfg.hd.SetPOSSync(true)
-	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
-
-	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests, test)
+	syncing := cfg.hd.PosStatus() != headerdownload.Idle
+	if !syncing {
+		log.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", s.LogPrefix()))
+	}
+	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
@@ -304,7 +314,7 @@ func startHandlingForkChoice(
 	}
 
 	if header == nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice downloading missing header with hash %x", s.LogPrefix(), headerHash))
+		log.Info(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 		} else {
@@ -434,7 +444,7 @@ func handleNewPayload(
 		return nil, err
 	}
 	if parent == nil {
-		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		log.Info(fmt.Sprintf("[%s] New payload: need to download parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
@@ -616,6 +626,10 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
+		// no header to process
+		if value == nil {
+			return nil
+		}
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}

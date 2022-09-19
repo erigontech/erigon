@@ -16,6 +16,10 @@ on:
       - synchronize
       - ready_for_review
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
@@ -24,7 +28,7 @@ jobs:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
-    steps:
+    steps:      
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
@@ -72,7 +76,7 @@ jobs:
         os: [ windows-2022 ]
     runs-on: ${{ matrix.os }}
 
-    steps:
+    steps:      
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
@@ -106,8 +110,9 @@ jobs:
 
   docker:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    runs-on: ubuntu-20.04
+    runs-on: self-hosted
     steps:
+      - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
@@ -124,9 +129,10 @@ jobs:
        - tests
        - tests-windows
        - docker
-     runs-on: ubuntu-20.04
+     runs-on: self-hosted
      if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
      steps:
+       - uses: AutoModality/action-clean@v1
        - uses: actions/checkout@v3
          with:
            fetch-depth: 0 # fetch git tags for "git describe"
@@ -140,12 +146,13 @@ jobs:
 
        - name: run hive and parse output
          run: |
-          sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --exit.fail=false
-          docker run --rm --pull always -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results --outdir=/work/results --exclusionsfile=/work/hive/exclusions.json
+          sudo mkdir -p /results-${{ github.run_id }}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results-${{ github.run_id }} --client erigon_ci-$GITHUB_SHA --exit.fail=false
+          docker run --rm --pull always -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results-${{ github.run_id }} --outdir=/work/results-${{ github.run_id }} --exclusionsfile=/work/hive/exclusions.json
 
        - name: archive hive results
          uses: actions/upload-artifact@v3
          if: always()
          with:
            name: test-results
-           path: results/*.xml
+           path: results-${{ github.run_id }}/*.xml

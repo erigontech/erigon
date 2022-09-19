@@ -37,7 +37,7 @@ type regeneratePedersenCodeJob struct {
 type regeneratePedersenCodeOut struct {
 	chunks     [][]byte
 	address    common.Address
-	chunksKeys []common.Hash
+	chunksKeys [][]byte
 	codeSize   int
 }
 
@@ -131,7 +131,7 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 		}
 
 		var chunks [][]byte
-		var chunkKeys []common.Hash
+		var chunkKeys [][]byte
 		if job.code == nil || len(job.code) == 0 {
 			out <- &regeneratePedersenCodeOut{
 				chunks:     chunks,
@@ -150,13 +150,13 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 			chunks = append(chunks, common.CopyBytes(chunkedCode[i:i+32]))
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
 				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
-				chunkKeys = append(chunkKeys, common.BytesToHash(currentKey))
+				chunkKeys = append(chunkKeys, common.CopyBytes(currentKey))
 				offset = 1
 				offsetOverflow = false
 			} else {
 				codeKey := common.CopyBytes(currentKey)
 				codeKey[31] += offset
-				chunkKeys = append(chunkKeys, common.BytesToHash(codeKey))
+				chunkKeys = append(chunkKeys, common.CopyBytes(codeKey))
 				offset += 1
 				// If offset overflows, handle it.
 				offsetOverflow = offset == 0

@@ -28,8 +28,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const callTimeout = 5 * time.Minute
-
 const (
 	CALL               = "call"
 	CALLCODE           = "callcode"
@@ -894,8 +892,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
-	if callTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
@@ -977,7 +975,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
-		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
 	return traceResult, nil
@@ -1110,8 +1108,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
-	if callTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
@@ -1215,6 +1213,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			traceResult.Trace = []*ParityTrace{}
 		}
 		results = append(results, traceResult)
+		// When txIndexNeeded is not -1, we are tracing specific transaction in the block and not the entire block, so we stop after we've traced
+		// the required transaction
+		if txIndexNeeded != -1 && txIndex == txIndexNeeded {
+			break
+		}
 	}
 	return results, nil
 }

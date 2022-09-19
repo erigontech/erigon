@@ -183,7 +183,7 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
+			if _, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
 				return err
 			}
 		}

@@ -125,10 +125,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	var fromTxNum, toTxNum uint64
+	var err error
 	if begin > 0 {
-		fromTxNum = api._txNums.MinOf(begin)
+		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
+		if err != nil {
+			return nil, err
+		}
 	}
-	toTxNum = api._txNums.MaxOf(end) // end is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
+	if err != nil {
+		return nil, err
+	}
 
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
@@ -180,7 +187,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
-		ok, blockNum := api._txNums.Find(txNum)
+		ok, blockNum, err := rawdb.TxNums.FindBlockNum(tx, txNum)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			return nil, nil
 		}
@@ -195,7 +205,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums.MinOf(blockNum)
+			startTxNum, err = rawdb.TxNums.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)

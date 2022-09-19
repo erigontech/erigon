@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -72,19 +73,26 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 func Exec22(ctx context.Context,
 	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
+	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis, initialCycle bool,
 ) (err error) {
 
 	var block, stageProgress uint64
+	var outputTxNum, inputTxNum, maxTxNum uint64
+	var count, repeatCount, triggerCount uint64
+	var resultsSize int64
+	var inputBlockNum, outputBlockNum uint64
+	var lock sync.RWMutex
+	var rws state.TxTaskQueue
+	var rwsLock sync.Mutex
+
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
 	}
 
-	var lock sync.RWMutex
 	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
 	// too keep consistency
 	// will improve it in future versions
@@ -93,34 +101,50 @@ func Exec22(ctx context.Context,
 	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, txNums, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
 		agg.SetTx(applyTx)
+		maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
+		if err != nil {
+			return err
+		}
+		if block > 0 {
+			outputTxNum, err = rawdb.TxNums.Max(applyTx, execStage.BlockNumber)
+			if err != nil {
+				return err
+			}
+			inputTxNum = outputTxNum
+		}
+	} else {
+		if err := chainDb.View(ctx, func(tx kv.Tx) error {
+			maxTxNum, err = rawdb.TxNums.Max(tx, maxBlockNum)
+			if err != nil {
+				return err
+			}
+			if block > 0 {
+				outputTxNum, err = rawdb.TxNums.Max(tx, execStage.BlockNumber)
+				if err != nil {
+					return err
+				}
+				inputTxNum = outputTxNum
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
-	count := uint64(0)
-	repeatCount := uint64(0)
-	triggerCount := uint64(0)
-	resultsSize := int64(0)
 	progress := NewProgress(block)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	var rws state.TxTaskQueue
-	var rwsLock sync.Mutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
-	var outputTxNum uint64
-	if block > 0 {
-		outputTxNum = txNums.MaxOf(block - 1)
-	}
-
-	var inputBlockNum, outputBlockNum uint64
-	// Go-routine gathering results from the workers
-	var maxTxNum = txNums.MaxOf(txNums.LastBlockNum())
+	agg.SetTxNum(inputTxNum)
 	if parallel {
+		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
@@ -194,11 +218,11 @@ func Exec22(ctx context.Context,
 							if err = tx.Commit(); err != nil {
 								return err
 							}
-							for i := 0; i < len(reconWorkers); i++ {
-								reconWorkers[i].ResetTx(nil)
-							}
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
+							}
+							for i := 0; i < len(reconWorkers); i++ {
+								reconWorkers[i].ResetTx(nil)
 							}
 							agg.SetTx(tx)
 							return nil
@@ -214,10 +238,6 @@ func Exec22(ctx context.Context,
 				panic(err)
 			}
 		}()
-	}
-	var inputTxNum uint64
-	if block > 0 {
-		inputTxNum = txNums.MaxOf(block - 1)
 	}
 
 	var header *types.Header
@@ -269,11 +289,13 @@ loop:
 			} else if parallel {
 				rs.AddWork(txTask)
 			}
-			if !parallel {
+			if parallel {
+				stageProgress = blockNum
+			} else {
 				count++
 				reconWorkers[0].RunTxTask(txTask)
 				if txTask.Error == nil {
-					if err := rs.Apply(txTask.Rules.IsSpuriousDragon, reconWorkers[0].Tx(), txTask, agg); err != nil {
+					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
 					outputTxNum++
@@ -355,7 +377,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 		txTask := heap.Pop(rws).(*state.TxTask)
 		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.Apply(txTask.Rules.IsSpuriousDragon, applyTx, txTask, agg); err != nil {
+			if err := rs.Apply(applyTx, txTask, agg); err != nil {
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
@@ -371,26 +393,40 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 }
 
 func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB, db kv.RwDB,
-	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots, txNums *exec22.TxNums,
+	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
-	block := s.BlockNumber
 
-	endTxNumMinimax := agg.EndTxNumMinimax()
-	ok, blockNum := txNums.Find(endTxNumMinimax)
+	var ok bool
+	var blockNum uint64
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", endTxNumMinimax)
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
 	}
 	fmt.Printf("Max blockNum = %d\n", blockNum)
-	toBlock := blockNum
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
-	if block+1 > blockNum {
-		return fmt.Errorf("specified block %d which is higher than available %d", block, blockNum)
+	blockNum--
+	var txNum uint64
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		txNum, err = rawdb.TxNums.Max(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	blockNum = block + 1
-	txNum := txNums.MaxOf(blockNum - 1)
+
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, 128)
@@ -615,7 +651,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
-						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+						if err := db.Update(ctx, func(tx kv.RwTx) error {
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
@@ -641,7 +677,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	var inputTxNum uint64
 	var header *types.Header
 	var txKey [8]byte
-	for bn := uint64(0); bn < blockNum; bn++ {
+	for bn := uint64(0); bn <= blockNum; bn++ {
 		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
 			panic(err)
 		}
@@ -866,10 +902,10 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			return err
 		}
 		plainContractCollector.Close()
-		if err := s.Update(tx, toBlock); err != nil {
+		if err := s.Update(tx, blockNum); err != nil {
 			return err
 		}
-		s.BlockNumber = toBlock
+		s.BlockNumber = blockNum
 		return nil
 	}); err != nil {
 		return err

@@ -60,17 +60,26 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 		return err
 	}
 
+	from, err := stages.GetStageProgress(vTx, stages.VerkleTrie)
+	if err != nil {
+		return err
+	}
+
 	to, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 
-	if err := incrementAccount(vTx, tx, cfg, to); err != nil {
+	if err := incrementAccount(vTx, tx, cfg, from, to); err != nil {
 		return err
 	}
-	if err := incrementStorage(vTx, tx, cfg, to); err != nil {
+	if err := incrementStorage(vTx, tx, cfg, from, to); err != nil {
 		return err
 	}
+	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
+		return err
+	}
+
 	log.Info("Finished", "elapesed", time.Since(start))
 	return vTx.Commit()
 }

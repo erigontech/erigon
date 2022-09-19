@@ -13,11 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
@@ -28,16 +28,14 @@ type HashStateCfg struct {
 	dirs datadir.Dirs
 
 	historyV2 bool
-	txNums    *exec22.TxNums
 	agg       *state.Aggregator22
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, txNums *exec22.TxNums, agg *state.Aggregator22) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, agg *state.Aggregator22) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
 		historyV2: historyV2,
-		txNums:    txNums,
 		agg:       agg,
 	}
 }
@@ -124,13 +122,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	prom := NewPromoter(tx, cfg.dirs, quit)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(tx)
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, false /* storage */, true /* codes */); err != nil {
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, true); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, false /* storage */, false /* codes */); err != nil {
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, false); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, s.BlockNumber, u.UnwindPoint+1, true /* storage */, false /* codes */); err != nil {
+		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, true, false); err != nil {
 			return err
 		}
 		return nil
@@ -496,12 +494,15 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, from, to uint64, storage, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, from, to uint64, storage, codes bool) error {
 	if to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
 	}
 
-	txnFrom := txNums.MinOf(from + 1)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
+	if err != nil {
+		return err
+	}
 	txnTo := uint64(math.MaxUint64)
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
@@ -662,10 +663,13 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
-func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, txNums *exec22.TxNums, unwindFrom, unwindTo uint64, storage bool, codes bool) error {
+func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage, codes bool) error {
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
-	txnFrom := txNums.MinOf(unwindTo)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
+	if err != nil {
+		return err
+	}
 	txnTo := uint64(math.MaxUint64)
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
@@ -822,13 +826,13 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 	prom := NewPromoter(tx, cfg.dirs, quit)
 	if cfg.historyV2 {
 		cfg.agg.SetTx(tx)
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, false, true); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, false, true); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, false, false); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, false, false); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, cfg.txNums, from, to, true, false); err != nil {
+		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, true, false); err != nil {
 			return err
 		}
 		return nil

@@ -3,40 +3,7 @@
     {
       "name": "engine-api",
       "testCases": [
-        "Invalid Ancestor Chain Sync, Incomplete Transactions, Invalid P9d",
-        "Invalid Transition Payload Sync, Invalid Transaction Value",
-        "Invalid Ancestor Chain Sync, Invalid Transaction Nonce, Invalid P9",
-        "Invalid Ancestor Chain Sync, Invalid GasLimit, Invalid P9",
-        "Invalid Ancestor Chain Sync, Invalid ReceiptsRoot, Invalid P8",
-        "Sidechain Reorg",
-        "Invalid Transition Payload Sync, Invalid StateRoot",
-        "Inconsistent Head in ForkchoiceState",
-        "Invalid Transition Payload Sync, Invalid Transaction GasPrice",
-        "Consecutive Payload Execution",
-        "Invalid Ancestor Chain Sync, Invalid Ommers, Invalid P9",
-        "Invalid Transition Payload Sync, Invalid Transaction Signature",
-        "Invalid Ancestor Chain Sync, Invalid Transaction Value, Invalid P9'",
-        "Invalid Ancestor Chain Sync, Invalid StateRoot, Invalid P9'",
-        "Invalid Transition Payload Sync, Invalid GasLimit",
-        "Invalid Ancestor Chain Sync, Invalid Transaction Nonce, Invalid P9'",
-        "Invalid Transition Payload Sync, Invalid Timestamp",
-        "Invalid Transition Payload Sync, Invalid Transaction Nonce",
-        "Invalid Transition Payload Sync, Invalid ReceiptsRoot",
-        "Invalid Ancestor Chain Sync, Incomplete Transactions, Invalid P9'",
-        "Invalid Ancestor Chain Sync, Invalid Timestamp, Invalid P9'",
-        "Invalid Transition Payload Sync, Invalid GasUsed",
-        "Invalid Transition Payload Sync, Invalid StateRoot, Empty Txs",
-        "Invalid Ancestor Chain Sync, Invalid GasLimit, Invalid P9'",
-        "Invalid Ancestor Chain Sync, Invalid ReceiptsRoot, Invalid P8'",
-        "Invalid Ancestor Chain Sync, Invalid Transaction Gas, Invalid P9'",
-        "Invalid Ancestor Chain Sync, Invalid Transaction GasPrice, Invalid P9'",
-        "Invalid Ancestor Chain Re-Org, Invalid Transaction Gas, Invalid P9'",
-        "Invalid Ancestor Chain Sync, Invalid Ommers, Invalid P9'",
-        "Invalid Transition Payload Sync, Incomplete Transactions",
-        "Invalid Ancestor Chain Sync, Invalid Transaction Signature, Invalid P9'",
-        "Invalid Transition Payload Re-Org, Invalid StateRoot, Empty Txs, Reveal using sync",
-        "Invalid Ancestor Chain Sync, Invalid StateRoot, Empty Txs, Invalid P9'",
-        "Invalid Transition Payload Sync, Invalid Transaction Gas"
+        "Sidechain Reorg"
       ]
     },
     {
@@ -45,11 +12,10 @@
         "Two Block PoW Re-org to Lower-Height Chain, Transaction Overwrite",
         "Syncing on an Invalid Terminal Execution - Difficulty",
         "Syncing on an Invalid Terminal Execution - Sealed MixHash",
-        "Terminal blocks are gossiped (Common Ancestor Depth 5)",
         "Syncing on an Invalid Terminal Execution - Sealed Nonce",
         "Syncing on an Invalid Terminal Execution - Balance Mismatch",
         "Stop processing gossiped Post-TTD PoW blocks",
-        "Terminal blocks are gossiped"
+        "Terminal blocks are gossiped (Common Ancestor Depth 5"
       ]
     }
   ]

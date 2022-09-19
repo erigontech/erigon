@@ -272,23 +272,10 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	if chainConfig.TerminalBlockHash != beaconConfig.TerminalBlockHash {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block hash. expected %s, but instead got: %s", beaconConfig.TerminalBlockHash, chainConfig.TerminalBlockHash)
-	}
-
-	terminalBlockNumber := chainConfig.TerminalBlockNumber
-	if terminalBlockNumber == nil {
-		terminalBlockNumber = common.Big0
-	}
-
-	if terminalBlockNumber.Cmp((*big.Int)(beaconConfig.TerminalBlockNumber)) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block number. expected %v, but instead got: %d", beaconConfig.TerminalBlockNumber, terminalBlockNumber)
-	}
-
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-		TerminalBlockHash:       chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     (*hexutil.Big)(terminalBlockNumber),
+		TerminalBlockHash:       common.Hash{},
+		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
 	}, nil
 }
 

@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220912053753-1b5dd96e17df
-	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220809023834-6309df4da4b1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220918103843-f05cd214bd2e
+	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
@@ -16,6 +16,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.22.2
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.2-0.20220427063716-a4894bb521c6
+	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.46.1-0.20220808053819-61302332cfc5
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd v0.22.0-beta
@@ -56,7 +57,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.11
-	github.com/torquem-ch/mdbx-go v0.25.3
+	github.com/torquem-ch/mdbx-go v0.26.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.9
@@ -77,8 +78,6 @@ require (
 	pgregory.net/rapid v0.4.7
 )
 
-require github.com/ledgerwatch/interfaces v0.0.0-20220901131808-23c237c9b9a8 // indirect
-
 require (
 	crawshaw.io/sqlite v0.3.3-0.20210127221821-98b1f83c5508 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
@@ -93,7 +92,6 @@ require (
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.3.0 // indirect
 	github.com/anacrolix/stm v0.4.0 // indirect
-	github.com/anacrolix/sync v0.4.0 // indirect
 	github.com/anacrolix/upnp v0.1.3-0.20220123035249-922794e51c96 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

@@ -9,7 +9,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -35,24 +34,10 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 
 	historyV2 bool
-	txNums    *exec22.TxNums
 }
 
-func StageBodiesCfg(
-	db kv.RwDB,
-	bd *bodydownload.BodyDownload,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool),
-	penalise func(context.Context, []headerdownload.PenaltyItem),
-	blockPropagator adapter.BlockPropagator,
-	timeout int,
-	chanConfig params.ChainConfig,
-	batchSize datasize.ByteSize,
-	snapshots *snapshotsync.RoSnapshots,
-	blockReader services.FullBlockReader,
-	historyV2 bool,
-	txNums *exec22.TxNums,
-) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2, txNums: txNums}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig params.ChainConfig, batchSize datasize.ByteSize, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV2 bool) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -118,10 +103,14 @@ func BodiesForward(
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) {
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV2 {
-			cfg.txNums.Append(blockNum, lastTxnNum)
+			if err := rawdb.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+				return err
+			}
+			//cfg.txNums.Append(blockNum, lastTxnNum)
 		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
@@ -207,7 +196,10 @@ Loop:
 				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV2 && ok {
-				cfg.txNums.Append(blockHeight, lastTxnNum)
+				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+					return err
+				}
+				//cfg.txNums.Append(blockHeight, lastTxnNum)
 			}
 
 			if blockHeight > bodyProgress {
@@ -307,7 +299,9 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		return err
 	}
 	if cfg.historyV2 {
-		cfg.txNums.Unwind(u.UnwindPoint + 1)
+		if err := rawdb.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
+			return err
+		}
 	}
 
 	if err = u.Done(tx); err != nil {

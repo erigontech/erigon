@@ -64,7 +64,6 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 		if err := accounts.Deserialise2(&a, enc); err != nil {
 			return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 		}
-		fmt.Printf("aa2 1: %d, %x, %d\n", hr.txNum, address.Bytes(), a.Balance.Uint64())
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
 		}
@@ -84,7 +83,6 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 	}
-	fmt.Printf("aa2 2: %d, %x, %d\n", hr.txNum, address.Bytes(), a.Balance.Uint64())
 
 	if hr.trace {
 		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)

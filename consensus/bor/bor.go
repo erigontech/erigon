@@ -554,11 +554,14 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 				return nil, err
 			}
 			c.recents.Add(snap.Hash, snap)
-			// We've generated a new checkpoint snapshot, save to disk
-			if err = snap.store(c.DB); err != nil {
-				return nil, err
+
+			if snap.Number%checkpointInterval == 0 {
+				// We've generated a new checkpoint snapshot, save to disk
+				if err = snap.store(c.DB); err != nil {
+					return nil, err
+				}
+				log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 			}
-			log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 		}
 		if cont {
 			snap = nil

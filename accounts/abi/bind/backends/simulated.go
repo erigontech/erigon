@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
@@ -117,9 +118,8 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.RwDB {
-	return b.m.DB
-}
+func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
+func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV2Components() }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {

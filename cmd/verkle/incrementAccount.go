@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -49,14 +48,8 @@ func badKeysForAddress(tx kv.RwTx, address common.Address) ([][]byte, error) {
 	return badKeys, nil
 }
 
-func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
+func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
-	// START
-	var progress uint64
-	var err error
-	if progress, err = stages.GetStageProgress(vTx, stages.VerkleTrie); err != nil {
-		return err
-	}
 	logPrefix := "IncrementVerkleAccount"
 
 	collectorLookup := etl.NewCollector(PedersenHashedCodeLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -114,10 +107,10 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 		}
 	}()
 	marker := NewVerkleMarker()
-	defer marker.Close()
+	defer marker.Rollback()
 
 	accountProcessed := 0
-	for k, v, err := accountCursor.Seek(dbutils.EncodeBlockNumber(progress)); k != nil; k, v, err = accountCursor.Next() {
+	for k, v, err := accountCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = accountCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -203,7 +196,10 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, to uint64) error {
 		return err
 	}
 	// Get root
-	/*h := rawdb.ReadHeaderByNumber(tx, progress)
-	return verkleWriter.CommitVerkleTree(h.Root)*/
-	return verkleWriter.CommitVerkleTree(common.Hash{})
+	root, err := ReadVerkleRoot(tx, from)
+	if err != nil {
+		return err
+	}
+	_, err = verkleWriter.CommitVerkleTree(root)
+	return err
 }

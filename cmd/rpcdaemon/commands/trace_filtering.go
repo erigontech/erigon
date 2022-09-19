@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"math/big"
 )
 
 // Transaction implements trace_transaction
@@ -324,6 +325,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
+	isPos := false
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
@@ -366,6 +368,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
+		if !isPos && api._chainConfig.TerminalTotalDifficulty != nil {
+			header := block.Header()
+			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
+		}
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
 		if tErr != nil {
@@ -415,6 +421,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				}
 			}
 		}
+
+		// if we are in POS
+		// we dont check for uncles or block rewards
+		if isPos {
+			continue
+		}
+
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
 			nSeen++
@@ -499,10 +512,17 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	var fromTxNum, toTxNum uint64
+	var err error
 	if fromBlock > 0 {
-		fromTxNum = api._txNums.MinOf(fromBlock)
+		fromTxNum, err = rawdb.TxNums.Min(dbtx, fromBlock)
+		if err != nil {
+			return err
+		}
 	}
-	toTxNum = api._txNums.MaxOf(toBlock) // toBlock is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	if err != nil {
+		return err
+	}
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
@@ -584,7 +604,10 @@ func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	for it.HasNext() {
 		txNum := it.Next()
 		// Find block number
-		ok, blockNum := api._txNums.Find(txNum)
+		ok, blockNum, err := rawdb.TxNums.FindBlockNum(dbtx, txNum)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
@@ -605,7 +628,19 @@ func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, to
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
 		}
-		if txNum+1 == api._txNums.MaxOf(blockNum) {
+		maxTxNum, err := rawdb.TxNums.Max(dbtx, blockNum)
+		if err != nil {
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
+		}
+		if txNum+1 == maxTxNum {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -700,7 +735,10 @@ func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		}
 		var startTxNum uint64
 		if blockNum > 0 {
-			startTxNum = api._txNums.MinOf(blockNum)
+			startTxNum, err = rawdb.TxNums.Min(dbtx, blockNum)
+			if err != nil {
+				return err
+			}
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
