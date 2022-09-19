@@ -298,6 +298,9 @@ type HeaderDownload struct {
 	QuitPoWMining          chan struct{}
 	trace                  bool
 	stats                  Stats
+	ignoreAboveHeight      *uint64
+	insertLimit            int64
+	insertsLeft            int64
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          services.HeaderReader

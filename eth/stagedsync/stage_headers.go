@@ -44,6 +44,8 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	insertLimit       uint64
+	ignoreAboveHeight *big.Int
 	tmpdir            string
 
 	snapshots     *snapshotsync.RoSnapshots
@@ -62,6 +64,8 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	insertLimit uint64,
+	ignoreAboveHeight *big.Int,
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
@@ -82,6 +86,8 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
+		insertLimit:       insertLimit,
+		ignoreAboveHeight: ignoreAboveHeight,
 	}
 }
 
@@ -740,6 +746,15 @@ func HeadersPOW(
 
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
+	}
+	if cfg.insertLimit > 0 {
+		cfg.hd.SetInsertLimit(int64(cfg.insertLimit))
+	}
+	if cfg.ignoreAboveHeight != nil {
+		if haveAll := cfg.hd.SetIgnoreAboveHeight(cfg.ignoreAboveHeight.Uint64()); haveAll {
+			// have all non-ignored headers; skip headers stage
+			return nil
+		}
 	}
 	cfg.hd.SetPOSSync(false)
 	cfg.hd.SetFetchingNew(true)
