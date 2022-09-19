@@ -331,7 +331,7 @@ func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := rawdb.TxNums.Max(tx, u.UnwindPoint)
+	txNum, err := rawdb.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
