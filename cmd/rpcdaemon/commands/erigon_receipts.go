@@ -190,16 +190,13 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		if body == nil {
 			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
-		for _, log := range blockLogs {
+		for i, log := range blockLogs {
 			log.BlockNumber = blockNumber
 			log.BlockHash = blockHash
 			log.TxHash = body.Transactions[log.TxIndex].Hash()
 
-			erigonLog := &types.ErigonLog{
-				Log:       *log,
-				Timestamp: timestamp,
-			}
-			erigonLogs = append(erigonLogs, erigonLog)
+			erigonLogs[i].Log = *log
+			erigonLogs[i].Timestamp = timestamp
 		}
 	}
 
