@@ -601,16 +601,10 @@ func TestPoSDownloader(t *testing.T) {
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
-	// Since we are removing the current request to avoid the deadlock, we need to send the new payload (or fcu) request again.
-	m.SendPayloadRequest(chain.TopBlock)
 	// Second cycle: process the previous beacon request
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
-	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
-	// Second cycle: checking the response
-	payloadStatus = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	// Point forkChoice to the head
