@@ -88,16 +88,16 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	// we delete Bor Receipt log too
 	borReceipt, err := ReadBorReceipt(tx, number)
 	if err != nil {
-		log.Crit("Failted to read bor receipt", "err", err)
+		log.Error("Failted to read bor receipt", "err", err)
 	}
 	if borReceipt != nil {
 		if err := tx.Delete(kv.Log, dbutils.LogKey(number, uint32(borReceipt.TransactionIndex))); err != nil {
-			log.Crit("Failed to delete bor log", "err", err)
+			log.Error("Failed to delete bor log", "err", err)
 		}
 	}
 
 	if err := tx.Delete(kv.BorReceipts, key); err != nil {
-		log.Crit("Failed to delete bor receipt", "err", err)
+		log.Error("Failed to delete bor receipt", "err", err)
 	}
 }
 
