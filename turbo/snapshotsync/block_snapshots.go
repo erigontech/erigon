@@ -1759,38 +1759,6 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	return nil
 }
 
-type decompressItem struct {
-	i, offset uint64
-	word      []byte
-	err       error
-}
-
-func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompressItem {
-	ch := make(chan decompressItem, 1024)
-	go func() {
-		defer close(ch)
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			var wc, pos, nextPos uint64
-			word := make([]byte, 0, 4096)
-			for g.HasNext() {
-				word, nextPos = g.Next(word[:0])
-				select {
-				case <-ctx.Done():
-					return nil
-				case ch <- decompressItem{i: wc, offset: pos, word: common2.Copy(word)}:
-				}
-				wc++
-				pos = nextPos
-			}
-			return nil
-		}); err != nil {
-			ch <- decompressItem{err: err}
-		}
-	}()
-	return ch
-}
-
 // Idx - iterate over segment and building .idx file
 func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpDir string, lvl log.Lvl, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	segmentFileName := d.FilePath()
