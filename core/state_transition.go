@@ -374,10 +374,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
-	homestead := st.evm.ChainRules().IsHomestead
-	istanbul := st.evm.ChainRules().IsIstanbul
-	london := st.evm.ChainRules().IsLondon
-	nano := st.evm.ChainRules().IsNano
+	rules := st.evm.ChainRules()
+	homestead := rules.IsHomestead
+	istanbul := rules.IsIstanbul
+	london := rules.IsLondon
+	nano := rules.IsNano
 	contractCreation := msg.To() == nil
 
 	if nano {
@@ -410,8 +411,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Set up the initial access list.
-	if st.evm.ChainRules().IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(st.evm.ChainRules()), msg.AccessList())
+	if rules.IsBerlin {
+		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+		// EIP-3651 warm COINBASE
+		if rules.IsShanghai {
+			st.state.AddAddressToAccessList(st.evm.Context().Coinbase)
+		}
 	}
 
 	var (
