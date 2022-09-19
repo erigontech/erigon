@@ -197,7 +197,10 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, block
 	}
 
 	// Block is prefetched, no need to request
-	bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
+	bd.deliveriesH[blockNum] = block.Header()
+
+	// make sure we have the body in the bucket for later use
+	bd.addBodyToBucket(tx, blockNum, block.RawBody())
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
