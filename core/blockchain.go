@@ -433,7 +433,7 @@ func ExecuteBlockEphemerallyBor(
 	}
 
 	blockLogs := ibs.Logs()
-	var stateSyncReceipt *types.Receipt
+	stateSyncReceipt := &types.Receipt{}
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
