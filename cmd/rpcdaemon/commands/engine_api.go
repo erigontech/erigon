@@ -266,14 +266,6 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	if beaconConfig.TerminalBlockHash != (common.Hash{}) {
-		return TransitionConfiguration{}, fmt.Errorf("the consensus layer has a non-stub terminal block hash: %x", beaconConfig.TerminalBlockHash)
-	}
-
-	if common.Big0.Cmp((*big.Int)(beaconConfig.TerminalBlockNumber)) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the consensus layer has a non-stub terminal block number: %s", beaconConfig.TerminalBlockNumber)
-	}
-
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       common.Hash{},
