@@ -54,14 +54,15 @@ func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wa
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		ctx:         ctx,
 		stateWriter: state.NewStateWriter22(rs),
 		stateReader: state.NewStateReader22(rs),
 		chainConfig: chainConfig,
-		logger:      logger,
-		genesis:     genesis,
-		resultCh:    resultCh,
-		engine:      engine,
+
+		ctx:      ctx,
+		logger:   logger,
+		genesis:  genesis,
+		resultCh: resultCh,
+		engine:   engine,
 		getHeader: func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, nil, hash, number)
 			if err != nil {
