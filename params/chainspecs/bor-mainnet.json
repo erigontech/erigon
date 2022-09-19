@@ -14,7 +14,6 @@
   "muirGlacierBlock": 3395000,
   "berlinBlock": 14750000,
   "londonBlock": 23850000,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "bor": {
     "period": {
       "0": 2

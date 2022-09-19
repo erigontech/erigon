@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.19-alpine3.15 AS builder
+FROM docker.io/library/golang:1.19-alpine3.16 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/go/pkg/mod \
     make all db-tools
 
-FROM docker.io/library/alpine:3.15
+FROM docker.io/library/alpine:3.16
 
 RUN apk add --no-cache ca-certificates curl libstdc++ jq tzdata
 # copy compiled artifacts from builder
