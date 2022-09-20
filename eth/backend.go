@@ -185,7 +185,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
-		if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+		ok := true
+		if genesisErr != nil {
+			_, ok = genesisErr.(*params.ConfigCompatError)
+		}
+		if genesisErr != nil && !ok {
 			return genesisErr
 		}
 
