@@ -464,6 +464,13 @@ func applySystemContractUpgrade(upgrade *Upgrade, blockNumber *big.Int, statedb 
 		if err != nil {
 			panic(fmt.Errorf("failed to decode new contract code: %s", err.Error()))
 		}
+
+		prevContractCode := statedb.GetCode(cfg.ContractAddr)
+		if len(prevContractCode) == 0 && len(newContractCode) > 0 {
+			// system contracts defined after genesis need to be explicitly created
+			statedb.CreateAccount(cfg.ContractAddr, true)
+		}
+
 		statedb.SetCode(cfg.ContractAddr, newContractCode)
 
 		if cfg.AfterUpgrade != nil {
