@@ -358,11 +358,15 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 				return nil, err
 			}
 		}
-		txIndex := txNum - startTxNum - 1
+
+		txIndex := int(txNum) - int(startTxNum) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txIndex))
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
+		}
+		if txn == nil {
+			continue
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)

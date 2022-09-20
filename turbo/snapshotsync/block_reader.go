@@ -705,6 +705,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 	return
 }
 
+// TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
+// return nil if 0 < i < body.TxAmoun
 func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
 	var b *types.BodyForStorage
 	ok, err := back.sn.ViewBodies(blockNum, func(segment *BodySegment) error {
@@ -715,10 +717,18 @@ func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv
 		if b == nil {
 			return nil
 		}
-
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+
 	if ok {
+		// if block has no transactions, or requested txNum out of non-system transactions length
+		if b.TxAmount == 2 || i == -1 || i >= int(b.TxAmount-2) {
+			return nil, nil
+		}
+
 		ok, err = back.sn.Txs.ViewSegment(blockNum, func(segment *TxnSegment) error {
 			// +1 because block has system-txn in the beginning of block
 			txn, err = back.txnByID(b.BaseTxId+1+uint64(i), segment, nil)
