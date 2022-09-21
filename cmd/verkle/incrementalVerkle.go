@@ -30,6 +30,7 @@ func readCodeKey(tx kv.RwTx, address []byte, index *uint256.Int) ([]byte, error)
 
 func IncrementVerkleTree(cfg optionsCfg) error {
 	start := time.Now()
+
 	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
 	if err != nil {
 		log.Error("Error while opening database", "err", err.Error())
@@ -55,7 +56,6 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 		return err
 	}
 	defer tx.Rollback()
-
 	if err := initDB(vTx); err != nil {
 		return err
 	}
@@ -69,11 +69,12 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-
-	if err := incrementAccount(vTx, tx, cfg, from, to); err != nil {
+	verkleWriter := NewVerkleTreeWriter(vTx, cfg.tmpdir)
+	defer verkleWriter.Close()
+	if err := incrementAccount(vTx, tx, cfg, verkleWriter, from, to); err != nil {
 		return err
 	}
-	if err := incrementStorage(vTx, tx, cfg, from, to); err != nil {
+	if err := incrementStorage(vTx, tx, cfg, verkleWriter, from, to); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {

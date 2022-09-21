@@ -202,3 +202,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 	commitment := rootNode.ComputeCommitment().Bytes()
 	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
 }
+
+func (v *VerkleTreeWriter) Close() {
+	v.collector.Close()
+}

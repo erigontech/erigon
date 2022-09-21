@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -18,12 +17,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) error {
+func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter, from, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleStorage"
-
-	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorLookup.Close()
 
 	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
 	out := make(chan *regeneratePedersenStorageJob, batchSize)
@@ -44,17 +40,12 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 		return err
 	}
 	defer storageCursor.Close()
-	verkleWriter := NewVerkleTreeWriter(vTx, cfg.tmpdir)
 	// Start Goroutine for collection
 	go func() {
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
 			if err := verkleWriter.Insert(o.storageVerkleKey[:], o.storageValue); err != nil {
-				panic(err)
-			}
-
-			if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
 				panic(err)
 			}
 		}
@@ -134,12 +125,6 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 	close(jobs)
 	wg.Wait()
 	close(out)
-	if err := collectorLookup.Load(vTx, PedersenHashedStorageLookup, identityFuncForVerkleTree, etl.TransformArgs{Quit: context.Background().Done(),
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"key", common.Bytes2Hex(k)}
-		}}); err != nil {
-		return err
-	}
 	// Get root
 	root, err := ReadVerkleRoot(tx, from)
 	if err != nil {
