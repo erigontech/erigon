@@ -156,6 +156,17 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		return err
 	}
 	log.Info("decompress speed", "took", time.Since(t))
+	t = time.Now()
+	if err := decompressor.WithReadAhead(func() error {
+		g := decompressor.MakeGetter()
+		for g.HasNext() {
+			_ = g.Skip()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	log.Info("decompress skip speed", "took", time.Since(t))
 	return nil
 }
 func doRam(cliCtx *cli.Context) error {
