@@ -185,12 +185,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
-		ok := true
 		if genesisErr != nil {
-			_, ok = genesisErr.(*params.ConfigCompatError)
-		}
-		if genesisErr != nil && !ok {
-			return genesisErr
+			if _, ok := genesisErr.(*params.ConfigCompatError); !ok {
+				return err
+			}
 		}
 
 		currentBlock = rawdb.ReadCurrentBlock(tx)
