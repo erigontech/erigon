@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -92,6 +93,12 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
 		},
+		{
+			Name:   "decompress_speed",
+			Action: doDecompressSpeed,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+		},
 	},
 }
 
@@ -122,6 +129,31 @@ var (
 	}
 )
 
+func doDecompressSpeed(cliCtx *cli.Context) error {
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	defer decompressor.Close()
+	t := time.Now()
+	if err := decompressor.WithReadAhead(func() error {
+		g := decompressor.MakeGetter()
+		buf := make([]byte, 0, 16*etl.BufIOSize)
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	log.Info("decompress speed", "took", time.Since(t))
+	return nil
+}
 func doRam(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
 	if len(args) != 1 {
