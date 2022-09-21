@@ -64,7 +64,9 @@ func plainWriterGen(tx kv.RwTx) stateWriterGen {
 	}
 }
 
-func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWriter *state.StateWriter22, apply func(bn uint64), difficulty int) {
+type testGenHook func(n, from, numberOfBlocks uint64)
+
+func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWriter state.StateWriter, beforeBlock, afterBlock testGenHook, difficulty int) {
 	acc1 := accounts.NewAccount()
 	acc1.Incarnation = 1
 	acc1.Initialised = true
@@ -81,9 +83,8 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 	}
 
 	for blockNumber := uint64(1); blockNumber < from+numberOfBlocks; blockNumber++ {
+		beforeBlock(blockNumber, from, numberOfBlocks)
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
-		blockWriter.SetTxNum(blockNumber)
-		blockWriter.ResetWriteSet()
 
 		for i, oldAcc := range testAccounts {
 			addr := common.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
@@ -132,7 +133,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			}
 			testAccounts[i] = newAcc
 		}
-		apply(blockNumber)
+		afterBlock(blockNumber, from, numberOfBlocks)
 	}
 }
 

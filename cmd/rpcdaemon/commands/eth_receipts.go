@@ -358,11 +358,15 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 				return nil, err
 			}
 		}
-		txIndex := txNum - startTxNum - 1
+
+		txIndex := int(txNum) - int(startTxNum) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txIndex))
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
+		}
+		if txn == nil {
+			continue
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
@@ -407,12 +411,12 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap2(ac *libstate.Aggregator22Context, c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
+func getTopicsBitmap2(ac *libstate.Aggregator22Context, tx kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			it := ac.LogTopicIterator(topic.Bytes(), from, to, nil)
+			it := ac.LogTopicIterator(topic.Bytes(), from, to, tx)
 			for it.HasNext() {
 				bitmapForORing.Add(it.Next())
 			}

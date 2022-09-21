@@ -30,29 +30,6 @@ func (hr *HistoryReader22) ReadAccountData(address common.Address) (*accounts.Ac
 	if err != nil {
 		return nil, err
 	}
-	/*
-		if !ok {
-			enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
-			if err != nil {
-				return nil, err
-			}
-		}
-		if len(enc) == 0 {
-			if hr.trace {
-				fmt.Printf("ReadAccountData [%x] => []\n", address)
-			}
-			return nil, nil
-		}
-		var a accounts.Account
-		if err := accounts.Deserialise2(&a, enc); err != nil {
-			return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
-		}
-
-		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
-		}
-		return &a, nil
-	*/
 	if ok {
 		if len(enc) == 0 {
 			if hr.trace {
@@ -121,7 +98,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 		return nil, err
 	}
 	if !ok {
-		enc, err = hr.tx.GetOne(kv.Code, address.Bytes())
+		enc, err = hr.tx.GetOne(kv.Code, codeHash[:])
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +115,7 @@ func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnati
 		return 0, err
 	}
 	if !ok {
-		enc, err := hr.tx.GetOne(kv.Code, address.Bytes())
+		enc, err := hr.tx.GetOne(kv.Code, codeHash[:])
 		if err != nil {
 			return 0, err
 		}

@@ -86,6 +86,12 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
 		},
+		{
+			Name:   "ram",
+			Action: doRam,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+		},
 	},
 }
 
@@ -116,6 +122,26 @@ var (
 	}
 )
 
+func doRam(cliCtx *cli.Context) error {
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	runtime.ReadMemStats(&m)
+	before := m.Alloc
+	log.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	defer decompressor.Close()
+	runtime.ReadMemStats(&m)
+	log.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
+	return nil
+}
 func doIndicesCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()

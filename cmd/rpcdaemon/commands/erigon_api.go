@@ -18,6 +18,7 @@ import (
 type ErigonAPI interface {
 	// System related (see ./erigon_system.go)
 	Forks(ctx context.Context) (Forks, error)
+	BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error)
 
 	// Blocks related (see ./erigon_blocks.go)
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
