@@ -135,6 +135,10 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
+
+	ff, _ := os.Open(f)
+	_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 1*1024*1024), make([]byte, 1*1024*1024))
+
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
