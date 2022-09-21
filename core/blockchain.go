@@ -442,6 +442,7 @@ func ExecuteBlockEphemerallyBor(
 
 			// fill the state sync with the correct information
 			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+			stateSyncReceipt.Status = types.ReceiptStatusSuccessful
 		}
 	}
 
