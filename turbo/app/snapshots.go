@@ -136,7 +136,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	f := args[0]
 
-	compress.SetDecompressionTableCondensity(9)
+	compress.SetDecompressionTableCondensity(8)
 
 	ff, _ := os.Open(f)
 	_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 1*1024*1024), make([]byte, 1*1024*1024))
