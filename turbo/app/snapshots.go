@@ -220,7 +220,7 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(os.Stdin, 16*etl.BufIOSize)
+	r := bufio.NewReaderSize(os.Stdin, workers*4*etl.BufIOSize)
 	buf := make([]byte, 0, 32*1024*1024)
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
