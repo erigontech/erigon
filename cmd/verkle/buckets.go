@@ -3,19 +3,13 @@ package main
 import "github.com/ledgerwatch/erigon-lib/kv"
 
 const (
-	VerkleIncarnation            = "VerkleIncarnation"
-	VerkleRoots                  = "VerkleRoots"
-	PedersenHashedCodeLookup     = "PedersenHashedCodeLookup"
-	PedersenHashedAccountsLookup = "PedersenHashedAccountsLookup"
-	PedersenHashedStorageLookup  = "PedersenHashedStorageLookup"
-	VerkleTrie                   = "VerkleTrie"
+	VerkleIncarnation = "VerkleIncarnation"
+	VerkleRoots       = "VerkleRoots"
+	VerkleTrie        = "VerkleTrie"
 )
 
 var ExtraBuckets = []string{
 	VerkleIncarnation,
-	PedersenHashedCodeLookup,
-	PedersenHashedAccountsLookup,
-	PedersenHashedStorageLookup,
 	VerkleTrie,
 	VerkleRoots,
 }
