@@ -212,7 +212,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args[0]
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	workers := runtime.GOMAXPROCS(-1) - 1
+	workers := 2*runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
 	}
