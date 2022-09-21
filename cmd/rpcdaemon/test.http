@@ -176,8 +176,8 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x312FF",
-      "toBlock": "0x312FF"
+      "fromBlock": "0x312ff",
+      "toBlock": "0x312ff"
     }
   ],
   "id": 537758
@@ -189,13 +189,8 @@ Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
-  "method": "eth_getLogs",
-  "params": [
-    {
-      "fromBlock": "0x312FF",
-      "toBlock": "0x313FF"
-    }
-  ],
+  "method": "eth_getBlockReceipts",
+  "params": ["0x312ff"],
   "id": 537758
 }
 

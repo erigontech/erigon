@@ -33,9 +33,9 @@ import (
 )
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
-		return cached, nil
-	}
+	//if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
+	//	return cached, nil
+	//}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, tx, hash, number)
@@ -60,10 +60,12 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		header := block.Header()
+		fmt.Printf("h: %x, %d, %d\n", txn.Hash(), block.Number().Uint64(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), ethashFaker, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
+
 		receipt.BlockHash = block.Hash()
 		receipts[i] = receipt
 	}
@@ -370,6 +372,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			continue
 		}
 		txHash := txn.Hash()
+		fmt.Printf("h: %x, %d, %d\n", txHash, blockNum, txIndex)
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
 			return nil, err
@@ -387,7 +390,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("bn: %d, %d, %d\n", blockNum, txNum, len(ibs.GetLogs(txHash)))
+		fmt.Printf("bn: %d, %d, %d, %s\n", blockNum, txNum, len(ibs.GetLogs(txHash)), ibs.Error())
 		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
