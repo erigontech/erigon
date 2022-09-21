@@ -131,6 +131,7 @@ func doRam(cliCtx *cli.Context) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	runtime.ReadMemStats(&m)
+	before := m.Alloc
 	log.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
@@ -138,7 +139,7 @@ func doRam(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	runtime.ReadMemStats(&m)
-	log.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	log.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
 	return nil
 }
 func doIndicesCommand(cliCtx *cli.Context) error {
