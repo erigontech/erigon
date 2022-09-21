@@ -65,7 +65,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
-			if err := verkleWriter.UpdateAccount(o.versionHash[:], o.codeSize, o.account); err != nil {
+			if err := verkleWriter.UpdateAccount(o.versionHash[:], o.codeSize, true, o.account); err != nil {
 				panic(err)
 			}
 

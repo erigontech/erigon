@@ -89,7 +89,7 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, from, to uint64) er
 			if o.absentInState {
 				continue
 			}
-			if err := verkleWriter.UpdateAccount(o.versionHash, o.codeSize, o.account); err != nil {
+			if err := verkleWriter.UpdateAccount(o.versionHash, o.codeSize, true, o.account); err != nil {
 				panic(err)
 			}
 			if err := verkleWriter.WriteContractCodeChunks(o.codeKeys, o.codeChunks); err != nil {
