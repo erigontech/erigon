@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"sync"
 	"time"
 
@@ -43,16 +44,13 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
-			// Remove all bad keys
-			for _, badKey := range o.badKeys {
-				if err := verkleWriter.Insert(badKey, nil); err != nil {
+			if o.absentInState {
+				if err := verkleWriter.DeleteAccount(o.versionHash, o.isContract); err != nil {
 					panic(err)
 				}
-			}
-			if o.absentInState {
 				continue
 			}
-			if err := verkleWriter.UpdateAccount(o.versionHash, o.codeSize, true, o.account); err != nil {
+			if err := verkleWriter.UpdateAccount(o.versionHash, o.codeSize, o.isContract, o.account); err != nil {
 				panic(err)
 			}
 			if err := verkleWriter.WriteContractCodeChunks(o.codeKeys, o.codeChunks); err != nil {
@@ -63,7 +61,6 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 	marker := NewVerkleMarker()
 	defer marker.Rollback()
 
-	accountProcessed := 0
 	for k, v, err := accountCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = accountCursor.Next() {
 		if err != nil {
 			return err
@@ -91,9 +88,17 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 		if err != nil {
 			return err
 		}
+
+		incarnationBytes, err := tx.GetOne(kv.IncarnationMap, addressBytes)
+		if err != nil {
+			return err
+		}
+		isContract := len(incarnationBytes) > 0 && binary.BigEndian.Uint64(incarnationBytes) != 0
 		// Start
 		if len(encodedAccount) == 0 {
 			jobs <- &regenerateIncrementalPedersenAccountsJob{
+				address:       address,
+				isContract:    isContract,
 				absentInState: true,
 			}
 		} else {
@@ -101,25 +106,19 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 			if err := acc.DecodeForStorage(encodedAccount); err != nil {
 				return err
 			}
-			verkleIncarnation, err := ReadVerkleIncarnation(vTx, address)
+
+			// We need to update code.
+			code, err := tx.GetOne(kv.Code, acc.CodeHash[:])
 			if err != nil {
 				return err
 			}
-			var code []byte
-			var badKeys [][]byte
-			if verkleIncarnation != acc.Incarnation {
-				// We need to update code.
-				code, err = tx.GetOne(kv.Code, acc.CodeHash[:])
-				if err != nil {
-					return err
-				}
-			}
+
 			jobs <- &regenerateIncrementalPedersenAccountsJob{
 				address:       address,
 				account:       acc,
 				code:          code,
 				absentInState: false,
-				badKeys:       badKeys,
+				isContract:    isContract,
 			}
 		}
 		if err := marker.MarkAsDone(addressBytes); err != nil {
@@ -127,7 +126,7 @@ func incrementAccount(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Creating Verkle Trie Incrementally", "phase", "account", "blockNum", blockNumber, "accountsProcessed", accountProcessed)
+			log.Info("Creating Verkle Trie Incrementally", "phase", "account", "blockNum", blockNumber)
 		default:
 		}
 	}

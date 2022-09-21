@@ -40,6 +40,31 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 	return err
 }
 
+func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
+	var err error
+	totalInserted := 0
+	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
+		if err != nil {
+			return
+		}
+		var encodedNode []byte
+
+		rootHash := node.ComputeCommitment().Bytes()
+		encodedNode, err = node.Serialize()
+		if err != nil {
+			return
+		}
+		err = collector.Collect(rootHash[:], encodedNode)
+		totalInserted++
+		select {
+		case <-logInterval.C:
+			log.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+		default:
+		}
+	})
+	return err
+}
+
 type VerkleTreeWriter struct {
 	db        kv.RwTx
 	collector *etl.Collector
@@ -88,6 +113,40 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, isC
 			return err
 		}
 		if err := v.collector.Collect(codeSizeKey[:], cs[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *VerkleTreeWriter) DeleteAccount(versionKey []byte, isContract bool) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	var codeHashKey, nonceKey, balanceKey, codeSizeKey [32]byte
+	copy(codeHashKey[:], versionKey[:31])
+	copy(nonceKey[:], versionKey[:31])
+	copy(balanceKey[:], versionKey[:31])
+	copy(codeSizeKey[:], versionKey[:31])
+	codeHashKey[31] = vtree.CodeKeccakLeafKey
+	nonceKey[31] = vtree.NonceLeafKey
+	balanceKey[31] = vtree.BalanceLeafKey
+	codeSizeKey[31] = vtree.CodeSizeLeafKey
+	// Insert in the tree
+	if err := v.collector.Collect(versionKey, []byte{0}); err != nil {
+		return err
+	}
+
+	if err := v.collector.Collect(nonceKey[:], []byte{0}); err != nil {
+		return err
+	}
+	if err := v.collector.Collect(balanceKey[:], []byte{0}); err != nil {
+		return err
+	}
+	if isContract {
+		if err := v.collector.Collect(codeHashKey[:], []byte{0}); err != nil {
+			return err
+		}
+		if err := v.collector.Collect(codeSizeKey[:], []byte{0}); err != nil {
 			return err
 		}
 	}
@@ -146,6 +205,11 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+		return common.Hash{}, err
+	}
+
+	// Flush the rest all at once
+	if err := collectVerkleNode(v.collector, root, logInterval, nil); err != nil {
 		return common.Hash{}, err
 	}
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"sync"
 	"time"
 
@@ -12,8 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -77,8 +74,8 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 		address := common.BytesToAddress(changesetKey[:20])
 
-		var acc accounts.Account
-		has, err := rawdb.ReadAccount(tx, address, &acc)
+		/*var acc accounts.Account
+		_, err := rawdb.ReadAccount(tx, address, &acc)
 		if err != nil {
 			return err
 		}
@@ -94,7 +91,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 		if acc.Incarnation != storageIncarnation {
 			continue
-		}
+		}*/
 
 		storageValue, err := tx.GetOne(kv.PlainState, changesetKey)
 		if err != nil {
