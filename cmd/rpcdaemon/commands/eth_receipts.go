@@ -366,6 +366,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			return nil, err
 		}
 		if txn == nil {
+			fmt.Printf("tx is nil: %d\n", txNum)
 			continue
 		}
 		txHash := txn.Hash()
@@ -386,6 +387,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("bn: %d, %d, %d\n", blockNum, txNum, len(ibs.GetLogs(txHash)))
 		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
