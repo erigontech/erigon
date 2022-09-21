@@ -386,6 +386,7 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		fmt.Printf("tx: rules=%+v, nonce=%d, data=%x\n", lastRules, txn.GetNonce(), txn.GetData())
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, err
