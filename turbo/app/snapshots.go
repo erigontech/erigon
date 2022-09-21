@@ -176,7 +176,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+	wr := bufio.NewWriterSize(os.Stdout, 256*1024*1024)
 	defer wr.Flush()
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
