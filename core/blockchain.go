@@ -444,8 +444,9 @@ func ExecuteBlockEphemerallyBor(
 			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
 
 			stateSyncReceipt = &types.ReceiptForStorage{
-				Status: types.ReceiptStatusSuccessful, // make receipt status successful
-				Logs:   stateSyncLogs,
+				Status:           types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:             stateSyncLogs,
+				TransactionIndex: uint(len(includedTxs)),
 			}
 		}
 	}
