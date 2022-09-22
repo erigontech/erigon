@@ -98,7 +98,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 		return nil, err
 	}
 	if !ok {
-		enc, err = hr.tx.GetOne(kv.Code, address.Bytes())
+		enc, err = hr.tx.GetOne(kv.Code, codeHash[:])
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +115,7 @@ func (hr *HistoryReader22) ReadAccountCodeSize(address common.Address, incarnati
 		return 0, err
 	}
 	if !ok {
-		enc, err := hr.tx.GetOne(kv.Code, address.Bytes())
+		enc, err := hr.tx.GetOne(kv.Code, codeHash[:])
 		if err != nil {
 			return 0, err
 		}

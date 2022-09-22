@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -36,9 +35,6 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
 
-	collectorLookup := etl.NewCollector(PedersenHashedAccountsLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorLookup.Close()
-
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
@@ -65,11 +61,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 		defer debug.LogPanic()
 		defer cancelWorkers()
 		for o := range out {
-			if err := verkleWriter.UpdateAccount(o.versionHash[:], o.codeSize, o.account); err != nil {
-				panic(err)
-			}
-
-			if err := collectorLookup.Collect(o.address[:], o.versionHash[:]); err != nil {
+			if err := verkleWriter.UpdateAccount(o.versionHash[:], o.codeSize, true, o.account); err != nil {
 				panic(err)
 			}
 		}
@@ -108,10 +100,6 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 	wg.Wait()
 	close(out)
 
-	collectorLookup.Load(outTx, PedersenHashedAccountsLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"key", common.Bytes2Hex(k)}
-		}})
 	log.Info("Finished generation of Pedersen Hashed Accounts", "elapsed", time.Since(start))
 
 	return nil
@@ -121,9 +109,6 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 	logPrefix := "PedersenHashedStorage"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Storage")
-
-	collectorLookup := etl.NewCollector(PedersenHashedStorageLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
 	if err != nil {
@@ -157,9 +142,6 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 			}
 			if cfg.disabledLookups {
 				continue
-			}
-			if err := collectorLookup.Collect(append(o.address[:], o.storageKey.Bytes()...), o.storageVerkleKey[:]); err != nil {
-				panic(err)
 			}
 		}
 	}()
@@ -199,10 +181,6 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 	wg.Wait()
 	close(out)
 
-	collectorLookup.Load(outTx, PedersenHashedStorageLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"key", common.Bytes2Hex(k)}
-		}})
 	log.Info("Finished generation of Pedersen Hashed Storage", "elapsed", time.Since(start))
 
 	return nil
@@ -212,9 +190,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 	logPrefix := "PedersenHashedCode"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Code")
-
-	collectorLookup := etl.NewCollector(PedersenHashedCodeLookup, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorLookup.Close()
 
 	plainStateCursor, err := readTx.Cursor(kv.PlainState)
 	if err != nil {
@@ -252,16 +227,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 			}
 			if cfg.disabledLookups {
 				continue
-			}
-			for i := range o.chunks {
-
-				// Build lookup [address + index]
-				lookupKey := make([]byte, 24)
-				copy(lookupKey, o.address[:])
-				binary.BigEndian.PutUint32(lookupKey[20:], uint32(i))
-				if err := collectorLookup.Collect(lookupKey, o.chunksKeys[i]); err != nil {
-					panic(err)
-				}
 			}
 		}
 	}()
@@ -301,12 +266,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 	wg.Wait()
 	close(out)
 
-	if err := collectorLookup.Load(outTx, PedersenHashedCodeLookup, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"key", common.Bytes2Hex(k)}
-		}}); err != nil {
-		return err
-	}
 	log.Info("Finished generation of Pedersen Hashed Code", "elapsed", time.Since(start))
 
 	return nil
