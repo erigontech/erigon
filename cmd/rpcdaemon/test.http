@@ -176,21 +176,15 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x312ff",
-      "toBlock": "0x312ff"
+      "address": "0x6090a6e47849629b7245dfa1ca21d94cd15878ef",
+      "fromBlock": "0x3d0000",
+      "toBlock": "0x3d2600",
+      "topics": [
+        null,
+        "0x374f3a049e006f36f6cf91b02a3b0ee16c858af2f75858733eb0e927b5b7126c"
+      ]
     }
   ],
-  "id": 537758
-}
-
-###
-POST localhost:8545
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "method": "eth_getBlockReceipts",
-  "params": ["0x312ff"],
   "id": 537758
 }
 
