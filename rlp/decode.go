@@ -999,18 +999,18 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 	}
 	s.byteval = 0
 	switch {
-	case b < 0x80:
+	case b < 0x80: //128
 		// For a single byte whose value is in the [0x00, 0x7F] range, that byte
 		// is its own RLP encoding.
 		s.byteval = b
 		return Byte, 0, nil
-	case b < 0xB8:
+	case b < 0xB8: //184
 		// Otherwise, if a string is 0-55 bytes long,
 		// the RLP encoding consists of a single byte with value 0x80 plus the
 		// length of the string followed by the string. The range of the first
 		// byte is thus [0x80, 0xB7].
 		return String, uint64(b - 0x80), nil
-	case b < 0xC0:
+	case b < 0xC0: //192
 		// If a string is more than 55 bytes long, the
 		// RLP encoding consists of a single byte with value 0xB7 plus the length
 		// of the length of the string in binary form, followed by the length of
@@ -1022,7 +1022,7 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 			err = ErrCanonSize
 		}
 		return String, size, err
-	case b < 0xF8:
+	case b < 0xF8: //248
 		// If the total payload of a list
 		// (i.e. the combined length of all its items) is 0-55 bytes long, the
 		// RLP encoding consists of a single byte with value 0xC0 plus the length
@@ -1036,7 +1036,7 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 		// form, followed by the length of the payload, followed by
 		// the concatenation of the RLP encodings of the items. The
 		// range of the first byte is thus [0xF8, 0xFF].
-		size, err = s.readUint(b - 0xF7)
+		size, err = s.readUint(b - 0xF7) //247
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
