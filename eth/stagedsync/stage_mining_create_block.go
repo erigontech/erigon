@@ -91,6 +91,8 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 	}
 }
 
+var maxTransactions uint16 = 1000
+
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
@@ -130,7 +132,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	var txs []types.Transaction
 	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		txSlots := types2.TxsRlp{}
-		if err := cfg.txPool2.Best(200, &txSlots, poolTx); err != nil {
+		if err := cfg.txPool2.Best(maxTransactions, &txSlots, poolTx); err != nil {
 			return err
 		}
 
