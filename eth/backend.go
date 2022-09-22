@@ -190,6 +190,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return genesisErr
 		}
 
+		types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
+
 		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
@@ -197,7 +199,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
 
-	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
 	// Apply special hacks for BSC params
