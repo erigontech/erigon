@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -92,6 +93,12 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
 		},
+		{
+			Name:   "decompress_speed",
+			Action: doDecompressSpeed,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+		},
 	},
 }
 
@@ -122,6 +129,54 @@ var (
 	}
 )
 
+func preloadFileAsync(name string) {
+	go func() {
+		ff, _ := os.Open(name)
+		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
+	}()
+}
+
+func doDecompressSpeed(cliCtx *cli.Context) error {
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+
+	compress.SetDecompressionTableCondensity(9)
+
+	preloadFileAsync(f)
+
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	defer decompressor.Close()
+	t := time.Now()
+	if err := decompressor.WithReadAhead(func() error {
+		g := decompressor.MakeGetter()
+		buf := make([]byte, 0, 16*etl.BufIOSize)
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	log.Info("decompress speed", "took", time.Since(t))
+	t = time.Now()
+	if err := decompressor.WithReadAhead(func() error {
+		g := decompressor.MakeGetter()
+		for g.HasNext() {
+			_ = g.Skip()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	log.Info("decompress skip speed", "took", time.Since(t))
+	return nil
+}
 func doRam(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
 	if len(args) != 1 {
@@ -171,12 +226,15 @@ func doUncompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
+
+	preloadFileAsync(f)
+
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+	wr := bufio.NewWriterSize(os.Stdout, 512*1024*1024)
 	defer wr.Flush()
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
@@ -220,7 +278,9 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(os.Stdin, 16*etl.BufIOSize)
+	defer c.Close()
+
+	r := bufio.NewReaderSize(os.Stdin, 512*1024*1024)
 	buf := make([]byte, 0, 32*1024*1024)
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
