@@ -254,7 +254,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
 		var found bool
-		var reconstituteToBlock uint64
+		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
 		if tx == nil {
 			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
@@ -266,7 +266,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 		}
 
-		if found && reconstituteToBlock > s.BlockNumber {
+		if found && reconstituteToBlock > s.BlockNumber+1 {
 			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
 			dir.Recreate(reconDbPath)
 			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))

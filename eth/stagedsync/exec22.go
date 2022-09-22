@@ -115,6 +115,7 @@ func Exec22(ctx context.Context,
 			if err != nil {
 				return err
 			}
+			outputTxNum++
 			inputTxNum = outputTxNum
 		}
 	} else {
@@ -128,6 +129,7 @@ func Exec22(ctx context.Context,
 				if err != nil {
 					return err
 				}
+				outputTxNum++
 				inputTxNum = outputTxNum
 			}
 			return nil
@@ -398,7 +400,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
 
 	var ok bool
-	var blockNum uint64
+	var blockNum uint64 // First block which is not covered by the history snapshot files
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
@@ -422,6 +424,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		if err != nil {
 			return err
 		}
+		txNum++
 		return nil
 	}); err != nil {
 		return err

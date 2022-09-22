@@ -1815,9 +1815,13 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 
 	blockNum = uint64(sort.Search(int(cnt), func(i int) bool {
 		binary.BigEndian.PutUint64(seek[:], uint64(i))
-		_, v, _ := c.SeekExact(seek[:])
+		var v []byte
+		_, v, err = c.SeekExact(seek[:])
 		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
 	}))
+	if err != nil {
+		return false, 0, err
+	}
 	if blockNum == cnt {
 		return false, 0, nil
 	}
