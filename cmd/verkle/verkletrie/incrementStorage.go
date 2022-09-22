@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -123,7 +124,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	wg.Wait()
 	close(out)
 	// Get root
-	root, err := ReadVerkleRoot(tx, from)
+	root, err := rawdb.ReadVerkleRoot(tx, from)
 	if err != nil {
 		return err
 	}
@@ -133,5 +134,5 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
 
-	return WriteVerkleRoot(vTx, to, newRoot)
+	return rawdb.WriteVerkleRoot(vTx, to, newRoot)
 }
