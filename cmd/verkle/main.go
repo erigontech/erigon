@@ -50,9 +50,6 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := verkletrie.InitDB(vTx); err != nil {
-		return err
-	}
 
 	from, err := stages.GetStageProgress(vTx, stages.VerkleTrie)
 	if err != nil {
@@ -106,10 +103,6 @@ func RegeneratePedersenHashstate(cfg optionsCfg) error {
 	}
 	defer tx.Rollback()
 
-	if err := verkletrie.InitDB(vTx); err != nil {
-		return err
-	}
-
 	verleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir)
 
 	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
@@ -152,10 +145,6 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 		return err
 	}
 	defer tx.Rollback()
-
-	if err := verkletrie.InitDB(vTx); err != nil {
-		return err
-	}
 
 	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir)
 
@@ -202,9 +191,7 @@ func analyseOut(cfg optionsCfg) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := verkletrie.InitDB(tx); err != nil {
-		return err
-	}
+
 	buckets, err := tx.ListBuckets()
 	if err != nil {
 		return err

@@ -27,6 +27,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -1822,4 +1823,40 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 		return false, 0, nil
 	}
 	return true, blockNum, nil
+}
+
+func ReadVerkleRoot(tx kv.Tx, blockNum uint64) (common.Hash, error) {
+	root, err := tx.GetOne(kv.VerkleRoots, dbutils.EncodeBlockNumber(blockNum))
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return common.BytesToHash(root), nil
+}
+
+func WriteVerkleRoot(tx kv.RwTx, blockNum uint64, root common.Hash) error {
+	return tx.Put(kv.VerkleRoots, dbutils.EncodeBlockNumber(blockNum), root[:])
+}
+
+func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {
+	var (
+		root    common.Hash
+		encoded []byte
+		err     error
+	)
+	root = node.ComputeCommitment().Bytes()
+	encoded, err = node.Serialize()
+	if err != nil {
+		return err
+	}
+
+	return tx.Put(kv.VerkleTrie, root[:], encoded)
+}
+
+func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
+	encoded, err := tx.GetOne(kv.VerkleTrie, root[:])
+	if err != nil {
+		return nil, err
+	}
+	return verkle.ParseNode(encoded, 0, root[:])
 }
