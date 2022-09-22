@@ -93,6 +93,9 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	if codeHash == emptyCodeHashH {
+		return nil, nil
+	}
 	enc, ok, err := hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
