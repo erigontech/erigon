@@ -261,7 +261,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args[0]
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	workers := 2*runtime.GOMAXPROCS(-1) - 1
+	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
 	}
@@ -273,6 +273,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	r := bufio.NewReaderSize(os.Stdin, 1*1024*1024*1024)
 	buf := make([]byte, 0, 32*1024*1024)
+	defer func(t time.Time) { fmt.Printf("snapshots.go:276: %s\n", time.Since(t)) }(time.Now())
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
@@ -295,6 +296,7 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
+	defer func(t time.Time) { fmt.Printf("snapshots.go:299: %s\n", time.Since(t)) }(time.Now())
 	if err := c.Compress(); err != nil {
 		return err
 	}
