@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) error {
+func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) (common.Hash, error) {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleStorage"
 
@@ -35,7 +35,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer storageCursor.Close()
 	// Start Goroutine for collection
@@ -53,11 +53,11 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		blockNumber, changesetKey, _, err := changeset.DecodeStorage(k, v)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		if blockNumber > to {
@@ -66,7 +66,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 		marked, err := marker.IsMarked(changesetKey)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		if marked {
@@ -96,7 +96,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 		storageValue, err := tx.GetOne(kv.PlainState, changesetKey)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		storageKey := new(uint256.Int).SetBytes(changesetKey[28:])
 		var storageValueFormatted []byte
@@ -112,7 +112,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 			storageValue: storageValueFormatted,
 		}
 		if err := marker.MarkAsDone(changesetKey); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		select {
 		case <-logInterval.C:
@@ -126,13 +126,13 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	// Get root
 	root, err := rawdb.ReadVerkleRoot(tx, from)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	newRoot, err := verkleWriter.CommitVerkleTree(root)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
 
-	return rawdb.WriteVerkleRoot(vTx, to, newRoot)
+	return newRoot, rawdb.WriteVerkleRoot(vTx, to, newRoot)
 }

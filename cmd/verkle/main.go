@@ -65,7 +65,7 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
 		return err
 	}
-	if err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
+	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
