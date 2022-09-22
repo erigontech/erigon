@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"context"
@@ -14,16 +14,16 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter, from, to uint64) error {
+func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleStorage"
 
 	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
 	out := make(chan *regeneratePedersenStorageJob, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(cfg.workersCount))
+	wg.Add(int(workers))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(cfg.workersCount); i++ {
+	for i := 0; i < int(workers); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
