@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/gballet/go-verkle"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -14,6 +15,19 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
 )
+
+func identityFuncForVerkleTree(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	return next(k, k, value)
+}
+
+func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
+	bbytes := x.ToBig().Bytes()
+	if len(bbytes) > 0 {
+		for i, b := range bbytes {
+			buffer[len(bbytes)-i-1] = b
+		}
+	}
+}
 
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
 	var err error
