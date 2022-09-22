@@ -107,7 +107,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 		}
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
+		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, enc)
 	}
 	return enc, nil
 }
