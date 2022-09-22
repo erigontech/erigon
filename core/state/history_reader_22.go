@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -73,7 +74,7 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 		return nil, err
 	}
 	if !ok {
-		k := append(address.Bytes(), key.Bytes()...)
+		k := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 		enc, err = hr.tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return nil, err
@@ -93,6 +94,9 @@ func (hr *HistoryReader22) ReadAccountStorage(address common.Address, incarnatio
 }
 
 func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	if codeHash == emptyCodeHashH {
+		return nil, nil
+	}
 	enc, ok, err := hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	if err != nil {
 		return nil, err
@@ -104,7 +108,7 @@ func (hr *HistoryReader22) ReadAccountCode(address common.Address, incarnation u
 		}
 	}
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
+		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, enc)
 	}
 	return enc, nil
 }
