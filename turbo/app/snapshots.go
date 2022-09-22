@@ -129,6 +129,13 @@ var (
 	}
 )
 
+func preloadFileAsync(name string) {
+	go func() {
+		ff, _ := os.Open(name)
+		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 16*1024*1024), make([]byte, 16*1024*1024))
+	}()
+}
+
 func doDecompressSpeed(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
 	if len(args) != 1 {
@@ -138,8 +145,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 
 	compress.SetDecompressionTableCondensity(9)
 
-	ff, _ := os.Open(f)
-	_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 1*1024*1024), make([]byte, 1*1024*1024))
+	preloadFileAsync(f)
 
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
@@ -220,6 +226,9 @@ func doUncompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
+
+	preloadFileAsync(f)
+
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
