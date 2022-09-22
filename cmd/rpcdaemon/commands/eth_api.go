@@ -154,14 +154,12 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 			return it.(*types.Block), nil
 		}
 	}
-	header, err := api._blockReader.HeaderByHash(context.Background(), tx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
 		return nil, nil
 	}
-	return api.blockWithSenders(tx, hash, header.Number.Uint64())
+
+	return api.blockWithSenders(tx, hash, *number)
 }
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
