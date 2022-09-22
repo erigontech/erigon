@@ -230,6 +230,12 @@ Invariants:
 const TrieOfAccounts = "TrieAccount"
 const TrieOfStorage = "TrieStorage"
 
+// Mapping [block number] => [Verkle Root]
+const VerkleRoots = "VerkleRoots"
+
+// Mapping [Verkle Root] => [Rlp-Encoded Verkle Node]
+const VerkleTrie = "VerkleTrie"
+
 const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
@@ -532,6 +538,9 @@ var ChaindataTables = []string{
 	RStorageIdx,
 	RCodeKeys,
 	RCodeIdx,
+
+	VerkleRoots,
+	VerkleTrie,
 }
 
 const (
