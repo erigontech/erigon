@@ -82,7 +82,7 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 type TxSlot struct {
 	Nonce          uint64      // Nonce of the transaction
 	Tip            uint256.Int // Maximum tip that transaction is giving to miner/block proposer
-	FeeCap         uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
+	FeeCap         uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
 	Gas            uint64      // Gas limit of the transaction
 	Value          uint256.Int // Value transferred by the transaction
 	IDHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
@@ -215,10 +215,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 	// equal to tip
 	if txType < DynamicFeeTxType {
-		slot.FeeCap = slot.Tip.Uint64()
+		slot.FeeCap = slot.Tip
 	} else {
 		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
-		p, slot.FeeCap, err = rlp.U64(payload, p)
+		p, err = rlp.U256(payload, p, &slot.FeeCap)
 		if err != nil {
 			return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err)
 		}
