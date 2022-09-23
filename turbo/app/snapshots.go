@@ -274,7 +274,7 @@ func doCompress(cliCtx *cli.Context) error {
 	if workers < 1 {
 		workers = 1
 	}
-	c, err := compress.NewCompressor(ctx, "", f, dirs.Tmp, compress.MinPatternScore, workers, log.LvlInfo)
+	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, workers, log.LvlInfo)
 	if err != nil {
 		return err
 	}
@@ -305,12 +305,12 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	log.Info("AddWord loop", "took", time.Since(t))
+	log.Info("[compress] AddWord loop", "took", time.Since(t))
 	t = time.Now()
 	if err := c.Compress(); err != nil {
 		return err
 	}
-	log.Info("Compress", "took", time.Since(t), "ratio", c.Ratio)
+	log.Info("[compress] Compress", "took", time.Since(t), "ratio", c.Ratio)
 
 	return nil
 }
