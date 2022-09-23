@@ -182,7 +182,7 @@ func executeBlock(
 			return err
 		}
 
-		if stateSyncReceipt != nil {
+		if stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
