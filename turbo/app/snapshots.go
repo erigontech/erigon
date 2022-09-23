@@ -235,7 +235,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, 256*1024*1024)
+	wr := bufio.NewWriterSize(os.Stdout, int(256*datasize.MB))
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -254,16 +254,16 @@ func doUncompress(cliCtx *cli.Context) error {
 			if _, err := wr.Write(buf); err != nil {
 				return err
 			}
-			i++
-			select {
-			case <-logEvery.C:
-				_, fileName := filepath.Split(decompressor.FilePath())
-				progress := 100 * float64(i) / float64(decompressor.Count())
-				log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+			//i++
+			//select {
+			//case <-logEvery.C:
+			//	_, fileName := filepath.Split(decompressor.FilePath())
+			//	progress := 100 * float64(i) / float64(decompressor.Count())
+			//	log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
+			//case <-ctx.Done():
+			//	return ctx.Err()
+			//default:
+			//}
 		}
 		return nil
 	}); err != nil {
