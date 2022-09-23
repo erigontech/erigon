@@ -169,6 +169,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
+	if config.Genesis != nil && config.Genesis.Config != nil {
+		types.SetHeaderSealFlag(config.Genesis.Config.IsHeaderWithSeal())
+	}
+
 	var currentBlock *types.Block
 
 	// Check if we have an already initialized chain and fall back to

@@ -124,10 +124,17 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if exec.chainConfig.IsCancun(0) {
+					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx)
+					return err
+				}
 				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				if exec.chainConfig.IsCancun(0) {
+					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx)
+				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {

@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"bytes"
@@ -9,28 +9,13 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
 
-/*func retrieveAccountKeys(address common.Address) (versionKey, balanceKey, codeSizeKey, codeHashKey, noncekey [32]byte) {
-	// Process the polynomial
-	versionkey := vtree.GetTreeKeyVersion(address[:])
-	copy(balanceKey[:], versionkey)
-	balanceKey[31] = vtree.BalanceLeafKey
-	copy(noncekey[:], versionkey)
-	noncekey[31] = vtree.NonceLeafKey
-	copy(codeSizeKey[:], versionkey)
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
-	copy(codeHashKey[:], versionkey)
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	return
-}*/
-
-func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
+func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedAccounts"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Accounts")
@@ -46,9 +31,9 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 	jobs := make(chan *regeneratePedersenAccountsJob, batchSize)
 	out := make(chan *regeneratePedersenAccountsOut, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(cfg.workersCount))
+	wg.Add(int(workers))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(cfg.workersCount); i++ {
+	for i := 0; i < int(workers); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -105,7 +90,7 @@ func regeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, ver
 	return nil
 }
 
-func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
+func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedStorage"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Storage")
@@ -122,9 +107,9 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
 	out := make(chan *regeneratePedersenStorageJob, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(cfg.workersCount))
+	wg.Add(int(workers))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(cfg.workersCount); i++ {
+	for i := 0; i < int(workers); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -139,9 +124,6 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 		for o := range out {
 			if err := verkleWriter.Insert(o.storageVerkleKey[:], o.storageValue); err != nil {
 				panic(err)
-			}
-			if cfg.disabledLookups {
-				continue
 			}
 		}
 	}()
@@ -186,7 +168,7 @@ func regeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verk
 	return nil
 }
 
-func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter) error {
+func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
 	logPrefix := "PedersenHashedCode"
 	start := time.Now()
 	log.Info("Started Generation of Pedersen Hashed Code")
@@ -203,9 +185,9 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 	jobs := make(chan *regeneratePedersenCodeJob, batchSize)
 	out := make(chan *regeneratePedersenCodeOut, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(cfg.workersCount))
+	wg.Add(int(workers))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(cfg.workersCount); i++ {
+	for i := 0; i < int(workers); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -224,9 +206,6 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 			}
 			if err := verkleWriter.WriteContractCodeChunks(o.chunksKeys, o.chunks); err != nil {
 				panic(err)
-			}
-			if cfg.disabledLookups {
-				continue
 			}
 		}
 	}()
@@ -269,50 +248,4 @@ func regeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, cfg optionsCfg, verkleW
 	log.Info("Finished generation of Pedersen Hashed Code", "elapsed", time.Since(start))
 
 	return nil
-}
-
-func RegeneratePedersenHashstate(cfg optionsCfg) error {
-	db, err := mdbx.Open(cfg.stateDb, log.Root(), true)
-	if err != nil {
-		log.Error("Error while opening database", "err", err.Error())
-		return err
-	}
-	defer db.Close()
-
-	vDb, err := mdbx.Open(cfg.stateDb, log.Root(), false)
-	if err != nil {
-		log.Error("Error while opening db transaction", "err", err.Error())
-		return err
-	}
-	defer vDb.Close()
-
-	vTx, err := vDb.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer vTx.Rollback()
-
-	tx, err := db.BeginRo(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := initDB(vTx); err != nil {
-		return err
-	}
-
-	verleWriter := NewVerkleTreeWriter(vTx, cfg.tmpdir)
-
-	if err := regeneratePedersenAccounts(vTx, tx, cfg, verleWriter); err != nil {
-		return err
-	}
-	if err := regeneratePedersenCode(vTx, tx, cfg, verleWriter); err != nil {
-		return err
-	}
-
-	if err := regeneratePedersenStorage(vTx, tx, cfg, verleWriter); err != nil {
-		return err
-	}
-	return vTx.Commit()
 }

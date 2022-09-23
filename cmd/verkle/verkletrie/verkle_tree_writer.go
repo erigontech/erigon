@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"context"
@@ -7,13 +7,28 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/gballet/go-verkle"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 	"github.com/ledgerwatch/log/v3"
 )
+
+func identityFuncForVerkleTree(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	return next(k, k, value)
+}
+
+func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
+	bbytes := x.ToBig().Bytes()
+	if len(bbytes) > 0 {
+		for i, b := range bbytes {
+			buffer[len(bbytes)-i-1] = b
+		}
+	}
+}
 
 func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
 	var err error
@@ -22,14 +37,11 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		if err != nil {
 			return
 		}
-		var encodedNode []byte
 
-		rootHash := node.ComputeCommitment().Bytes()
-		encodedNode, err = node.Serialize()
+		err = rawdb.WriteVerkleNode(db, node)
 		if err != nil {
 			return
 		}
-		err = db.Put(VerkleTrie, rootHash[:], encodedNode)
 		totalInserted++
 		select {
 		case <-logInterval.C:
@@ -172,17 +184,17 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 }
 
 func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
-	if err := v.db.ClearBucket(VerkleTrie); err != nil {
+	if err := v.db.ClearBucket(kv.VerkleTrie); err != nil {
 		return common.Hash{}, err
 	}
 
-	verkleCollector := etl.NewCollector(VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer verkleCollector.Close()
 
 	root := verkle.New()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	if err := v.collector.Load(v.db, VerkleTrie, func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := v.collector.Load(v.db, kv.VerkleTrie, func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(v) == 0 {
 			return next(k, nil, nil)
 		}
@@ -214,7 +226,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 	}
 
 	log.Info("Started Verkle Tree Flushing")
-	return root.ComputeCommitment().Bytes(), verkleCollector.Load(v.db, VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	return root.ComputeCommitment().Bytes(), verkleCollector.Load(v.db, kv.VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}})
@@ -222,17 +234,13 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 
 func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
-		return v.db.GetOne(VerkleTrie, root)
+		return v.db.GetOne(kv.VerkleTrie, root)
 	}
 
 	var rootNode verkle.VerkleNode
+	var err error
 	if root != (common.Hash{}) {
-		nodeEncoded, err := v.db.GetOne(VerkleTrie, root[:])
-		if err != nil {
-			return common.Hash{}, err
-		}
-
-		rootNode, err = verkle.ParseNode(nodeEncoded, 0, root[:])
+		rootNode, err = rawdb.ReadVerkleNode(v.db, root)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -240,13 +248,13 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 		return v.CommitVerkleTreeFromScratch()
 	}
 
-	verkleCollector := etl.NewCollector(VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer verkleCollector.Close()
 
 	insertionBeforeFlushing := 2_000_000 // 2M node to flush at a time
 	insertions := 0
 	logInterval := time.NewTicker(30 * time.Second)
-	if err := v.collector.Load(v.db, VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := v.collector.Load(v.db, kv.VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(value) > 0 {
 			if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
 				return err
