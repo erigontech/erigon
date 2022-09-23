@@ -256,7 +256,7 @@ func doUncompress(cliCtx *cli.Context) error {
 			i++
 			select {
 			case <-logEvery.C:
-				log.Info("[uncompress] read", "millions", i/1_000_000, "total_millions", decompressor.Count()/1_000_000)
+				log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(decompressor.Count())))
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
