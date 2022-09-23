@@ -111,6 +111,7 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
+COMMANDS += lightclient
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
