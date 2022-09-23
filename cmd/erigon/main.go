@@ -105,12 +105,12 @@ func setFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 				}
 				err := ctx.GlobalSet(key, strings.Join(s, ","))
 				if err != nil {
-					return fmt.Errorf("failed setting flag for values=%s error=%s", s, err)
+					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
 				}
 			} else {
 				err := ctx.GlobalSet(key, fmt.Sprintf("%v", value))
 				if err != nil {
-					return fmt.Errorf("failed setting flag for value=%v error=%s", value, err)
+					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
 
 				}
 			}
