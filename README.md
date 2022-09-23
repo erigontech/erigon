@@ -192,14 +192,14 @@ C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 You can set Erigon flags through a YAML or TOML configuration file with the flag `--config`. The flags set in the configuration
 file can be overwritten by writing the flags directly on Erigon command line
 
-## Example
+### Example
 
 `./build/bin/erigon --config ./config.yaml --chain=goerli
 
 Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the flag inside
 of the yaml configuration file and sets the chain to goerli
 
-## TOML 
+### TOML 
 
 Example of setting up TOML config file
 
@@ -213,7 +213,7 @@ http = true
 "http.api" = ["eth","debug","net"]
 ```
 
-## YAML 
+### YAML 
 
 Example of setting up a YAML config file
 
