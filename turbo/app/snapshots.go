@@ -314,11 +314,9 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	log.Info("[compress] AddWord loop", "took", time.Since(t))
-	t = time.Now()
 	if err := c.Compress(); err != nil {
 		return err
 	}
-	log.Info("[compress] Compress", "took", time.Since(t), "ratio", c.Ratio)
 
 	return nil
 }
