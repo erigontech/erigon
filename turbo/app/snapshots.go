@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -288,26 +289,17 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer c.Close()
-	r := bufio.NewReaderSize(os.Stdin, 256*1024*1024)
-	buf := make([]byte, 0, 32*1024*1024)
+	r := bufio.NewReaderSize(os.Stdin, int(256*datasize.MB))
+	buf := make([]byte, 0, int(64*datasize.MB))
 	t := time.Now()
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		if cap(buf) < int(l) {
-			buf = make([]byte, l)
-		} else {
-			buf = buf[:l]
-		}
+		buf = buf[:l]
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
 		if err = c.AddWord(buf); err != nil {
 			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
 		}
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
