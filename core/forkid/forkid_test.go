@@ -145,6 +145,14 @@ func TestCreation(t *testing.T) {
 				{1735371, ID{Hash: checksumToBytes(0xb96cbd13), Next: 0}},       // First MergeNetsplit block
 			},
 		},
+		// Gnosis test cases
+		{
+			params.GnosisChainConfig,
+			params.GnosisGenesisHash,
+			[]testcase{
+				{24000000, ID{Hash: checksumToBytes(0x018479D3), Next: 0}},
+			},
+		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
