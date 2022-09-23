@@ -234,7 +234,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, 256*1024*1024)
+	wr := bufio.NewWriterSize(os.Stdout, 512*1024*1024)
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -288,7 +288,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer c.Close()
-	r := bufio.NewReaderSize(os.Stdin, 256*1024*1024)
+	r := bufio.NewReaderSize(os.Stdin, 512*1024*1024)
 	buf := make([]byte, 0, 32*1024*1024)
 	t := time.Now()
 	var l uint64
