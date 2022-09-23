@@ -282,6 +282,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	r := bufio.NewReaderSize(os.Stdin, 256*1024*1024)
 	buf := make([]byte, 0, 32*1024*1024)
+	t := time.Now()
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
@@ -304,9 +305,12 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
+	log.Info("AddWord loop", "took", time.Since(t))
+	t = time.Now()
 	if err := c.Compress(); err != nil {
 		return err
 	}
+	log.Info("Compress", "took", time.Since(t), "ratio", c.Ratio)
 
 	return nil
 }
