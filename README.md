@@ -205,9 +205,9 @@ Example of setting up TOML config file
 
 ```
 `datadir = 'your datadir'
-port = "1111"
+port = 1111
 chain = "mainnet"
-http = "true"
+http = true
 "private.api.addr"="localhost:9090"
 
 "http.api" = ["eth","debug","net"]
@@ -219,9 +219,9 @@ Example of setting up a YAML config file
 
 ```
 datadir : 'your datadir'
-port : "1111"
+port : 1111
 chain : "mainnet"
-http : "true"
+http : true
 private.api.addr : "localhost:9090"
 
 http.api : ["eth","debug","net"]
