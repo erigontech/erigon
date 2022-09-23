@@ -235,7 +235,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, int(256*datasize.MB))
+	wr := bufio.NewWriterSize(os.Stdout, int(1*datasize.MB))
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -244,7 +244,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
 		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 16*etl.BufIOSize)
+		buf := make([]byte, 0, 1*datasize.MB)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
@@ -289,12 +289,16 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer c.Close()
-	r := bufio.NewReaderSize(os.Stdin, int(256*datasize.MB))
-	buf := make([]byte, 0, int(32*datasize.MB))
+	r := bufio.NewReaderSize(os.Stdin, int(1*datasize.MB))
+	buf := make([]byte, 0, int(1*datasize.MB))
 	t := time.Now()
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		buf = buf[:l]
+		if cap(buf) < int(l) {
+			buf = make([]byte, l)
+		} else {
+			buf = buf[:l]
+		}
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
