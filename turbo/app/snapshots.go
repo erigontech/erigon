@@ -236,6 +236,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	defer decompressor.Close()
 	wr := bufio.NewWriterSize(os.Stdout, 256*1024*1024)
 	defer wr.Flush()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	var i uint
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
 		g := decompressor.MakeGetter()
@@ -249,7 +253,10 @@ func doUncompress(cliCtx *cli.Context) error {
 			if _, err := wr.Write(buf); err != nil {
 				return err
 			}
+			i++
 			select {
+			case <-logEvery.C:
+				log.Info("[uncompress] read", "millions", i/1_000_000, "total_millions", decompressor.Count()/1_000_000)
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
@@ -279,7 +286,6 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer c.Close()
-
 	r := bufio.NewReaderSize(os.Stdin, 256*1024*1024)
 	buf := make([]byte, 0, 32*1024*1024)
 	t := time.Now()
