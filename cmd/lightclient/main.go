@@ -21,7 +21,7 @@ func generateKey() (*ecdsa.PrivateKey, error) {
 }
 
 func main() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	discCfg, err := clparams.GetDefaultDiscoveryConfig(clparams.Mainnet)
 	if err != nil {
 		log.Error("error", "err", err)
@@ -41,11 +41,12 @@ func main() {
 		log.Error("error", "err", err)
 		return
 	}
+	log.Info("Sentinel started", "enr", sent.String())
 	logInterval := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("DEBUG", "peers", sent.PeersCount())
+			log.Info("[Lighclient] Networking Report", "peers", sent.PeersCount())
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}
