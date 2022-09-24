@@ -12,7 +12,7 @@ func GetDefaultDiscoveryConfig(net NetworkType) (*discover.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var enodes []*enode.Node
+	enodes := []*enode.Node{}
 	for _, addr := range bootnodes {
 		enode, err := enode.Parse(enode.ValidSchemes, addr)
 		if err != nil {
