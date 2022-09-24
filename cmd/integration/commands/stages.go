@@ -490,7 +490,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		}
 
 		if reset {
-			if err := reset2.ResetBlocks(tx, sn, br); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, br); err != nil {
 				return err
 			}
 			return nil

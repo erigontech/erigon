@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"go.uber.org/atomic"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
@@ -44,7 +45,12 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader) error {
+	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.EthTx, nil, 1_000_000)
+	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.NonCanonicalTxs, nil, 1_000_000)
+	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.Headers, dbutils.EncodeBlockNumber(1), 1_000_000)
+	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.BlockBody, dbutils.EncodeBlockNumber(1), 1_000_000)
+
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err

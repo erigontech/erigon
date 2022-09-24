@@ -1307,6 +1307,12 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	if blockFrom == 1 || blockFrom == 0 {
+		log.Info("clear transactions table, may take time...")
+		_ = tx.ClearBucket(kv.EthTx)
+		_ = tx.ClearBucket(kv.NonCanonicalTxs)
+	}
+
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
