@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
 )
 
@@ -17,7 +21,9 @@ type Sentinel struct {
 	started  bool
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
+	host     host.Host
 	cfg      SentinelConfig
+	peers    *peers.Peers
 }
 
 func (s *Sentinel) createLocalNode(
@@ -86,11 +92,26 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg SentinelConfig) *Sentinel {
-	return &Sentinel{
-		ctx: ctx,
-		cfg: cfg,
+func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
+	s := &Sentinel{
+		ctx:   ctx,
+		cfg:   cfg,
+		peers: peers.New(),
 	}
+
+	opts, err := buildOptions(cfg, s)
+	if err != nil {
+		return nil, err
+	}
+
+	h, err := libp2p.New(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	h.RemoveStreamHandler(identify.IDDelta)
+	s.host = h
+	return s, nil
 }
 
 func (s *Sentinel) Start() error {
@@ -105,8 +126,6 @@ func (s *Sentinel) Start() error {
 	return nil
 }
 
-// Debug methods
-
-func (s *Sentinel) GetListener() *discover.UDPv5 {
-	return s.listener
+func (s *Sentinel) PeersCount() int {
+	return len(s.host.Network().Peers())
 }

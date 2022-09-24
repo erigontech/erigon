@@ -21,17 +21,22 @@ func generateKey() (*ecdsa.PrivateKey, error) {
 }
 
 func main() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
 	discCfg, err := clparams.GetDefaultDiscoveryConfig(clparams.Mainnet)
 	if err != nil {
 		log.Error("error", "err", err)
 		return
 	}
-	sent := sentinel.New(context.Background(), sentinel.SentinelConfig{
+	sent, err := sentinel.New(context.Background(), sentinel.SentinelConfig{
 		IpAddr:         "127.0.0.1",
 		Port:           8080,
+		TCPPort:        9000,
 		DiscoverConfig: *discCfg,
 	})
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
 	if err := sent.Start(); err != nil {
 		log.Error("error", "err", err)
 		return
@@ -40,7 +45,7 @@ func main() {
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("DEBUG", "peers", len(sent.GetListener().AllNodes()))
+			log.Info("DEBUG", "peers", sent.PeersCount())
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}
