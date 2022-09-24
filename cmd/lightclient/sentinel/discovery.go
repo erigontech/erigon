@@ -60,7 +60,7 @@ func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (
 }
 
 func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
-	var multiAddrs []multiaddr.Multiaddr
+	multiAddrs := []multiaddr.Multiaddr{}
 	for _, node := range nodes {
 		// ignore nodes with no ip address stored
 		if node.IP() == nil {
