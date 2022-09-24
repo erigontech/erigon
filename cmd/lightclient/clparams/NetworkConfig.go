@@ -46,10 +46,52 @@ var mainnetNetworkConfig = &NetworkConfig{
 	bootNodes:                       BootstrapNodes[Mainnet],
 }
 
+var sepoliaNetworkConfig = &NetworkConfig{
+	GossipMaxSize:                   1 << 20, // 1 MiB
+	MaxChunkSize:                    1 << 20, // 1 MiB
+	AttestationSubnetCount:          64,
+	AttestationPropagationSlotRange: 32,
+	MaxRequestBlocks:                1 << 10, // 1024
+	TtfbTimeout:                     5 * time.Second,
+	RespTimeout:                     10 * time.Second,
+	MaximumGossipClockDisparity:     500 * time.Millisecond,
+	MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+	MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+	Eth2key:                         "eth2",
+	AttSubnetKey:                    "attnets",
+	SyncCommsSubnetKey:              "syncnets",
+	MinimumPeersInSubnetSearch:      20,
+	ContractDeploymentBlock:         1273020,
+	bootNodes:                       BootstrapNodes[Sepolia],
+}
+
+var goerliNetworkConfig = &NetworkConfig{
+	GossipMaxSize:                   1 << 20, // 1 MiB
+	MaxChunkSize:                    1 << 20, // 1 MiB
+	AttestationSubnetCount:          64,
+	AttestationPropagationSlotRange: 32,
+	MaxRequestBlocks:                1 << 10, // 1024
+	TtfbTimeout:                     5 * time.Second,
+	RespTimeout:                     10 * time.Second,
+	MaximumGossipClockDisparity:     500 * time.Millisecond,
+	MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+	MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+	Eth2key:                         "eth2",
+	AttSubnetKey:                    "attnets",
+	SyncCommsSubnetKey:              "syncnets",
+	MinimumPeersInSubnetSearch:      20,
+	ContractDeploymentBlock:         4367322,
+	bootNodes:                       BootstrapNodes[Goerli],
+}
+
 func NetworkConfigFromNetworkType(networkType NetworkType) *NetworkConfig {
 	switch networkType {
 	case Mainnet:
 		return mainnetNetworkConfig
+	case Sepolia:
+		return sepoliaNetworkConfig
+	case Goerli:
+		return goerliNetworkConfig
 	default:
 		return nil
 	}

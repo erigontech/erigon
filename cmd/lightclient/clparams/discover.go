@@ -7,8 +7,7 @@ import (
 )
 
 func GetDefaultDiscoveryConfig(net NetworkType) (*discover.Config, error) {
-	networkConfig := NetworkConfigFromNetworkType(net)
-	bootnodes := networkConfig.BootNodes()
+	bootnodes := BootstrapNodes[net]
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
 		return nil, err
