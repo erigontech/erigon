@@ -46,7 +46,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader, tmpdir string) error {
 	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.EthTx, nil, math.MaxUint32)
 	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.NonCanonicalTxs, nil, math.MaxUint32)
 	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.Headers, nil, math.MaxUint32)
@@ -102,7 +102,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 	}
 
 	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, "", snapshots, br); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, tmpdir, snapshots, br); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
