@@ -274,7 +274,7 @@ func (m *MemoryMutation) CollectMetrics() {
 }
 
 func (m *MemoryMutation) CreateBucket(bucket string) error {
-	panic("Not implemented")
+	return m.memTx.CreateBucket(bucket)
 }
 
 func (m *MemoryMutation) Flush(tx kv.RwTx) error {
