@@ -20,7 +20,7 @@ func (s *Sentinel) InterceptAddrDial(pid peer.ID, m multiaddr.Multiaddr) (allow 
 
 // InterceptAccept checks whether the incidental inbound connection is allowed.
 func (s *Sentinel) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
-	return !s.TooManyPeers()
+	return !s.HasTooManyPeers()
 }
 
 // InterceptSecured tests whether a given connection, now authenticated,

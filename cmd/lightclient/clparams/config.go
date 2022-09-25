@@ -7,9 +7,9 @@ import (
 type NetworkType int
 
 var (
-	Mainnet NetworkType = 0
-	Goerli  NetworkType = 1
-	Sepolia NetworkType = 2
+	MainnetNetwork NetworkType = 0
+	GoerliNetwork  NetworkType = 1
+	SepoliaNetwork NetworkType = 2
 )
 
 var (
@@ -74,7 +74,7 @@ type NetworkConfig struct {
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
-	Mainnet: {
+	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
@@ -93,7 +93,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		bootNodes:                       MainnetBootstrapNodes,
 	},
 
-	Sepolia: {
+	SepoliaNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
@@ -112,7 +112,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		bootNodes:                       SepoliaBootstrapNodes,
 	},
 
-	Goerli: {
+	GoerliNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,

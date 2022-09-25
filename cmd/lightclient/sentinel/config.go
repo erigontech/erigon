@@ -31,7 +31,7 @@ type SentinelConfig struct {
 	HostDNS       string
 }
 
-func convertToInterfacePrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
+func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
 	privBytes := privkey.D.Bytes()
 	// In the event the number of bytes outputted by the big-int are less than 32,
 	// we append bytes to the start of the sequence for the missing most significant
@@ -47,7 +47,7 @@ func convertToInterfacePrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error
 // private key contents cannot be marshaled, an exception is thrown.
 func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 	return func(cfg *libp2p.Config) error {
-		ifaceKey, err := convertToInterfacePrivkey(privkey)
+		ifaceKey, err := convertToCryptoPrivkey(privkey)
 		if err != nil {
 			return err
 		}
