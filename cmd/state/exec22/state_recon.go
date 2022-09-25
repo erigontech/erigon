@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -64,6 +64,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 	}()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
+	value := make([]byte, 1024)
 	for it.HasNext() {
 		key, val, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
@@ -98,7 +99,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 			if a.Incarnation > 0 {
 				a.Incarnation = state2.FirstContractIncarnation
 			}
-			value := make([]byte, a.EncodingLengthForStorage())
+			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
 			if err := plainStateCollector.Collect(key, value); err != nil {
 				panic(err)
@@ -114,12 +115,16 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	}()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
+	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	for it.HasNext() {
 		key, val, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.currentKey = key
-		compositeKey := dbutils.PlainGenerateCompositeStorageKey(key[:20], state2.FirstContractIncarnation, key[20:])
 		if len(val) > 0 {
+			copy(compositeKey[:20], key[:20])
+			binary.BigEndian.PutUint64(key[20:], state2.FirstContractIncarnation)
+			copy(compositeKey[20+8:], key[20:])
+
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
 				panic(err)
 			}
@@ -134,12 +139,16 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	}()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
+	var compositeKey = make([]byte, length.Addr+length.Incarnation)
+
 	for it.HasNext() {
 		key, val, progress := it.Next()
 		atomic.StoreUint64(&fw.progress, progress)
 		fw.currentKey = key
-		compositeKey := dbutils.PlainGenerateStoragePrefix(key, state2.FirstContractIncarnation)
 		if len(val) > 0 {
+			copy(compositeKey, key)
+			binary.BigEndian.PutUint64(compositeKey[length.Addr:], state2.FirstContractIncarnation)
+
 			codeHash, err := common.HashData(val)
 			if err != nil {
 				panic(err)
