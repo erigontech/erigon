@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
+	"os"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
@@ -206,6 +209,55 @@ func analyseOut(cfg optionsCfg) error {
 	return nil
 }
 
+func dump(cfg optionsCfg) error {
+	db, err := mdbx.Open(cfg.verkleDb, log.Root(), false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	logInterval := time.NewTicker(30 * time.Second)
+	file, err := os.Create("dump.txt")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	verkleCursor, err := tx.Cursor(kv.VerkleTrie)
+	if err != nil {
+		return err
+	}
+	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
+		if err != nil {
+			return err
+		}
+		// k is the root so it will always be 32 bytes
+		if _, err := file.Write(k); err != nil {
+			return err
+		}
+		// Write length of RLP encoded note
+		lenNode := make([]byte, 8)
+		binary.BigEndian.PutUint64(lenNode, uint64(len(v)))
+		if _, err := file.Write(lenNode); err != nil {
+			return err
+		}
+		// Write Rlp encoded node
+		if _, err := file.Write(v); err != nil {
+			return err
+		}
+		select {
+		case <-logInterval.C:
+			log.Info("Dumping verkle tree to plain text", "key", common.Bytes2Hex(k))
+		default:
+		}
+	}
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
 	mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
@@ -241,6 +293,11 @@ func main() {
 		}
 	case "incremental":
 		if err := IncrementVerkleTree(opt); err != nil {
+			log.Error("Error", "err", err.Error())
+		}
+	case "dump":
+		log.Info("Dumping in dump.txt")
+		if err := dump(opt); err != nil {
 			log.Error("Error", "err", err.Error())
 		}
 	default:

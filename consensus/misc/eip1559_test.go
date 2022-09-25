@@ -58,6 +58,7 @@ func copyConfig(original *params.ChainConfig) *params.ChainConfig {
 		BrunoBlock:                    original.BrunoBlock,
 		EulerBlock:                    original.EulerBlock,
 		GibbsBlock:                    original.GibbsBlock,
+		PosdaoBlock:                   original.PosdaoBlock,
 		Ethash:                        original.Ethash,
 		Clique:                        original.Clique,
 		Aura:                          original.Aura,
