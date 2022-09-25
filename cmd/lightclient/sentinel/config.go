@@ -19,6 +19,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
@@ -33,6 +34,8 @@ import (
 
 type SentinelConfig struct {
 	DiscoverConfig discover.Config
+	NetworkConfig  clparams.NetworkConfig
+	GenesisConfig  clparams.GenesisConfig
 	IpAddr         string
 	Port           int
 	TCPPort        uint
@@ -46,18 +49,12 @@ type SentinelConfig struct {
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
 	privBytes := privkey.D.Bytes()
-	// In the event the number of bytes outputted by the big-int are less than 32,
-	// we append bytes to the start of the sequence for the missing most significant
-	// bytes.
 	if len(privBytes) < 32 {
 		privBytes = append(make([]byte, 32-len(privBytes)), privBytes...)
 	}
 	return crypto.UnmarshalSecp256k1PrivateKey(privBytes)
 }
 
-// Adds a private key to the libp2p option if the option was provided.
-// If the private key file is missing or cannot be read, or if the
-// private key contents cannot be marshaled, an exception is thrown.
 func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 	return func(cfg *libp2p.Config) error {
 		ifaceKey, err := convertToCryptoPrivkey(privkey)
@@ -109,12 +106,8 @@ func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) 
 	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%d", ipAddr, port))
 }
 
-// buildOptions for the libp2p host.
 func buildOptions(cfg SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
-	var (
-		//ip     = net.IP(cfg.IpAddr)
-		priKey = cfg.DiscoverConfig.PrivateKey
-	)
+	var priKey = cfg.DiscoverConfig.PrivateKey
 
 	listen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
 	if err != nil {
@@ -122,7 +115,7 @@ func buildOptions(cfg SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 	}
 	if cfg.LocalIP != "" {
 		if net.ParseIP(cfg.LocalIP) == nil {
-			return nil, fmt.Errorf("Invalid local ip provided: %s", cfg.LocalIP)
+			return nil, fmt.Errorf("invalid local ip provided: %s", cfg.LocalIP)
 		}
 		listen, err = multiAddressBuilder(cfg.LocalIP, cfg.TCPPort)
 		if err != nil {

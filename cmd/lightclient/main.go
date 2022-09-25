@@ -30,7 +30,7 @@ var (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	discCfg, err := clparams.GetDefaultDiscoveryConfig(clparams.MainnetNetwork)
+	discCfg, genesisCfg, networkCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	if err != nil {
 		log.Error("error", "err", err)
 		return
@@ -40,6 +40,8 @@ func main() {
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
+		GenesisConfig:  genesisCfg,
+		NetworkConfig:  networkCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)

@@ -1,7 +1,25 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package clparams
 
 import (
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/discover"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 type NetworkType int
@@ -73,6 +91,11 @@ type NetworkConfig struct {
 	bootNodes               []string
 }
 
+type GenesisConfig struct {
+	GenesisValidatorRoot common.Hash // Merkle Root at Genesis
+	GenesisTime          uint64      // Unix time at Genesis
+}
+
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
@@ -130,4 +153,40 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		ContractDeploymentBlock:         4367322,
 		bootNodes:                       GoerliBootstrapNodes,
 	},
+}
+
+var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
+	MainnetNetwork: {
+		GenesisValidatorRoot: common.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
+		GenesisTime:          1606824023,
+	},
+	SepoliaNetwork: {
+		GenesisValidatorRoot: common.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
+		GenesisTime:          1655733600,
+	},
+	GoerliNetwork: {
+		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
+		GenesisTime:          1616508000,
+	},
+}
+
+func GetConfigsByNetwork(net NetworkType) (*discover.Config, GenesisConfig, NetworkConfig, error) {
+	networkConfig := NetworkConfigs[net]
+	bootnodes := networkConfig.bootNodes
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, GenesisConfig{}, NetworkConfig{}, err
+	}
+	enodes := []*enode.Node{}
+	for _, addr := range bootnodes {
+		enode, err := enode.Parse(enode.ValidSchemes, addr)
+		if err != nil {
+			return nil, GenesisConfig{}, NetworkConfig{}, err
+		}
+		enodes = append(enodes, enode)
+	}
+	return &discover.Config{
+		PrivateKey: privateKey,
+		Bootnodes:  enodes,
+	}, GenesisConfigs[net], networkConfig, nil
 }

@@ -60,6 +60,7 @@ func (s *Sentinel) createLocalNode(
 
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
+	s.setupENR(localNode)
 
 	return localNode, nil
 }
@@ -102,7 +103,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, port+1)
+	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort))
 	if err != nil {
 		return nil, err
 	}

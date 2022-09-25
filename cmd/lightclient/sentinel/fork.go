@@ -11,4 +11,21 @@
    limitations under the License.
 */
 
-package clparams
+package sentinel
+
+import (
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/prysmaticlabs/go-bitfield"
+)
+
+func (s *Sentinel) setupENR(
+	node *enode.LocalNode,
+) (*enode.LocalNode, error) {
+	// TODO(Giulio2002): Implement fork id.
+
+	// Setup subnets key
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
+	return node, nil
+}
