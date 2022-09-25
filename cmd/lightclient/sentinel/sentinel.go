@@ -145,10 +145,10 @@ func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
 
-func (s *Sentinel) TooManyPeers() bool {
-	return s.PeersCount() >= peers.DefaultMaxPeers
+func (s *Sentinel) HasTooManyPeers() bool {
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) PeersCount() int {
+func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
 }

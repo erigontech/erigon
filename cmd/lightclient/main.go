@@ -52,7 +52,7 @@ func main() {
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("[Lighclient] Networking Report", "peers", sent.PeersCount())
+			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}
