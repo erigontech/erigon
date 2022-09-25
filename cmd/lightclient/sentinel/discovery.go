@@ -19,9 +19,9 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) erro
 	if s.peers.IsBadPeer(info.ID) {
 		return errors.New("refused to connect to bad peer")
 	}
-	ctx, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
-	if err := s.host.Connect(ctx, info); err != nil {
+	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
 		s.peers.Penalize(info.ID)
 		return err
 	}
@@ -33,13 +33,13 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	if err != nil {
 		return err
 	}
-	for _, info := range addrInfos {
+	for _, peerInfo := range addrInfos {
 		// make each dial non-blocking
-		go func(info peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, info); err != nil {
+		go func(peerInfo peer.AddrInfo) {
+			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
 			}
-		}(info)
+		}(peerInfo)
 	}
 	return nil
 }
@@ -72,8 +72,8 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		// Make sure that peer is not dialed too often, for each connection attempt there's a backoff period.
-		go func(info *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *info); err != nil {
+		go func(peerInfo *peer.AddrInfo) {
+			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
 			}
 		}(peerInfo)

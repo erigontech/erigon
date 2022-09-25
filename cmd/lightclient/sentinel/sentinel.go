@@ -55,22 +55,29 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		port    = s.cfg.Port
 		discCfg = s.cfg.DiscoverConfig
 	)
+
 	ip := net.ParseIP(ipAddr)
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("IPV4 address not provided instead %s was provided", ipAddr)
 	}
+
 	var bindIP net.IP
 	var networkVersion string
+
+	// check for our network version
 	switch {
+	// if we have 16 byte and 4 byte representation then we are in using udp6
 	case ip.To16() != nil && ip.To4() == nil:
 		bindIP = net.IPv6zero
 		networkVersion = "udp6"
+		// only 4 bytes then we are using udp4
 	case ip.To4() != nil:
 		bindIP = net.IPv4zero
 		networkVersion = "udp4"
 	default:
 		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
+
 	udpAddr := &net.UDPAddr{
 		IP:   bindIP,
 		Port: port,
@@ -79,6 +86,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, port+1)
 	if err != nil {
 		return nil, err
@@ -88,6 +96,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return net, err
 }
 
@@ -103,28 +112,29 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 		return nil, err
 	}
 
-	h, err := libp2p.New(opts...)
+	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	h.RemoveStreamHandler(identify.IDDelta)
-	s.host = h
+	host.RemoveStreamHandler(identify.IDDelta)
+	s.host = host
 	s.peers = peers.New(s.host)
 	return s, nil
 }
 
 func (s *Sentinel) Start() error {
 	if s.started {
-		log.Error("Sentinel already running")
+		log.Warn("Sentinel already running")
 	}
+
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed creating sentinel listener err=%s", err)
 	}
 	if err := s.connectToBootnodes(); err != nil {
-		return err
+		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
 	go s.listenForPeers()
 

@@ -3,7 +3,6 @@ package peers
 import (
 	"sync"
 
-	"github.com/anacrolix/log"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -58,5 +57,4 @@ func (p *Peers) Penalize(pid peer.ID) {
 func (p *Peers) markBadPeer(pid peer.ID) {
 	p.host.Peerstore().RemovePeer(pid)
 	p.badPeers.Add(pid, []byte{0})
-	log.Info("[Sentinel] peer=%s is marked as bad", pid)
 }
