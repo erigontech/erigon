@@ -234,6 +234,8 @@ func EmbeddedServices(ctx context.Context,
 	mining = direct.NewMiningClient(miningServer)
 	ff = rpchelper.New(ctx, eth, txPool, mining, func() {})
 
+	_ = agg.MakeContext()
+
 	return
 }
 
