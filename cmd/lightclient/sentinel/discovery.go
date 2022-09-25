@@ -53,7 +53,7 @@ func (s *Sentinel) listenForPeers() {
 		if s.ctx.Err() != nil {
 			break
 		}
-		if s.TooManyPeers() {
+		if s.HasTooManyPeers() {
 			// Pause the main loop for a period to stop looking
 			// for new peers.
 			log.Trace("Not looking for peers, at peer limit")
