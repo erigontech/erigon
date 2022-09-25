@@ -27,7 +27,7 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 	}
 
 	type ErigonLog struct {
-		Log Log `json:"log" gencoded:"required"`
+		Log       Log            `json:"log" gencoded:"required"`
 		Timestamp hexutil.Uint64 `json:"timestamp"`
 	}
 
@@ -45,7 +45,6 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 	var encodedErigonLog ErigonLog
 	encodedErigonLog.Log = enc
 	encodedErigonLog.Timestamp = hexutil.Uint64(l.Timestamp)
-
 
 	return json.Marshal(&enc)
 }
@@ -65,7 +64,7 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	}
 
 	type ErigonLog struct {
-		Log Log `json:"log" gencodec:"required"`
+		Log       Log             `json:"log" gencodec:"required"`
 		Timestamp *hexutil.Uint64 `json:"timestamp"`
 	}
 
@@ -109,6 +108,6 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp != nil {
 		l.Timestamp = uint64(*dec.Timestamp)
 	}
-	
+
 	return nil
 }
