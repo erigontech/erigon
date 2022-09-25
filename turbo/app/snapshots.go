@@ -348,6 +348,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 		merger := snapshotsync.NewMerger(dirs.Tmp, workers, log.LvlInfo, *chainID, nil)
 		rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
+		fmt.Printf("snapshots.Ranges(): %s\n", snapshots.Ranges())
 		fmt.Printf("mergeRanges: %s\n", rangesToMerge)
 		if len(rangesToMerge) == 0 {
 			return nil
