@@ -286,7 +286,6 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
 
-	log.Info("alex debug", "isNil", api._agg == nil)
 	ac := api._agg.MakeContext()
 	ac.SetTx(tx)
 
