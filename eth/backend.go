@@ -576,7 +576,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 	}
-	_ = backend.agg.MakeContext()
 
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
@@ -852,8 +851,9 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	_ = agg.ReopenFiles()
-	_ = agg.MakeContext()
+	if err = agg.ReopenFiles(); err != nil {
+		panic(err)
+	}
 
 	return blockReader, allSnapshots, agg, nil
 }
