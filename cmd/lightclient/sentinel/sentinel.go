@@ -94,9 +94,8 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 // This is just one of the examples from the libp2p repository.
 func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:   ctx,
-		cfg:   cfg,
-		peers: peers.New(),
+		ctx: ctx,
+		cfg: cfg,
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -111,6 +110,7 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 
 	h.RemoveStreamHandler(identify.IDDelta)
 	s.host = h
+	s.peers = peers.New(s.host)
 	return s, nil
 }
 
@@ -123,7 +123,20 @@ func (s *Sentinel) Start() error {
 	if err != nil {
 		return err
 	}
+	if err := s.connectToBootnodes(); err != nil {
+		return err
+	}
+	go s.listenForPeers()
+
 	return nil
+}
+
+func (s *Sentinel) String() string {
+	return s.listener.Self().String()
+}
+
+func (s *Sentinel) TooManyPeers() bool {
+	return s.PeersCount() >= peers.DefaultMaxPeers
 }
 
 func (s *Sentinel) PeersCount() int {

@@ -1,7 +1,6 @@
 package sentinel
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -21,7 +20,7 @@ func (s *Sentinel) InterceptAddrDial(pid peer.ID, m multiaddr.Multiaddr) (allow 
 
 // InterceptAccept checks whether the incidental inbound connection is allowed.
 func (s *Sentinel) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
-	return len(s.host.Network().Peers()) < peers.DefaultMaxPeers
+	return !s.TooManyPeers()
 }
 
 // InterceptSecured tests whether a given connection, now authenticated,

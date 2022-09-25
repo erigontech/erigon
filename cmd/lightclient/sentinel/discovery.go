@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
@@ -30,6 +31,18 @@ func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal.Zero()
 	yVal.Zero()
 	return newKey, nil
+}
+
+func convertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, error) {
+	multiAddr, err := convertToSingleMultiAddr(node)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := peer.AddrInfoFromP2pAddr(multiAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return info, multiAddr, nil
 }
 
 func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
@@ -86,7 +99,7 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) erro
 	ctx, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
 	if err := s.host.Connect(ctx, info); err != nil {
-		s.peers.IncrementBadResponse(info.ID)
+		s.peers.Penalize(info.ID)
 		return err
 	}
 	return nil
@@ -121,4 +134,40 @@ func (s *Sentinel) connectToBootnodes() error {
 	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
 	s.connectWithAllPeers(multiAddresses)
 	return nil
+}
+
+// listen for new nodes watches for new nodes in the network and adds them to the peerstore.
+func (s *Sentinel) listenForPeers() {
+	iterator := s.listener.RandomNodes()
+	defer iterator.Close()
+	for {
+		// Exit if service's context is canceled
+		if s.ctx.Err() != nil {
+			break
+		}
+		if s.TooManyPeers() {
+			// Pause the main loop for a period to stop looking
+			// for new peers.
+			log.Trace("Not looking for peers, at peer limit")
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		exists := iterator.Next()
+		if !exists {
+			break
+		}
+		node := iterator.Node()
+		peerInfo, _, err := convertToAddrInfo(node)
+		if err != nil {
+			log.Error("Could not convert to peer info", "err", err)
+			continue
+		}
+
+		// Make sure that peer is not dialed too often, for each connection attempt there's a backoff period.
+		go func(info *peer.AddrInfo) {
+			if err := s.connectWithPeer(s.ctx, *info); err != nil {
+				log.Debug("Could not connect with peer", "err", err)
+			}
+		}(peerInfo)
+	}
 }
