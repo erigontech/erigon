@@ -16,12 +16,12 @@ import (
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
-	ok := xVal.SetByteSlice(pubkey.X.Bytes())
-	if !ok {
+	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
+	if overflows {
 		return nil, errors.Errorf("X value overflows")
 	}
-	ok = yVal.SetByteSlice(pubkey.Y.Bytes())
-	if !ok {
+	overflows = yVal.SetByteSlice(pubkey.Y.Bytes())
+	if overflows {
 		return nil, errors.Errorf("Y value overflows")
 	}
 	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
