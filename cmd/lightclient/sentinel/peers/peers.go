@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -49,12 +50,13 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.badResponses[pid]++
 	// Drop peer and delete the map element.
 	if p.badResponses[pid] > MaxBadResponses {
-		p.markBadPeer(pid)
+		p.banBadPeer(pid)
 		delete(p.badResponses, pid)
 	}
 }
 
-func (p *Peers) markBadPeer(pid peer.ID) {
+func (p *Peers) banBadPeer(pid peer.ID) {
 	p.host.Peerstore().RemovePeer(pid)
 	p.badPeers.Add(pid, []byte{0})
+	log.Warn("[Peers] bad peers has been banned", "peer-id", pid)
 }
