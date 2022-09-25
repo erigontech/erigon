@@ -286,6 +286,10 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	txNumbers := roaring64.New()
 	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
 
+	if err = api._agg.ReopenFiles(); err != nil {
+		panic(err)
+	}
+
 	ac := api._agg.MakeContext()
 	ac.SetTx(tx)
 
