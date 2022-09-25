@@ -342,26 +342,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	br := snapshotsync.NewBlockRetire(workers, dirs.Tmp, snapshots, db, nil, nil)
 
-	{
-		chainConfig := fromdb.ChainConfig(db)
-		chainID, _ := uint256.FromBig(chainConfig.ChainID)
-
-		merger := snapshotsync.NewMerger(dirs.Tmp, workers, log.LvlInfo, *chainID, nil)
-		rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
-		fmt.Printf("snapshots.Ranges(): %s\n", snapshots.Ranges())
-		fmt.Printf("mergeRanges: %s\n", rangesToMerge)
-		if len(rangesToMerge) == 0 {
-			return nil
-		}
-		err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true)
-		if err != nil {
-			return err
-		}
-		if err := snapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("reopen: %w", err)
-		}
-	}
-
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
