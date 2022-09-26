@@ -12,8 +12,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -43,8 +41,11 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	bd.deliveriesH = make(map[uint64]*types.Header)
-	bd.requests = make(map[uint64]*BodyRequest)
+	for i := 0; i < len(bd.deliveriesH); i++ {
+		bd.deliveriesH[i] = nil
+		bd.deliveriesB[i] = nil
+		bd.requests[i] = nil
+	}
 	bd.peerMap = make(map[[64]byte]int)
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
@@ -68,124 +69,101 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+	if blockNum < bd.requestedLow {
+		blockNum = bd.requestedLow
+	}
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
-
-	// go right back to the start of the earliest request that it still outstanding here so that we can
-	// check for timeouts, as requests are delivered from peers bd.requestedLow will be incremented so this loop will move forwards over time.
-	// If a request has timed out we nil out the request and add it back in to the next request going to a peer.
-	// not all requests will have contiguous block numbers because of this
-	for bNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bNum <= bd.maxProgress; bNum++ {
+	for ; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
 		// Check if we reached highest allowed request block number, and turn back
-		if bNum >= bd.requestedLow+bd.outstandingLimit || bNum >= bd.maxProgress {
+		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
+			blockNum = 0
 			break // Avoid tight loop
 		}
-		if bd.delivered.Contains(bNum) {
+		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
 		}
-
-		// check if we already have a request and check if it has timed out
-		req := bd.requests[bNum]
+		req := bd.requests[blockNum-bd.requestedLow]
 		if req != nil {
 			if currentTime < req.waitUntil {
 				continue
 			}
 			bd.peerMap[req.peerID]++
-			bd.requests[bNum] = nil
+			bd.requests[blockNum-bd.requestedLow] = nil
 		}
-
-		// check in the bucket if that has been received either in this run or a previous one.
-		// if we already have the body we can continue on to populate header info and then skip
-		// the body request altogether
-		var err error
-		key := dbutils.EncodeBlockNumber(bNum)
-		bodyInBucket, err := tx.Has("BodiesStage", key)
-		if err != nil {
-			return nil, err
-		}
-		if bodyInBucket {
-			bd.delivered.Add(bNum)
-			continue
-		}
-
 		var hash common.Hash
 		var header *types.Header
+		var err error
 		request := true
-		if bd.deliveriesH[bNum] != nil {
+
+		if bd.deliveriesH[blockNum-bd.requestedLow] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
-			header = bd.deliveriesH[bNum]
+			header = bd.deliveriesH[blockNum-bd.requestedLow]
 			if header == nil {
-				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
 
 			// check here if we have the block prefetched as this could have come in as part of a data race
 			// we want to avoid an infinite loop if the header was populated in deliveriesH before the block
 			// was added to the prefetched cache
-			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, bNum, blockPropagator); hasPrefetched {
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			}
 		} else {
-			hash, err = rawdb.ReadCanonicalHash(tx, bNum)
+			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
-				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 
-			header, err = blockReader.Header(context.Background(), tx, hash, bNum)
+			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 			if err != nil {
-				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			if header == nil {
-				return nil, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", bNum, hash, dbg.Stack())
+				return nil, 0, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
-			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, bNum, blockPropagator); hasPrefetched {
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			} else {
-				bd.deliveriesH[bNum] = header
+				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
-					block := rawdb.ReadBlock(tx, hash, bNum)
+					block := rawdb.ReadBlock(tx, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash
 						copy(doubleHash[:], header.UncleHash.Bytes())
 						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = bNum
+						bd.requestedMap[doubleHash] = blockNum
 					} else {
-						err = bd.addBodyToBucket(tx, bNum, block.RawBody())
-						if err != nil {
-							log.Error("Failed to add block body to bucket", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
-						}
+						bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 						request = false
 					}
 				} else {
-					err = bd.addBodyToBucket(tx, bNum, &types.RawBody{})
-					if err != nil {
-						log.Error("Failed to add block body to bucket", "err", err, "number", bNum, "hash", hash)
-					}
+					bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{}
 					request = false
 				}
 			}
 		}
-
 		if request {
-			blockNums = append(blockNums, bNum)
+			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
 			// Both uncleHash and txHash are empty (or block is prefetched), no need to request
-			bd.delivered.Add(bNum)
+			bd.delivered.Add(blockNum)
 		}
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		for _, num := range blockNums {
-			bd.requests[num] = bodyReq
+		for _, blockNum := range blockNums {
+			bd.requests[blockNum-bd.requestedLow] = bodyReq
 		}
 	}
-	return bodyReq, nil
+	return bodyReq, blockNum, nil
 }
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
@@ -197,10 +175,8 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, block
 	}
 
 	// Block is prefetched, no need to request
-	bd.deliveriesH[blockNum] = block.Header()
-
-	// make sure we have the body in the bucket for later use
-	bd.addBodyToBucket(tx, blockNum, block.RawBody())
+	bd.deliveriesH[blockNum-bd.requestedLow] = block.Header()
+	bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
@@ -222,10 +198,10 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 		if blockNum < bd.requestedLow {
 			continue
 		}
-		req := bd.requests[blockNum]
+		req := bd.requests[blockNum-bd.requestedLow]
 		if req != nil {
-			bd.requests[blockNum].waitUntil = timeWithTimeout
-			bd.requests[blockNum].peerID = peer
+			bd.requests[blockNum-bd.requestedLow].waitUntil = timeWithTimeout
+			bd.requests[blockNum-bd.requestedLow].peerID = peer
 		}
 	}
 }
@@ -265,13 +241,7 @@ func (rt RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(rt[i]) //nolint:errcheck
 }
 
-func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
-	bd.deliveredCount += delivered
-	bd.wastedCount += wasted
-}
-
-func (bd *BodyDownload) GetDeliveries(tx kv.RwTx) (uint64, uint64, error) {
-	var delivered, undelivered int
+func (bd *BodyDownload) doDeliverBodies() (err error) {
 Loop:
 	for {
 		var delivery Delivery
@@ -295,6 +265,7 @@ Loop:
 
 		reqMap := make(map[uint64]*BodyRequest)
 		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
+		var delivered, undelivered int
 
 		for i := range txs {
 			uncleHash := types.CalcUncleHash(uncles[i])
@@ -310,7 +281,7 @@ Loop:
 				undelivered++
 				continue
 			}
-			req := bd.requests[blockNum]
+			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
 					reqMap[req.BlockNums[0]] = req
@@ -318,17 +289,14 @@ Loop:
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
 
-			err := bd.addBodyToBucket(tx, blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i]})
-			if err != nil {
-				return 0, 0, err
-			}
+			bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{Transactions: txs[i], Uncles: uncles[i]}
 			bd.delivered.Add(blockNum)
 			delivered++
 		}
 		// Clean up the requests
 		for _, req := range reqMap {
 			for _, blockNum := range req.BlockNums {
-				bd.requests[blockNum] = nil
+				bd.requests[blockNum-bd.requestedLow] = nil
 			}
 		}
 		total := delivered + undelivered
@@ -337,20 +305,44 @@ Loop:
 			bd.DeliverySize(float64(lenOfP2PMessage)*float64(delivered)/float64(delivered+undelivered), float64(lenOfP2PMessage)*float64(undelivered)/float64(delivered+undelivered))
 		}
 	}
-
-	return bd.requestedLow, uint64(delivered), nil
+	return nil
 }
 
-// NextProcessingCount returns the count of contiguous block numbers ready to process from the
-// requestedLow minimum value.
-// the requestedLow count is increased by the number returned
-func (bd *BodyDownload) NextProcessingCount() uint64 {
+func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
+	bd.deliveredCount += delivered
+	bd.wastedCount += wasted
+}
+
+func (bd *BodyDownload) GetDeliveries() ([]*types.Header, []*types.RawBody, error) {
+	err := bd.doDeliverBodies() // TODO: join this 2 funcs and simplify
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var i uint64
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
-	bd.requestedLow += i
-	return i
+	// Move the deliveries back
+	// bd.requestedLow can only be moved forward if there are consecutive block numbers present in the bd.delivered map
+	var headers []*types.Header
+	var rawBodies []*types.RawBody
+	if i > 0 {
+		headers = make([]*types.Header, i)
+		rawBodies = make([]*types.RawBody, i)
+		copy(headers, bd.deliveriesH[:i])
+		copy(rawBodies, bd.deliveriesB[:i])
+		copy(bd.deliveriesH, bd.deliveriesH[i:])
+		copy(bd.deliveriesB, bd.deliveriesB[i:])
+		copy(bd.requests, bd.requests[i:])
+		for j := len(bd.deliveriesH) - int(i); j < len(bd.deliveriesH); j++ {
+			bd.deliveriesH[j] = nil
+			bd.deliveriesB[j] = nil
+			bd.requests[j] = nil
+		}
+		bd.requestedLow += i
+	}
+	return headers, rawBodies, nil
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
@@ -391,56 +383,4 @@ func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
 func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
 	bd.AddToPrefetch(block)
 	return nil
-}
-
-// GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies
-// or if the code is continuing from a previous run and this isn't present, by reading from the DB as the RequestMoreBodies would have.
-// as the requestedLow count is incremented before a call to this function we need the process count so that we can anticipate this,
-// effectively reversing time a little to get the actual position we need in the slice prior to requestedLow being incremented
-func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, common.Hash, error) {
-	var header *types.Header
-	if bd.deliveriesH[blockNum] != nil {
-		header = bd.deliveriesH[blockNum]
-	} else {
-		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return nil, common.Hash{}, err
-		}
-		header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
-		if err != nil {
-			return nil, common.Hash{}, err
-		}
-		if header == nil {
-			return nil, common.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
-		}
-	}
-	return header, header.Hash(), nil
-}
-
-func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawBody) error {
-	writer := bytes.NewBuffer(nil)
-	err := body.EncodeRLP(writer)
-	if err != nil {
-		return err
-	}
-	rlpBytes := common.CopyBytes(writer.Bytes())
-	writer.Reset()
-	writer.WriteString(hexutil.Encode(rlpBytes))
-
-	k := dbutils.EncodeBlockNumber(key)
-	err = tx.Put("BodiesStage", k, writer.Bytes())
-	if err != nil {
-		return err
-	}
-
-	bd.bodiesAdded = true
-	return nil
-}
-
-func (bd *BodyDownload) HasAddedBodies() bool {
-	return bd.bodiesAdded
-}
-
-func (bd *BodyDownload) ResetAddedBodies() {
-	bd.bodiesAdded = false
 }
