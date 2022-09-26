@@ -417,10 +417,7 @@ func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFi
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     h.dir,
-		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		IndexFile: historyIdxPath,
+		IndexFile:  historyIdxPath,
 	}); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}
@@ -579,16 +576,16 @@ func (h *History) pruneF(txFrom, txTo uint64, f func(txNum uint64, k, v []byte) 
 
 type HistoryContext struct {
 	h                        *History
-	indexFiles, historyFiles *btree.BTreeG[*ctxItem]
+	indexFiles, historyFiles *btree.BTreeG[ctxItem]
 
 	tx kv.Tx
 }
 
 func (h *History) MakeContext() *HistoryContext {
 	var hc = HistoryContext{h: h}
-	hc.indexFiles = btree.NewG[*ctxItem](32, ctxItemLess)
+	hc.indexFiles = btree.NewG[ctxItem](32, ctxItemLess)
 	h.InvertedIndex.files.Ascend(func(item *filesItem) bool {
-		hc.indexFiles.ReplaceOrInsert(&ctxItem{
+		hc.indexFiles.ReplaceOrInsert(ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,
 			getter:     item.decompressor.MakeGetter(),
@@ -596,9 +593,9 @@ func (h *History) MakeContext() *HistoryContext {
 		})
 		return true
 	})
-	hc.historyFiles = btree.NewG[*ctxItem](32, ctxItemLess)
+	hc.historyFiles = btree.NewG[ctxItem](32, ctxItemLess)
 	h.files.Ascend(func(item *filesItem) bool {
-		hc.historyFiles.ReplaceOrInsert(&ctxItem{
+		hc.historyFiles.ReplaceOrInsert(ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,
 			getter:     item.decompressor.MakeGetter(),
@@ -617,7 +614,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	var foundStartTxNum uint64
 	var found bool
 	//hc.indexFiles.Ascend(func(item *ctxItem) bool {
-	hc.indexFiles.AscendGreaterOrEqual(&ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item *ctxItem) bool {
+	hc.indexFiles.AscendGreaterOrEqual(ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item ctxItem) bool {
 		//fmt.Printf("ef item %d-%d, key %x\n", item.startTxNum, item.endTxNum, key)
 		if item.reader.Empty() {
 			return true
@@ -641,12 +638,12 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		return true
 	})
 	if found {
-		var historyItem *ctxItem
+		var historyItem ctxItem
 		var ok bool
 		var search ctxItem
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
-		if historyItem, ok = hc.historyFiles.Get(&search); !ok {
+		if historyItem, ok = hc.historyFiles.Get(search); !ok {
 			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
 		}
 		var txKey [8]byte
@@ -676,12 +673,12 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 	var foundStartTxNum uint64
 	var found bool
 	var anyItem bool // Whether any filesItem has been looked at in the loop below
-	var topState *ctxItem
-	hc.historyFiles.AscendGreaterOrEqual(&search, func(i *ctxItem) bool {
+	var topState ctxItem
+	hc.historyFiles.AscendGreaterOrEqual(search, func(i ctxItem) bool {
 		topState = i
 		return false
 	})
-	hc.indexFiles.AscendGreaterOrEqual(&search, func(item *ctxItem) bool {
+	hc.indexFiles.AscendGreaterOrEqual(search, func(item ctxItem) bool {
 		anyItem = true
 		offset := item.reader.Lookup(key)
 		g := item.getter
@@ -707,11 +704,11 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 	if found {
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		var historyItem *ctxItem
+		var historyItem ctxItem
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
-		historyItem, ok := hc.historyFiles.Get(&search)
-		if !ok || historyItem == nil {
+		historyItem, ok := hc.historyFiles.Get(search)
+		if !ok {
 			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
 		}
 		offset := historyItem.reader.Lookup2(txKey[:], key)
@@ -728,7 +725,7 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 	if anyItem {
 		// If there were no changes but there were history files, the value can be obtained from value files
 		var val []byte
-		hc.historyFiles.DescendLessOrEqual(topState, func(item *ctxItem) bool {
+		hc.historyFiles.DescendLessOrEqual(topState, func(item ctxItem) bool {
 			if item.reader.Empty() {
 				return true
 			}
@@ -801,7 +798,7 @@ func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx
 		valsTable:    hc.h.historyValsTable,
 	}
 
-	hc.indexFiles.Ascend(func(item *ctxItem) bool {
+	hc.indexFiles.Ascend(func(item ctxItem) bool {
 		if item.endTxNum >= endTxNum {
 			hi.hasNextInDb = false
 		}
@@ -896,7 +893,7 @@ func (hi *HistoryIterator1) advanceInFiles() {
 		hi.nextFileKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], n)
 		search := ctxItem{startTxNum: top.startTxNum, endTxNum: top.endTxNum}
-		historyItem, ok := hi.hc.historyFiles.Get(&search)
+		historyItem, ok := hi.hc.historyFiles.Get(search)
 		if !ok {
 			panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextFileKey))
 		}

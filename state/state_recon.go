@@ -31,7 +31,7 @@ import (
 func (hc *HistoryContext) IsMaxTxNum(key []byte, txNum uint64) bool {
 	var found bool
 	var foundTxNum uint64
-	hc.indexFiles.AscendGreaterOrEqual(&ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item *ctxItem) bool {
+	hc.indexFiles.AscendGreaterOrEqual(ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item ctxItem) bool {
 		if item.endTxNum <= txNum {
 			return true
 		}
@@ -167,7 +167,7 @@ func (si *ScanIterator) Total() uint64 {
 
 func (hc *HistoryContext) iterateReconTxs(fromKey, toKey []byte, uptoTxNum uint64) *ScanIterator {
 	var si ScanIterator
-	hc.indexFiles.Ascend(func(item *ctxItem) bool {
+	hc.indexFiles.Ascend(func(item ctxItem) bool {
 		g := item.getter
 		for g.HasNext() {
 			key, offset := g.NextUncompressed()
@@ -220,12 +220,12 @@ func (hi *HistoryIterator) advance() {
 				hi.key = key
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], n)
-				var historyItem *ctxItem
+				var historyItem ctxItem
 				var ok bool
 				var search ctxItem
 				search.startTxNum = top.startTxNum
 				search.endTxNum = top.endTxNum
-				if historyItem, ok = hi.hc.historyFiles.Get(&search); !ok {
+				if historyItem, ok = hi.hc.historyFiles.Get(search); !ok {
 					panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.key))
 				}
 				offset := historyItem.reader.Lookup2(txKey[:], hi.key)
@@ -262,7 +262,7 @@ func (hi *HistoryIterator) Total() uint64 {
 func (hc *HistoryContext) iterateHistoryBeforeTxNum(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
 	var hi HistoryIterator
 	heap.Init(&hi.h)
-	hc.indexFiles.Ascend(func(item *ctxItem) bool {
+	hc.indexFiles.Ascend(func(item ctxItem) bool {
 		g := item.getter
 		g.Reset(0)
 		for g.HasNext() {

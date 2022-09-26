@@ -363,7 +363,7 @@ type ctxItem struct {
 	reader     *recsplit.IndexReader
 }
 
-func ctxItemLess(i, j *ctxItem) bool {
+func ctxItemLess(i, j ctxItem) bool {
 	if i.endTxNum == j.endTxNum {
 		return i.startTxNum > j.startTxNum
 	}
@@ -373,17 +373,17 @@ func ctxItemLess(i, j *ctxItem) bool {
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
 	d     *Domain
-	files *btree.BTreeG[*ctxItem]
+	files *btree.BTreeG[ctxItem]
 	hc    *HistoryContext
 }
 
 func (d *Domain) MakeContext() *DomainContext {
 	dc := &DomainContext{d: d}
 	dc.hc = d.History.MakeContext()
-	bt := btree.NewG[*ctxItem](32, ctxItemLess)
+	bt := btree.NewG[ctxItem](32, ctxItemLess)
 	dc.files = bt
 	d.files.Ascend(func(item *filesItem) bool {
-		bt.ReplaceOrInsert(&ctxItem{
+		bt.ReplaceOrInsert(ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,
 			getter:     item.decompressor.MakeGetter(),
@@ -426,7 +426,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
-	dc.files.Ascend(func(item *ctxItem) bool {
+	dc.files.Ascend(func(item ctxItem) bool {
 		if item.reader.Empty() {
 			return true
 		}
@@ -684,10 +684,7 @@ func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     dir,
-		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		IndexFile: idxPath,
+		IndexFile:  idxPath,
 	}); err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
@@ -790,7 +787,7 @@ func (d *Domain) prune(step uint64, txFrom, txTo uint64) error {
 func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool) {
 	var val []byte
 	var found bool
-	dc.files.Descend(func(item *ctxItem) bool {
+	dc.files.Descend(func(item ctxItem) bool {
 		if item.reader.Empty() {
 			return true
 		}
@@ -820,12 +817,12 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	var foundStartTxNum uint64
 	var found bool
 	var anyItem bool // Whether any filesItem has been looked at in the loop below
-	var topState *ctxItem
-	dc.files.AscendGreaterOrEqual(&search, func(i *ctxItem) bool {
+	var topState ctxItem
+	dc.files.AscendGreaterOrEqual(search, func(i ctxItem) bool {
 		topState = i
 		return false
 	})
-	dc.hc.indexFiles.AscendGreaterOrEqual(&search, func(item *ctxItem) bool {
+	dc.hc.indexFiles.AscendGreaterOrEqual(search, func(item ctxItem) bool {
 		anyItem = true
 		offset := item.reader.Lookup(key)
 		g := item.getter
@@ -852,7 +849,7 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 		if anyItem {
 			// If there were no changes but there were history files, the value can be obtained from value files
 			var val []byte
-			dc.files.DescendLessOrEqual(topState, func(item *ctxItem) bool {
+			dc.files.DescendLessOrEqual(topState, func(item ctxItem) bool {
 				if item.reader.Empty() {
 					return true
 				}
@@ -913,11 +910,11 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-	var historyItem *ctxItem
+	var historyItem ctxItem
 	search.startTxNum = foundStartTxNum
 	search.endTxNum = foundEndTxNum
-	historyItem, ok := dc.hc.historyFiles.Get(&search)
-	if !ok || historyItem == nil {
+	historyItem, ok := dc.hc.historyFiles.Get(search)
+	if !ok {
 		return nil, false, fmt.Errorf("no %s file found for [%x]", dc.d.filenameBase, key)
 	}
 	offset := historyItem.reader.Lookup2(txKey[:], key)
