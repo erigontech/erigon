@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -209,12 +210,27 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
+	dir.MustExist(dirs.SnapHistory)
+
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
-		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
 		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
+	}
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+	if err != nil {
+		return err
+	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return err
+	}
+	agg.SetWorkers(workers)
+	err = agg.BuildMissedIndices()
+	if err != nil {
+		return err
 	}
 	return nil
 }
