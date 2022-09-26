@@ -37,7 +37,7 @@ type SnapshotsCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
-	historyV2          bool
+	historyV3          bool
 	agg                *state.Aggregator22
 }
 
@@ -50,7 +50,7 @@ func StageSnapshotsCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	dbEventNotifier snapshotsync.DBEventNotifier,
-	historyV2 bool,
+	historyV3 bool,
 	agg *state.Aggregator22,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
@@ -62,7 +62,7 @@ func StageSnapshotsCfg(
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
-		historyV2:          historyV2,
+		historyV3:          historyV3,
 		agg:                agg,
 	}
 }
@@ -121,6 +121,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
+				}
+			}
+
+			if cfg.historyV3 {
+				if err := cfg.agg.BuildMissedIndices(); err != nil {
+					return err
 				}
 			}
 
@@ -222,11 +228,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
 			}
 
-			historyV2, err := rawdb.HistoryV2.Enabled(tx)
+			historyV3, err := rawdb.HistoryV3.Enabled(tx)
 			if err != nil {
 				return err
 			}
-			if historyV2 {
+			if historyV3 {
 				var toBlock uint64
 				if sn != nil {
 					toBlock = sn.BlocksAvailable()
@@ -249,7 +255,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 								log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", logPrefix), "block_num", blockNum)
 							default:
 							}
-							maxTxNum := baseTxNum + txAmount
+							maxTxNum := baseTxNum + txAmount - 1
 
 							if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 								return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
@@ -310,7 +316,7 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	for _, p := range preverifiedBlockSnapshots {
 		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
 	}
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
 		for _, p := range preverifiedHistorySnapshots {
 			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))

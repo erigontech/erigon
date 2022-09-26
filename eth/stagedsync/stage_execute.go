@@ -233,7 +233,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter, nil
 }
 
-// ================ Erigon22 ================
+// ================ Erigon3 ================
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	sigs := make(chan os.Signal, 1)
@@ -254,7 +254,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
 		var found bool
-		var reconstituteToBlock uint64
+		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
 		if tx == nil {
 			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
@@ -266,7 +266,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 		}
 
-		if found && reconstituteToBlock > s.BlockNumber {
+		if found && reconstituteToBlock > s.BlockNumber+1 {
 			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
 			dir.Recreate(reconDbPath)
 			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
@@ -313,7 +313,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	rs := state.NewState22()
-	if err := Exec22(execCtx, s, workersCount, cfg.db, tx, rs,
+	if err := Exec3(execCtx, s, workersCount, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
@@ -327,7 +327,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	return nil
 }
 
-func unwindExec22(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -375,7 +375,7 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 	return prevStageProgress, nil
 }
 
-// ================ Erigon22 End ================
+// ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if cfg.exec22 {
@@ -633,7 +633,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	if cfg.exec22 {
-		return unwindExec22(u, s, tx, ctx, cfg)
+		return unwindExec3(u, s, tx, ctx, cfg)
 	}
 
 	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))

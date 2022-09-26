@@ -245,7 +245,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	if api.historyV2(dbtx) {
+	if api.historyV3(dbtx) {
 		return api.filter22(ctx, dbtx, fromBlock, toBlock, req, stream)
 	}
 

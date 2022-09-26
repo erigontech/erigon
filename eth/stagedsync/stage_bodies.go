@@ -32,12 +32,11 @@ type BodiesCfg struct {
 	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
-
-	historyV2 bool
+	historyV3       bool
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig params.ChainConfig, batchSize datasize.ByteSize, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV2 bool) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV2: historyV2}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig params.ChainConfig, batchSize datasize.ByteSize, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -104,7 +103,7 @@ func BodiesForward(
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
 	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
-		if cfg.historyV2 {
+		if cfg.historyV3 {
 			if err := rawdb.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
 			}
@@ -195,7 +194,7 @@ Loop:
 			if err != nil {
 				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
-			if cfg.historyV2 && ok {
+			if cfg.historyV3 && ok {
 				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return err
 				}
@@ -267,6 +266,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
 		// Don't log "Wrote block ..." unless we're actually writing something
+		log.Info(fmt.Sprintf("[%s] No block bodies to write in this log period", logPrefix), "block number", committed, "blk/second", speed)
 		return
 	}
 
@@ -298,7 +298,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
 		return err
 	}
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		if err := rawdb.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"context"
@@ -46,9 +46,8 @@ type regenerateIncrementalPedersenAccountsJob struct {
 	address       common.Address
 	account       accounts.Account
 	code          []byte // New code
+	isContract    bool
 	absentInState bool
-	// keys to be deleted
-	badKeys [][]byte
 }
 
 type regenerateIncrementalPedersenAccountsOut struct {
@@ -58,6 +57,7 @@ type regenerateIncrementalPedersenAccountsOut struct {
 	codeSize      uint64
 	codeChunks    [][]byte
 	codeKeys      [][]byte
+	isContract    bool
 	absentInState bool
 	badKeys       [][]byte
 }
@@ -186,14 +186,15 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		case <-ctx.Done():
 			return
 		}
+		versionKey := common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
 		if job.absentInState {
 			out <- &regenerateIncrementalPedersenAccountsOut{
+				versionHash:   versionKey[:],
+				isContract:    job.isContract,
 				absentInState: job.absentInState,
-				badKeys:       job.badKeys,
 			}
 			continue
 		}
-		versionKey := common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
 
 		var chunks [][]byte
 		var chunkKeys [][]byte
@@ -226,7 +227,7 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 			codeChunks:    chunks,
 			codeKeys:      chunkKeys,
 			absentInState: job.absentInState,
-			badKeys:       job.badKeys,
+			isContract:    job.isContract,
 			address:       job.address,
 		}
 	}

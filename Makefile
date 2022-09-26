@@ -111,6 +111,7 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
+COMMANDS += lightclient
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -132,8 +133,8 @@ db-tools:
 test:
 	$(GOTEST) --timeout 50s
 
-test22:
-	$(GOTEST) --timeout 50s -tags erigon22
+test3:
+	$(GOTEST) --timeout 50s -tags erigon3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:

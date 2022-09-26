@@ -34,7 +34,7 @@ import (
 
 func TestEstimateGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
@@ -52,7 +52,7 @@ func TestEstimateGas(t *testing.T) {
 
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -71,12 +71,14 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	pruneTo := uint64(3)
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
-	db, bankAddress, contractAddress := chainWithDeployedContract(t)
+	m, bankAddress, contractAddress := chainWithDeployedContract(t)
 
-	prune(t, db, pruneTo)
+	prune(t, m.DB, pruneTo)
+
+	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -93,7 +95,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -130,7 +132,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -171,7 +173,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -209,7 +211,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -260,7 +262,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -302,7 +304,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	}
 }
 
-func chainWithDeployedContract(t *testing.T) (kv.RwDB, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address, common.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -354,7 +356,7 @@ func chainWithDeployedContract(t *testing.T) (kv.RwDB, common.Address, common.Ad
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
 
-	return db, bankAddress, contractAddr
+	return m, bankAddress, contractAddr
 }
 
 func prune(t *testing.T, db kv.RwDB, pruneTo uint64) {

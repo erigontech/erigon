@@ -30,7 +30,7 @@ var (
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 
-	_forceSetHistoryV2 bool
+	_forceSetHistoryV3 bool
 	workers            uint64
 )
 

@@ -124,10 +124,17 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if exec.chainConfig.IsCancun(0) {
+					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx)
+					return err
+				}
 				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				if exec.chainConfig.IsCancun(0) {
+					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx)
+				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
@@ -138,7 +145,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
-			Disabled:            bodies.historyV2,
+			Disabled:            bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnCallTraces(s, tx, callTraces, ctx)
 			},
@@ -152,7 +159,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 		{
 			ID:          stages.AccountHistoryIndex,
 			Description: "Generate account history index",
-			Disabled:    bodies.historyV2,
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
@@ -166,7 +173,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 		{
 			ID:          stages.StorageHistoryIndex,
 			Description: "Generate storage history index",
-			Disabled:    bodies.historyV2,
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
@@ -180,7 +187,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 		{
 			ID:          stages.LogIndex,
 			Description: "Generate receipt logs index",
-			Disabled:    bodies.historyV2,
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnLogIndex(s, tx, logIndex, ctx, 0)
 			},

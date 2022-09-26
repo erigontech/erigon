@@ -130,7 +130,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	if api.historyV2(tx) {
+	if api.historyV3(tx) {
 		return api.getLogs22(ctx, tx, begin, end, crit)
 	}
 

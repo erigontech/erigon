@@ -622,9 +622,9 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	HistoryV2Flag = cli.BoolFlag{
-		Name:  "experimental.history.v2",
-		Usage: "Not recommended, experimental: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+	HistoryV3Flag = cli.BoolFlag{
+		Name:  "experimental.history.v3",
+		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
@@ -1481,7 +1481,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Ethstats = ctx.GlobalString(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.EnabledIssuance = ctx.GlobalBool(EnabledIssuance.Name)
-	cfg.HistoryV2 = ctx.GlobalBool(HistoryV2Flag.Name)
+	cfg.HistoryV3 = ctx.GlobalBool(HistoryV3Flag.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
