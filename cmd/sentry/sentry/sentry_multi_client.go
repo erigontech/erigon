@@ -263,7 +263,7 @@ type MultiClient struct {
 	blockReader   services.HeaderAndCanonicalReader
 	logPeerInfo   bool
 
-	historyV2 bool
+	historyV3 bool
 }
 
 func NewMultiClient(
@@ -279,7 +279,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 ) (*MultiClient, error) {
-	historyV2 := fromdb.HistoryV2(db)
+	historyV3 := fromdb.HistoryV3(db)
 
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
@@ -303,7 +303,7 @@ func NewMultiClient(
 		blockReader:   blockReader,
 		logPeerInfo:   logPeerInfo,
 		forkValidator: forkValidator,
-		historyV2:     historyV2,
+		historyV3:     historyV3,
 	}
 	cs.ChainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.ChainConfig)
@@ -619,7 +619,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if cs.historyV2 { // historyV2 doesn't store receipts in DB
+	if cs.historyV3 { // historyV3 doesn't store receipts in DB
 		return nil
 	}
 

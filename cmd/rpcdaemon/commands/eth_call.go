@@ -57,7 +57,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, nil
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache, api.historyV2(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache, api.historyV3(tx), api._agg)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 			return false, nil, nil
 		}
 
-		stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, numOrHash, api.filters, api.stateCache, api.historyV2(dbtx), api._agg)
+		stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, numOrHash, api.filters, api.stateCache, api.historyV3(dbtx), api._agg)
 		if err != nil {
 			return false, nil, err
 		}

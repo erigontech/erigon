@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -70,7 +70,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec22(ctx context.Context,
+func Exec3(ctx context.Context,
 	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
 	allSnapshots *snapshotsync.RoSnapshots,
@@ -101,7 +101,7 @@ func Exec22(ctx context.Context,
 	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
@@ -439,7 +439,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	bigStep := big.NewInt(0x100000000)
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
-	fillWorkers := make([]*exec22.FillWorker, workerCount)
+	fillWorkers := make([]*exec3.FillWorker, workerCount)
 	var doneCount uint64
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
@@ -451,7 +451,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			bigCurrent.FillBytes(toKey)
 		}
 		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec22.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -591,7 +591,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	codeCollectorX = nil
 	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
-	reconWorkers := make([]*exec22.ReconWorker, workerCount)
+	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
@@ -613,7 +613,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec22.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)

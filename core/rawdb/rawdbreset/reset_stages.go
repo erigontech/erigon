@@ -147,11 +147,11 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 		}
 	}
 
-	historyV2, err := rawdb.HistoryV2.Enabled(tx)
+	historyV3, err := rawdb.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err
 	}
-	if historyV2 {
+	if historyV3 {
 		buckets := []string{
 			kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
 			kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
