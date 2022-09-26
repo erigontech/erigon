@@ -152,7 +152,7 @@ func StageLoopStep(
 	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+8096 && highestSeenHeader < finishProgressBefore+8096
-
+	fmt.Printf("alex: %t, %t\n", initialCycle, canRunCycleInOneTransaction)
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
 		tx, err = db.BeginRw(context.Background())
