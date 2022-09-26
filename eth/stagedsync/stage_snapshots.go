@@ -124,8 +124,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				}
 			}
 
-			if err := cfg.agg.BuildMissedIndices(); err != nil {
-				return err
+			if cfg.historyV3 {
+				if err := cfg.agg.BuildMissedIndices(); err != nil {
+					return err
+				}
 			}
 
 			if err := cfg.snapshots.ReopenFolder(); err != nil {
