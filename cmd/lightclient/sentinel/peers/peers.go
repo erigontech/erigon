@@ -1,9 +1,23 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package peers
 
 import (
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -49,12 +63,13 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.badResponses[pid]++
 	// Drop peer and delete the map element.
 	if p.badResponses[pid] > MaxBadResponses {
-		p.markBadPeer(pid)
+		p.banBadPeer(pid)
 		delete(p.badResponses, pid)
 	}
 }
 
-func (p *Peers) markBadPeer(pid peer.ID) {
+func (p *Peers) banBadPeer(pid peer.ID) {
 	p.host.Peerstore().RemovePeer(pid)
 	p.badPeers.Add(pid, []byte{0})
+	log.Warn("[Peers] bad peers has been banned", "peer-id", pid)
 }

@@ -1,3 +1,16 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package sentinel
 
 import (
@@ -40,11 +53,14 @@ func (s *Sentinel) createLocalNode(
 	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
 	tcpEntry := enr.TCP(tcpPort)
+
 	localNode.Set(ipEntry)
 	localNode.Set(udpEntry)
 	localNode.Set(tcpEntry)
+
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
+	s.setupENR(localNode)
 
 	return localNode, nil
 }
@@ -55,22 +71,29 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		port    = s.cfg.Port
 		discCfg = s.cfg.DiscoverConfig
 	)
+
 	ip := net.ParseIP(ipAddr)
 	if ip.To4() == nil {
 		return nil, fmt.Errorf("IPV4 address not provided instead %s was provided", ipAddr)
 	}
+
 	var bindIP net.IP
 	var networkVersion string
+
+	// check for our network version
 	switch {
+	// if we have 16 byte and 4 byte representation then we are in using udp6
 	case ip.To16() != nil && ip.To4() == nil:
 		bindIP = net.IPv6zero
 		networkVersion = "udp6"
+		// only 4 bytes then we are using udp4
 	case ip.To4() != nil:
 		bindIP = net.IPv4zero
 		networkVersion = "udp4"
 	default:
 		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
+
 	udpAddr := &net.UDPAddr{
 		IP:   bindIP,
 		Port: port,
@@ -79,7 +102,8 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, port+1)
+
+	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort))
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +112,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return net, err
 }
 
@@ -103,28 +128,29 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 		return nil, err
 	}
 
-	h, err := libp2p.New(opts...)
+	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	h.RemoveStreamHandler(identify.IDDelta)
-	s.host = h
+	host.RemoveStreamHandler(identify.IDDelta)
+	s.host = host
 	s.peers = peers.New(s.host)
 	return s, nil
 }
 
 func (s *Sentinel) Start() error {
 	if s.started {
-		log.Error("Sentinel already running")
+		log.Warn("Sentinel already running")
 	}
+
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed creating sentinel listener err=%s", err)
 	}
 	if err := s.connectToBootnodes(); err != nil {
-		return err
+		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
 	go s.listenForPeers()
 
@@ -135,10 +161,10 @@ func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
 
-func (s *Sentinel) TooManyPeers() bool {
-	return s.PeersCount() >= peers.DefaultMaxPeers
+func (s *Sentinel) HasTooManyPeers() bool {
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) PeersCount() int {
+func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
 }

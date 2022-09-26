@@ -1,93 +1,29 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package sentinel
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"fmt"
-	"net"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 )
-
-func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
-	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
-	if xVal.SetByteSlice(pubkey.X.Bytes()) {
-		return nil, errors.Errorf("X value overflows")
-	}
-	if yVal.SetByteSlice(pubkey.Y.Bytes()) {
-		return nil, errors.Errorf("Y value overflows")
-	}
-	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
-	// Zero out temporary values.
-	xVal.Zero()
-	yVal.Zero()
-	return newKey, nil
-}
-
-func convertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, error) {
-	multiAddr, err := convertToSingleMultiAddr(node)
-	if err != nil {
-		return nil, nil, err
-	}
-	info, err := peer.AddrInfoFromP2pAddr(multiAddr)
-	if err != nil {
-		return nil, nil, err
-	}
-	return info, multiAddr, nil
-}
-
-func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
-	pubkey := node.Pubkey()
-	assertedKey, err := convertToInterfacePubkey(pubkey)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not get pubkey")
-	}
-	id, err := peer.IDFromPublicKey(assertedKey)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not get peer id")
-	}
-	return multiAddressBuilderWithID(node.IP().String(), "tcp", uint(node.TCP()), id)
-}
-
-func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
-	parsedIP := net.ParseIP(ipAddr)
-	if parsedIP.To4() == nil && parsedIP.To16() == nil {
-		return nil, errors.Errorf("invalid ip address provided: %s", ipAddr)
-	}
-	if id.String() == "" {
-		return nil, errors.New("empty peer id given")
-	}
-	if parsedIP.To4() != nil {
-		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))
-	}
-	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))
-}
-
-func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
-	multiAddrs := []multiaddr.Multiaddr{}
-	for _, node := range nodes {
-		// ignore nodes with no ip address stored
-		if node.IP() == nil {
-			continue
-		}
-		multiAddr, err := convertToSingleMultiAddr(node)
-		if err != nil {
-			log.Debug("Could not convert to multiAddr", "err", err)
-			continue
-		}
-		multiAddrs = append(multiAddrs, multiAddr)
-	}
-	return multiAddrs
-}
 
 func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) error {
 	if info.ID == s.host.ID() {
@@ -96,9 +32,9 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) erro
 	if s.peers.IsBadPeer(info.ID) {
 		return errors.New("refused to connect to bad peer")
 	}
-	ctx, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
-	if err := s.host.Connect(ctx, info); err != nil {
+	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
 		s.peers.Penalize(info.ID)
 		return err
 	}
@@ -110,29 +46,14 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	if err != nil {
 		return err
 	}
-	for _, info := range addrInfos {
+	for _, peerInfo := range addrInfos {
 		// make each dial non-blocking
-		go func(info peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, info); err != nil {
+		go func(peerInfo peer.AddrInfo) {
+			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
 			}
-		}(info)
+		}(peerInfo)
 	}
-	return nil
-}
-
-func (s *Sentinel) connectToBootnodes() error {
-	for i := range s.cfg.DiscoverConfig.Bootnodes {
-		// do not dial bootnodes with their tcp ports not set
-		if err := s.cfg.DiscoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
-			if !enr.IsNotFound(err) {
-				log.Error("Could not retrieve tcp port")
-			}
-			continue
-		}
-	}
-	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
-	s.connectWithAllPeers(multiAddresses)
 	return nil
 }
 
@@ -145,7 +66,7 @@ func (s *Sentinel) listenForPeers() {
 		if s.ctx.Err() != nil {
 			break
 		}
-		if s.TooManyPeers() {
+		if s.HasTooManyPeers() {
 			// Pause the main loop for a period to stop looking
 			// for new peers.
 			log.Trace("Not looking for peers, at peer limit")
@@ -164,10 +85,25 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		// Make sure that peer is not dialed too often, for each connection attempt there's a backoff period.
-		go func(info *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *info); err != nil {
+		go func(peerInfo *peer.AddrInfo) {
+			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
+}
+
+func (s *Sentinel) connectToBootnodes() error {
+	for i := range s.cfg.DiscoverConfig.Bootnodes {
+		// do not dial bootnodes with their tcp ports not set
+		if err := s.cfg.DiscoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
+			if !enr.IsNotFound(err) {
+				log.Error("Could not retrieve tcp port")
+			}
+			continue
+		}
+	}
+	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
+	s.connectWithAllPeers(multiAddresses)
+	return nil
 }
