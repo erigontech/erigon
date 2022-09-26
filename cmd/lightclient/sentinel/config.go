@@ -103,8 +103,7 @@ func buildOptions(cfg SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		libp2p.DefaultMuxers,
 	}
 
-	options = append(options, libp2p.Security(noise.ID, noise.New))
-	options = append(options, libp2p.DisableRelay())
+	options = append(options, libp2p.Security(noise.ID, noise.New), libp2p.DisableRelay())
 
 	if cfg.EnableUPnP {
 		options = append(options, libp2p.NATPortMap()) // Allow to use UPnP
