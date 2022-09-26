@@ -17,14 +17,12 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-core/crypto"
-	"github.com/libp2p/go-libp2p/config"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/p2p/muxer/mplex"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -63,34 +61,6 @@ func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 		}
 		log.Debug("ECDSA private key generated")
 		return cfg.Apply(libp2p.Identity(ifaceKey))
-	}
-}
-
-func withRelayAddrs(relay string) config.AddrsFactory {
-	return func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-		if relay == "" {
-			return addrs
-		}
-
-		var relayAddrs []multiaddr.Multiaddr
-
-		for _, a := range addrs {
-			if strings.Contains(a.String(), "/p2p-circuit") {
-				continue
-			}
-			relayAddr, err := multiaddr.NewMultiaddr(relay + "/p2p-circuit" + a.String())
-			if err != nil {
-				log.Debug("Failed to create multiaddress for relay node")
-			} else {
-				relayAddrs = append(relayAddrs, relayAddr)
-			}
-		}
-
-		if len(relayAddrs) == 0 {
-			log.Warn("Addresses via relay node are zero - using non-relay addresses")
-			return addrs
-		}
-		return append(addrs, relayAddrs...)
 	}
 }
 
@@ -134,16 +104,12 @@ func buildOptions(cfg SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 	}
 
 	options = append(options, libp2p.Security(noise.ID, noise.New))
+	options = append(options, libp2p.DisableRelay())
 
 	if cfg.EnableUPnP {
 		options = append(options, libp2p.NATPortMap()) // Allow to use UPnP
 	}
-	if cfg.RelayNodeAddr != "" {
-		options = append(options, libp2p.AddrsFactory(withRelayAddrs(cfg.RelayNodeAddr)))
-	} else {
-		// Disable relay if it has not been set.
-		options = append(options, libp2p.DisableRelay())
-	}
+
 	if cfg.HostAddress != "" {
 		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 			external, err := multiAddressBuilder(cfg.HostAddress, cfg.TCPPort)
