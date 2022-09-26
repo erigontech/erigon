@@ -103,8 +103,8 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_historyV2     *bool
-	_historyV2Lock sync.RWMutex
+	_historyV3     *bool
+	_historyV3Lock sync.RWMutex
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
@@ -189,22 +189,22 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	return block, nil
 }
 
-func (api *BaseAPI) historyV2(tx kv.Tx) bool {
-	api._historyV2Lock.RLock()
-	historyV2 := api._historyV2
-	api._historyV2Lock.RUnlock()
+func (api *BaseAPI) historyV3(tx kv.Tx) bool {
+	api._historyV3Lock.RLock()
+	historyV3 := api._historyV3
+	api._historyV3Lock.RUnlock()
 
-	if historyV2 != nil {
-		return *historyV2
+	if historyV3 != nil {
+		return *historyV3
 	}
-	enabled, err := rawdb.HistoryV2.Enabled(tx)
+	enabled, err := rawdb.HistoryV3.Enabled(tx)
 	if err != nil {
 		log.Warn("HisoryV2Enabled: read", "err", err)
 		return false
 	}
-	api._historyV2Lock.Lock()
-	api._historyV2 = &enabled
-	api._historyV2Lock.Unlock()
+	api._historyV3Lock.Lock()
+	api._historyV3 = &enabled
+	api._historyV3Lock.Unlock()
 	return enabled
 }
 

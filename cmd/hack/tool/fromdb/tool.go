@@ -10,10 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func HistoryV2(db kv.RoDB) (enabled bool) {
+func HistoryV3(db kv.RoDB) (enabled bool) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		enabled, err = rawdb.HistoryV2.Enabled(tx)
+		enabled, err = rawdb.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}

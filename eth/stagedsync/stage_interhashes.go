@@ -35,11 +35,11 @@ type TrieCfg struct {
 	blockReader       services.FullBlockReader
 	hd                *headerdownload.HeaderDownload
 
-	historyV2 bool
+	historyV3 bool
 	agg       *state.Aggregator22
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV2 bool, agg *state.Aggregator22) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator22) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -49,7 +49,7 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 		blockReader:       blockReader,
 		hd:                hd,
 
-		historyV2: historyV2,
+		historyV3: historyV3,
 		agg:       agg,
 	}
 }
@@ -188,7 +188,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
@@ -334,7 +334,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
@@ -511,7 +511,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to uint64, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix)
 	rl := trie.NewRetainList(0)
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) error {
 			if len(k) == 32 {
@@ -539,10 +539,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			rl.AddKeyWithMarker(compositeKey, len(v) == 0)
 			return nil
 		}
-		if err := p.PromoteOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, to, false, collect); err != nil {
+		if err := p.PromoteOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
-		if err := p.PromoteOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, to, true, collect); err != nil {
+		if err := p.PromoteOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, to, true, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
@@ -625,15 +625,15 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix)
 	rl := trie.NewRetainList(0)
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) {
 			rl.AddKeyWithMarker(k, len(v) == 0)
 		}
-		if err := p.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
+		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
 			return err
 		}
-		if err := p.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
+		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
 			return err
 		}
 	} else {

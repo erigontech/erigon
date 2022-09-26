@@ -72,7 +72,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, ethconfig.HistoryV2AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -105,7 +105,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, ethconfig.HistoryV2AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
