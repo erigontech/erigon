@@ -1,4 +1,4 @@
-package main
+package verkletrie
 
 import (
 	"context"
@@ -11,19 +11,20 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *VerkleTreeWriter, from, to uint64) error {
+func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) (common.Hash, error) {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleStorage"
 
 	jobs := make(chan *regeneratePedersenStorageJob, batchSize)
 	out := make(chan *regeneratePedersenStorageJob, batchSize)
 	wg := new(sync.WaitGroup)
-	wg.Add(int(cfg.workersCount))
+	wg.Add(int(workers))
 	ctx, cancelWorkers := context.WithCancel(context.Background())
-	for i := 0; i < int(cfg.workersCount); i++ {
+	for i := 0; i < int(workers); i++ {
 		go func(threadNo int) {
 			defer debug.LogPanic()
 			defer wg.Done()
@@ -34,7 +35,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer storageCursor.Close()
 	// Start Goroutine for collection
@@ -52,11 +53,11 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		blockNumber, changesetKey, _, err := changeset.DecodeStorage(k, v)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		if blockNumber > to {
@@ -65,7 +66,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 		marked, err := marker.IsMarked(changesetKey)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 
 		if marked {
@@ -95,7 +96,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 
 		storageValue, err := tx.GetOne(kv.PlainState, changesetKey)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		storageKey := new(uint256.Int).SetBytes(changesetKey[28:])
 		var storageValueFormatted []byte
@@ -111,7 +112,7 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 			storageValue: storageValueFormatted,
 		}
 		if err := marker.MarkAsDone(changesetKey); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		select {
 		case <-logInterval.C:
@@ -123,15 +124,15 @@ func incrementStorage(vTx kv.RwTx, tx kv.Tx, cfg optionsCfg, verkleWriter *Verkl
 	wg.Wait()
 	close(out)
 	// Get root
-	root, err := ReadVerkleRoot(tx, from)
+	root, err := rawdb.ReadVerkleRoot(tx, from)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	newRoot, err := verkleWriter.CommitVerkleTree(root)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
 
-	return WriteVerkleRoot(vTx, to, newRoot)
+	return newRoot, rawdb.WriteVerkleRoot(vTx, to, newRoot)
 }

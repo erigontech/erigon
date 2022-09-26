@@ -157,8 +157,8 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if !m.HistoryV2 {
-		// HistoryV2 doesn't store Receipts in db by default. Please enable this test, after implementation of special flag which stores logs
+	if !m.HistoryV3 {
+		// HistoryV3 doesn't store Receipts in db by default. Please enable this test, after implementation of special flag which stores logs
 		it, err := revive.FilterDeployEvent(nil)
 		if err != nil {
 			t.Fatal(err)
@@ -205,7 +205,7 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	if !m.HistoryV2 {
+	if !m.HistoryV3 {
 		it, err := revive.FilterDeployEvent(nil)
 		if err != nil {
 			t.Fatal(err)
@@ -390,7 +390,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !m.HistoryV2 {
+	if !m.HistoryV3 {
 		var it *contracts.PolyDeployEventIterator
 		it, err = poly.FilterDeployEvent(nil)
 		if err != nil {
@@ -435,7 +435,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	if !m.HistoryV2 {
+	if !m.HistoryV3 {
 		it, err := poly.FilterDeployEvent(nil)
 		if err != nil {
 			t.Fatal(err)
@@ -467,7 +467,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
 		t.Fatal(err)
 	}
-	if !m.HistoryV2 {
+	if !m.HistoryV3 {
 		it, err := poly.FilterDeployEvent(nil)
 		if err != nil {
 			t.Fatal(err)

@@ -1077,6 +1077,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	if speed == 0 {
 		// Don't log "Wrote block ..." unless we're actually writing something
+		log.Info(fmt.Sprintf("[%s] No block headers to write in this log period", logPrefix), "block number", now, "blk/second", speed)
 		return now
 	}
 

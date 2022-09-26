@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -70,7 +70,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec22(ctx context.Context,
+func Exec3(ctx context.Context,
 	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
 	allSnapshots *snapshotsync.RoSnapshots,
@@ -101,7 +101,7 @@ func Exec22(ctx context.Context,
 	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec22.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
@@ -115,6 +115,7 @@ func Exec22(ctx context.Context,
 			if err != nil {
 				return err
 			}
+			outputTxNum++
 			inputTxNum = outputTxNum
 		}
 	} else {
@@ -128,6 +129,7 @@ func Exec22(ctx context.Context,
 				if err != nil {
 					return err
 				}
+				outputTxNum++
 				inputTxNum = outputTxNum
 			}
 			return nil
@@ -398,7 +400,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
 
 	var ok bool
-	var blockNum uint64
+	var blockNum uint64 // First block which is not covered by the history snapshot files
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
@@ -422,6 +424,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		if err != nil {
 			return err
 		}
+		txNum++
 		return nil
 	}); err != nil {
 		return err
@@ -436,7 +439,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	bigStep := big.NewInt(0x100000000)
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
-	fillWorkers := make([]*exec22.FillWorker, workerCount)
+	fillWorkers := make([]*exec3.FillWorker, workerCount)
 	var doneCount uint64
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
@@ -448,7 +451,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			bigCurrent.FillBytes(toKey)
 		}
 		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec22.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -459,6 +462,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
+	t := time.Now()
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
@@ -474,6 +478,8 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	log.Info("Scan accounts history", "took", time.Since(t))
+
 	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accountCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
@@ -501,6 +507,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
+	t = time.Now()
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
@@ -516,6 +523,8 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	log.Info("Scan storage history", "took", time.Since(t))
+
 	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
@@ -582,7 +591,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 	codeCollectorX = nil
 	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
-	reconWorkers := make([]*exec22.ReconWorker, workerCount)
+	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
@@ -604,7 +613,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec22.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)

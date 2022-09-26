@@ -53,7 +53,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	api := NewTraceAPI(
 		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
 		m.DB, &httpcfg.HttpCfg{})
@@ -101,7 +101,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
@@ -156,7 +156,7 @@ func TestCallTraceUnwind(t *testing.T) {
 
 func TestFilterNoAddresses(t *testing.T) {
 	m := stages.Mock(t)
-	if m.HistoryV2 {
+	if m.HistoryV3 {
 		t.Skip()
 	}
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
@@ -165,7 +165,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
@@ -190,7 +190,7 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}

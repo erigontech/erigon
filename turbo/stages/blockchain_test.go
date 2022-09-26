@@ -492,8 +492,8 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if m.HistoryV2 {
-			// m.HistoryV2 doesn't store
+		if m.HistoryV3 {
+			// m.HistoryV3 doesn't store
 		} else {
 			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
 				t.Errorf("add %d: expected receipt to be found", i)
@@ -506,8 +506,8 @@ func TestChainTxReorgs(t *testing.T) {
 		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if m.HistoryV2 {
-			// m.HistoryV2 doesn't store
+		if m.HistoryV3 {
+			// m.HistoryV3 doesn't store
 		} else {
 			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
 				t.Errorf("share %d: expected receipt to be found", i)
@@ -761,8 +761,8 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		})
 		require.NoError(err)
 		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
-		if m.HistoryV2 {
-			// receipts are not stored in erigon22
+		if m.HistoryV3 {
+			// receipts are not stored in erigon3
 		} else {
 			require.Greater(found, uint64(0))
 		}

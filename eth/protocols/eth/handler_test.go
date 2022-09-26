@@ -118,8 +118,8 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	if m.HistoryV2 {
-		// GetReceiptsMsg disabled for historyV2
+	if m.HistoryV3 {
+		// GetReceiptsMsg disabled for historyV3
 	} else {
 		m.ReceiveWg.Wait()
 		sent := m.SentMessage(0)
