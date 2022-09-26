@@ -71,12 +71,14 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	pruneTo := uint64(3)
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
-	db, bankAddress, contractAddress := chainWithDeployedContract(t)
+	m, bankAddress, contractAddress := chainWithDeployedContract(t)
 
-	prune(t, db, pruneTo)
+	prune(t, m.DB, pruneTo)
+
+	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -302,7 +304,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	}
 }
 
-func chainWithDeployedContract(t *testing.T) (kv.RwDB, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address, common.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -354,7 +356,7 @@ func chainWithDeployedContract(t *testing.T) (kv.RwDB, common.Address, common.Ad
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
 
-	return db, bankAddress, contractAddr
+	return m, bankAddress, contractAddr
 }
 
 func prune(t *testing.T, db kv.RwDB, pruneTo uint64) {
