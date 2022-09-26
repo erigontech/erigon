@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -213,13 +214,16 @@ func Exec3(ctx context.Context,
 								txTask := heap.Pop(&rws).(*state.TxTask)
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
+								syncMetrics[stages.Execution].Set(txTask.BlockNum)
 							}
 							if err := rs.Flush(tx); err != nil {
 								return err
 							}
+							tx.CollectMetrics()
 							if err = tx.Commit(); err != nil {
 								return err
 							}
+
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
@@ -323,6 +327,7 @@ loop:
 							if err = execStage.Update(applyTx, stageProgress); err != nil {
 								return err
 							}
+							applyTx.CollectMetrics()
 							if err := applyTx.Commit(); err != nil {
 								return err
 							}

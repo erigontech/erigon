@@ -78,7 +78,7 @@ type ExecuteBlockCfg struct {
 	hd            *headerdownload.HeaderDownload
 
 	dirs         datadir.Dirs
-	exec22       bool
+	historyV3    bool
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
@@ -96,7 +96,7 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 
-	exec22 bool,
+	historyV3 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
@@ -119,7 +119,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		exec22:        exec22,
+		historyV3:     historyV3,
 		workersCount:  workersCount,
 		agg:           agg,
 	}
@@ -250,7 +250,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
-	cfg.agg.SetCompressWorkers(runtime.NumCPU() - 1)
+	cfg.agg.SetWorkers(runtime.NumCPU() - 1)
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
@@ -379,7 +379,7 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	if cfg.exec22 {
+	if cfg.historyV3 {
 		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
 
@@ -633,7 +633,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	if cfg.exec22 {
+	if cfg.historyV3 {
 		return unwindExec3(u, s, tx, ctx, cfg)
 	}
 
