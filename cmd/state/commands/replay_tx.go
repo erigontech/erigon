@@ -104,7 +104,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	fmt.Printf("txNum = %d\n", txNum)
 	dirs := datadir2.New(datadir)
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV2AggregationStep)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}

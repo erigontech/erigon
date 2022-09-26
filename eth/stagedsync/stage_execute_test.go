@@ -156,7 +156,7 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 
 func newAgg(t *testing.T) *libstate.Aggregator22 {
 	t.Helper()
-	agg, err := libstate.NewAggregator22(t.TempDir(), ethconfig.HistoryV2AggregationStep)
+	agg, err := libstate.NewAggregator22(t.TempDir(), ethconfig.HistoryV3AggregationStep)
 	require.NoError(t, err)
 	err = agg.ReopenFiles()
 	require.NoError(t, err)

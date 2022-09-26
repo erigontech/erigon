@@ -102,7 +102,7 @@ func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts
 	return reader.ReadAccountData(address)
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters, stateCache kvcache.Cache, historyV2 bool, agg *state2.Aggregator22) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
 	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNum
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		if historyV2 {
+		if historyV3 {
 			aggCtx := agg.MakeContext()
 			aggCtx.SetTx(tx)
 			r := state.NewHistoryReader22(aggCtx)

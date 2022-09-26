@@ -412,7 +412,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
 		dir.MustExist(e22Dir)
-		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV2AggregationStep); err != nil {
+		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV3AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 		if err = agg.ReopenFiles(); err != nil {

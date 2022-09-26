@@ -34,7 +34,7 @@ import (
 
 func TestEstimateGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
@@ -52,7 +52,7 @@ func TestEstimateGas(t *testing.T) {
 
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -93,7 +93,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -130,7 +130,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -171,7 +171,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -209,7 +209,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -260,7 +260,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV2Components()
+	agg := m.HistoryV3Components()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")

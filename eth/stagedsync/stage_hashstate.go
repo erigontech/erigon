@@ -27,15 +27,15 @@ type HashStateCfg struct {
 	db   kv.RwDB
 	dirs datadir.Dirs
 
-	historyV2 bool
+	historyV3 bool
 	agg       *state.Aggregator22
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV2 bool, agg *state.Aggregator22) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state.Aggregator22) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
-		historyV2: historyV2,
+		historyV3: historyV3,
 		agg:       agg,
 	}
 }
@@ -120,15 +120,15 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, cfg.dirs, quit)
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, true); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, true); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, false); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV2(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, true, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, true, false); err != nil {
 			return err
 		}
 		return nil
@@ -494,7 +494,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV2(logPrefix string, agg *state.Aggregator22, from, to uint64, storage, codes bool) error {
+func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage, codes bool) error {
 	if to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
 	}
@@ -663,7 +663,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
-func (p *Promoter) UnwindOnHistoryV2(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage, codes bool) error {
+func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage, codes bool) error {
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
@@ -824,15 +824,15 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
 	prom := NewPromoter(tx, cfg.dirs, quit)
-	if cfg.historyV2 {
+	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, false, true); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, true); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, false, false); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, false); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV2(logPrefix, cfg.agg, from, to, true, false); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, true, false); err != nil {
 			return err
 		}
 		return nil
