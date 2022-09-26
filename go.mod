@@ -51,6 +51,7 @@ require (
 	github.com/libp2p/go-libp2p-core v0.20.1
 	github.com/multiformats/go-multiaddr v0.7.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
+	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pion/stun v0.3.5
@@ -139,7 +140,6 @@ require (
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
-	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect

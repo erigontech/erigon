@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pbnjay/memory"
 )
 
 type SnapshotsCfg struct {
@@ -118,7 +119,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				workers := cmp.InRange(1, runtime.NumCPU()-1, int(memory.FreeMemory()/4))
 				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
