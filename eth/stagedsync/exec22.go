@@ -462,6 +462,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
+	t := time.Now()
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
@@ -477,6 +478,8 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	log.Info("Scan accounts history", "took", time.Since(t))
+
 	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accountCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
@@ -504,6 +507,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
+	t = time.Now()
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
@@ -519,6 +523,8 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	log.Info("Scan storage history", "took", time.Since(t))
+
 	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollectorX.Close()
 	for i := 0; i < workerCount; i++ {
