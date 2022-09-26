@@ -282,7 +282,7 @@ func BodiesForward(
 					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 				}
 				if cfg.historyV2 && ok {
-					if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+					if err := rawdb.TxNums.Append(innerTx, blockHeight, lastTxnNum); err != nil {
 						return false, err
 					}
 				}
