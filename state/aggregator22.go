@@ -79,6 +79,16 @@ func (a *Aggregator22) Close() {
 	a.closeFiles()
 }
 
+func (a *Aggregator22) SetWorkers(i int) {
+	a.accounts.workers = i
+	a.storage.workers = i
+	a.code.workers = i
+	a.logAddrs.workers = i
+	a.logTopics.workers = i
+	a.tracesFrom.workers = i
+	a.tracesTo.workers = i
+}
+
 func (a *Aggregator22) Files() (res []string) {
 	res = append(res, a.accounts.Files()...)
 	res = append(res, a.storage.Files()...)
@@ -112,6 +122,45 @@ func (a *Aggregator22) closeFiles() {
 	if a.tracesTo != nil {
 		a.tracesTo.Close()
 	}
+}
+
+func (a *Aggregator22) BuildMissedIndices() error {
+	if a.accounts != nil {
+		if err := a.accounts.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.storage != nil {
+		if err := a.storage.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.code != nil {
+		if err := a.code.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.logAddrs != nil {
+		if err := a.logAddrs.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.logTopics != nil {
+		if err := a.logTopics.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.tracesFrom != nil {
+		if err := a.tracesFrom.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	if a.tracesTo != nil {
+		if err := a.tracesTo.BuildMissedIndices(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator22) SetLogPrefix(v string) { a.logPrefix = v }

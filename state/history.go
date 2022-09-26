@@ -45,6 +45,7 @@ type History struct {
 
 	files        *btree.BTreeG[*filesItem]
 	compressVals bool
+	workers      int
 }
 
 func NewHistory(
@@ -62,6 +63,7 @@ func NewHistory(
 		historyValsTable: historyValsTable,
 		settingsTable:    settingsTable,
 		compressVals:     compressVals,
+		workers:          1,
 	}
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
@@ -178,6 +180,14 @@ func (h *History) Files() (res []string) {
 	return res
 }
 
+func (h *History) BuildMissedIndices() (err error) {
+	if err := h.InvertedIndex.BuildMissedIndices(); err != nil {
+		return err
+	}
+	//TODO: build .vi
+	return nil
+}
+
 func (h *History) AddPrevValue(key1, key2, original []byte) error {
 	lk := len(key1) + len(key2)
 	historyKey := make([]byte, lk+8)
@@ -234,7 +244,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.dir, compress.MinPatternScore, h.workers, log.LvlDebug); err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
@@ -372,7 +382,7 @@ func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFi
 	}
 	// Build history ef
 	efHistoryPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.ef", h.filenameBase, step, step+1))
-	efHistoryComp, err = compress.NewCompressor(context.Background(), "ef history", efHistoryPath, h.dir, compress.MinPatternScore, 1, log.LvlDebug)
+	efHistoryComp, err = compress.NewCompressor(context.Background(), "ef history", efHistoryPath, h.dir, compress.MinPatternScore, h.workers, log.LvlDebug)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
