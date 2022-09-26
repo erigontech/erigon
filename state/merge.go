@@ -25,11 +25,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (d *Domain) endTxNumMinimax() uint64 {
@@ -245,19 +246,80 @@ func (h *History) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles 
 	return
 }
 
+func maxUint64(a, b uint64) uint64 {
+	if a < b {
+		return b
+	}
+	return a
+}
+
+type eliasFanoMinHeap []uint64
+
+func (h eliasFanoMinHeap) Len() int {
+	return len(h)
+}
+
+func (h eliasFanoMinHeap) Less(i, j int) bool {
+	return h[i] < h[j]
+}
+
+func (h eliasFanoMinHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *eliasFanoMinHeap) Push(a interface{}) {
+	ai := a.(uint64)
+	for i := 0; i < len(*h); i++ {
+		if (*h)[i] == ai {
+			return
+		}
+	}
+	*h = append(*h, a.(uint64))
+}
+
+func (h *eliasFanoMinHeap) Pop() interface{} {
+	c := *h
+	*h = c[:len(c)-1]
+	return c[len(c)-1]
+}
+
 func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	preef, _ := eliasfano32.ReadEliasFano(preval)
 	ef, _ := eliasfano32.ReadEliasFano(val)
 	preIt := preef.Iterator()
 	efIt := ef.Iterator()
-	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
+	//fmt.Printf("merge ef Pre [%x] || Val [%x]\n", preval, val)
+
+	minHeap := make(eliasFanoMinHeap, 0)
+
+	//prelist := make([]uint64, 0)
 	for preIt.HasNext() {
-		newEf.AddOffset(preIt.Next())
+		v := preIt.Next()
+		heap.Push(&minHeap, v)
+		//prelist = append(prelist, v)
 	}
+	//fmt.Printf("prelist (%d) [%v]\n", len(prelist), prelist)
+	//newList := make([]uint64, 0)
 	for efIt.HasNext() {
-		newEf.AddOffset(efIt.Next())
+		v := efIt.Next()
+		heap.Push(&minHeap, v)
+		//newList = append(newList, v)
 	}
+	//fmt.Printf("newlist (%d) [%v]\n", len(newList), newList)
+
+	newEf := eliasfano32.NewEliasFano(uint64(minHeap.Len()), maxUint64(ef.Max(), preef.Max()))
+	for minHeap.Len() > 0 {
+		v := heap.Pop(&minHeap).(uint64)
+		newEf.AddOffset(v)
+	}
+
 	newEf.Build()
+	//nit := newEf.Iterator()
+	//res := make([]uint64, 0)
+	//for nit.HasNext() {
+	//	res = append(res, nit.Next())
+	//}
+	//fmt.Printf("merged ef [%v]\n", res)
 	return newEf.AppendBytes(buf), nil
 }
 
@@ -378,6 +440,13 @@ func (d *Domain) mergeFiles(valuesFiles, indexFiles, historyFiles []*filesItem, 
 						return nil, nil, nil, err
 					}
 					count++ // Only counting keys, not values
+
+					//if d.valueMergeFn != nil {
+					//	valBuf, err = d.valueMergeFn(valBuf, nil)
+					//	if err != nil {
+					//		return nil, nil, nil, err
+					//	}
+					//}
 					if d.compressVals {
 						if err = comp.AddWord(valBuf); err != nil {
 							return nil, nil, nil, err
@@ -422,8 +491,14 @@ func (d *Domain) mergeFiles(valuesFiles, indexFiles, historyFiles []*filesItem, 
 		}
 	}
 	closeItem = false
+	d.stats.MergesCount++
+	d.mergesCount++
 	return
 }
+
+//func (d *Domain) SetValueMergeStrategy(merge func([]byte, []byte) ([]byte, error)) {
+//	d.valueMergeFn = merge
+//}
 
 func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uint64, maxSpan uint64) (*filesItem, error) {
 	var outItem *filesItem
@@ -483,6 +558,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
 		var mergedOnce bool
+
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := cp[0]
@@ -620,8 +696,20 @@ func (h *History) mergeFiles(indexFiles, historyFiles []*filesItem, r HistoryRan
 		for cp.Len() > 0 {
 			lastKey := common.Copy(cp[0].key)
 			// Advance all the items that have this key (including the top)
+			//var mergeOnce bool
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := cp[0]
+
+				//if h.valueMergeFn != nil && mergeOnce {
+				//	valBuf, err = h.valueMergeFn(ci1.val, valBuf)
+				//	if err != nil {
+				//		return nil, nil, err
+				//	}
+				//	ci1.val = valBuf
+				//}
+				//if !mergeOnce {
+				//	mergeOnce = true
+				//}
 				ef, _ := eliasfano32.ReadEliasFano(ci1.val)
 				for i := uint64(0); i < ef.Count(); i++ {
 					if h.compressVals {

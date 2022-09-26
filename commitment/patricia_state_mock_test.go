@@ -4,175 +4,15 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
-
-type UpdateFlags uint8
-
-const (
-	CODE_UPDATE    UpdateFlags = 1
-	DELETE_UPDATE  UpdateFlags = 2
-	BALANCE_UPDATE UpdateFlags = 4
-	NONCE_UPDATE   UpdateFlags = 8
-	STORAGE_UPDATE UpdateFlags = 16
-)
-
-func (uf UpdateFlags) String() string {
-	var sb strings.Builder
-	if uf == DELETE_UPDATE {
-		sb.WriteString("Delete")
-	} else {
-		if uf&BALANCE_UPDATE != 0 {
-			sb.WriteString("+Balance")
-		}
-		if uf&NONCE_UPDATE != 0 {
-			sb.WriteString("+Nonce")
-		}
-		if uf&CODE_UPDATE != 0 {
-			sb.WriteString("+Code")
-		}
-		if uf&STORAGE_UPDATE != 0 {
-			sb.WriteString("+Storage")
-		}
-	}
-	return sb.String()
-}
-
-type Update struct {
-	Flags             UpdateFlags
-	Balance           uint256.Int
-	Nonce             uint64
-	CodeHashOrStorage [length.Hash]byte
-	ValLength         int
-}
-
-func (u *Update) DecodeForStorage(enc []byte) {
-	u.Nonce = 0
-	u.Balance.Clear()
-	copy(u.CodeHashOrStorage[:], EmptyCodeHash)
-
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		u.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		u.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(u.CodeHashOrStorage[:], enc[pos:pos+codeHashBytes])
-	}
-}
-
-func (u Update) encode(buf []byte, numBuf []byte) []byte {
-	buf = append(buf, byte(u.Flags))
-	if u.Flags&BALANCE_UPDATE != 0 {
-		buf = append(buf, byte(u.Balance.ByteLen()))
-		buf = append(buf, u.Balance.Bytes()...)
-	}
-	if u.Flags&NONCE_UPDATE != 0 {
-		n := binary.PutUvarint(numBuf, u.Nonce)
-		buf = append(buf, numBuf[:n]...)
-	}
-	if u.Flags&CODE_UPDATE != 0 {
-		buf = append(buf, u.CodeHashOrStorage[:]...)
-	}
-	if u.Flags&STORAGE_UPDATE != 0 {
-		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
-		buf = append(buf, numBuf[:n]...)
-		if u.ValLength > 0 {
-			buf = append(buf, u.CodeHashOrStorage[:u.ValLength]...)
-		}
-	}
-	return buf
-}
-
-func (u *Update) decode(buf []byte, pos int) (int, error) {
-	if len(buf) < pos+1 {
-		return 0, fmt.Errorf("decode Update: buffer too small for flags")
-	}
-	u.Flags = UpdateFlags(buf[pos])
-	pos++
-	if u.Flags&BALANCE_UPDATE != 0 {
-		if len(buf) < pos+1 {
-			return 0, fmt.Errorf("decode Update: buffer too small for balance len")
-		}
-		balanceLen := int(buf[pos])
-		pos++
-		if len(buf) < pos+balanceLen {
-			return 0, fmt.Errorf("decode Update: buffer too small for balance")
-		}
-		u.Balance.SetBytes(buf[pos : pos+balanceLen])
-		pos += balanceLen
-	}
-	if u.Flags&NONCE_UPDATE != 0 {
-		var n int
-		u.Nonce, n = binary.Uvarint(buf[pos:])
-		if n == 0 {
-			return 0, fmt.Errorf("decode Update: buffer too small for nonce")
-		}
-		if n < 0 {
-			return 0, fmt.Errorf("decode Update: nonce overflow")
-		}
-		pos += n
-	}
-	if u.Flags&CODE_UPDATE != 0 {
-		if len(buf) < pos+32 {
-			return 0, fmt.Errorf("decode Update: buffer too small for codeHash")
-		}
-		copy(u.CodeHashOrStorage[:], buf[pos:pos+32])
-		pos += 32
-	}
-	if u.Flags&STORAGE_UPDATE != 0 {
-		l, n := binary.Uvarint(buf[pos:])
-		if n == 0 {
-			return 0, fmt.Errorf("decode Update: buffer too small for storage len")
-		}
-		if n < 0 {
-			return 0, fmt.Errorf("decode Update: storage lee overflow")
-		}
-		pos += n
-		if len(buf) < pos+int(l) {
-			return 0, fmt.Errorf("decode Update: buffer too small for storage")
-		}
-		u.ValLength = int(l)
-		copy(u.CodeHashOrStorage[:], buf[pos:pos+int(l)])
-		pos += int(l)
-	}
-	return pos, nil
-}
-
-func (u Update) String() string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Flags: [%s]", u.Flags))
-	if u.Flags&BALANCE_UPDATE != 0 {
-		sb.WriteString(fmt.Sprintf(", Balance: [%d]", &u.Balance))
-	}
-	if u.Flags&NONCE_UPDATE != 0 {
-		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
-	}
-	if u.Flags&CODE_UPDATE != 0 {
-		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHashOrStorage))
-	}
-	if u.Flags&STORAGE_UPDATE != 0 {
-		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.CodeHashOrStorage[:u.ValLength]))
-	}
-	return sb.String()
-}
 
 // In memory commitment and state to use with the tests
 type MockState struct {
@@ -199,13 +39,14 @@ func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
 }
 
 func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
-	exBytes, ok := ms.sm[string(plainKey)]
+	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("accountFn not found key [%x]", plainKey)
+		cell.Delete = true
 		return nil
 	}
 	var ex Update
-	pos, err := ex.decode(exBytes, 0)
+	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
 		ms.t.Fatalf("accountFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
 		return nil
@@ -241,13 +82,14 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 }
 
 func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
-	exBytes, ok := ms.sm[string(plainKey)]
+	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("storageFn not found key [%x]", plainKey)
+		cell.Delete = true
 		return nil
 	}
 	var ex Update
-	pos, err := ex.decode(exBytes, 0)
+	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
 		ms.t.Fatalf("storageFn decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
 		return nil
@@ -290,7 +132,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 		} else {
 			if exBytes, ok := ms.sm[string(key)]; ok {
 				var ex Update
-				pos, err := ex.decode(exBytes, 0)
+				pos, err := ex.Decode(exBytes, 0)
 				if err != nil {
 					return fmt.Errorf("applyPlainUpdates decode existing [%x], bytes: [%x]: %w", key, exBytes, err)
 				}
@@ -313,9 +155,9 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 					ex.Flags |= STORAGE_UPDATE
 					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
 				}
-				ms.sm[string(key)] = ex.encode(nil, ms.numBuf[:])
+				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {
-				ms.sm[string(key)] = update.encode(nil, ms.numBuf[:])
+				ms.sm[string(key)] = update.Encode(nil, ms.numBuf[:])
 			}
 		}
 	}

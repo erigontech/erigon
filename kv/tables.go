@@ -385,6 +385,13 @@ const (
 	CodeSettings    = "CodeSettings"
 	CodeIdx         = "CodeIdx"
 
+	CommitmentKeys        = "CommitmentKeys"
+	CommitmentVals        = "CommitmentVals"
+	CommitmentHistoryKeys = "CommitmentHistoryKeys"
+	CommitmentHistoryVals = "CommitmentHistoryVals"
+	CommitmentSettings    = "CommitmentSettings"
+	CommitmentIdx         = "CommitmentIdx"
+
 	LogAddressKeys = "LogAddressKeys"
 	LogAddressIdx  = "LogAddressIdx"
 	LogTopicsKeys  = "LogTopicsKeys"
@@ -519,6 +526,13 @@ var ChaindataTables = []string{
 	CodeSettings,
 	CodeIdx,
 
+	CommitmentKeys,
+	CommitmentVals,
+	CommitmentHistoryKeys,
+	CommitmentHistoryVals,
+	CommitmentSettings,
+	CommitmentIdx,
+
 	LogAddressKeys,
 	LogAddressIdx,
 	LogTopicsKeys,
@@ -625,29 +639,32 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	AccountKeys:        {Flags: DupSort},
-	AccountHistoryKeys: {Flags: DupSort},
-	AccountIdx:         {Flags: DupSort},
-	StorageKeys:        {Flags: DupSort},
-	StorageHistoryKeys: {Flags: DupSort},
-	StorageIdx:         {Flags: DupSort},
-	CodeKeys:           {Flags: DupSort},
-	CodeHistoryKeys:    {Flags: DupSort},
-	CodeIdx:            {Flags: DupSort},
-	LogAddressKeys:     {Flags: DupSort},
-	LogAddressIdx:      {Flags: DupSort},
-	LogTopicsKeys:      {Flags: DupSort},
-	LogTopicsIdx:       {Flags: DupSort},
-	TracesFromKeys:     {Flags: DupSort},
-	TracesFromIdx:      {Flags: DupSort},
-	TracesToKeys:       {Flags: DupSort},
-	TracesToIdx:        {Flags: DupSort},
-	RAccountKeys:       {Flags: DupSort},
-	RAccountIdx:        {Flags: DupSort},
-	RStorageKeys:       {Flags: DupSort},
-	RStorageIdx:        {Flags: DupSort},
-	RCodeKeys:          {Flags: DupSort},
-	RCodeIdx:           {Flags: DupSort},
+	AccountKeys:           {Flags: DupSort},
+	AccountHistoryKeys:    {Flags: DupSort},
+	AccountIdx:            {Flags: DupSort},
+	StorageKeys:           {Flags: DupSort},
+	StorageHistoryKeys:    {Flags: DupSort},
+	StorageIdx:            {Flags: DupSort},
+	CodeKeys:              {Flags: DupSort},
+	CodeHistoryKeys:       {Flags: DupSort},
+	CodeIdx:               {Flags: DupSort},
+	CommitmentKeys:        {Flags: DupSort},
+	CommitmentHistoryKeys: {Flags: DupSort},
+	CommitmentIdx:         {Flags: DupSort},
+	LogAddressKeys:        {Flags: DupSort},
+	LogAddressIdx:         {Flags: DupSort},
+	LogTopicsKeys:         {Flags: DupSort},
+	LogTopicsIdx:          {Flags: DupSort},
+	TracesFromKeys:        {Flags: DupSort},
+	TracesFromIdx:         {Flags: DupSort},
+	TracesToKeys:          {Flags: DupSort},
+	TracesToIdx:           {Flags: DupSort},
+	RAccountKeys:          {Flags: DupSort},
+	RAccountIdx:           {Flags: DupSort},
+	RStorageKeys:          {Flags: DupSort},
+	RStorageIdx:           {Flags: DupSort},
+	RCodeKeys:             {Flags: DupSort},
+	RCodeIdx:              {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

@@ -30,22 +30,22 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 type History struct {
 	*InvertedIndex
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	settingsTable    string
-
-	files        *btree.BTreeG[*filesItem]
-	compressVals bool
-	workers      int
+	files            *btree.BTreeG[*filesItem]
+	compressVals     bool
+	workers          int
 }
 
 func NewHistory(
@@ -128,17 +128,30 @@ func (h *History) scanStateFiles(files []fs.DirEntry) {
 func (h *History) openFiles() error {
 	var totalKeys uint64
 	var err error
+
+	invalidFileItems := make([]*filesItem, 0)
 	h.files.Ascend(func(item *filesItem) bool {
 		datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep))
+		if fi, err := os.Stat(datPath); err != nil || fi.IsDir() {
+			invalidFileItems = append(invalidFileItems, item)
+			return true
+		}
 		if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 			return false
 		}
 		idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep))
+
+		if fi, err := os.Stat(idxPath); err != nil || fi.IsDir() {
+			invalidFileItems = append(invalidFileItems, item)
+			return true
+		}
+
 		//if !dir.Exist(idxPath) {
 		//	if _, err = buildIndex(item.decompressor, idxPath, h.dir, item.decompressor.Count()/2, false /* values */); err != nil {
 		//		return false
 		//	}
 		//}
+
 		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return false
 		}
@@ -147,6 +160,9 @@ func (h *History) openFiles() error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, item := range invalidFileItems {
+		h.files.Delete(item)
 	}
 	return nil
 }

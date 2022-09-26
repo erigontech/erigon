@@ -351,6 +351,13 @@ func (branchData BranchData) IsComplete() bool {
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []byte) (BranchData, error) {
+	if branchData2 == nil {
+		return branchData, nil
+	}
+	if branchData == nil {
+		return branchData2, nil
+	}
+
 	touchMap1 := binary.BigEndian.Uint16(branchData[0:])
 	afterMap1 := binary.BigEndian.Uint16(branchData[2:])
 	bitmap1 := touchMap1 & afterMap1

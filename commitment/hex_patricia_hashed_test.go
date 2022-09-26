@@ -19,10 +19,12 @@ package commitment
 import (
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
 func TestEmptyState(t *testing.T) {
@@ -138,7 +140,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
 	ms2 := NewMockState(t)
 
 	plainKeys, hashedKeys, updates := NewUpdateBuilder().
-		Balance("f4", 4).
+		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
@@ -264,4 +266,53 @@ func Test_Sepolia(t *testing.T) {
 
 		require.EqualValues(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
 	}
+}
+
+func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
+	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
+	var s state
+	rnd := rand.New(rand.NewSource(42))
+	n, err := rnd.Read(s.CurrentKey[:])
+	require.NoError(t, err)
+	require.EqualValues(t, 128, n)
+	n, err = rnd.Read(s.RootHash[:])
+	require.NoError(t, err)
+	require.EqualValues(t, 32, n)
+	s.RootPresent = true
+	s.RootTouched = true
+	s.RootChecked = true
+
+	s.CurrentKeyLen = int8(rnd.Intn(129))
+	for i := 0; i < len(s.Depths); i++ {
+		s.Depths[i] = rnd.Int()
+	}
+	for i := 0; i < len(s.TouchMap); i++ {
+		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
+	}
+	for i := 0; i < len(s.AfterMap); i++ {
+		s.AfterMap[i] = uint16(rnd.Intn(1<<16 - 1))
+	}
+	for i := 0; i < len(s.BranchBefore); i++ {
+		if rnd.Intn(100) > 49 {
+			s.BranchBefore[i] = true
+		}
+	}
+
+	enc, err := s.Encode(nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, enc)
+
+	var s1 state
+	err = s1.Decode(enc)
+	require.NoError(t, err)
+
+	require.EqualValues(t, s.RootHash[:], s1.RootHash[:])
+	require.EqualValues(t, s.CurrentKey[:], s1.CurrentKey[:])
+	require.EqualValues(t, s.AfterMap[:], s1.AfterMap[:])
+	require.EqualValues(t, s.TouchMap[:], s1.TouchMap[:])
+	require.EqualValues(t, s.BranchBefore[:], s1.BranchBefore[:])
+	require.EqualValues(t, s.RootTouched, s1.RootTouched)
+	require.EqualValues(t, s.RootPresent, s1.RootPresent)
+	require.EqualValues(t, s.RootChecked, s1.RootChecked)
+	require.EqualValues(t, s.CurrentKeyLen, s1.CurrentKeyLen)
 }
