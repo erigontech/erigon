@@ -267,7 +267,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 		}
 
-		if found && reconstituteToBlock > s.BlockNumber+1 {
+		if s.BlockNumber == 0 && found && reconstituteToBlock > s.BlockNumber+1 {
 			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
 			dir.Recreate(reconDbPath)
 			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
