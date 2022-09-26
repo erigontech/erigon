@@ -98,6 +98,8 @@ var Defaults = Config{
 	},
 }
 
+const RamToIndexSnapshot = 4 * datasize.GB
+
 func init() {
 	home := os.Getenv("HOME")
 	if home == "" {

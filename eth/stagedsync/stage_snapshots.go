@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -18,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -119,7 +121,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := cmp.InRange(1, runtime.NumCPU()-1, int(memory.FreeMemory()/4)) //assume 1 idx build eating 4Gb
+				workers := cmp.InRange(1, runtime.NumCPU()-1, int(datasize.ByteSize(memory.FreeMemory())/ethconfig.RamToIndexSnapshot))
 				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
