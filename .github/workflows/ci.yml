@@ -110,7 +110,6 @@ jobs:
 
   docker:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    runs-on: self-hosted
     steps:
       - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
