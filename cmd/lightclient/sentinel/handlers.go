@@ -22,15 +22,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/snappy_ssz"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
-)
-
-var (
-	ProtocolPrefix = "/eth2/beacon_chain/req"
-	reservedBytes  = 128
 )
 
 var (
@@ -42,9 +36,9 @@ var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.Str
 	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
 	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
 	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(goodbyeHandler),
+	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
 	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
 	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
-	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
 }
 
 func setDeadLines(stream network.Stream) {
