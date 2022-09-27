@@ -14,6 +14,7 @@
 package sentinel
 
 import (
+	"encoding/hex"
 	"reflect"
 	"time"
 
@@ -34,7 +35,7 @@ var (
 
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
 	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
-	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
+	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryHandler(statusHandler),
 	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(goodbyeHandler),
 	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
 	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
@@ -78,17 +79,26 @@ func pingHandler(ctx *proto.Context, dat *p2p.Ping) error {
 }
 
 func metadataHandler(ctx *proto.Context, dat *proto.EmptyPacket) error {
-	log.Info("Got metadata call", "metadata", dat)
+	log.Info("Got metadata call")
 	return nil
 }
 
-func statusHandler(stream network.Stream) {
-	setDeadLines(stream)
-	log.Info("Got status request")
+func statusHandler(ctx *proto.Context, dat *p2p.Status) error {
+	log.Info("Got status call",
+		"epoch", dat.FinalizedEpoch,
+		"final root", hexb(dat.FinalizedRoot),
+		"head root", hexb(dat.HeadRoot),
+		"head slot", dat.HeadSlot,
+		"fork digest", hexb(dat.ForkDigest),
+	)
+	return nil
+}
+
+func hexb(b []byte) string {
+	return hex.EncodeToString(b)
 }
 
 func goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
-	setDeadLines(ctx.Stream)
 	log.Info("[Lightclient] Received", "goodbye", dat.Reason)
 	_, err := ctx.Stream.Write(ctx.Raw)
 	if err != nil {
