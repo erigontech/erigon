@@ -420,6 +420,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer func() {
 		fmt.Printf("remove: %s\n", reconDbPath)
 	}()
+	db.View(ctx, func(tx kv.Tx) error {
+		c, _ := tx.Cursor(kv.XAccount)
+		cnt, _ := c.Count()
+		fmt.Printf("xacc: %d\n", cnt)
+		return nil
+	})
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
