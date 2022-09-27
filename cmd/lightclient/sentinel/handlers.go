@@ -14,8 +14,9 @@
 package sentinel
 
 import (
-	"fmt"
+	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -36,8 +37,18 @@ var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.Str
 	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
 }
 
+func setDeadLines(stream network.Stream) {
+	if err := stream.SetReadDeadline(time.Now().Add(clparams.TtfbTimeout)); err != nil {
+		log.Error("failed to set stream read dead line", "err", err)
+	}
+	if err := stream.SetWriteDeadline(time.Now().Add(clparams.RespTimeout)); err != nil {
+		log.Error("failed to set stream write dead line", "err", err)
+	}
+}
+
 func pingHandler(stream network.Stream) {
 	pingBytes := make([]byte, 8)
+	setDeadLines(stream)
 	n, err := stream.Read(pingBytes)
 	if err != nil {
 		log.Warn("handler crashed", "err", err)
@@ -60,17 +71,20 @@ func pingHandler(stream network.Stream) {
 }
 
 func statusHandler(stream network.Stream) {
+	setDeadLines(stream)
+
 	log.Info("Got status request")
 }
 
 func goodbyeHandler(stream network.Stream) {
 	goodByeBytes := make([]byte, 8)
+	setDeadLines(stream)
 	n, err := stream.Read(goodByeBytes)
 	if err != nil {
 		log.Warn("Goodbye handler crashed", "err", err)
 		return
 	}
-	fmt.Println("good bye bytes", goodByeBytes)
+
 	if n != 8 {
 		log.Warn("Invalid goodbye message received")
 		return
@@ -92,14 +106,17 @@ func goodbyeHandler(stream network.Stream) {
 }
 
 func blocksByRangeHandler(stream network.Stream) {
+	setDeadLines(stream)
 	log.Info("Got block by range handler call")
 }
 
 func beaconBlocksByRootHandler(stream network.Stream) {
+	setDeadLines(stream)
 	log.Info("Got beacon block by root handler call")
 }
 
 func metadataHandler(stream network.Stream) {
+	setDeadLines(stream)
 	log.Info("Got metadata handler call")
 }
 
