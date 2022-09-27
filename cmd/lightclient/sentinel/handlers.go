@@ -14,6 +14,8 @@
 package sentinel
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -22,6 +24,7 @@ import (
 
 var (
 	ProtocolPrefix = "/eth2/beacon_chain/req"
+	reservedBytes  = 128
 )
 
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
@@ -61,7 +64,31 @@ func statusHandler(stream network.Stream) {
 }
 
 func goodbyeHandler(stream network.Stream) {
-	log.Info("Got goodbye handler")
+	goodByeBytes := make([]byte, 8)
+	n, err := stream.Read(goodByeBytes)
+	if err != nil {
+		log.Warn("Goodbye handler crashed", "err", err)
+		return
+	}
+	fmt.Println("good bye bytes", goodByeBytes)
+	if n != 8 {
+		log.Warn("Invalid goodbye message received")
+		return
+	}
+
+	log.Info("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
+	n, err = stream.Write(goodByeBytes)
+	if err != nil {
+		log.Warn("Goodbye handler crashed", "err", err)
+		return
+	}
+
+	if n != 8 {
+		log.Warn("Could not send Goodbye")
+	}
+
+	peerId := stream.Conn().RemotePeer()
+	disconnectPeerCh <- peerId
 }
 
 func blocksByRangeHandler(stream network.Stream) {
