@@ -211,7 +211,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	dir.MustExist(dirs.SnapHistory)
 
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
+	workers := ethconfig.RamToIndexSnapshot.Workers()
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
 		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
@@ -411,7 +411,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 		return err
 	}
 
-	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
@@ -37,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/pbnjay/memory"
 )
 
 // AggregationStep number of transactions in smallest static file
@@ -98,7 +100,19 @@ var Defaults = Config{
 	},
 }
 
-const RamToIndexSnapshot = 4 * datasize.GB
+type estimatedRamPerWorker datasize.ByteSize
+
+// Workers - return max workers amount based on available Memory/CPU's and estimated RAM per worker
+func (r estimatedRamPerWorker) Workers() int {
+	maxWorkersForGivenMemory := memory.FreeMemory() / uint64(r)
+	maxWorkersForGivenCPU := runtime.NumCPU() - 1 // leave 1 core free for "work-producer thread", also IO software on machine in cloud-providers using 1 CPU
+	return cmp.InRange(1, maxWorkersForGivenCPU, int(maxWorkersForGivenMemory))
+}
+
+const (
+	RamToIndexSnapshot     = estimatedRamPerWorker(4 * datasize.GB)
+	RamToReconstituteState = estimatedRamPerWorker(2 * datasize.GB)
+)
 
 func init() {
 	home := os.Getenv("HOME")

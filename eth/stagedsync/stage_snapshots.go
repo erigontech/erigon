@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -21,19 +20,18 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pbnjay/memory"
 )
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
 	chainConfig params.ChainConfig
-
-	tmpdir string
+	dirs        datadir.Dirs
 
 	snapshots          *snapshotsync.RoSnapshots
 	blockRetire        *snapshotsync.BlockRetire
@@ -47,7 +45,7 @@ type SnapshotsCfg struct {
 func StageSnapshotsCfg(
 	db kv.RwDB,
 	chainConfig params.ChainConfig,
-	tmpdir string,
+	dirs datadir.Dirs,
 	snapshots *snapshotsync.RoSnapshots,
 	blockRetire *snapshotsync.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -59,7 +57,7 @@ func StageSnapshotsCfg(
 	return SnapshotsCfg{
 		db:                 db,
 		chainConfig:        chainConfig,
-		tmpdir:             tmpdir,
+		dirs:               dirs,
 		snapshots:          snapshots,
 		blockRetire:        blockRetire,
 		snapshotDownloader: snapshotDownloader,
@@ -121,8 +119,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := cmp.InRange(1, runtime.NumCPU()-1, int(datasize.ByteSize(memory.FreeMemory())/ethconfig.RamToIndexSnapshot))
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, ethconfig.RamToIndexSnapshot.Workers(), log.LvlInfo); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -149,7 +146,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = blocksAvailable
 	}
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.tmpdir, cfg.snapshots, cfg.blockReader); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs.Tmp, cfg.snapshots, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil
