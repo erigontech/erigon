@@ -246,80 +246,19 @@ func (h *History) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles 
 	return
 }
 
-func maxUint64(a, b uint64) uint64 {
-	if a < b {
-		return b
-	}
-	return a
-}
-
-type eliasFanoMinHeap []uint64
-
-func (h eliasFanoMinHeap) Len() int {
-	return len(h)
-}
-
-func (h eliasFanoMinHeap) Less(i, j int) bool {
-	return h[i] < h[j]
-}
-
-func (h eliasFanoMinHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *eliasFanoMinHeap) Push(a interface{}) {
-	ai := a.(uint64)
-	for i := 0; i < len(*h); i++ {
-		if (*h)[i] == ai {
-			return
-		}
-	}
-	*h = append(*h, a.(uint64))
-}
-
-func (h *eliasFanoMinHeap) Pop() interface{} {
-	c := *h
-	*h = c[:len(c)-1]
-	return c[len(c)-1]
-}
-
 func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	preef, _ := eliasfano32.ReadEliasFano(preval)
 	ef, _ := eliasfano32.ReadEliasFano(val)
 	preIt := preef.Iterator()
 	efIt := ef.Iterator()
-	//fmt.Printf("merge ef Pre [%x] || Val [%x]\n", preval, val)
-
-	minHeap := make(eliasFanoMinHeap, 0)
-
-	//prelist := make([]uint64, 0)
+	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
 	for preIt.HasNext() {
-		v := preIt.Next()
-		heap.Push(&minHeap, v)
-		//prelist = append(prelist, v)
+		newEf.AddOffset(preIt.Next())
 	}
-	//fmt.Printf("prelist (%d) [%v]\n", len(prelist), prelist)
-	//newList := make([]uint64, 0)
 	for efIt.HasNext() {
-		v := efIt.Next()
-		heap.Push(&minHeap, v)
-		//newList = append(newList, v)
+		newEf.AddOffset(efIt.Next())
 	}
-	//fmt.Printf("newlist (%d) [%v]\n", len(newList), newList)
-
-	newEf := eliasfano32.NewEliasFano(uint64(minHeap.Len()), maxUint64(ef.Max(), preef.Max()))
-	for minHeap.Len() > 0 {
-		v := heap.Pop(&minHeap).(uint64)
-		newEf.AddOffset(v)
-	}
-
 	newEf.Build()
-	//nit := newEf.Iterator()
-	//res := make([]uint64, 0)
-	//for nit.HasNext() {
-	//	res = append(res, nit.Next())
-	//}
-	//fmt.Printf("merged ef [%v]\n", res)
 	return newEf.AppendBytes(buf), nil
 }
 

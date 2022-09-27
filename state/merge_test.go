@@ -10,6 +10,8 @@ import (
 )
 
 func Test_mergeEliasFano(t *testing.T) {
+	t.Skip()
+
 	firstList := []int{1, 298164, 298163, 13, 298160, 298159}
 	sort.Ints(firstList)
 	uniq := make(map[int]struct{})
