@@ -270,7 +270,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		if s.BlockNumber == 0 && found && reconstituteToBlock > s.BlockNumber+1 {
 			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
 			dir.Recreate(reconDbPath)
-			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU() + 1))
+			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
 			reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 			if err != nil {
 				return err
