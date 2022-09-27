@@ -263,7 +263,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 		}
