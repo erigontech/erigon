@@ -158,6 +158,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 	if number == nil {
 		return nil, nil
 	}
+
 	return api.blockWithSenders(tx, hash, *number)
 }
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
