@@ -32,6 +32,8 @@ func NewCodec(
 	}
 }
 
+// write packet to stream. will add correct header + compression
+// will error if packet does not implement ssz.Marshaler interface
 func (d *Codec) WritePacket(p proto.Packet) (n int, err error) {
 	if val, ok := p.(ssz.Marshaler); ok {
 		sz := val.SizeSSZ()
@@ -56,10 +58,12 @@ func (d *Codec) WritePacket(p proto.Packet) (n int, err error) {
 	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(p))
 }
 
+// write raw bytes to stream
 func (d *Codec) Write(payload []byte) (n int, err error) {
 	return d.s.Write(payload)
 }
 
+// decode into packet p, then return the packet context
 func (d *Codec) Decode(p proto.Packet) (ctx *proto.Context, err error) {
 	ctx, err = d.readPacket(p)
 	return
