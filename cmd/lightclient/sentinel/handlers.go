@@ -21,9 +21,16 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/snappy_ssz"
+
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
+)
+
+var (
+	ProtocolPrefix = "/eth2/beacon_chain/req"
+	reservedBytes  = 128
 )
 
 var (
