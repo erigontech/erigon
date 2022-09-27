@@ -10,7 +10,7 @@ import (
 
 type estimatedRamPerWorker datasize.ByteSize
 
-// Workers - return max workers amount based on available Memory/CPU's and estimated RAM per worker
+// Workers - return max workers amount based on total Memory/CPU's and estimated RAM per worker
 func (r estimatedRamPerWorker) Workers() int {
 	maxWorkersForGivenMemory := memory.TotalMemory() / uint64(r)
 	maxWorkersForGivenCPU := runtime.NumCPU() - 1 // leave 1 core free for "work-producer thread", also IO software on machine in cloud-providers using 1 CPU
