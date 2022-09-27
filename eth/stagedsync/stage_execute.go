@@ -249,7 +249,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	cfg.agg.SetWorkers(runtime.NumCPU() - 1)
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	if initialCycle {
+	if initialCycle && s.BlockNumber == 0 {
 		var found bool
 		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
 		if tx == nil {
