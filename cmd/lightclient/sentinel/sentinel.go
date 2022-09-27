@@ -32,7 +32,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var disconnectPeerCh = make(chan peer.ID, 0)
+var disconnectPeerCh = make(chan peer.ID)
 
 type Sentinel struct {
 	started  bool
@@ -127,7 +127,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 				break
 			case pid := <-disconnectPeerCh:
 				s.peers.DisconnectPeer(pid)
-			default:
 			}
 		}
 	}()
