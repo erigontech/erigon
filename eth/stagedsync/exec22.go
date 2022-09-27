@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -13,8 +15,10 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -28,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 func NewProgress(prevOutputBlockNum uint64) *Progress {
@@ -399,10 +404,18 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 	}
 }
 
-func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB, db kv.RwDB,
-	blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
+func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB,
+	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	reconDbPath := path.Join(dirs.DataDir, "recondb")
+	dir.Recreate(reconDbPath)
+	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
+	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(reconDbPath)
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
@@ -618,7 +631,7 @@ func Recon22(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount 
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, allSnapshots, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
