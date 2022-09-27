@@ -415,6 +415,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
 	var ok bool
