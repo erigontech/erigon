@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -408,7 +408,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
-	reconDbPath := path.Join(dirs.DataDir, "recondb")
+	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
 	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
