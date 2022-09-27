@@ -4,8 +4,6 @@ type Root [32]byte
 type Roots [][32]byte
 type Signature [96]byte
 
-type packet interface{}
-
 type AggregateAndProof struct {
 	Index          uint64       `json:"aggregator_index"`
 	Aggregate      *Attestation `json:"aggregate"`
