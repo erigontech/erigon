@@ -340,7 +340,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 		if progress < header.Number.Uint64() {
-			return fmt.Errorf("unsucessful execution, progress %d < expected %d", progress, header.Number.Uint64())
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
 		}
 		return nil
 	}
