@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
@@ -211,7 +212,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	dir.MustExist(dirs.SnapHistory)
 
-	workers := ethconfig.RamToIndexSnapshot.Workers()
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	if rebuild {
 		cfg := ethconfig.NewSnapCfg(true, true, false)
 		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
@@ -226,7 +227,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(workers)
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.BuildMissedIndices()
 	if err != nil {
 		return err
