@@ -14,13 +14,16 @@
 package sentinel
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/snappy_ssz"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 var (
@@ -29,12 +32,12 @@ var (
 )
 
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   pingHandler,
+	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
 	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
-	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                goodbyeHandler,
+	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(goodbyeHandler),
 	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
 	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
-	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
+	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
 }
 
 func setDeadLines(stream network.Stream) {
@@ -46,63 +49,53 @@ func setDeadLines(stream network.Stream) {
 	}
 }
 
-func pingHandler(stream network.Stream) {
-	pingBytes := make([]byte, 8)
-	setDeadLines(stream)
-	n, err := stream.Read(pingBytes)
+func curryHandler[T proto.Packet](fn func(ctx *proto.Context, v T) error) func(network.Stream) {
+	return func(s network.Stream) {
+		setDeadLines(s)
+		sd := snappy_ssz.NewCodec(s)
+		val := (*new(T)).Clone().(T)
+		ctx, err := sd.Decode(val)
+		if err != nil {
+			log.Warn("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			return
+		}
+		err = fn(ctx, val)
+		if err != nil {
+			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			return
+		}
+	}
+}
+
+func pingHandler(ctx *proto.Context, dat *p2p.Ping) error {
+	log.Info("[Lightclient] Received", "ping", dat.Id)
+	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
-		log.Warn("handler crashed", "err", err)
-		return
+		return err
 	}
-	if n != 8 {
-		log.Warn("Invalid ping received")
-		return
-	}
-	log.Info("[Lightclient] Received", "ping", ssz.UnmarshallUint64(pingBytes))
-	// Send it back
-	n, err = stream.Write(pingBytes)
-	if err != nil {
-		log.Warn("handler crashed", "err", err)
-		return
-	}
-	if n != 8 {
-		log.Warn("Could not send Ping")
-	}
+	return nil
+}
+
+func metadataHandler(ctx *proto.Context, dat *proto.EmptyPacket) error {
+	log.Info("Got metadata call", "metadata", dat)
+	return nil
 }
 
 func statusHandler(stream network.Stream) {
 	setDeadLines(stream)
-
 	log.Info("Got status request")
 }
 
-func goodbyeHandler(stream network.Stream) {
-	goodByeBytes := make([]byte, 8)
-	setDeadLines(stream)
-	n, err := stream.Read(goodByeBytes)
+func goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
+	setDeadLines(ctx.Stream)
+	log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	_, err := ctx.Stream.Write(ctx.Raw)
 	if err != nil {
-		log.Warn("Goodbye handler crashed", "err", err)
-		return
+		return err
 	}
-
-	if n != 8 {
-		log.Warn("Invalid goodbye message received")
-		return
-	}
-
-	log.Info("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
-	n, err = stream.Write(goodByeBytes)
-	if err != nil {
-		log.Warn("Goodbye handler crashed", "err", err)
-		return
-	}
-
-	if n != 8 {
-		log.Warn("Could not send Goodbye")
-	}
-
-	peerId := stream.Conn().RemotePeer()
+	peerId := ctx.Stream.Conn().RemotePeer()
 	disconnectPeerCh <- peerId
+	return nil
 }
 
 func blocksByRangeHandler(stream network.Stream) {
@@ -113,11 +106,6 @@ func blocksByRangeHandler(stream network.Stream) {
 func beaconBlocksByRootHandler(stream network.Stream) {
 	setDeadLines(stream)
 	log.Info("Got beacon block by root handler call")
-}
-
-func metadataHandler(stream network.Stream) {
-	setDeadLines(stream)
-	log.Info("Got metadata handler call")
 }
 
 func (s *Sentinel) setupHandlers() {
