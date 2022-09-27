@@ -69,7 +69,12 @@ func (p *Peers) Penalize(pid peer.ID) {
 }
 
 func (p *Peers) banBadPeer(pid peer.ID) {
-	p.host.Peerstore().RemovePeer(pid)
+	p.DisconnectPeer(pid)
 	p.badPeers.Add(pid, []byte{0})
 	log.Warn("[Peers] bad peers has been banned", "peer-id", pid)
+}
+
+func (p *Peers) DisconnectPeer(pid peer.ID) {
+	log.Info("[Peers] disconnecting from peer", "peer-id", pid)
+	p.host.Peerstore().RemovePeer(pid)
 }
