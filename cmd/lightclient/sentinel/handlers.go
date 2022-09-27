@@ -16,6 +16,7 @@ package sentinel
 import (
 	"encoding/hex"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
@@ -58,7 +59,9 @@ func curryHandler[T proto.Packet](fn func(ctx *proto.Context, v T) error) func(n
 		val := (*new(T)).Clone().(T)
 		ctx, err := sd.Decode(val)
 		if err != nil {
-			log.Warn("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			if !strings.Contains(err.Error(), "stream reset") {
+				log.Warn("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			}
 			return
 		}
 		err = fn(ctx, val)
@@ -99,7 +102,7 @@ func hexb(b []byte) string {
 }
 
 func goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
-	log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
 	_, err := ctx.Stream.Write(ctx.Raw)
 	if err != nil {
 		return err
