@@ -165,7 +165,7 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
-		if to-from != 8 {
+		if to-from != snap.Erigon3SeedableSteps {
 			continue
 		}
 		res = append(res, filepath.Join("history", f.Name()))
