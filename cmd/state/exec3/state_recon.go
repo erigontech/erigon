@@ -270,6 +270,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 		genesis:     genesis,
 		engine:      engine,
 	}
+	rw.stateReader.SetTrace(true)
 	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
@@ -362,7 +363,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
+			panic(fmt.Errorf("could not apply  blockNum=%d , txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txHash, err))
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)
