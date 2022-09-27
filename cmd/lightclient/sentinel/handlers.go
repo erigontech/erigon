@@ -20,10 +20,7 @@ import (
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
-var (
-	ProtocolPrefix = "/eth2/beacon_chain/req"
-	reservedBytes  = 128
-)
+var ProtocolPrefix = "/eth2/beacon_chain/req"
 
 func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
 	return map[protocol.ID]network.StreamHandler{
