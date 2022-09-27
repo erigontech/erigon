@@ -417,6 +417,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
+	defer func() {
+		fmt.Printf("remove: %s\n", reconDbPath)
+	}()
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
