@@ -121,7 +121,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey[:20], key[:20])
-			binary.BigEndian.PutUint64(key[20:], state2.FirstContractIncarnation)
+			binary.BigEndian.PutUint64(compositeKey[20:], state2.FirstContractIncarnation)
 			copy(compositeKey[20+8:], key[20:])
 
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
