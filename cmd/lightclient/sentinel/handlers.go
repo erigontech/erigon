@@ -20,8 +20,13 @@ import (
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
+var (
+	ProtocolPrefix = "/eth2/beacon_chain/req"
+)
+
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID("/eth2/beacon_chain/req/ping/1/ssz_snappy"): pingHandler,
+	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):   pingHandler,
+	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"): statusHandler,
 }
 
 func pingHandler(stream network.Stream) {
@@ -45,6 +50,14 @@ func pingHandler(stream network.Stream) {
 	if n != 8 {
 		log.Warn("Could not send Ping")
 	}
+}
+
+func statusHandler(stream network.Stream) {
+	log.Info("Got status request")
+}
+
+func goodbyeHandler(stream network.Stream) {
+	log.Info("Got goodbye handler")
 }
 
 func (s *Sentinel) setupHandlers() {
