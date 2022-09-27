@@ -25,8 +25,12 @@ var (
 )
 
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):   pingHandler,
-	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"): statusHandler,
+	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   pingHandler,
+	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
+	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                goodbyeHandler,
+	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
+	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
+	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
 }
 
 func pingHandler(stream network.Stream) {
@@ -58,6 +62,18 @@ func statusHandler(stream network.Stream) {
 
 func goodbyeHandler(stream network.Stream) {
 	log.Info("Got goodbye handler")
+}
+
+func blocksByRangeHandler(stream network.Stream) {
+	log.Info("Got block by range handler call")
+}
+
+func beaconBlocksByRootHandler(stream network.Stream) {
+	log.Info("Got beacon block by root handler call")
+}
+
+func metadataHandler(stream network.Stream) {
+	log.Info("Got metadata handler call")
 }
 
 func (s *Sentinel) setupHandlers() {
