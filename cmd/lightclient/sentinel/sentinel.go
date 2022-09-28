@@ -115,7 +115,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return net, err
 }
 

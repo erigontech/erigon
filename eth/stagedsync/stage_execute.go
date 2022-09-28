@@ -246,6 +246,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
+	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()-1))
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
