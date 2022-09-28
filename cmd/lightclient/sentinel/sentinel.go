@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/discover"
@@ -35,13 +36,15 @@ import (
 var disconnectPeerCh = make(chan peer.ID, 0)
 
 type Sentinel struct {
-	started  bool
-	listener *discover.UDPv5 // this is us in the network.
-	ctx      context.Context
-	host     host.Host
-	cfg      SentinelConfig
-	peers    *peers.Peers
-	pubsub   *pubsub.PubSub
+	started             bool
+	listener            *discover.UDPv5 // this is us in the network.
+	ctx                 context.Context
+	host                host.Host
+	cfg                 SentinelConfig
+	peers               *peers.Peers
+	pubsub              *pubsub.PubSub
+	subscribedTopics    map[string]*pubsub.Topic
+	subscribedTopicLock sync.Mutex
 }
 
 func (s *Sentinel) createLocalNode(
@@ -170,6 +173,12 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	s.host = host
 	s.peers = peers.New(s.host)
 
+	gossipSubscription, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
+	if err != nil {
+		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%s", err)
+	}
+
+	s.pubsub = gossipSubscription
 	return s, nil
 }
 
@@ -186,7 +195,12 @@ func (s *Sentinel) Start() error {
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
+
 	go s.listenForPeers()
+
+	if err := s.beginSubscriptions(); err != nil {
+		return err
+	}
 
 	return nil
 }
