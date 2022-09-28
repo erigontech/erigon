@@ -585,7 +585,11 @@ func schedulePoSDownload(
 		return false
 	}
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+	if heightToDownload == 0 {
+		log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", "unknown", "hash", hashToDownload, "requestId", requestId)
+	} else {
+		log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+	}
 
 	cfg.hd.SetRequestId(requestId)
 	cfg.hd.SetPoSDownloaderTip(downloaderTip)
