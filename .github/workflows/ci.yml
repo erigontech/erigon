@@ -111,7 +111,7 @@ jobs:
   docker-build-check:
     # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
     if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
-    runs-on: self-hosted
+    runs-on: ubuntu-20.04
     steps:
       - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
