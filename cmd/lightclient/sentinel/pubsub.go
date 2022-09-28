@@ -30,29 +30,49 @@ const (
 
 // Specifies the prefix for any pubsub topic.
 const gossipTopicPrefix = "/eth2/"
+const blockSubnetTopicFormat = "/eth2/%x/beacon_block"
 
-func (s *Sentinel) beginSubscriptions() error {
+// begings the topic subscription
+func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
+	s.runningSubscriptionsLock.Lock()
+	defer s.runningSubscriptionsLock.Unlock()
+
+	topicHandle, err := s.SubscribeToTopic(topic)
+	if err != nil {
+		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
+	}
+
+	subscription, err := topicHandle.Subscribe(opt...)
+	if err != nil {
+		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
+	}
+
+	s.runningSubscriptions[subscription.Topic()] = subscription
 	return nil
 }
 
-func (s *Sentinel) subscribeToTopic(topic string, opts ...pubsub.TopicOpt) error {
+// subscribes to topics that the sentinel is not subscribe to
+func (s *Sentinel) SubscribeToTopic(topic string, opts ...pubsub.TopicOpt) (topicHandle *pubsub.Topic, err error) {
 	s.subscribedTopicLock.Lock()
 	defer s.subscribedTopicLock.Unlock()
 
 	// Join topics if we have alredy not joined them
 	if _, ok := s.subscribedTopics[topic]; !ok {
-		topicHandle, err := s.pubsub.Join(topic, opts...)
+		topicHandle, err = s.pubsub.Join(topic, opts...)
 		if err != nil {
-			return fmt.Errorf("failed to join topic %s, error=%s", topic, err)
+			return nil, fmt.Errorf("failed to join topic %s, error=%s", topic, err)
 		}
 
 		s.subscribedTopics[topic] = topicHandle
+	} else {
+		topicHandle = s.subscribedTopics[topic]
 	}
 
-	return nil
+	return nil, nil
 }
 
-func (s *Sentinel) unsubscribeToTopic(topic string) error {
+// unsubscribes from topics
+func (s *Sentinel) UnsubscribeToTopic(topic string) error {
 	s.subscribedTopicLock.Lock()
 	defer s.subscribedTopicLock.Unlock()
 

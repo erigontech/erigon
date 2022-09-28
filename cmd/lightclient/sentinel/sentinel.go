@@ -36,15 +36,19 @@ import (
 var disconnectPeerCh = make(chan peer.ID, 0)
 
 type Sentinel struct {
-	started             bool
-	listener            *discover.UDPv5 // this is us in the network.
-	ctx                 context.Context
-	host                host.Host
-	cfg                 SentinelConfig
-	peers               *peers.Peers
-	pubsub              *pubsub.PubSub
-	subscribedTopics    map[string]*pubsub.Topic
-	subscribedTopicLock sync.Mutex
+	started  bool
+	listener *discover.UDPv5 // this is us in the network.
+	ctx      context.Context
+	host     host.Host
+	cfg      SentinelConfig
+	peers    *peers.Peers
+
+	pubsub               *pubsub.PubSub
+	subscribedTopics     map[string]*pubsub.Topic
+	runningSubscriptions map[string]*pubsub.Subscription
+
+	subscribedTopicLock      sync.Mutex
+	runningSubscriptionsLock sync.Mutex
 }
 
 func (s *Sentinel) createLocalNode(
@@ -155,8 +159,12 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 // This is just one of the examples from the libp2p repository.
 func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx: ctx,
-		cfg: cfg,
+		ctx:                      ctx,
+		cfg:                      cfg,
+		subscribedTopics:         make(map[string]*pubsub.Topic),
+		runningSubscriptions:     make(map[string]*pubsub.Subscription),
+		subscribedTopicLock:      sync.Mutex{},
+		runningSubscriptionsLock: sync.Mutex{},
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -198,7 +206,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 
-	if err := s.beginSubscriptions(); err != nil {
+	if err := s.BeginSubscription(); err != nil {
 		return err
 	}
 
