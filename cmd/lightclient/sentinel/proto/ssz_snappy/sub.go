@@ -1,4 +1,4 @@
-package snappy_ssz
+package ssz_snappy
 
 import (
 	"bytes"

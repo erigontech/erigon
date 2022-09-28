@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/snappy_ssz"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -33,10 +33,10 @@ var ProtocolPrefix = "/eth2/beacon_chain/req"
 
 func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
 	return map[protocol.ID]network.StreamHandler{
-		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(snappy_ssz.NewStreamCodec, pingHandler),
-		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(snappy_ssz.NewStreamCodec, statusHandler),
-		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(snappy_ssz.NewStreamCodec, s.goodbyeHandler),
-		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(snappy_ssz.NewStreamCodec, metadataHandler),
+		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
+		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(ssz_snappy.NewStreamCodec, s.goodbyeHandler),
+		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): s.blocksByRangeHandler,
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  s.beaconBlocksByRootHandler,
 	}
