@@ -157,6 +157,16 @@ jobs:
            name: test-results
            path: results-${{ github.run_id }}/*.xml
 
+       - name: clean up containers
+         if: always()
+         run: |
+          ids=$(docker ps -a -q)
+          for id in $ids
+          do
+            echo "stopping/removing container: $id"
+            docker stop $id && docker rm $id
+          done
+
   hive-results:
     needs: hive
     name: Hive results
