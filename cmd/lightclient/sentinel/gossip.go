@@ -13,15 +13,19 @@ import (
 
 func (s *Sentinel) startGossip() error {
 	prefix := "/eth2/4a26c58b"
-	err := subscribeGossipTopic(s, prefix+"/beacon_block/ssz_snappy", ssz_snappy.NewSubCodec, s.handleBeaconBlockSubscription)
+	gsub, err := pubsub.NewGossipSub(s.ctx, s.host)
 	if err != nil {
 		return err
 	}
-	err = subscribeGossipTopic(s, prefix+"/light_client_finality_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleFinalitySubscription)
+	err = subscribeGossipTopic(s, gsub, prefix+"/beacon_block/ssz_snappy", ssz_snappy.NewSubCodec, s.handleBeaconBlockSubscription)
 	if err != nil {
 		return err
 	}
-	err = subscribeGossipTopic(s, prefix+"/light_client_optimistic_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleOptimisticSubscription)
+	err = subscribeGossipTopic(s, gsub, prefix+"/light_client_finality_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleFinalitySubscription)
+	if err != nil {
+		return err
+	}
+	err = subscribeGossipTopic(s, gsub, prefix+"/light_client_optimistic_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleOptimisticSubscription)
 	if err != nil {
 		return err
 	}
@@ -30,19 +34,17 @@ func (s *Sentinel) startGossip() error {
 
 func subscribeGossipTopic[T proto.Packet](
 	s *Sentinel,
+	gsub *pubsub.PubSub,
 	topic string,
 	newcodec func(*pubsub.Subscription) proto.SubCodec,
 	fn func(ctx *proto.SubContext, v T) error,
 ) error {
-	gsub, err := pubsub.NewGossipSub(s.ctx, s.host)
-	if err != nil {
-		return err
-	}
+
 	top, err := gsub.Join(topic)
 	if err != nil {
 		return err
 	}
-	sub_sub, err := top.Subscribe()
+	sub_sub, err := top.Subscribe(pubsub.WithBufferSize(1024))
 	if err != nil {
 		return err
 	}
