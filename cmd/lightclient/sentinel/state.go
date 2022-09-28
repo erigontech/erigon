@@ -112,7 +112,7 @@ func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
 	if u.AttestedHeader.Slot < u.FinalizedHeader.Slot {
 		return fmt.Errorf("attested header slot must be lower than finalized header slot")
 	}
-	storePeriod := computeSyncCommitteePeriodAtSlot(l.finalized_header.Slot)
+	storePeriod := computeSyncCommitteePeriodAtSlot(uint64(l.finalized_header.Slot))
 	updateSigPeriod := computeSyncCommitteePeriodAtSlot(uint64(u.SignatureSlot))
 
 	if l.next_sync_committee != nil {
@@ -125,7 +125,7 @@ func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
 		}
 	}
 
-	updateAttestedPeriod := computeSyncCommitteePeriodAtSlot(u.AttestedHeader.Slot)
+	updateAttestedPeriod := computeSyncCommitteePeriodAtSlot(uint64(u.AttestedHeader.Slot))
 	if !(l.next_sync_committee == nil && (isSyncCommitteeUpdate(u) && updateAttestedPeriod == storePeriod)) {
 		if u.AttestedHeader.Slot <= l.finalized_header.Slot {
 			return fmt.Errorf("if up has next sync committee, the update header slot must be strictly larger than the store's finalized header")
@@ -136,7 +136,7 @@ func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
 		// TODO: what is the genesis slot
 		GENESIS_SLOT := uint64(1)
 		finalized_root := [32]byte{}
-		if u.FinalizedHeader.Slot != GENESIS_SLOT {
+		if u.FinalizedHeader.Slot != p2p.Slot(GENESIS_SLOT) {
 			finalized_root = hashTreeRoot(&u.FinalizedHeader)
 		}
 		if !isValidMerkleBranch(finalized_root, u.FinalityBranch, 0, 0, u.AttestedHeader.StateRoot) {

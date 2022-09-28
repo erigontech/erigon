@@ -1,0 +1,220 @@
+aliases:
+  Slot: uint64
+  Epoch: uint64
+  Bitvector64: uint64
+  Bitvector4: uint8
+  Root: '[32]byte'
+  Signature: '[96]byte'
+  Bytea: '[]byte'
+structs:
+  Status:
+    - name: ForkDigest
+      type: Bytea
+      tags:
+       json: 'fork_digest,omitempty'
+       ssz-size: 4
+    - name: FinalizedRoot
+      type: Bytea
+      tags:
+       json: 'finalized_root,omitempty'
+       ssz-size: 32
+    - name: FinalizedEpoch
+      type: Epoch
+      tags:
+       json: 'finalized_epoch,omitempty'
+    - name: HeadRoot
+      type: Bytea
+      tags:
+       json: 'head_root,omitempty'
+       ssz-size: 32
+    - name: HeadSlot
+      type: Slot
+      tags:
+        json: 'head_slot,omitempty'
+  SingleRoot:
+    - name: Root
+      type: Root
+      tags:
+       json: root
+       ssz-size: 32
+  BeaconBlockHeader:
+    - name: Slot
+      type: Slot
+      tags:
+        json: slot
+    - name: ProposerIndex
+      type: Root
+      tags:
+        json: proposer_index
+        ssz-size: 32
+    - name: ParentRoot
+      type: Root
+      tags:
+        json: parent_root
+        ssz-size: 32
+    - name: StateRoot
+      type: Root
+      tags:
+        json: state_root
+        ssz-size: 32
+    - name: BodyRoot
+      type: Root
+      tags:
+        json: body_root
+        ssz-size: 32
+  LightClientBootstrap:
+    - name: Header
+      type: BeaconBlockHeader
+      tags:
+        json: "header"
+    - name: CurrentSyncCommittee
+      type: SyncCommittee
+      tags:
+        json: current_sync_committee
+    - name: CurrentSyncCommitteeBranch
+      type: '[][32]byte'
+      tags:
+        json: current_sync_committee
+        ssz-max: 5
+        ssz-size: ',32'
+  LightClientUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: NextSyncCommittee
+      type: SyncCommittee
+      tags:
+        json: next_sync_committee
+    - name: NextSyncCommitteeBranch
+      type: '[][32]byte'
+      tags:
+        json: next_sync_committee
+        ssz-max: 5
+        ssz-size: ',32'
+    - name: FinalizedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: finalized_header
+    - name: FinalityBranch
+      type: '[][32]byte'
+      tags:
+        json: finality_branch
+        ssz-max: 6
+        ssz-size: ',32'
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  LightClientFinalityUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: FinalizedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: finalized_header
+    - name: FinalityBranch
+      type: '[][32]byte'
+      tags:
+        json: finality_branch
+        ssz-max: 6
+        ssz-size: ',32'
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  LightClientOptimisticUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: SyncAggregate
+      type:  SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  SyncAggregate:
+    - name: SyncCommiteeBits
+      type: '[64]byte'
+      tags:
+        json: sync_committee_bits
+        ssz-size: 64
+    - name: SyncCommiteeSignature
+      type: Signature
+      tags:
+        json: sync_committee_signature
+        ssz-size: 96
+  SyncCommittee:
+    - name: PubKeys
+      type: '[512][48]byte'
+      tags:
+        json: pubkeys
+        ssz-size: '512,48'
+    - name: AggregatePubKey
+      type: '[48]byte'
+      tags:
+        json: aggregate_pubkey
+        ssz-size: 48
+  Goodbye:
+    - name: Reason
+      type: uint64
+      tags:
+        json: reason
+  Ping:
+    - name: Id
+      type: uint64
+      tags:
+        json: id
+  MetadataV0:
+    - name: SeqNumber
+      type: uint64
+      tags:
+        json: 'seq_number,omitempty'
+    - name: Attnets
+      type: Bitvector64
+      tags:
+        json: 'attnets,omitempty'
+        ssz-size: 8
+  MetaDataV1:
+    - name: SeqNumber
+      type: uint64
+      tags:
+        json: 'seq_number,omitempty'
+    - name: Attnets
+      type: Bitvector64
+      tags:
+        json: 'attnets,omitempty'
+        ssz-size: 8
+    - name: Syncnets
+      type: Bitvector64
+      tags:
+        json: 'syncnets,omitempty'
+        ssz-size: 1
+  ENRForkID:
+    - name: CurrentForkDigest
+      type: Bytea
+      tags:
+        json: 'current_fork_digest,omitempty'
+        ssz-size: 4
+    - name: NextForkVersion
+      type: Bytea
+      tags:
+        json: 'next_fork_version,omitempty'
+        ssz-size: 4
+    - name: NextForkEpoch
+      type: Epoch
+      tags:
+        json: 'next_fork_epoch,omitempty'

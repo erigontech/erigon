@@ -64,11 +64,13 @@ func curryHandler[T proto.Packet](fn func(ctx *proto.Context, v T) error) func(n
 			}
 			return
 		}
+
 		err = fn(ctx, val)
 		if err != nil {
 			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
+		log.Info("[Lightclient] Handled", "endpont", ctx.Protocol, "msg", val)
 	}
 }
 
@@ -82,7 +84,6 @@ func pingHandler(ctx *proto.Context, dat *p2p.Ping) error {
 }
 
 func metadataHandler(ctx *proto.Context, dat *proto.EmptyPacket) error {
-	log.Info("Got metadata call")
 	return nil
 }
 
