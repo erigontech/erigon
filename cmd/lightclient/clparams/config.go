@@ -25,9 +25,11 @@ import (
 type NetworkType int
 
 var (
-	MainnetNetwork NetworkType = 0
-	GoerliNetwork  NetworkType = 1
-	SepoliaNetwork NetworkType = 2
+	MainnetNetwork NetworkType   = 0
+	GoerliNetwork  NetworkType   = 1
+	SepoliaNetwork NetworkType   = 2
+	TtfbTimeout    time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 10 * time.Second
 )
 
 var (
