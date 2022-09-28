@@ -1,0 +1,215 @@
+package sentinel
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+)
+
+type LightClientEvent interface {
+}
+
+type LightState struct {
+
+	// none of the fields below are protected by a mutex.
+	// the original bootstrap a ala trusted block root
+	bootstrap *p2p.LightClientBootstrap
+	genesis   [32]byte
+
+	// channel of events
+	events chan LightClientEvent
+
+	// light client state https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/sync-protocol.md#lightclientstore
+	finalized_header                 p2p.BeaconBlockHeader
+	current_sync_committee           p2p.SyncCommittee
+	next_sync_committee              *p2p.SyncCommittee
+	best_valid_update                p2p.LightClientUpdate
+	optimistic_header                p2p.BeaconBlockHeader
+	previous_max_active_participants uint64
+	current_max_active_participants  uint64
+}
+
+func NewLightState(ctx context.Context, bootstrap *p2p.LightClientBootstrap, genesis [32]byte) *LightState {
+	// makes copy of light client bootstrap
+	l := &LightState{
+		bootstrap:              bootstrap,
+		genesis:                genesis,
+		finalized_header:       bootstrap.Header,
+		current_sync_committee: bootstrap.CurrentSyncCommittee,
+		optimistic_header:      bootstrap.Header,
+		events:                 make(chan LightClientEvent, 1280),
+	}
+	return l
+}
+
+func (l *LightState) CurrentSlot() uint64 {
+	return 0
+}
+
+func (l *LightState) start(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-l.events:
+			switch evt := ev.(type) {
+			case *p2p.LightClientUpdate:
+				l.onLightClientUpdate(evt)
+			case *p2p.LightClientFinalityUpdate:
+				l.onFinalityUpdate(evt)
+			case *p2p.LightClientOptimisticUpdate:
+				l.onOptimisticUpdate(evt)
+			}
+		}
+	}
+}
+
+func (l *LightState) AddUpdateEvent(u *p2p.LightClientUpdate) {
+	l.events <- u
+}
+func (l *LightState) AddOptimisticUpdateEvent(u *p2p.LightClientUpdate) {
+	l.events <- u
+}
+func (l *LightState) AddFinalityUpdateEvent(u *p2p.LightClientUpdate) {
+	l.events <- u
+}
+
+func (l *LightState) onOptimisticUpdate(u *p2p.LightClientOptimisticUpdate) error {
+	// TODO: validate update
+
+	//
+	l.optimistic_header = u.AttestedHeader
+	return nil
+}
+
+func (l *LightState) onFinalityUpdate(u *p2p.LightClientFinalityUpdate) error {
+	// TODO: validate update
+
+	//
+	l.finalized_header = u.FinalizedHeader
+	return nil
+}
+
+func (l *LightState) onLightClientUpdate(u *p2p.LightClientUpdate) error {
+	if err := l.validateLightClientUpdate(u); err != nil {
+		return err
+	}
+	return nil
+}
+func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
+	// need to do this but im too lazy to. maybe someone else knows an elegant solution...
+	// if u.SyncAggregate.SyncCommiteeBits < min_sync_participants  {
+	// return fmt.Errorf("not enough participants in commmittee (%d/%d)", )
+	//}
+
+	if l.CurrentSlot() < uint64(u.SignatureSlot) {
+		return fmt.Errorf("current slot must be bigger or eq to sig slot")
+	}
+	if u.SignatureSlot <= p2p.Slot(u.AttestedHeader.Slot) {
+		return fmt.Errorf("current sig slot must be larger than attested slot")
+	}
+	if u.AttestedHeader.Slot < u.FinalizedHeader.Slot {
+		return fmt.Errorf("attested header slot must be lower than finalized header slot")
+	}
+	storePeriod := computeSyncCommitteePeriodAtSlot(l.finalized_header.Slot)
+	updateSigPeriod := computeSyncCommitteePeriodAtSlot(uint64(u.SignatureSlot))
+
+	if l.next_sync_committee != nil {
+		if updateSigPeriod != storePeriod && updateSigPeriod != storePeriod+1 {
+			return fmt.Errorf("update sig period must match store period or be store period + 1 if next sync committee not")
+		}
+	} else {
+		if updateSigPeriod != storePeriod {
+			return fmt.Errorf("update sig period must match store period if next sync committee nil")
+		}
+	}
+
+	updateAttestedPeriod := computeSyncCommitteePeriodAtSlot(u.AttestedHeader.Slot)
+	if !(l.next_sync_committee == nil && (isSyncCommitteeUpdate(u) && updateAttestedPeriod == storePeriod)) {
+		if u.AttestedHeader.Slot <= l.finalized_header.Slot {
+			return fmt.Errorf("if up has next sync committee, the update header slot must be strictly larger than the store's finalized header")
+		}
+	}
+
+	if isFinalityUpdate(u) {
+		// TODO: what is the genesis slot
+		GENESIS_SLOT := uint64(1)
+		finalized_root := [32]byte{}
+		if u.FinalizedHeader.Slot != GENESIS_SLOT {
+			finalized_root = hashTreeRoot(&u.FinalizedHeader)
+		}
+		if !isValidMerkleBranch(finalized_root, u.FinalityBranch, 0, 0, u.AttestedHeader.StateRoot) {
+			return fmt.Errorf("merkle branch invalid for finality update")
+		}
+	}
+	if isSyncCommitteeUpdate(u) {
+		leaf, _ := u.NextSyncCommittee.HashTreeRoot()
+		if !isValidMerkleBranch(leaf, u.NextSyncCommitteeBranch, 0, 0, u.AttestedHeader.StateRoot) {
+			return fmt.Errorf("merkle branch invalid for sync committee update")
+		}
+	}
+
+	var curSyncCommittee p2p.SyncCommittee
+	if updateSigPeriod == storePeriod {
+		curSyncCommittee = l.current_sync_committee
+	} else {
+		if l.next_sync_committee != nil {
+			curSyncCommittee = *l.next_sync_committee
+		}
+	}
+	_ = curSyncCommittee
+	//TODO: remaining validation
+	///   participant_pubkeys = [
+	///       pubkey for (bit, pubkey) in zip(sync_aggregate.sync_committee_bits, sync_committee.pubkeys)
+	///       if bit
+	///   ]
+	///   fork_version = compute_fork_version(compute_epoch_at_slot(update.signature_slot))
+	///   domain = compute_domain(DOMAIN_SYNC_COMMITTEE, fork_version, genesis_validators_root)
+	///   signing_root = compute_signing_root(update.attested_header, domain)
+	///   assert bls.FastAggregateVerify(participant_pubkeys, signing_root, sync_aggregate.sync_committee_signature)
+	return nil
+}
+
+// TODO: implement
+func isValidMerkleBranch(
+	leaf [32]byte,
+	branch [][32]byte,
+	depth int,
+	index int,
+	root [32]byte,
+) bool {
+	return false
+}
+
+// TODO: implement
+func hashTreeRoot(h *p2p.BeaconBlockHeader) [32]byte {
+	return [32]byte{}
+}
+
+// TODO: implement
+func computeEpochAtSlot(slot uint64) uint64 {
+	return 0
+}
+
+// TODO: implement
+func computeSyncCommitteePeriodAtSlot(slot uint64) uint64 {
+	return computeSyncCommitteePeriod(computeEpochAtSlot(slot))
+}
+
+// TODO: implement
+func computeSyncCommitteePeriod(slot uint64) uint64 {
+	return slot
+}
+
+// TODO: implement
+func isSyncCommitteeUpdate(update *p2p.LightClientUpdate) bool {
+	//   return update.next_sync_committee_branch != [Bytes32() for _ in range(floorlog2(NEXT_SYNC_COMMITTEE_INDEX))]
+	return true
+}
+
+// TODO: implement
+func isFinalityUpdate(update *p2p.LightClientUpdate) bool {
+	//   return update.next_sync_committee_branch != [Bytes32() for _ in range(floorlog2(NEXT_SYNC_COMMITTEE_INDEX))]
+	return true
+}

@@ -191,6 +191,59 @@ func (s *Sentinel) Start() error {
 	return nil
 }
 
+func (s *Sentinel) startGossip() error {
+	gossipSub, err := pubsub.NewGossipSub(s.ctx, s.host)
+	if err != nil {
+		return err
+	}
+
+	topicFinality, err := gossipSub.Join("light_client_finality_update")
+	if err != nil {
+		return err
+	}
+	finalitySubscription, err := topicFinality.Subscribe()
+	if err != nil {
+		return err
+	}
+	topicOptimistic, err := gossipSub.Join("light_client_optimistic_update")
+	if err != nil {
+		return err
+	}
+	optimisticSubscription, err := topicOptimistic.Subscribe()
+	if err != nil {
+		return err
+	}
+
+	go s.handleFinalitySubscription(finalitySubscription)
+	go s.handleOptimisticSubscription(optimisticSubscription)
+	return nil
+}
+
+func (s *Sentinel) handleFinalitySubscription(sub *pubsub.Subscription) {
+	for {
+		msg, err := sub.Next(s.ctx)
+		if err != nil {
+			log.Warn("error listen to finality subscription", "err", err)
+			continue
+		}
+		if msg.ReceivedFrom == s.host.ID() {
+			continue
+		}
+	}
+}
+func (s *Sentinel) handleOptimisticSubscription(sub *pubsub.Subscription) {
+	for {
+		msg, err := sub.Next(s.ctx)
+		if err != nil {
+			log.Warn("error listen to optimistic subscription", "err", err)
+			continue
+		}
+		if msg.ReceivedFrom == s.host.ID() {
+			continue
+		}
+	}
+}
+
 func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
