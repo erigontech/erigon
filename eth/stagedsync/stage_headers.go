@@ -325,7 +325,7 @@ func startHandlingForkChoice(
 	headerNumber := header.Number.Uint64()
 
 	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
-		log.Info("Flushing in-memory state")
+		log.Info(fmt.Sprintf("[%s]Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
 		if err := cfg.forkValidator.FlushExtendingFork(tx); err != nil {
 			return nil, err
 		}
@@ -352,7 +352,7 @@ func startHandlingForkChoice(
 	}
 	if forkingPoint < preProgress {
 
-		log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+		log.Info(fmt.Sprintf("[%s] Fork choice: re-org", s.LogPrefix()), "goal", headerNumber, "from", preProgress, "to", forkingPoint)
 
 		if requestStatus == engineapi.New {
 			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
@@ -368,6 +368,7 @@ func startHandlingForkChoice(
 		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 	} else {
 		// Extend canonical chain by the new header
+		log.Info(fmt.Sprintf("[%s] Fork choice: chain extention", s.LogPrefix()), "goal", headerNumber, "from", preProgress)
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
@@ -465,7 +466,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
 
-	log.Debug(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
