@@ -40,21 +40,17 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 		bp := bufpool.Get(sz)
 		defer bufpool.Put(bp)
 		p := bp.Bytes()
-		p, err = val.MarshalSSZTo(p)
+		p = append(p, make([]byte, 10)...)
+		vin := binary.PutVarint(p, int64(sz))
+		_, err = val.MarshalSSZTo(p[vin:])
 		if err != nil {
 			return 0, fmt.Errorf("marshal ssz: %w", err)
 		}
-		vi := make([]byte, 10)
-		vin := binary.PutVarint(vi, int64(sz))
-		n0, err := d.s.Write(vi[:vin])
+		n, err := d.sw.Write(p)
 		if err != nil {
 			return 0, err
 		}
-		n1, err := d.sw.Write(p)
-		if err != nil {
-			return n0, err
-		}
-		return n0 + n1, nil
+		return n, nil
 	}
 	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
 }
