@@ -6,22 +6,22 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/snappy_ssz"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 func (s *Sentinel) startGossip() error {
 	prefix := "/eth2/4a26c58b"
-	err := subscribeGossipTopic(s, prefix+"/beacon_block/ssz_snappy", snappy_ssz.NewSubCodec, s.handleBeaconBlockSubscription)
+	err := subscribeGossipTopic(s, prefix+"/beacon_block/ssz_snappy", ssz_snappy.NewSubCodec, s.handleBeaconBlockSubscription)
 	if err != nil {
 		return err
 	}
-	err = subscribeGossipTopic(s, prefix+"/light_client_finality_update/ssz_snappy", snappy_ssz.NewSubCodec, s.handleFinalitySubscription)
+	err = subscribeGossipTopic(s, prefix+"/light_client_finality_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleFinalitySubscription)
 	if err != nil {
 		return err
 	}
-	err = subscribeGossipTopic(s, prefix+"/light_client_optimistic_update/ssz_snappy", snappy_ssz.NewSubCodec, s.handleOptimisticSubscription)
+	err = subscribeGossipTopic(s, prefix+"/light_client_optimistic_update/ssz_snappy", ssz_snappy.NewSubCodec, s.handleOptimisticSubscription)
 	if err != nil {
 		return err
 	}
