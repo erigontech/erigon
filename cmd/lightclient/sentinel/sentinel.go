@@ -120,11 +120,12 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	go func() {
+	Loop:
 		for {
 			select {
 			case <-s.ctx.Done():
 				close(disconnectPeerCh)
-				break
+				break Loop
 			case pid := <-disconnectPeerCh:
 				s.peers.DisconnectPeer(pid)
 			}
