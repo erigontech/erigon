@@ -111,11 +111,11 @@ func SpawnStageHeaders(
 		}
 	}
 
-	var blockNumber uint64
+	var preProgress uint64
 	if s == nil {
-		blockNumber = 0
+		preProgress = 0
 	} else {
-		blockNumber = s.BlockNumber
+		preProgress = s.BlockNumber
 	}
 
 	notBorAndParlia := cfg.chainConfig.Bor == nil && cfg.chainConfig.Parlia == nil
@@ -128,18 +128,18 @@ func SpawnStageHeaders(
 	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
 	if notBorAndParlia && !transitionedToPoS {
 		var err error
-		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		transitionedToPoS, err = rawdb.Transitioned(tx, preProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
 		if transitionedToPoS {
-			cfg.hd.SetFirstPoSHeight(blockNumber)
+			cfg.hd.SetFirstPoSHeight(preProgress)
 		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx, preProgress)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -156,6 +156,7 @@ func HeadersPOS(
 	initialCycle bool,
 	test bool,
 	useExternalTx bool,
+	preProgress uint64,
 ) error {
 	if initialCycle {
 		// Let execution and other stages to finish before waiting for CL
@@ -196,7 +197,7 @@ func HeadersPOS(
 
 	var payloadStatus *engineapi.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter, preProgress)
 	} else {
 		payloadMessage := request.(*types.Block)
 		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, test, headerInserter)
@@ -277,6 +278,7 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	test bool,
 	headerInserter *headerdownload.HeaderInserter,
+	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
 	if cfg.memoryOverlay {
 		defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
@@ -353,21 +355,53 @@ func startHandlingForkChoice(
 	if err != nil {
 		return nil, err
 	}
+	if forkingPoint < preProgress {
 
-	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+		log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 
-	if requestStatus == engineapi.New {
-		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			// TODO(yperbasis): what if some bodies are missing and we have to download them?
-			cfg.hd.SetPendingPayloadHash(headerHash)
+		if requestStatus == engineapi.New {
+			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
+				// TODO(yperbasis): what if some bodies are missing and we have to download them?
+				cfg.hd.SetPendingPayloadHash(headerHash)
+			} else {
+				cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			}
+		}
+
+		u.UnwindTo(forkingPoint, common.Hash{})
+
+		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
+	} else {
+		// Extend canonical chain by the new header
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+			return nil, err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+			return nil, err
+		}
+
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := s.Update(tx, headerNumber); err != nil {
+			return nil, err
+		}
+
+		if canonical {
+			return &engineapi.PayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: currentHeadHash,
+			}, nil
 		} else {
-			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			return &engineapi.PayloadStatus{
+				CriticalError: &privateapi.InvalidForkchoiceStateErr,
+			}, nil
 		}
 	}
-
-	u.UnwindTo(forkingPoint, common.Hash{})
-
-	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
 	return nil, nil
 }
