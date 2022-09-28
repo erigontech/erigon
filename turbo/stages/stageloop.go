@@ -171,15 +171,15 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	logCtx := sync.PrintTimings()
-	var bucketSizes []interface{}
+	var tableSizes []interface{}
 	if canRunCycleInOneTransaction {
+		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := tx.Commit()
 		if errTx != nil {
 			return headBlockHash, errTx
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
-		bucketSizes = stagedsync.PrintTables(db, tx)
 	}
 	var rotx kv.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
@@ -201,9 +201,11 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
-	if head != finishProgressBefore && len(logCtx) > 0 {
+	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
 		log.Info("Timings (slower than 50ms)", logCtx...)
-		log.Info("Tables", bucketSizes...)
+		if len(tableSizes) > 0 {
+			log.Info("Tables", tableSizes...)
+		}
 	}
 
 	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
