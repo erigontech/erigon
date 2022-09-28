@@ -375,7 +375,7 @@ func startHandlingForkChoice(
 		// Extend canonical chain by the new header
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
-		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
 			return nil, err
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
