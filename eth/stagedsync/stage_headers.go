@@ -352,7 +352,7 @@ func startHandlingForkChoice(
 	}
 	if forkingPoint < preProgress {
 
-		log.Info(fmt.Sprintf("[%s] Fork choice: re-org", s.LogPrefix()), "goal", headerNumber, "from", preProgress, "to", forkingPoint)
+		log.Info(fmt.Sprintf("[%s] Fork choice: re-org", s.LogPrefix()), "goal", headerNumber, "from", preProgress, "unwind to", forkingPoint)
 
 		if requestStatus == engineapi.New {
 			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
@@ -368,7 +368,7 @@ func startHandlingForkChoice(
 		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 	} else {
 		// Extend canonical chain by the new header
-		log.Info(fmt.Sprintf("[%s] Fork choice: chain extention", s.LogPrefix()), "goal", headerNumber, "from", preProgress)
+		log.Info(fmt.Sprintf("[%s] Fork choice: chain extension", s.LogPrefix()), "from", preProgress, "to", headerNumber)
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
