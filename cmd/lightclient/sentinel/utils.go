@@ -19,6 +19,7 @@ import (
 	"net"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -98,4 +99,19 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 		multiAddrs = append(multiAddrs, multiAddr)
 	}
 	return multiAddrs
+}
+
+func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (digest [4]byte) {
+	data := p2p.ForkData{
+		CurrentVersion:        currentVersion,
+		GenesisValidatorsRoot: genesisValidatorsRoot,
+	}
+	dataRoot, err := data.HashTreeRoot()
+	if err != nil {
+		//TODO: not sure what to actually do here
+		panic(err)
+	}
+	// copy first four bytes to output
+	copy(digest[:], dataRoot[:4])
+	return
 }

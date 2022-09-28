@@ -23,13 +23,13 @@ type Slot uint64
 type BeaconBlockHeader struct {
 	Slot Slot `json:"slot" `
 
-	ProposerIndex Root `ssz-size:"32" json:"proposer_index" `
+	ProposerIndex Root `json:"proposer_index" ssz-size:"32" `
 
 	ParentRoot Root `json:"parent_root" ssz-size:"32" `
 
-	StateRoot Root `json:"state_root" ssz-size:"32" `
+	StateRoot Root `ssz-size:"32" json:"state_root" `
 
-	BodyRoot Root `ssz-size:"32" json:"body_root" `
+	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
 
 func (typ *BeaconBlockHeader) Clone() proto.Packet {
@@ -46,6 +46,16 @@ type ENRForkID struct {
 
 func (typ *ENRForkID) Clone() proto.Packet {
 	return &ENRForkID{}
+}
+
+type ForkData struct {
+	CurrentVersion [4]byte `json:"current_version" ssz-size:"4" `
+
+	GenesisValidatorsRoot Root `json:"genesis_validators_root" ssz-size:"32" `
+}
+
+func (typ *ForkData) Clone() proto.Packet {
+	return &ForkData{}
 }
 
 type Goodbye struct {
@@ -131,7 +141,7 @@ func (typ *MetaDataV1) Clone() proto.Packet {
 type MetadataV0 struct {
 	SeqNumber uint64 `json:"seq_number,omitempty" `
 
-	Attnets Bitvector64 `ssz-size:"8" json:"attnets,omitempty" `
+	Attnets Bitvector64 `json:"attnets,omitempty" ssz-size:"8" `
 }
 
 func (typ *MetadataV0) Clone() proto.Packet {
@@ -147,7 +157,7 @@ func (typ *Ping) Clone() proto.Packet {
 }
 
 type SingleRoot struct {
-	Root Root `json:"root" ssz-size:"32" `
+	Root Root `ssz-size:"32" json:"root" `
 }
 
 func (typ *SingleRoot) Clone() proto.Packet {
@@ -155,7 +165,7 @@ func (typ *SingleRoot) Clone() proto.Packet {
 }
 
 type Status struct {
-	ForkDigest Bytea `json:"fork_digest,omitempty" ssz-size:"4" `
+	ForkDigest Bytea `ssz-size:"4" json:"fork_digest,omitempty" `
 
 	FinalizedRoot Bytea `json:"finalized_root,omitempty" ssz-size:"32" `
 
@@ -181,9 +191,9 @@ func (typ *SyncAggregate) Clone() proto.Packet {
 }
 
 type SyncCommittee struct {
-	PubKeys [512][48]byte `json:"pubkeys" ssz-size:"512,48" `
+	PubKeys [512][48]byte `ssz-size:"512,48" json:"pubkeys" `
 
-	AggregatePubKey [48]byte `json:"aggregate_pubkey" ssz-size:"48" `
+	AggregatePubKey [48]byte `ssz-size:"48" json:"aggregate_pubkey" `
 }
 
 func (typ *SyncCommittee) Clone() proto.Packet {

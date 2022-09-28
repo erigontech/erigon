@@ -14,7 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-type Codec struct {
+type StreamCodec struct {
 	s  network.Stream
 	sr *snappy.Reader
 	sw *snappy.Writer
@@ -22,10 +22,10 @@ type Codec struct {
 	mu sync.Mutex
 }
 
-func NewCodec(
+func NewStreamCodec(
 	s network.Stream,
-) *Codec {
-	return &Codec{
+) proto.StreamCodec {
+	return &StreamCodec{
 		s:  s,
 		sr: snappy.NewReader(s),
 		sw: snappy.NewWriter(s),
@@ -34,7 +34,7 @@ func NewCodec(
 
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
-func (d *Codec) WritePacket(p proto.Packet) (n int, err error) {
+func (d *StreamCodec) WritePacket(p proto.Packet) (n int, err error) {
 	if val, ok := p.(ssz.Marshaler); ok {
 		sz := val.SizeSSZ()
 		bp := bufpool.Get(sz)
@@ -59,18 +59,18 @@ func (d *Codec) WritePacket(p proto.Packet) (n int, err error) {
 }
 
 // write raw bytes to stream
-func (d *Codec) Write(payload []byte) (n int, err error) {
+func (d *StreamCodec) Write(payload []byte) (n int, err error) {
 	return d.s.Write(payload)
 }
 
 // decode into packet p, then return the packet context
-func (d *Codec) Decode(p proto.Packet) (ctx *proto.Context, err error) {
+func (d *StreamCodec) Decode(p proto.Packet) (ctx *proto.StreamContext, err error) {
 	ctx, err = d.readPacket(p)
 	return
 }
 
-func (d *Codec) readPacket(p proto.Packet) (ctx *proto.Context, err error) {
-	c := &proto.Context{
+func (d *StreamCodec) readPacket(p proto.Packet) (ctx *proto.StreamContext, err error) {
+	c := &proto.StreamContext{
 		Packet:   p,
 		Stream:   d.s,
 		Codec:    d,

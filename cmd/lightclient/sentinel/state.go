@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type LightClientEvent interface {
@@ -53,13 +54,17 @@ func (l *LightState) start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-l.events:
+			var err error
 			switch evt := ev.(type) {
 			case *p2p.LightClientUpdate:
-				l.onLightClientUpdate(evt)
+				err = l.onLightClientUpdate(evt)
 			case *p2p.LightClientFinalityUpdate:
-				l.onFinalityUpdate(evt)
+				err = l.onFinalityUpdate(evt)
 			case *p2p.LightClientOptimisticUpdate:
-				l.onOptimisticUpdate(evt)
+				err = l.onOptimisticUpdate(evt)
+			}
+			if err != nil {
+				log.Warn("failed processing state update", "err", err)
 			}
 		}
 	}
@@ -68,26 +73,20 @@ func (l *LightState) start(ctx context.Context) {
 func (l *LightState) AddUpdateEvent(u *p2p.LightClientUpdate) {
 	l.events <- u
 }
-func (l *LightState) AddOptimisticUpdateEvent(u *p2p.LightClientUpdate) {
+func (l *LightState) AddOptimisticUpdateEvent(u *p2p.LightClientOptimisticUpdate) {
 	l.events <- u
 }
-func (l *LightState) AddFinalityUpdateEvent(u *p2p.LightClientUpdate) {
+func (l *LightState) AddFinalityUpdateEvent(u *p2p.LightClientFinalityUpdate) {
 	l.events <- u
 }
 
 func (l *LightState) onOptimisticUpdate(u *p2p.LightClientOptimisticUpdate) error {
 	// TODO: validate update
-
-	//
-	l.optimistic_header = u.AttestedHeader
 	return nil
 }
 
 func (l *LightState) onFinalityUpdate(u *p2p.LightClientFinalityUpdate) error {
 	// TODO: validate update
-
-	//
-	l.finalized_header = u.FinalizedHeader
 	return nil
 }
 
@@ -102,7 +101,6 @@ func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
 	// if u.SyncAggregate.SyncCommiteeBits < min_sync_participants  {
 	// return fmt.Errorf("not enough participants in commmittee (%d/%d)", )
 	//}
-
 	if l.CurrentSlot() < uint64(u.SignatureSlot) {
 		return fmt.Errorf("current slot must be bigger or eq to sig slot")
 	}

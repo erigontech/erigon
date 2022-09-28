@@ -20,6 +20,7 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -39,6 +40,8 @@ type Sentinel struct {
 	cfg      SentinelConfig
 	peers    *peers.Peers
 	pubsub   *pubsub.PubSub
+
+	state *LightState
 }
 
 func (s *Sentinel) createLocalNode(
@@ -152,7 +155,8 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
-
+	//TODO: populate with data from config
+	s.state = NewLightState(ctx, &p2p.LightClientBootstrap{}, [32]byte{})
 	return s, nil
 }
 
@@ -169,62 +173,12 @@ func (s *Sentinel) Start() error {
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
+	if err := s.startGossip(); err != nil {
+		return fmt.Errorf("failed to subscribe to gossip err=%s", err)
+	}
 	go s.listenForPeers()
 
 	return nil
-}
-
-func (s *Sentinel) startGossip() error {
-	gossipSub, err := pubsub.NewGossipSub(s.ctx, s.host)
-	if err != nil {
-		return err
-	}
-
-	topicFinality, err := gossipSub.Join("light_client_finality_update")
-	if err != nil {
-		return err
-	}
-	finalitySubscription, err := topicFinality.Subscribe()
-	if err != nil {
-		return err
-	}
-	topicOptimistic, err := gossipSub.Join("light_client_optimistic_update")
-	if err != nil {
-		return err
-	}
-	optimisticSubscription, err := topicOptimistic.Subscribe()
-	if err != nil {
-		return err
-	}
-
-	go s.handleFinalitySubscription(finalitySubscription)
-	go s.handleOptimisticSubscription(optimisticSubscription)
-	return nil
-}
-
-func (s *Sentinel) handleFinalitySubscription(sub *pubsub.Subscription) {
-	for {
-		msg, err := sub.Next(s.ctx)
-		if err != nil {
-			log.Warn("error listen to finality subscription", "err", err)
-			continue
-		}
-		if msg.ReceivedFrom == s.host.ID() {
-			continue
-		}
-	}
-}
-func (s *Sentinel) handleOptimisticSubscription(sub *pubsub.Subscription) {
-	for {
-		msg, err := sub.Next(s.ctx)
-		if err != nil {
-			log.Warn("error listen to optimistic subscription", "err", err)
-			continue
-		}
-		if msg.ReceivedFrom == s.host.ID() {
-			continue
-		}
-	}
 }
 
 func (s *Sentinel) String() string {

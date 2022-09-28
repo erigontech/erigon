@@ -33,10 +33,10 @@ var ProtocolPrefix = "/eth2/beacon_chain/req"
 
 func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
 	return map[protocol.ID]network.StreamHandler{
-		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
-		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryHandler(statusHandler),
-		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(s.goodbyeHandler),
-		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
+		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(snappy_ssz.NewStreamCodec, pingHandler),
+		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(snappy_ssz.NewStreamCodec, statusHandler),
+		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(snappy_ssz.NewStreamCodec, s.goodbyeHandler),
+		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(snappy_ssz.NewStreamCodec, metadataHandler),
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): s.blocksByRangeHandler,
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  s.beaconBlocksByRootHandler,
 	}
@@ -51,30 +51,35 @@ func setDeadLines(stream network.Stream) {
 	}
 }
 
-func curryHandler[T proto.Packet](fn func(ctx *proto.Context, v T) error) func(network.Stream) {
+// curryStreamHandler converts a func(ctx *proto.StreamContext, dat proto.Packet) error to func(network.Stream)
+// this allows us to write encoding non specific type safe handler without performance overhead
+func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.StreamCodec, fn func(ctx *proto.StreamContext, v T) error) func(network.Stream) {
 	return func(s network.Stream) {
 		setDeadLines(s)
-		sd := snappy_ssz.NewCodec(s)
+		sd := newcodec(s)
 		val := (*new(T)).Clone().(T)
 		ctx, err := sd.Decode(val)
 		if err != nil {
+			// the stream reset error is ignored, because
 			if !strings.Contains(err.Error(), "stream reset") {
 				log.Warn("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			}
 			return
 		}
-
 		err = fn(ctx, val)
 		if err != nil {
 			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
-		log.Info("[Lightclient] Handled", "endpont", ctx.Protocol, "msg", val)
+		log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
 	}
 }
 
-func pingHandler(ctx *proto.Context, dat *p2p.Ping) error {
-	log.Info("[Lightclient] Received", "ping", dat.Id)
+// type safe handlers which all have access to the original stream & decompressed data
+
+// ping handler
+func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
+	// since packets are just structs, they can be resent with no issue
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
@@ -82,12 +87,13 @@ func pingHandler(ctx *proto.Context, dat *p2p.Ping) error {
 	return nil
 }
 
-func metadataHandler(ctx *proto.Context, dat *proto.EmptyPacket) error {
+// TODO: respond with proper metadata
+func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
 	return nil
 }
 
-func statusHandler(ctx *proto.Context, dat *p2p.Status) error {
-	log.Info("Got status call",
+func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
+	log.Info("[ReqResp] Status",
 		"epoch", dat.FinalizedEpoch,
 		"final root", hexb(dat.FinalizedRoot),
 		"head root", hexb(dat.HeadRoot),
@@ -101,9 +107,9 @@ func hexb(b []byte) string {
 	return hex.EncodeToString(b)
 }
 
-func (s *Sentinel) goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
+func (s *Sentinel) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) error {
 	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
-	_, err := ctx.Stream.Write(ctx.Raw)
+	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
 	}
@@ -118,10 +124,6 @@ func (s *Sentinel) blocksByRangeHandler(stream network.Stream) {
 
 func (s *Sentinel) beaconBlocksByRootHandler(stream network.Stream) {
 	log.Info("Got beacon block by root handler call")
-}
-
-func (s *Sentinel) metadataHandler(stream network.Stream) {
-	log.Info("Got metadata handler call")
 }
 
 func (s *Sentinel) setupHandlers() {
