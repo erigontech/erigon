@@ -206,7 +206,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 
-	if err := s.BeginSubscription(); err != nil {
+	if err := s.BeginSubscription(blockSubnetTopicFormat); err != nil {
 		return err
 	}
 

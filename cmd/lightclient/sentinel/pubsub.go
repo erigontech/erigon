@@ -37,12 +37,15 @@ func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
 	s.runningSubscriptionsLock.Lock()
 	defer s.runningSubscriptionsLock.Unlock()
 
-	topicHandle, err := s.SubscribeToTopic(topic)
+	topicHandle, err := s.AddToTopic(topic)
 	if err != nil {
 		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
 	}
+	if topicHandle == nil {
+		return fmt.Errorf("failed to get topic handle while subscribing")
+	}
 
-	subscription, err := topicHandle.Subscribe(opt...)
+	subscription, err := topicHandle.Subscribe()
 	if err != nil {
 		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
 	}
@@ -51,8 +54,8 @@ func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
 	return nil
 }
 
-// subscribes to topics that the sentinel is not subscribe to
-func (s *Sentinel) SubscribeToTopic(topic string, opts ...pubsub.TopicOpt) (topicHandle *pubsub.Topic, err error) {
+// Add the topics to the sentinel
+func (s *Sentinel) AddToTopic(topic string, opts ...pubsub.TopicOpt) (topicHandle *pubsub.Topic, err error) {
 	s.subscribedTopicLock.Lock()
 	defer s.subscribedTopicLock.Unlock()
 
@@ -68,7 +71,7 @@ func (s *Sentinel) SubscribeToTopic(topic string, opts ...pubsub.TopicOpt) (topi
 		topicHandle = s.subscribedTopics[topic]
 	}
 
-	return nil, nil
+	return topicHandle, nil
 }
 
 // unsubscribes from topics
@@ -76,11 +79,15 @@ func (s *Sentinel) UnsubscribeToTopic(topic string) error {
 	s.subscribedTopicLock.Lock()
 	defer s.subscribedTopicLock.Unlock()
 
+	s.runningSubscriptionsLock.Lock()
+	defer s.runningSubscriptionsLock.Unlock()
+
 	// unsubscribe from topic of we are subscribe to it
 	if topicHandler, ok := s.subscribedTopics[topic]; ok {
 		if err := topicHandler.Close(); err != nil {
 			return fmt.Errorf("failed to unsubscribe from topic %s, error=%s", topic, err)
 		}
+		delete(s.runningSubscriptions, topic)
 		delete(s.subscribedTopics, topic)
 	}
 
