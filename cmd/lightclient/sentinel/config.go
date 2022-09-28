@@ -34,6 +34,7 @@ type SentinelConfig struct {
 	DiscoverConfig discover.Config
 	NetworkConfig  clparams.NetworkConfig
 	GenesisConfig  clparams.GenesisConfig
+	BeaconConfig   clparams.BeaconChainConfig
 	IpAddr         string
 	Port           int
 	TCPPort        uint

@@ -172,27 +172,6 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	},
 }
 
-func GetConfigsByNetwork(net NetworkType) (*discover.Config, GenesisConfig, NetworkConfig, error) {
-	networkConfig := NetworkConfigs[net]
-	bootnodes := networkConfig.bootNodes
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		return nil, GenesisConfig{}, NetworkConfig{}, err
-	}
-	enodes := []*enode.Node{}
-	for _, addr := range bootnodes {
-		enode, err := enode.Parse(enode.ValidSchemes, addr)
-		if err != nil {
-			return nil, GenesisConfig{}, NetworkConfig{}, err
-		}
-		enodes = append(enodes, enode)
-	}
-	return &discover.Config{
-		PrivateKey: privateKey,
-		Bootnodes:  enodes,
-	}, GenesisConfigs[net], networkConfig, nil
-}
-
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
@@ -658,4 +637,25 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	GoerliNetwork:  goerliConfig(),
+}
+
+func GetConfigsByNetwork(net NetworkType) (*discover.Config, GenesisConfig, NetworkConfig, BeaconChainConfig, error) {
+	networkConfig := NetworkConfigs[net]
+	bootnodes := networkConfig.bootNodes
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
+	}
+	enodes := []*enode.Node{}
+	for _, addr := range bootnodes {
+		enode, err := enode.Parse(enode.ValidSchemes, addr)
+		if err != nil {
+			return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
+		}
+		enodes = append(enodes, enode)
+	}
+	return &discover.Config{
+		PrivateKey: privateKey,
+		Bootnodes:  enodes,
+	}, GenesisConfigs[net], networkConfig, BeaconConfigs[net], nil
 }
