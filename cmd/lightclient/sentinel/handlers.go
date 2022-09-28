@@ -71,7 +71,7 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
-		log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
+		//	log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
 	}
 }
 
@@ -92,7 +92,7 @@ func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
 }
 
 func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
-	log.Info("[ReqResp] Status",
+	log.Info("[Incoming Request] Status",
 		"epoch", dat.FinalizedEpoch,
 		"final root", hexb(dat.FinalizedRoot),
 		"head root", hexb(dat.HeadRoot),

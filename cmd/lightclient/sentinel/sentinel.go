@@ -173,6 +173,9 @@ func (s *Sentinel) Start() error {
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
+	if err := s.startGossip(); err != nil {
+		return fmt.Errorf("failed to subscribe to gossip err=%s", err)
+	}
 	go s.listenForPeers()
 
 	return nil
