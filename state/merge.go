@@ -315,7 +315,7 @@ func (d *Domain) mergeFiles(valuesFiles, indexFiles, historyFiles []*filesItem, 
 	}
 	if r.values {
 		datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep))
-		if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+		if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, d.dir, compress.MinPatternScore, d.workers, log.LvlDebug); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
 		}
 		var cp CursorHeap
@@ -465,7 +465,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 		}
 	}()
 	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
-	if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, ii.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+	if comp, err = compress.NewCompressor(context.Background(), "Snapshots merge", datPath, ii.dir, compress.MinPatternScore, ii.workers, log.LvlDebug); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
 	var cp CursorHeap
@@ -602,7 +602,7 @@ func (h *History) mergeFiles(indexFiles, historyFiles []*filesItem, r HistoryRan
 		}()
 		datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
 		idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
-		if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, h.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+		if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, h.dir, compress.MinPatternScore, h.workers, log.LvlDebug); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
 		var cp CursorHeap

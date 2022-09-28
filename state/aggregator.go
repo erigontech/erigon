@@ -171,6 +171,17 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 	a.tracesTo.SetTxNum(txNum)
 }
 
+func (a *Aggregator) SetWorkers(i int) {
+	a.accounts.workers = i
+	a.storage.workers = i
+	a.code.workers = i
+	a.commitment.workers = i
+	a.logAddrs.workers = i
+	a.logTopics.workers = i
+	a.tracesFrom.workers = i
+	a.tracesTo.workers = i
+}
+
 type AggCollation struct {
 	accounts   Collation
 	storage    Collation
