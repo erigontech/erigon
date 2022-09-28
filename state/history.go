@@ -691,87 +691,14 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 // GetNoStateWithRecent searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	var search ctxItem
-	search.startTxNum = txNum
-	search.endTxNum = txNum
-	var foundTxNum uint64
-	var foundEndTxNum uint64
-	var foundStartTxNum uint64
-	var found bool
-	var anyItem bool // Whether any filesItem has been looked at in the loop below
-	var topState ctxItem
-	hc.historyFiles.AscendGreaterOrEqual(search, func(i ctxItem) bool {
-		topState = i
-		return false
-	})
-	hc.indexFiles.AscendGreaterOrEqual(search, func(item ctxItem) bool {
-		anyItem = true
-		offset := item.reader.Lookup(key)
-		g := item.getter
-		g.Reset(offset)
-		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			//start := time.Now()
-			n, ok := ef.Search(txNum)
-			//d.stats.EfSearchTime += time.Since(start)
-			if ok {
-				foundTxNum = n
-				foundEndTxNum = item.endTxNum
-				foundStartTxNum = item.startTxNum
-				found = true
-				return false
-			} else if item.endTxNum > txNum && item.endTxNum >= topState.endTxNum {
-				return false
-			}
-		}
-		return true
-	})
-	if found {
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		var historyItem ctxItem
-		search.startTxNum = foundStartTxNum
-		search.endTxNum = foundEndTxNum
-		historyItem, ok := hc.historyFiles.Get(search)
-		if !ok {
-			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
-		}
-		offset := historyItem.reader.Lookup2(txKey[:], key)
-		g := historyItem.getter
-		g.Reset(offset)
-		if hc.h.compressVals {
-			v, _ := g.Next(nil)
-			return v, true, nil
-		}
-		v, _ := g.NextUncompressed()
+	v, ok, err := hc.GetNoState(key, txNum)
+	if err != nil {
+		return nil, ok, err
+	}
+	if ok {
 		return v, true, nil
 	}
 
-	if anyItem {
-		// If there were no changes but there were history files, the value can be obtained from value files
-		var val []byte
-		hc.historyFiles.DescendLessOrEqual(topState, func(item ctxItem) bool {
-			if item.reader.Empty() {
-				return true
-			}
-			offset := item.reader.Lookup(key)
-			g := item.getter
-			g.Reset(offset)
-			if g.HasNext() {
-				if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
-					if hc.h.compressVals {
-						val, _ = g.Next(nil)
-					} else {
-						val, _ = g.NextUncompressed()
-					}
-					return false
-				}
-			}
-			return true
-		})
-		return val, true, nil
-	}
 	// Value not found in history files, look in the recent history
 	if roTx == nil {
 		return nil, false, fmt.Errorf("roTx is nil")
