@@ -32,7 +32,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var disconnectPeerCh = make(chan peer.ID, 0)
+var disconnectPeerCh = make(chan peer.ID)
 
 type Sentinel struct {
 	started  bool
