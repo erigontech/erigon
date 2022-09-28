@@ -332,7 +332,7 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 	}
 	tx.CollectMetrics()
-	return bucketSizes[:]
+	return bucketSizes
 }
 
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool, quiet bool) (err error) {
