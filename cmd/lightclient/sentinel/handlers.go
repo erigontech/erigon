@@ -37,22 +37,22 @@ func (s *Sentinel) pingHandler(stream network.Stream) {
 	pingBytes := make([]byte, 8)
 	n, err := stream.Read(pingBytes)
 	if err != nil {
-		log.Warn("handler crashed", "err", err)
+		log.Debug("handler crashed", "err", err)
 		return
 	}
 	if n != 8 {
-		log.Warn("Invalid ping received")
+		log.Debug("Invalid ping received")
 		return
 	}
-	log.Info("[Lightclient] Received", "ping", ssz.UnmarshallUint64(pingBytes))
+	log.Trace("[Lightclient] Received", "ping", ssz.UnmarshallUint64(pingBytes))
 	// Send it back
 	n, err = stream.Write(pingBytes)
 	if err != nil {
-		log.Warn("handler crashed", "err", err)
+		log.Debug("handler crashed", "err", err)
 		return
 	}
 	if n != 8 {
-		log.Warn("Could not send Ping")
+		log.Debug("Could not send Ping")
 	}
 }
 
@@ -69,28 +69,28 @@ func (s *Sentinel) goodbyeHandler(stream network.Stream) {
 		return
 	}
 	if err != nil {
-		log.Warn("Goodbye handler crashed", "err", err)
+		log.Debug("Goodbye handler crashed", "err", err)
 		return
 	}
 
 	if n != 8 {
-		log.Warn("Invalid goodbye message received")
+		log.Debug("Invalid goodbye message received")
 		return
 	}
 
-	log.Info("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
+	log.Trace("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
 	n, err = stream.Write(goodByeBytes)
 	if err == network.ErrReset {
 		// We disconnected prior so this error can be ignored.
 		return
 	}
 	if err != nil {
-		log.Warn("Goodbye handler crashed", "err", err)
+		log.Debug("Goodbye handler crashed", "err", err)
 		return
 	}
 
 	if n != 8 {
-		log.Warn("Could not send Goodbye")
+		log.Debug("Could not send Goodbye")
 	}
 
 	s.peers.DisconnectPeer(stream.Conn().RemotePeer())
