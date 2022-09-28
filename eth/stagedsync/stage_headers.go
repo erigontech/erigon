@@ -550,14 +550,6 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
-	forkingPoint, err := forkingPoint(ctx, tx, headerInserter, cfg.blockReader, header)
-	if err != nil {
-		return nil, false, err
-	}
-	forkingHash, err := cfg.blockReader.CanonicalHash(ctx, tx, forkingPoint)
-
-	canExtendCanonical := forkingHash == currentHeadHash
-
 	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
 	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
@@ -576,41 +568,6 @@ func verifyAndSaveNewPoSHeader(
 		LatestValidHash: latestValidHash,
 		ValidationError: validationError,
 	}, success, nil
-
-	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-		return nil, false, err
-	}
-
-	if !canExtendCanonical {
-		log.Info("Side chain", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
-	}
-
-	// OK, we're on the canonical chain
-	if requestStatus == engineapi.New {
-		cfg.hd.SetPendingPayloadHash(headerHash)
-	}
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	// Extend canonical chain by the new header
-	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
-	if err != nil {
-		return nil, false, err
-	}
-
-	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-	if err != nil {
-		return nil, false, err
-	}
-
-	err = s.Update(tx, headerNumber)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return nil, true, nil
 }
 
 func schedulePoSDownload(
