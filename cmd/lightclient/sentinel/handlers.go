@@ -29,18 +29,17 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-var (
-	ProtocolPrefix = "/eth2/beacon_chain/req"
-	reservedBytes  = 128
-)
+var ProtocolPrefix = "/eth2/beacon_chain/req"
 
-var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
-	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryHandler(statusHandler),
-	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(goodbyeHandler),
-	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
-	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
-	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
+func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
+	return map[protocol.ID]network.StreamHandler{
+		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryHandler(pingHandler),
+		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryHandler(statusHandler),
+		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryHandler(s.goodbyeHandler),
+		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryHandler(metadataHandler),
+		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): s.blocksByRangeHandler,
+		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  s.beaconBlocksByRootHandler,
+	}
 }
 
 func setDeadLines(stream network.Stream) {
@@ -102,29 +101,31 @@ func hexb(b []byte) string {
 	return hex.EncodeToString(b)
 }
 
-func goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
+func (s *Sentinel) goodbyeHandler(ctx *proto.Context, dat *p2p.Goodbye) error {
 	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
 	_, err := ctx.Stream.Write(ctx.Raw)
 	if err != nil {
 		return err
 	}
-	peerId := ctx.Stream.Conn().RemotePeer()
-	disconnectPeerCh <- peerId
+
+	s.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	return nil
 }
 
-func blocksByRangeHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) blocksByRangeHandler(stream network.Stream) {
 	log.Info("Got block by range handler call")
 }
 
-func beaconBlocksByRootHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) beaconBlocksByRootHandler(stream network.Stream) {
 	log.Info("Got beacon block by root handler call")
 }
 
+func (s *Sentinel) metadataHandler(stream network.Stream) {
+	log.Info("Got metadata handler call")
+}
+
 func (s *Sentinel) setupHandlers() {
-	for id, handler := range handlers {
+	for id, handler := range getHandlers(s) {
 		s.host.SetStreamHandler(id, handler)
 	}
 }
