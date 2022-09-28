@@ -133,8 +133,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
 
-const Erigon21SegmentSize = 500_000
-const Erigon21MinSegmentSize = 1_000
+const Erigon3SeedableSteps = 32
+const Erigon2SegmentSize = 500_000
+const Erigon2MinSegmentSize = 1_000
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -146,7 +147,7 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return common.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon21SegmentSize }
+func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2SegmentSize }
 func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }

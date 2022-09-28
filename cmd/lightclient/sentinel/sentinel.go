@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
@@ -37,6 +38,7 @@ type Sentinel struct {
 	host     host.Host
 	cfg      SentinelConfig
 	peers    *peers.Peers
+	pubsub   *pubsub.PubSub
 }
 
 func (s *Sentinel) createLocalNode(
@@ -107,13 +109,27 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.setupHandlers()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
-
 	return net, err
+}
+
+func (s *Sentinel) pubsubOptions() []pubsub.Option {
+	pubsubQueueSize := 600
+	psOpts := []pubsub.Option{
+		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithNoAuthor(),
+		pubsub.WithSubscriptionFilter(nil),
+		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
+		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
+		pubsub.WithValidateQueueSize(pubsubQueueSize),
+		pubsub.WithGossipSubParams(pubsub.DefaultGossipSubParams()),
+	}
+	return psOpts
 }
 
 // This is just one of the examples from the libp2p repository.
@@ -136,6 +152,7 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
+
 	return s, nil
 }
 

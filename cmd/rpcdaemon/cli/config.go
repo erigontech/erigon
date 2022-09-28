@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
@@ -408,9 +407,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot)
 	if cfg.WithDatadir {
-		e22Dir := filepath.Join(cfg.DataDir, "erigon22")
-		dir.MustExist(e22Dir)
-		if agg, err = libstate.NewAggregator22(e22Dir, ethconfig.HistoryV3AggregationStep); err != nil {
+		dirs := datadir.New(cfg.DataDir)
+		if agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 		if err = agg.ReopenFiles(); err != nil {

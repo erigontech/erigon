@@ -131,7 +131,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	if api.historyV3(tx) {
-		return api.getLogs22(ctx, tx, begin, end, crit)
+		return api.getLogsV3(ctx, tx, begin, end, crit)
 	}
 
 	blockNumbers := roaring.New()
@@ -267,7 +267,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 	return result, nil
 }
 
-func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
+func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
 	var fromTxNum, toTxNum uint64
@@ -381,17 +381,22 @@ func (api *APIImpl) getLogs22(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		ibs.Prepare(txHash, lastBlockHash, txIndex)
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, err
 		}
-		filtered := filterLogs(ibs.GetLogs(txHash), crit.Addresses, crit.Topics)
+		rawLogs := ibs.GetLogs(txHash)
+		var logIndex uint
+		for _, log := range rawLogs {
+			log.Index = logIndex
+			logIndex++
+		}
+		filtered := filterLogs(rawLogs, crit.Addresses, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = lastBlockHash
 			log.TxHash = txHash
-			log.Index = 0
 		}
 		logs = append(logs, filtered...)
 	}
@@ -491,14 +496,17 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if txn == nil {
-		borTx, blockHash, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
+		borTx, _, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if borTx == nil {
 			return nil, nil
 		}
-		borReceipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		borReceipt, err := rawdb.ReadBorReceipt(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 		if borReceipt == nil {
 			return nil, nil
 		}
@@ -552,7 +560,10 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
-			borReceipt := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum)
+			borReceipt, err := rawdb.ReadBorReceipt(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
 			if borReceipt != nil {
 				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
 			}
