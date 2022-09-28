@@ -34,8 +34,8 @@ func NewStreamCodec(
 
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
-func (d *StreamCodec) WritePacket(p proto.Packet) (n int, err error) {
-	if val, ok := p.(ssz.Marshaler); ok {
+func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
+	if val, ok := pkt.(ssz.Marshaler); ok {
 		sz := val.SizeSSZ()
 		bp := bufpool.Get(sz)
 		defer bufpool.Put(bp)
@@ -56,7 +56,7 @@ func (d *StreamCodec) WritePacket(p proto.Packet) (n int, err error) {
 		}
 		return n0 + n1, nil
 	}
-	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(p))
+	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
 }
 
 // write raw bytes to stream
