@@ -177,7 +177,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", fmt.Sprintf("0x%x", notifyToHash), "header sending", headerTiming, "log sending", logTiming)
+		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }
