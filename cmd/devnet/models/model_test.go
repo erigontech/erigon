@@ -1,8 +1,12 @@
 package models
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestParameterFromArgument(t *testing.T) {
+	enode := fmt.Sprintf("%q", "1234567")
 	testCases := []struct {
 		argInput    string
 		paramInput  string
@@ -12,6 +16,7 @@ func TestParameterFromArgument(t *testing.T) {
 		{"--datadir", "./dev", "--datadir=./dev", nil},
 		{"--chain", "dev", "--chain=dev", nil},
 		{"--dev.period", "30", "--dev.period=30", nil},
+		{"--staticpeers", enode, "--staticpeers=" + enode, nil},
 		{"", "30", "", ErrInvalidArgument},
 	}
 

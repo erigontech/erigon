@@ -2,22 +2,50 @@ package node
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/utils"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 )
 
+// Start starts the process for two erigon nodes running on the dev chain
+func Start(wg *sync.WaitGroup) {
+	// add one goroutine to the wait-list
+	wg.Add(1)
+
+	// start the first node
+	go StartNode(wg, miningNodeArgs())
+
+	// sleep for a while to allow first node to start
+	time.Sleep(time.Second * 10)
+
+	// get the enode of the first node
+	enode, err := getEnode()
+	if err != nil {
+		// TODO: Log the error, it means node did not start well
+		fmt.Printf("Error happened: %s\n", err)
+	}
+
+	// add one goroutine to the wait-list
+	wg.Add(1)
+
+	// start the second node, connect it to the mining node with the enode
+	go StartNode(wg, nonMiningNodeArgs(2, enode))
+}
+
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup) {
+func StartNode(wg *sync.WaitGroup, args []string) {
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
 		panicResult := recover()
@@ -32,12 +60,6 @@ func StartNode(wg *sync.WaitGroup) {
 		os.Exit(1)
 	}()
 
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam)
-	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
-	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
-	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
-
-	args := []string{models.BuildDirArg, dataDir, chainType, models.Mine, devPeriod, verbosity}
 	app := erigonapp.MakeApp(runNode, erigoncli.DefaultFlags)
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
@@ -49,6 +71,7 @@ func StartNode(wg *sync.WaitGroup) {
 	}
 }
 
+// runNode configures, creates and serves an erigon node
 func runNode(ctx *cli.Context) {
 	logger := log.New()
 
@@ -68,4 +91,42 @@ func runNode(ctx *cli.Context) {
 	if err != nil {
 		log.Error("error while serving Devnet node", "err", err)
 	}
+}
+
+// miningNodeArgs returns custom args for starting a mining node
+func miningNodeArgs() []string {
+	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, "./dev")
+	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
+	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
+	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
+	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, "admin,eth,erigon,web3,net,debug,trace,txpool,parity")
+
+	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, devPeriod, verbosity}
+}
+
+// nonMiningNodeArgs returns custom args for starting a non-mining node
+func nonMiningNodeArgs(nodeNumber int, enode string) []string {
+	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, "./dev"+fmt.Sprintf("%d", nodeNumber))
+	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
+	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
+	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, fmt.Sprintf("%s", enode))
+
+	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, verbosity}
+}
+
+// getEnode returns the enode of the mining node
+func getEnode() (string, error) {
+	nodeInfo, err := requests.AdminNodeInfo(0)
+	if err != nil {
+		return "", err
+	}
+
+	enode, err := utils.UniqueIDFromEnode(nodeInfo.Enode)
+	if err != nil {
+		return "", err
+	}
+
+	return enode, nil
 }

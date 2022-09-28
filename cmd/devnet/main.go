@@ -10,11 +10,11 @@ func main() {
 	// wait group variable to prevent main function from terminating until routines are finished
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
 	defer utils.ClearDevDB()
 
-	// Start the first erigon node in a go routine
-	go node.StartNode(&wg)
+	// start the first erigon node in a go routine
+	node.Start(&wg)
+
+	// wait for all goroutines to complete before exiting
 	wg.Wait()
 }
