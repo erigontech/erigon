@@ -44,8 +44,9 @@ func (d *StreamCodec) WritePacket(p proto.Packet) (n int, err error) {
 		if err != nil {
 			return 0, fmt.Errorf("marshal ssz: %w", err)
 		}
-		vi := binary.AppendVarint(p, int64(sz))
-		n0, err := d.s.Write(vi)
+		vi := make([]byte, 10)
+		vin := binary.PutVarint(vi, int64(sz))
+		n0, err := d.s.Write(vi[:vin])
 		if err != nil {
 			return 0, err
 		}

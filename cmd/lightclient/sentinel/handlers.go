@@ -112,7 +112,6 @@ func (s *Sentinel) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) er
 	if err != nil {
 		return err
 	}
-
 	s.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	return nil
 }
