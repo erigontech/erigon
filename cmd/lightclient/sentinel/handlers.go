@@ -76,7 +76,6 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 }
 
 // type safe handlers which all have access to the original stream & decompressed data
-
 // ping handler
 func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
 	// since packets are just structs, they can be resent with no issue
