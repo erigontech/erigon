@@ -46,7 +46,7 @@ type Progress struct {
 	prevRepeatCount    uint64
 }
 
-func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -58,7 +58,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	if count > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
 	}
-	log.Info("Transaction replay",
+	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
 		"at blk", outputBlockNum,
 		"input blk", atomic.LoadUint64(&inputBlockNum),
@@ -174,7 +174,7 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -319,7 +319,7 @@ loop:
 				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
-					progress.Log(rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
