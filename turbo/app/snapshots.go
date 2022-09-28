@@ -251,7 +251,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, int(1*datasize.MB))
+	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -296,18 +296,14 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args[0]
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	workers := runtime.GOMAXPROCS(-1) - 1
-	if workers < 1 {
-		workers = 1
-	}
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, workers, log.LvlInfo)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	r := bufio.NewReaderSize(os.Stdin, int(1*datasize.MB))
+	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
-	t := time.Now()
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
@@ -330,7 +326,6 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	log.Info("[compress] AddWord loop", "took", time.Since(t))
 	if err := c.Compress(); err != nil {
 		return err
 	}

@@ -576,7 +576,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 	}
-
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, allSnapshots, backend.agg, ethBackendRPC, backend.txPool2GrpcServer, miningRPC)
@@ -852,7 +851,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 		return nil, nil, nil, err
 	}
 	if err = agg.ReopenFiles(); err != nil {
-		panic(err)
+		return nil, nil, nil, err
 	}
 
 	return blockReader, allSnapshots, agg, nil

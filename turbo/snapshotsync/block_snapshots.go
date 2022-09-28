@@ -1087,8 +1087,6 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
-	log.Log(lvl, fmt.Sprintf("snapshots.Ranges(): %s -> rangesToMerge: %s\n", snapshots.Ranges(), rangesToMerge))
-
 	if len(rangesToMerge) == 0 {
 		return nil
 	}

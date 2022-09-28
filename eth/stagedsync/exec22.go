@@ -934,7 +934,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		s.BlockNumber = blockNum
-		log.Info("recon commit ", "progress", blockNum)
 		return nil
 	}); err != nil {
 		return err
