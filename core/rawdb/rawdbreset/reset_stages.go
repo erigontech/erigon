@@ -6,14 +6,12 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"go.uber.org/atomic"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
@@ -47,10 +45,21 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader, tmpdir string) error {
-	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.EthTx, nil, math.MaxUint32)
-	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.NonCanonicalTxs, nil, math.MaxUint32)
-	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.Headers, nil, math.MaxUint32)
-	kv.ReadAhead(context.Background(), db, atomic.NewBool(false), kv.BlockBody, nil, math.MaxUint32)
+	go func() { //inverted read-ahead - to warmup data
+		_ = db.View(context.Background(), func(tx kv.Tx) error {
+			c, err := tx.Cursor(kv.EthTx)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}()
 
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
