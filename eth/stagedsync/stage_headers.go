@@ -43,7 +43,6 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
-	memoryOverlay     bool
 	tmpdir            string
 
 	snapshots     *snapshotsync.RoSnapshots
@@ -62,7 +61,6 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	memoryOverlay bool,
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
@@ -83,7 +81,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
-		memoryOverlay:     memoryOverlay,
 	}
 }
 
@@ -280,9 +277,7 @@ func startHandlingForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
-	if cfg.memoryOverlay {
-		defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
-	}
+	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
@@ -329,7 +324,7 @@ func startHandlingForkChoice(
 
 	headerNumber := header.Number.Uint64()
 
-	if cfg.memoryOverlay && headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
+	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
 		log.Info("Flushing in-memory state")
 		if err := cfg.forkValidator.FlushExtendingFork(tx); err != nil {
 			return nil, err
@@ -563,26 +558,24 @@ func verifyAndSaveNewPoSHeader(
 
 	canExtendCanonical := forkingHash == currentHeadHash
 
-	if cfg.memoryOverlay {
-		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-		extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
-		if criticalError != nil {
-			return nil, false, criticalError
-		}
-		success = validationError == nil
-		if !success {
-			log.Warn("Validation failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
-			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
-		} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-			return nil, false, err
-		}
-		return &engineapi.PayloadStatus{
-			Status:          status,
-			LatestValidHash: latestValidHash,
-			ValidationError: validationError,
-		}, success, nil
+	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
+	if criticalError != nil {
+		return nil, false, criticalError
 	}
+	success = validationError == nil
+	if !success {
+		log.Warn("Validation failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
+		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+	} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+		return nil, false, err
+	}
+	return &engineapi.PayloadStatus{
+		Status:          status,
+		LatestValidHash: latestValidHash,
+		ValidationError: validationError,
+	}, success, nil
 
 	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
