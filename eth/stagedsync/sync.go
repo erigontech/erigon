@@ -302,7 +302,7 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func PrintTables(db kv.RoDB, tx kv.RwTx) error {
+func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	if tx == nil {
 		return nil
 	}
@@ -317,23 +317,22 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) error {
 	for _, bucket := range buckets {
 		sz, err1 := tx.BucketSize(bucket)
 		if err1 != nil {
-			return err1
+			return bucketSizes
 		}
 		bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
 	}
 
 	sz, err1 := tx.BucketSize("freelist")
 	if err1 != nil {
-		return err1
+		return bucketSizes
 	}
 	bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
 	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
 	if db != nil {
 		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 	}
-	log.Info("Tables", bucketSizes...)
 	tx.CollectMetrics()
-	return nil
+	return bucketSizes[:]
 }
 
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool, quiet bool) (err error) {
