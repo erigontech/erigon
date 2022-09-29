@@ -85,7 +85,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:          stages.Senders,
 			Description: "Recover senders from tx signatures",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx)
+				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindSendersStage(u, tx, senders, ctx)
@@ -111,7 +111,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnHashStateStage(s, tx, hashState, ctx)
+				return SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindHashStateStage(u, s, tx, hashState, ctx)
@@ -128,7 +128,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx)
 					return err
 				}
-				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
+				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, quiet)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -277,7 +277,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.Senders,
 			Description: "Recover senders from tx signatures",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx)
+				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindSendersStage(u, tx, senders, ctx)
@@ -297,7 +297,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnHashStateStage(s, tx, hashState, ctx)
+				return SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindHashStateStage(u, s, tx, hashState, ctx)
@@ -307,7 +307,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
+				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, quiet)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
