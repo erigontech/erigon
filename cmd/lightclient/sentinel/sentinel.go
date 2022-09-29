@@ -18,8 +18,11 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"sync"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -38,7 +41,14 @@ type Sentinel struct {
 	host     host.Host
 	cfg      SentinelConfig
 	peers    *peers.Peers
-	pubsub   *pubsub.PubSub
+
+	state                *lightclient.LightState
+	pubsub               *pubsub.PubSub
+	subscribedTopics     map[string]*pubsub.Topic
+	runningSubscriptions map[string]*pubsub.Subscription
+
+	subscribedTopicLock      sync.Mutex
+	runningSubscriptionsLock sync.Mutex
 }
 
 func (s *Sentinel) createLocalNode(
@@ -135,8 +145,12 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 // This is just one of the examples from the libp2p repository.
 func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx: ctx,
-		cfg: cfg,
+		ctx:                      ctx,
+		cfg:                      cfg,
+		subscribedTopics:         make(map[string]*pubsub.Topic),
+		runningSubscriptions:     make(map[string]*pubsub.Subscription),
+		subscribedTopicLock:      sync.Mutex{},
+		runningSubscriptionsLock: sync.Mutex{},
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -152,7 +166,15 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
+	//TODO: populate with data from config
+	s.state = lightclient.NewLightState(ctx, &p2p.LightClientBootstrap{}, [32]byte{})
 
+	gossipSubscription, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
+	if err != nil {
+		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%s", err)
+	}
+
+	s.pubsub = gossipSubscription
 	return s, nil
 }
 
@@ -169,7 +191,12 @@ func (s *Sentinel) Start() error {
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
 	}
+
 	go s.listenForPeers()
+
+	if err := s.BeginSubscription("/eth2/4a26c58b/beacon_block/ssz_snappy"); err != nil {
+		return err
+	}
 
 	return nil
 }

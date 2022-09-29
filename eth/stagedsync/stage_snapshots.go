@@ -119,14 +119,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
-				}
-			}
-
-			if cfg.historyV3 {
-				if err := cfg.agg.BuildMissedIndices(); err != nil {
-					return err
 				}
 			}
 
@@ -136,6 +130,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.dbEventNotifier != nil {
 				cfg.dbEventNotifier.OnNewSnapshot()
 			}
+		}
+	}
+
+	if cfg.historyV3 {
+		if err := cfg.agg.BuildMissedIndices(); err != nil {
+			return err
+		}
+		if cfg.dbEventNotifier != nil {
+			cfg.dbEventNotifier.OnNewSnapshot()
 		}
 	}
 

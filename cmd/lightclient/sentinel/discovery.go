@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
@@ -107,9 +108,11 @@ func (s *Sentinel) connectToBootnodes() error {
 func (s *Sentinel) setupENR(
 	node *enode.LocalNode,
 ) (*enode.LocalNode, error) {
-	// TODO(Giulio2002): Implement fork id.
-
-	// Setup subnets key
+	forkId, err := fork.ComputeForkId(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		return nil, err
+	}
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
 	return node, nil

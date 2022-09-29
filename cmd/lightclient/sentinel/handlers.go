@@ -14,86 +14,95 @@
 package sentinel
 
 import (
+	"encoding/hex"
+	"reflect"
+	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 var ProtocolPrefix = "/eth2/beacon_chain/req"
 
 func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
 	return map[protocol.ID]network.StreamHandler{
-		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   s.pingHandler,
-		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 s.statusHandler,
-		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                s.goodbyeHandler,
+		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
+		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(ssz_snappy.NewStreamCodec, s.goodbyeHandler),
+		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): s.blocksByRangeHandler,
 		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  s.beaconBlocksByRootHandler,
-		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               s.metadataHandler,
 	}
 }
 
-func (s *Sentinel) pingHandler(stream network.Stream) {
-	pingBytes := make([]byte, 8)
-	n, err := stream.Read(pingBytes)
-	if err != nil {
-		log.Debug("handler crashed", "err", err)
-		return
-	}
-	if n != 8 {
-		log.Debug("Invalid ping received")
-		return
-	}
-	log.Trace("[Lightclient] Received", "ping", ssz.UnmarshallUint64(pingBytes))
-	// Send it back
-	n, err = stream.Write(pingBytes)
-	if err != nil {
-		log.Debug("handler crashed", "err", err)
-		return
-	}
-	if n != 8 {
-		log.Debug("Could not send Ping")
+// curryStreamHandler converts a func(ctx *proto.StreamContext, dat proto.Packet) error to func(network.Stream)
+// this allows us to write encoding non specific type safe handler without performance overhead
+func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.StreamCodec, fn func(ctx *proto.StreamContext, v T) error) func(network.Stream) {
+	return func(s network.Stream) {
+		sd := newcodec(s)
+		var t T
+		val := t.Clone().(T)
+		ctx, err := sd.Decode(val)
+		if err != nil {
+			// the stream reset error is ignored, because
+			if !strings.Contains(err.Error(), "stream reset") {
+				log.Debug("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			}
+			return
+		}
+		err = fn(ctx, val)
+		if err != nil {
+			log.Debug("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			return
+		}
+		log.Trace("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpoint", ctx.Protocol, "msg", val)
 	}
 }
 
-func (s *Sentinel) statusHandler(stream network.Stream) {
-
-	log.Info("Got status request")
+// type safe handlers which all have access to the original stream & decompressed data
+// ping handler
+func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
+	// since packets are just structs, they can be resent with no issue
+	_, err := ctx.Codec.WritePacket(dat)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Sentinel) goodbyeHandler(stream network.Stream) {
-	goodByeBytes := make([]byte, 8)
-	n, err := stream.Read(goodByeBytes)
-	if err == network.ErrReset {
-		// Handle data race.
-		return
-	}
+// TODO: respond with proper metadata
+func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
+	return nil
+}
+
+func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
+	log.Info("[ReqResp] Status",
+		"epoch", dat.FinalizedEpoch,
+		"final root", hexb(dat.FinalizedRoot),
+		"head root", hexb(dat.HeadRoot),
+		"head slot", dat.HeadSlot,
+		"fork digest", hexb(dat.ForkDigest),
+	)
+	return nil
+}
+
+func hexb(b []byte) string {
+	return hex.EncodeToString(b)
+}
+
+func (s *Sentinel) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) error {
+	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
-		log.Debug("Goodbye handler crashed", "err", err)
-		return
+		return err
 	}
-
-	if n != 8 {
-		log.Debug("Invalid goodbye message received")
-		return
-	}
-
-	log.Trace("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
-	n, err = stream.Write(goodByeBytes)
-	if err == network.ErrReset {
-		// We disconnected prior so this error can be ignored.
-		return
-	}
-	if err != nil {
-		log.Debug("Goodbye handler crashed", "err", err)
-		return
-	}
-
-	if n != 8 {
-		log.Debug("Could not send Goodbye")
-	}
-
-	s.peers.DisconnectPeer(stream.Conn().RemotePeer())
+	s.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
+	return nil
 }
 
 func (s *Sentinel) blocksByRangeHandler(stream network.Stream) {
@@ -102,10 +111,6 @@ func (s *Sentinel) blocksByRangeHandler(stream network.Stream) {
 
 func (s *Sentinel) beaconBlocksByRootHandler(stream network.Stream) {
 	log.Info("Got beacon block by root handler call")
-}
-
-func (s *Sentinel) metadataHandler(stream network.Stream) {
-	log.Info("Got metadata handler call")
 }
 
 func (s *Sentinel) setupHandlers() {

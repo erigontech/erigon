@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220928064633-f3362a414109
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220929051144-62dc68dd669a
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.2
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	gfx.cafe/util/go/bufpool v0.0.0-20220921131905-10a2bde53f66
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.22.2
@@ -31,6 +32,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
+	github.com/ferranbt/fastssz v0.1.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
@@ -55,7 +57,6 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pion/stun v0.3.5
-	github.com/prysmaticlabs/fastssz v0.0.0-20220628131814-351fdcbb9964
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/rs/cors v1.8.2
@@ -149,7 +150,6 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
-	github.com/prysmaticlabs/gohashtree v0.0.0-20220517220438-192ee5ae6982 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
