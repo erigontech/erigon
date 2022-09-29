@@ -17,9 +17,7 @@ import (
 	"encoding/hex"
 	"reflect"
 	"strings"
-	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
@@ -42,20 +40,10 @@ func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
 	}
 }
 
-func setDeadLines(stream network.Stream) {
-	if err := stream.SetReadDeadline(time.Now().Add(clparams.TtfbTimeout)); err != nil {
-		log.Error("failed to set stream read dead line", "err", err)
-	}
-	if err := stream.SetWriteDeadline(time.Now().Add(clparams.RespTimeout)); err != nil {
-		log.Error("failed to set stream write dead line", "err", err)
-	}
-}
-
 // curryStreamHandler converts a func(ctx *proto.StreamContext, dat proto.Packet) error to func(network.Stream)
 // this allows us to write encoding non specific type safe handler without performance overhead
 func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.StreamCodec, fn func(ctx *proto.StreamContext, v T) error) func(network.Stream) {
 	return func(s network.Stream) {
-		setDeadLines(s)
 		sd := newcodec(s)
 		var t T
 		val := t.Clone().(T)
