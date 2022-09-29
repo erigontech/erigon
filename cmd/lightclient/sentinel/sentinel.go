@@ -20,7 +20,9 @@ import (
 	"net"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -40,6 +42,7 @@ type Sentinel struct {
 	cfg      SentinelConfig
 	peers    *peers.Peers
 
+	state                *lightclient.LightState
 	pubsub               *pubsub.PubSub
 	subscribedTopics     map[string]*pubsub.Topic
 	runningSubscriptions map[string]*pubsub.Subscription
@@ -163,6 +166,8 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
+	//TODO: populate with data from config
+	s.state = lightclient.NewLightState(ctx, &p2p.LightClientBootstrap{}, [32]byte{})
 
 	gossipSubscription, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {

@@ -1,0 +1,597 @@
+aliases:
+  Slot: uint64
+  Epoch: uint64
+  Bitvector64: uint64
+  Bitvector4: uint8
+  Root: '[32]byte'
+  Signature: '[96]byte'
+  Bytea: '[]byte'
+structs:
+  Status:
+    - name: ForkDigest
+      type: Bytea
+      tags:
+        json: 'fork_digest,omitempty'
+        ssz-size: 4
+    - name: FinalizedRoot
+      type: Bytea
+      tags:
+        json: 'finalized_root,omitempty'
+        ssz-size: 32
+    - name: FinalizedEpoch
+      type: Epoch
+      tags:
+        json: 'finalized_epoch,omitempty'
+    - name: HeadRoot
+      type: Bytea
+      tags:
+        json: 'head_root,omitempty'
+        ssz-size: 32
+    - name: HeadSlot
+      type: Slot
+      tags:
+        json: 'head_slot,omitempty'
+  ForkData:
+    - name: CurrentVersion
+      type: '[4]byte'
+      tags:
+        json: current_version
+        ssz-size: 4
+    - name: GenesisValidatorsRoot
+      type: Root
+      tags:
+        json: genesis_validators_root
+        ssz-size: 32
+  SingleRoot:
+    - name: Root
+      type: Root
+      tags:
+        json: root
+        ssz-size: 32
+  BeaconBlockHeader:
+    - name: Slot
+      type: Slot
+      tags:
+        json: slot
+    - name: ProposerIndex
+      type: uint64
+      tags:
+        json: proposer_index
+    - name: ParentRoot
+      type: Root
+      tags:
+        json: parent_root
+        ssz-size: 32
+    - name: StateRoot
+      type: Root
+      tags:
+        json: state_root
+        ssz-size: 32
+    - name: BodyRoot
+      type: Root
+      tags:
+        json: body_root
+        ssz-size: 32
+  Checkpoint:
+    - name: Epoch
+      type: uint64
+      tags:
+        json: epoch
+    - name: Root
+      type: Root
+      tags:
+        json: root
+        ssz-size: 32
+  SignedBeaconBlockHeader:
+    - name: Header
+      type: BeaconBlockHeader
+      tags:
+        json: message
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
+  LightClientBootstrap:
+    - name: Header
+      type: BeaconBlockHeader
+      tags:
+        json: header
+    - name: CurrentSyncCommittee
+      type: SyncCommittee
+      tags:
+        json: current_sync_committee
+    - name: CurrentSyncCommitteeBranch
+      type: '[][32]byte'
+      tags:
+        json: current_sync_committee_branch
+        ssz-max: 5
+        ssz-size: ',32'
+  LightClientUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: NextSyncCommittee
+      type: SyncCommittee
+      tags:
+        json: next_sync_committee
+    - name: NextSyncCommitteeBranch
+      type: '[][32]byte'
+      tags:
+        json: next_sync_committee_branch
+        ssz-max: 5
+        ssz-size: ',32'
+    - name: FinalizedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: finalized_header
+    - name: FinalityBranch
+      type: '[][32]byte'
+      tags:
+        json: finality_branch
+        ssz-max: 6
+        ssz-size: ',32'
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  LightClientFinalityUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: FinalizedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: finalized_header
+    - name: FinalityBranch
+      type: '[][32]byte'
+      tags:
+        json: finality_branch
+        ssz-max: 6
+        ssz-size: ',32'
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  LightClientOptimisticUpdate:
+    - name: AttestedHeader
+      type: BeaconBlockHeader
+      tags:
+        json: attested_header
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: SignatureSlot
+      type: Slot
+      tags:
+        json: signature_slot
+  AttestationData:
+    - name: Slot
+      type: uint64
+      tags:
+        json: slot
+    - name: Index
+      type: uint64
+      tags:
+        json: index
+    - name: BeaconBlockHash
+      type: '[32]byte'
+      tags:
+        json: beacon_block_root
+        ssz-size: 32
+    - name: Source
+      type: Checkpoint
+      tags:
+        json: source
+    - name: Target
+      type: Checkpoint
+      tags:
+        json: target
+  Attestation:
+    - name: AggregationBits
+      type: Bytea
+      tags:
+        json: aggregation_bits
+        ssz: bitlist
+        ssz-max: 2048
+    - name: Data
+      type: AttestationData
+      tags:
+        json: data
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
+  DepositData:
+    - name: Pubkey
+      type: '[48]byte'
+      tags:
+        json: pubkey
+        ssz-size: 48
+    - name: WithdrawalCredentials
+      type: '[32]byte'
+      tags:
+        json: withdrawal_credentials
+        ssz-size: 32
+    - name: Amount
+      type: uint64
+      tags:
+        json: amount
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
+    - name: Root
+      type: '[32]byte'
+      tags:
+        ssz: '-'
+  Deposit:
+    - name: Proof
+      type: '[33][32]byte'
+      tags:
+        ssz-size: '33,32'
+    - name: Data
+      type: DepositData
+  ProposerSlashing:
+    - name: Header1
+      type: SignedBeaconBlockHeader
+      tags:
+        json: signed_header_1
+    - name: Header2
+      type: SignedBeaconBlockHeader
+      tags:
+        json: signed_header_2
+  VoluntaryExit:
+    - name: Epoch
+      type: uint64
+      tags:
+        json: epoch
+    - name: ValidatorIndex
+      type: uint64
+      tags:
+        json: validator_index
+  SignedVoluntaryExit:
+    - name: Exit
+      type: VoluntaryExit
+      tags:
+        json: message
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
+  AttesterSlashing:
+    - name: Header1
+      type: SignedBeaconBlockHeader
+      tags:
+        json: signed_header_1
+    - name: Header2
+      type: SignedBeaconBlockHeader
+      tags:
+        json: signed_header_2
+  SyncAggregate:
+    - name: SyncCommiteeBits
+      type: '[64]byte'
+      tags:
+        json: sync_committee_bits
+        ssz-size: 64
+    - name: SyncCommiteeSignature
+      type: Signature
+      tags:
+        json: sync_committee_signature
+        ssz-size: 96
+  SyncCommittee:
+    - name: PubKeys
+      type: '[512][48]byte'
+      tags:
+        json: pubkeys
+        ssz-size: '512,48'
+    - name: AggregatePubKey
+      type: '[48]byte'
+      tags:
+        json: aggregate_pubkey
+        ssz-size: 48
+  Goodbye:
+    - name: Reason
+      type: uint64
+      tags:
+        json: reason
+  Ping:
+    - name: Id
+      type: uint64
+      tags:
+        json: id
+  MetadataV0:
+    - name: SeqNumber
+      type: uint64
+      tags:
+        json: 'seq_number,omitempty'
+    - name: Attnets
+      type: Bitvector64
+      tags:
+        json: 'attnets,omitempty'
+        ssz-size: 8
+  MetaDataV1:
+    - name: SeqNumber
+      type: uint64
+      tags:
+        json: 'seq_number,omitempty'
+    - name: Attnets
+      type: Bitvector64
+      tags:
+        json: 'attnets,omitempty'
+        ssz-size: 8
+    - name: Syncnets
+      type: Bitvector64
+      tags:
+        json: 'syncnets,omitempty'
+        ssz-size: 1
+  ENRForkID:
+    - name: CurrentForkDigest
+      type: Bytea
+      tags:
+        json: 'current_fork_digest,omitempty'
+        ssz-size: 4
+    - name: NextForkVersion
+      type: Bytea
+      tags:
+        json: 'next_fork_version,omitempty'
+        ssz-size: 4
+    - name: NextForkEpoch
+      type: Epoch
+      tags:
+        json: 'next_fork_epoch,omitempty'
+  Eth1Data:
+    - name: DepositRoot
+      type: Root
+      tags:
+        json: deposit_root
+        ssz-size: 32
+    - name: DepositCount
+      type: uint64
+      tags:
+        json: deposit_count
+    - name: BlockHash
+      type: '[32]byte'
+      tags:
+        json: block_hash
+        ssz-size: 32
+  ExecutionPayload:
+    - name: ParentHash
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+        json: parent_hash
+    - name: FeeRecipient
+      type: '[20]byte'
+      tags:
+        ssz-size: 20
+        json: fee_recipient
+    - name: StateRoot
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+        json: state_root
+    - name: ReceiptsRoot
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+        json: receipts_root
+    - name: LogsBloom
+      type: '[256]byte'
+      tags:
+        ssz-size: 256
+        json: logs_bloom
+    - name: PrevRandao
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+      json: prev_randao
+    - name: BlockNumber
+      type: uint64
+      tags:
+        json: block_number
+    - name: GasLimit
+      type: uint64
+      tags:
+        json: gas_limit
+    - name: GasUsed
+      type: uint64
+      tags:
+        json: gas_used
+    - name: Timestamp
+      type: uint64
+      tags:
+        json: timestamp
+    - name: ExtraData
+      type: '[]byte'
+      tags:
+        ssz-max: 32
+        json: extra_data
+    - name: BaseFeePerGas
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+        json: base_fee_per_gas
+    - name: BlockHash
+      type: '[32]byte'
+      tags:
+        ssz-size: 32
+        json: block_hash
+    - name: Transactions
+      type: '[][]byte'
+      tags:
+        ssz-max: '1048576,1073741824'
+        ssz-size: '?,?'
+        json: transactions
+  BeaconBlockBodyAltair:
+    - name: RandaoReveal
+      type: Signature
+      tags:
+        json: randao_reveal
+        ssz-size: 96
+    - name: Eth1Data
+      type: Eth1Data
+      tags:
+        json: eth1_data
+    - name: Graffiti
+      type: '[32]byte'
+      tags:
+        json: graffiti
+        ssz-size: 32
+    - name: ProposerSlashings
+      type: '[]*ProposerSlashing'
+      tags:
+        json: proposer_slashings
+        ssz-max: 16
+    - name: AttesterSlashings
+      type: '[]*AttesterSlashing'
+      tags:
+        json: attester_slashings
+        ssz-max: 2
+    - name: Attestations
+      type: '[]*Attestation'
+      tags:
+        json: attestations
+        ssz-max: 128
+    - name: Deposits
+      type: '[]*Deposit'
+      tags:
+        json: deposits
+        ssz-max: 16
+    - name: VoluntaryExits
+      type: '[]*SignedVoluntaryExit'
+      tags:
+        json: voluntary_exits
+        ssz-max: 16
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+  BeaconBlockAltair:
+    - name: Slot
+      type: Slot
+      tags:
+        json: slot
+    - name: ProposerIndex
+      type: uint64
+      tags:
+        json: proposer_index
+    - name: ParentRoot
+      type: Root
+      tags:
+        json: parent_root
+        ssz-size: 32
+    - name: StateRoot
+      type: Root
+      tags:
+        json: state_root
+        ssz-size: 32
+    - name: Body
+      type: BeaconBlockBodyAltair
+      tags:
+        json: body
+  SignedBeaconBlockAltair:
+    - name: Block
+      type: BeaconBlockAltair
+      tags:
+        json: message
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
+  BeaconBlockBodyBellatrix:
+    - name: RandaoReveal
+      type: Signature
+      tags:
+        json: randao_reveal
+        ssz-size: 96
+    - name: Eth1Data
+      type: Eth1Data
+      tags:
+        json: eth1_data
+    - name: Graffiti
+      type: '[32]byte'
+      tags:
+        json: graffiti
+        ssz-size: 32
+    - name: ProposerSlashings
+      type: '[]*ProposerSlashing'
+      tags:
+        json: proposer_slashings
+        ssz-max: 16
+    - name: AttesterSlashings
+      type: '[]*AttesterSlashing'
+      tags:
+        json: attester_slashings
+        ssz-max: 2
+    - name: Attestations
+      type: '[]*Attestation'
+      tags:
+        json: attestations
+        ssz-max: 128
+    - name: Deposits
+      type: '[]*Deposit'
+      tags:
+        json: deposits
+        ssz-max: 16
+    - name: VoluntaryExits
+      type: '[]*SignedVoluntaryExit'
+      tags:
+        json: voluntary_exits
+        ssz-max: 16
+    - name: SyncAggregate
+      type: SyncAggregate
+      tags:
+        json: sync_aggregate
+    - name: ExecutionPayload
+      type: ExecutionPayload
+      tags:
+        json: execution_payload
+  BeaconBlockBellatrix:
+    - name: Slot
+      type: Slot
+      tags:
+        json: slot
+    - name: ProposerIndex
+      type: uint64
+      tags:
+        json: proposer_index
+    - name: ParentRoot
+      type: Root
+      tags:
+        json: parent_root
+        ssz-size: 32
+    - name: StateRoot
+      type: Root
+      tags:
+        json: state_root
+        ssz-size: 32
+    - name: Body
+      type: BeaconBlockBodyBellatrix
+      tags:
+        json: body
+  SignedBeaconBlockBellatrix:
+    - name: Block
+      type: BeaconBlockBellatrix
+      tags:
+        json: message
+    - name: Signature
+      type: Signature
+      tags:
+        json: signature
+        ssz-size: 96
