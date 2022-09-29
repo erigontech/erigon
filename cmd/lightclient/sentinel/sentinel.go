@@ -27,12 +27,9 @@ import (
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
 )
-
-var disconnectPeerCh = make(chan peer.ID)
 
 type Sentinel struct {
 	started  bool
@@ -118,20 +115,6 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	go func() {
-	Loop:
-		for {
-			select {
-			case <-s.ctx.Done():
-				close(disconnectPeerCh)
-				break Loop
-			case pid := <-disconnectPeerCh:
-				s.peers.DisconnectPeer(pid)
-			}
-		}
-	}()
-
 	return net, err
 }
 

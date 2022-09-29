@@ -306,7 +306,7 @@ func (s *stat23) print(aStats libstate.FilesStats, logger log.Logger) {
 	totalIdxSize := aStats.IdxSize
 
 	logger.Info("Progress", "block", s.blockNum, "blk/s", s.speed, "state files", totalFiles,
-		"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+		"total dat", libcommon.ByteCount(totalDatSize), "total idx", libcommon.ByteCount(totalIdxSize),
 		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
 		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
 	)
