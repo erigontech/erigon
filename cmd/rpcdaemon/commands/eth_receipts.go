@@ -134,7 +134,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return api.getLogsV3(ctx, tx, begin, end, crit)
 	}
 
-	blockNumbers := roaring.New()
+	blockNumbers := getRoaring()
+	defer returnRoaring(blockNumbers)
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
