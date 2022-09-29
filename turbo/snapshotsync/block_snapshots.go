@@ -174,23 +174,23 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	return sn.seg.WithReadAhead(func() error {
-		var buf []byte
-		g := sn.seg.MakeGetter()
-		blockNum := sn.ranges.from
-		var b types.BodyForStorage
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, &b); err != nil {
-				return err
-			}
-			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
-				return err
-			}
-			blockNum++
+	defer sn.seg.EnableReadAhead().DisableReadAhead()
+
+	var buf []byte
+	g := sn.seg.MakeGetter()
+	blockNum := sn.ranges.from
+	var b types.BodyForStorage
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		if err := rlp.DecodeBytes(buf, &b); err != nil {
+			return err
 		}
-		return nil
-	})
+		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+			return err
+		}
+		blockNum++
+	}
+	return nil
 }
 
 func (sn *TxnSegment) closeIdx() {
@@ -1600,88 +1600,85 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-	withReadAhead := func(f func(g, bodyGetter *compress.Getter) error) error {
-		return d.WithReadAhead(func() error {
-			return bodiesSegment.WithReadAhead(func() error {
-				return f(d.MakeGetter(), bodiesSegment.MakeGetter())
-			})
-		})
-	}
+	defer d.EnableReadAhead().DisableReadAhead()
+	defer bodiesSegment.EnableReadAhead().DisableReadAhead()
 
 RETRY:
-	if err := withReadAhead(func(g, bodyGetter *compress.Getter) error {
-		var i, offset, nextPos uint64
-		blockNum := firstBlockNum
-		body := &types.BodyForStorage{}
+	g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
+	var i, offset, nextPos uint64
+	blockNum := firstBlockNum
+	body := &types.BodyForStorage{}
 
-		bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
-		if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+	bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+	if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+		return err
+	}
+
+	for g.HasNext() {
+		p.Processed.Inc()
+		word, nextPos = g.Next(word[:0])
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+			if !bodyGetter.HasNext() {
+				return fmt.Errorf("not enough bodies")
+			}
+
+			bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+			if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+				return err
+			}
+
+			blockNum++
+		}
+		firstTxByteAndlengthOfAddress := 21
+		isSystemTx := len(word) == 0
+		if isSystemTx { // system-txs hash:pad32(txnID)
+			binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+		} else {
+			if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
+				return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
+			}
+		}
+
+		if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
+			return err
+		}
+		if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
 			return err
 		}
 
-		for g.HasNext() {
-			p.Processed.Inc()
-			word, nextPos = g.Next(word[:0])
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+		i++
+		offset = nextPos
+	}
 
-			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
-				if !bodyGetter.HasNext() {
-					return fmt.Errorf("not enough bodies")
-				}
+	if i != expectedCount {
+		panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
+	}
 
-				bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
-				if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
-					return err
-				}
-
-				blockNum++
-			}
-			firstTxByteAndlengthOfAddress := 21
-			isSystemTx := len(word) == 0
-			if isSystemTx { // system-txs hash:pad32(txnID)
-				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
-			} else {
-				if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, nil /* validateHash */); err != nil {
-					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
-				}
-			}
-
-			if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
-				return err
-			}
-			if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
-				return err
-			}
-
-			i++
-			offset = nextPos
-		}
-
-		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
-		}
-
-		if err := txnHashIdx.Build(); err != nil {
-			return fmt.Errorf("txnHashIdx: %w", err)
-		}
-		if err := txnHash2BlockNumIdx.Build(); err != nil {
-			return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
-		}
-
-		return nil
-	}); err != nil {
+	if err := txnHashIdx.Build(); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 			txnHashIdx.ResetNextSalt()
 			txnHash2BlockNumIdx.ResetNextSalt()
 			goto RETRY
 		}
-		return err
+		return fmt.Errorf("txnHashIdx: %w", err)
 	}
+	if err := txnHash2BlockNumIdx.Build(); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+			txnHashIdx.ResetNextSalt()
+			txnHash2BlockNumIdx.ResetNextSalt()
+			goto RETRY
+		}
+		return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
+	}
+
 	p.Processed.Store(p.Total.Load())
 
 	return nil
@@ -1777,30 +1774,26 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	}
 	rs.LogLvl(lvl)
 
+	defer d.EnableReadAhead().DisableReadAhead()
+
 RETRY:
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		var i, offset, nextPos uint64
-		word := make([]byte, 0, 4096)
-		for g.HasNext() {
-			word, nextPos = g.Next(word[:0])
-			if err := walker(rs, i, offset, word); err != nil {
-				return err
-			}
-			i++
-			offset = nextPos
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	g := d.MakeGetter()
+	var i, offset, nextPos uint64
+	word := make([]byte, 0, 4096)
+	for g.HasNext() {
+		word, nextPos = g.Next(word[:0])
+		if err := walker(rs, i, offset, word); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
+		i++
+		offset = nextPos
 
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
 	if err = rs.Build(); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			log.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
