@@ -384,7 +384,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		ibs.Prepare(txHash, lastBlockHash, txIndex)
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d", err, blockNum, txNum)
 		}
 		rawLogs := ibs.GetLogs(txHash)
 		var logIndex uint
