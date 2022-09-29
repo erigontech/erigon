@@ -104,7 +104,7 @@ func (l *LightState) validateLightClientUpdate(u *p2p.LightClientUpdate) error {
 	if l.CurrentSlot() < uint64(u.SignatureSlot) {
 		return fmt.Errorf("current slot must be bigger or eq to sig slot")
 	}
-	if u.SignatureSlot <= p2p.Slot(u.AttestedHeader.Slot) {
+	if u.SignatureSlot <= u.AttestedHeader.Slot {
 		return fmt.Errorf("current sig slot must be larger than attested slot")
 	}
 	if u.AttestedHeader.Slot < u.FinalizedHeader.Slot {

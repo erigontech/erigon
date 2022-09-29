@@ -64,7 +64,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	os.WriteFile(path.Join(output, "generated.go"), src, 0644)
+	os.WriteFile(path.Join(output, "generated.go"), src, 0600)
 }
 
 const tmpl = `package p2p

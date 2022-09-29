@@ -57,7 +57,8 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 	return func(s network.Stream) {
 		setDeadLines(s)
 		sd := newcodec(s)
-		val := (*new(T)).Clone().(T)
+		var t T
+		val := t.Clone().(T)
 		ctx, err := sd.Decode(val)
 		if err != nil {
 			// the stream reset error is ignored, because
