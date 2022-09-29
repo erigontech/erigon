@@ -52,7 +52,7 @@ System Requirements
   200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Ethereum Mainnet Full node (
   see `--prune*` flags): 400Gb (April 2022).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022)..
 
 * BSC Archive: 7TB. BSC Full: 1TB.
 

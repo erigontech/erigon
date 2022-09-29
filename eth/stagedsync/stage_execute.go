@@ -365,7 +365,7 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
 		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
@@ -398,7 +398,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if to <= s.BlockNumber {
 		return nil
 	}
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
@@ -538,7 +538,9 @@ Loop:
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+	}
 	return stoppedErr
 }
 

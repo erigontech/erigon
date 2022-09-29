@@ -741,7 +741,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true /* initialCycle */, false /* quiet */)
 	if err != nil {
 		return err
 	}

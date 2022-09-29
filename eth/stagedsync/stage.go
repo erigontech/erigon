@@ -9,7 +9,7 @@ import (
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx) error
+type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx, quiet bool) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
