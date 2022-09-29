@@ -17,7 +17,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/bytesutils"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
@@ -485,19 +485,19 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxVoluntaryExits:    16,
 
 	// BLS domain values.
-	DomainBeaconProposer:              bytesutils.Uint32ToBytes4(0x00000000),
-	DomainBeaconAttester:              bytesutils.Uint32ToBytes4(0x01000000),
-	DomainRandao:                      bytesutils.Uint32ToBytes4(0x02000000),
-	DomainDeposit:                     bytesutils.Uint32ToBytes4(0x03000000),
-	DomainVoluntaryExit:               bytesutils.Uint32ToBytes4(0x04000000),
-	DomainSelectionProof:              bytesutils.Uint32ToBytes4(0x05000000),
-	DomainAggregateAndProof:           bytesutils.Uint32ToBytes4(0x06000000),
-	DomainSyncCommittee:               bytesutils.Uint32ToBytes4(0x07000000),
-	DomainSyncCommitteeSelectionProof: bytesutils.Uint32ToBytes4(0x08000000),
-	DomainContributionAndProof:        bytesutils.Uint32ToBytes4(0x09000000),
-	DomainApplicationMask:             bytesutils.Uint32ToBytes4(0x00000001),
-	DomainApplicationBuilder:          bytesutils.Uint32ToBytes4(0x00000001),
-	DomainBLSToExecutionChange:        bytesutils.Uint32ToBytes4(0x0A000000),
+	DomainBeaconProposer:              utils.Uint32ToBytes4(0x00000000),
+	DomainBeaconAttester:              utils.Uint32ToBytes4(0x01000000),
+	DomainRandao:                      utils.Uint32ToBytes4(0x02000000),
+	DomainDeposit:                     utils.Uint32ToBytes4(0x03000000),
+	DomainVoluntaryExit:               utils.Uint32ToBytes4(0x04000000),
+	DomainSelectionProof:              utils.Uint32ToBytes4(0x05000000),
+	DomainAggregateAndProof:           utils.Uint32ToBytes4(0x06000000),
+	DomainSyncCommittee:               utils.Uint32ToBytes4(0x07000000),
+	DomainSyncCommitteeSelectionProof: utils.Uint32ToBytes4(0x08000000),
+	DomainContributionAndProof:        utils.Uint32ToBytes4(0x09000000),
+	DomainApplicationMask:             utils.Uint32ToBytes4(0x00000001),
+	DomainApplicationBuilder:          utils.Uint32ToBytes4(0x00000001),
+	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
 
 	// Prysm constants.
 	GweiPerEth:                     1000000000,

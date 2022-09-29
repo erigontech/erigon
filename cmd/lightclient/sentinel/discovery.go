@@ -18,11 +18,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
+	"github.com/prysmaticlabs/go-bitfield"
 )
 
 func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) error {
@@ -100,4 +102,15 @@ func (s *Sentinel) connectToBootnodes() error {
 	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
 	s.connectWithAllPeers(multiAddresses)
 	return nil
+}
+
+func (s *Sentinel) setupENR(
+	node *enode.LocalNode,
+) (*enode.LocalNode, error) {
+	// TODO(Giulio2002): Implement fork id.
+
+	// Setup subnets key
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
+	return node, nil
 }

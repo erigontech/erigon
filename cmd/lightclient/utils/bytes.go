@@ -1,4 +1,4 @@
-package bytesutils
+package utils
 
 import "encoding/binary"
 
