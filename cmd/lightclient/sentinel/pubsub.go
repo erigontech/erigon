@@ -54,7 +54,7 @@ func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
 	if _, ok := s.runningSubscriptions[subscription.Topic()]; !ok {
 		s.runningSubscriptions[subscription.Topic()] = subscription
 		log.Info("[Gossip] began subscription", "topic", subscription.Topic())
-		go s.beginTopicListening(*subscription)
+		go s.beginTopicListening(subscription)
 	}
 
 	return nil
@@ -101,7 +101,7 @@ func (s *Sentinel) UnsubscribeToTopic(topic string) error {
 	return nil
 }
 
-func (s *Sentinel) beginTopicListening(subscription pubsub.Subscription) {
+func (s *Sentinel) beginTopicListening(subscription *pubsub.Subscription) {
 	log.Info("[Gossip] began listening to subscription", "topic", subscription.Topic())
 	for _, ok := s.runningSubscriptions[subscription.Topic()]; ok; _, ok = s.runningSubscriptions[subscription.Topic()] {
 		select {
