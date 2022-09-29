@@ -1,6 +1,7 @@
 package sentinel
 
 import (
+	"encoding/hex"
 	"reflect"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 func (s *Sentinel) startGossip() error {
 	prefix := "/eth2/4a26c58b"
-	gsub, err := pubsub.NewGossipSub(s.ctx, s.host)
+	gsub, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
 		return err
 	}
@@ -81,19 +82,33 @@ func runSubscriptionHandler[T proto.Packet](
 		if err != nil {
 			log.Warn("failed handling gossip ", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(val))
 		}
-		log.Info("[Gossip] Received message", "topic", ctx.Topic, "msg", val)
+		log.Info("[Gossip] Received Subscription", "topic", ctx.Topic)
 	}
 }
 
-func (s *Sentinel) handleFinalitySubscription(ctx *proto.SubContext, u *p2p.LightClientFinalityUpdate) error {
+func (s *Sentinel) handleFinalitySubscription(
+	ctx *proto.SubContext,
+	u *p2p.LightClientFinalityUpdate) error {
 	s.state.AddFinalityUpdateEvent(u)
 	return nil
 }
-func (s *Sentinel) handleOptimisticSubscription(ctx *proto.SubContext, u *p2p.LightClientOptimisticUpdate) error {
+func (s *Sentinel) handleOptimisticSubscription(
+	ctx *proto.SubContext,
+	u *p2p.LightClientOptimisticUpdate) error {
 	s.state.AddOptimisticUpdateEvent(u)
 	return nil
 }
-func (s *Sentinel) handleBeaconBlockSubscription(ctx *proto.SubContext, u *proto.EmptyPacket) error {
-	log.Info("got beacon block", "raw", ctx.Msg)
+func (s *Sentinel) handleBeaconBlockSubscription(
+	ctx *proto.SubContext,
+	u *p2p.SignedBeaconBlockBellatrix) error {
+	log.Info("[Gossip] beacon_block",
+		"Slot", u.Block.Slot,
+		"Signature", hex.EncodeToString(u.Signature[:]),
+		"graffiti", string(u.Block.Body.Graffiti[:]),
+		"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+		"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+		"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+		"proposerIdx", u.Block.ProposerIndex,
+	)
 	return nil
 }

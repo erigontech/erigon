@@ -20,14 +20,134 @@ type Signature [96]byte
 
 type Slot uint64
 
-type BeaconBlockHeader struct {
+type Attestation struct {
+	AggregationBits Bytea `json:"aggregation_bits" ssz:"bitlist" ssz-max:"2048" `
+
+	Data AttestationData `json:"data" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+}
+
+func (typ *Attestation) Clone() proto.Packet {
+	return &Attestation{}
+}
+
+type AttestationData struct {
+	Slot uint64 `json:"slot" `
+
+	Index uint64 `json:"index" `
+
+	BeaconBlockHash [32]byte `json:"beacon_block_root" ssz-size:"32" `
+
+	Source Checkpoint `json:"source" `
+
+	Target Checkpoint `json:"target" `
+}
+
+func (typ *AttestationData) Clone() proto.Packet {
+	return &AttestationData{}
+}
+
+type AttesterSlashing struct {
+	Header1 SignedBeaconBlockHeader `json:"signed_header_1" `
+
+	Header2 SignedBeaconBlockHeader `json:"signed_header_2" `
+}
+
+func (typ *AttesterSlashing) Clone() proto.Packet {
+	return &AttesterSlashing{}
+}
+
+type BeaconBlockAltair struct {
 	Slot Slot `json:"slot" `
 
-	ProposerIndex Root `json:"proposer_index" ssz-size:"32" `
+	ProposerIndex uint64 `json:"proposer_index" `
 
 	ParentRoot Root `json:"parent_root" ssz-size:"32" `
 
-	StateRoot Root `ssz-size:"32" json:"state_root" `
+	StateRoot Root `json:"state_root" ssz-size:"32" `
+
+	Body BeaconBlockBodyAltair `json:"body" `
+}
+
+func (typ *BeaconBlockAltair) Clone() proto.Packet {
+	return &BeaconBlockAltair{}
+}
+
+type BeaconBlockBellatrix struct {
+	Slot Slot `json:"slot" `
+
+	ProposerIndex uint64 `json:"proposer_index" `
+
+	ParentRoot Root `json:"parent_root" ssz-size:"32" `
+
+	StateRoot Root `json:"state_root" ssz-size:"32" `
+
+	Body BeaconBlockBodyBellatrix `json:"body" `
+}
+
+func (typ *BeaconBlockBellatrix) Clone() proto.Packet {
+	return &BeaconBlockBellatrix{}
+}
+
+type BeaconBlockBodyAltair struct {
+	RandaoReveal Signature `json:"randao_reveal" ssz-size:"96" `
+
+	Eth1Data Eth1Data `json:"eth1_data" `
+
+	Graffiti [32]byte `json:"graffiti" ssz-size:"32" `
+
+	ProposerSlashings []*ProposerSlashing `json:"proposer_slashings" ssz-max:"16" `
+
+	AttesterSlashings []*AttesterSlashing `ssz-max:"2" json:"attester_slashings" `
+
+	Attestations []*Attestation `json:"attestations" ssz-max:"128" `
+
+	Deposits []*Deposit `ssz-max:"16" json:"deposits" `
+
+	VoluntaryExits []*SignedVoluntaryExit `json:"voluntary_exits" ssz-max:"16" `
+
+	SyncAggregate SyncAggregate `json:"sync_aggregate" `
+}
+
+func (typ *BeaconBlockBodyAltair) Clone() proto.Packet {
+	return &BeaconBlockBodyAltair{}
+}
+
+type BeaconBlockBodyBellatrix struct {
+	RandaoReveal Signature `json:"randao_reveal" ssz-size:"96" `
+
+	Eth1Data Eth1Data `json:"eth1_data" `
+
+	Graffiti [32]byte `json:"graffiti" ssz-size:"32" `
+
+	ProposerSlashings []*ProposerSlashing `json:"proposer_slashings" ssz-max:"16" `
+
+	AttesterSlashings []*AttesterSlashing `ssz-max:"2" json:"attester_slashings" `
+
+	Attestations []*Attestation `json:"attestations" ssz-max:"128" `
+
+	Deposits []*Deposit `ssz-max:"16" json:"deposits" `
+
+	VoluntaryExits []*SignedVoluntaryExit `json:"voluntary_exits" ssz-max:"16" `
+
+	SyncAggregate SyncAggregate `json:"sync_aggregate" `
+
+	ExecutionPayload ExecutionPayload `json:"execution_payload" `
+}
+
+func (typ *BeaconBlockBodyBellatrix) Clone() proto.Packet {
+	return &BeaconBlockBodyBellatrix{}
+}
+
+type BeaconBlockHeader struct {
+	Slot Slot `json:"slot" `
+
+	ProposerIndex uint64 `json:"proposer_index" `
+
+	ParentRoot Root `json:"parent_root" ssz-size:"32" `
+
+	StateRoot Root `json:"state_root" ssz-size:"32" `
 
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
@@ -36,8 +156,44 @@ func (typ *BeaconBlockHeader) Clone() proto.Packet {
 	return &BeaconBlockHeader{}
 }
 
+type Checkpoint struct {
+	Epoch uint64 `json:"epoch" `
+
+	Root Root `json:"root" ssz-size:"32" `
+}
+
+func (typ *Checkpoint) Clone() proto.Packet {
+	return &Checkpoint{}
+}
+
+type Deposit struct {
+	Proof [33][32]byte `ssz-size:"33,32" `
+
+	Data DepositData ``
+}
+
+func (typ *Deposit) Clone() proto.Packet {
+	return &Deposit{}
+}
+
+type DepositData struct {
+	Pubkey [48]byte `json:"pubkey" ssz-size:"48" `
+
+	WithdrawalCredentials [32]byte `json:"withdrawal_credentials" ssz-size:"32" `
+
+	Amount uint64 `json:"amount" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+
+	Root [32]byte `ssz:"-" `
+}
+
+func (typ *DepositData) Clone() proto.Packet {
+	return &DepositData{}
+}
+
 type ENRForkID struct {
-	CurrentForkDigest Bytea `json:"current_fork_digest,omitempty" ssz-size:"4" `
+	CurrentForkDigest Bytea `ssz-size:"4" json:"current_fork_digest,omitempty" `
 
 	NextForkVersion Bytea `json:"next_fork_version,omitempty" ssz-size:"4" `
 
@@ -46,6 +202,52 @@ type ENRForkID struct {
 
 func (typ *ENRForkID) Clone() proto.Packet {
 	return &ENRForkID{}
+}
+
+type Eth1Data struct {
+	DepositRoot Root `json:"deposit_root" ssz-size:"32" `
+
+	DepositCount uint64 `json:"deposit_count" `
+
+	BlockHash [32]byte `json:"block_hash" ssz-size:"32" `
+}
+
+func (typ *Eth1Data) Clone() proto.Packet {
+	return &Eth1Data{}
+}
+
+type ExecutionPayload struct {
+	ParentHash [32]byte `ssz-size:"32" json:"parent_hash" `
+
+	FeeRecipient [20]byte `ssz-size:"20" json:"fee_recipient" `
+
+	StateRoot [32]byte `ssz-size:"32" json:"state_root" `
+
+	ReceiptsRoot [32]byte `ssz-size:"32" json:"receipts_root" `
+
+	LogsBloom [256]byte `json:"logs_bloom" ssz-size:"256" `
+
+	PrevRandao [32]byte `ssz-size:"32" `
+
+	BlockNumber uint64 `json:"block_number" `
+
+	GasLimit uint64 `json:"gas_limit" `
+
+	GasUsed uint64 `json:"gas_used" `
+
+	Timestamp uint64 `json:"timestamp" `
+
+	ExtraData []byte `ssz-max:"32" json:"extra_data" `
+
+	BaseFeePerGas [32]byte `ssz-size:"32" json:"base_fee_per_gas" `
+
+	BlockHash [32]byte `ssz-size:"32" json:"block_hash" `
+
+	Transactions [][]byte `ssz-max:"1048576,1073741824" ssz-size:"?,?" json:"transactions" `
+}
+
+func (typ *ExecutionPayload) Clone() proto.Packet {
+	return &ExecutionPayload{}
 }
 
 type ForkData struct {
@@ -115,7 +317,7 @@ type LightClientUpdate struct {
 
 	FinalizedHeader BeaconBlockHeader `json:"finalized_header" `
 
-	FinalityBranch [][32]byte `json:"finality_branch" ssz-max:"6" ssz-size:",32" `
+	FinalityBranch [][32]byte `ssz-max:"6" ssz-size:",32" json:"finality_branch" `
 
 	SyncAggregate SyncAggregate `json:"sync_aggregate" `
 
@@ -156,8 +358,58 @@ func (typ *Ping) Clone() proto.Packet {
 	return &Ping{}
 }
 
+type ProposerSlashing struct {
+	Header1 SignedBeaconBlockHeader `json:"signed_header_1" `
+
+	Header2 SignedBeaconBlockHeader `json:"signed_header_2" `
+}
+
+func (typ *ProposerSlashing) Clone() proto.Packet {
+	return &ProposerSlashing{}
+}
+
+type SignedBeaconBlockAltair struct {
+	Block BeaconBlockAltair `json:"message" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+}
+
+func (typ *SignedBeaconBlockAltair) Clone() proto.Packet {
+	return &SignedBeaconBlockAltair{}
+}
+
+type SignedBeaconBlockBellatrix struct {
+	Block BeaconBlockBellatrix `json:"message" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+}
+
+func (typ *SignedBeaconBlockBellatrix) Clone() proto.Packet {
+	return &SignedBeaconBlockBellatrix{}
+}
+
+type SignedBeaconBlockHeader struct {
+	Header BeaconBlockHeader `json:"message" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+}
+
+func (typ *SignedBeaconBlockHeader) Clone() proto.Packet {
+	return &SignedBeaconBlockHeader{}
+}
+
+type SignedVoluntaryExit struct {
+	Exit VoluntaryExit `json:"message" `
+
+	Signature Signature `json:"signature" ssz-size:"96" `
+}
+
+func (typ *SignedVoluntaryExit) Clone() proto.Packet {
+	return &SignedVoluntaryExit{}
+}
+
 type SingleRoot struct {
-	Root Root `ssz-size:"32" json:"root" `
+	Root Root `json:"root" ssz-size:"32" `
 }
 
 func (typ *SingleRoot) Clone() proto.Packet {
@@ -165,7 +417,7 @@ func (typ *SingleRoot) Clone() proto.Packet {
 }
 
 type Status struct {
-	ForkDigest Bytea `ssz-size:"4" json:"fork_digest,omitempty" `
+	ForkDigest Bytea `json:"fork_digest,omitempty" ssz-size:"4" `
 
 	FinalizedRoot Bytea `json:"finalized_root,omitempty" ssz-size:"32" `
 
@@ -191,11 +443,21 @@ func (typ *SyncAggregate) Clone() proto.Packet {
 }
 
 type SyncCommittee struct {
-	PubKeys [512][48]byte `ssz-size:"512,48" json:"pubkeys" `
+	PubKeys [512][48]byte `json:"pubkeys" ssz-size:"512,48" `
 
-	AggregatePubKey [48]byte `ssz-size:"48" json:"aggregate_pubkey" `
+	AggregatePubKey [48]byte `json:"aggregate_pubkey" ssz-size:"48" `
 }
 
 func (typ *SyncCommittee) Clone() proto.Packet {
 	return &SyncCommittee{}
+}
+
+type VoluntaryExit struct {
+	Epoch uint64 `json:"epoch" `
+
+	ValidatorIndex uint64 `json:"validator_index" `
+}
+
+func (typ *VoluntaryExit) Clone() proto.Packet {
+	return &VoluntaryExit{}
 }
