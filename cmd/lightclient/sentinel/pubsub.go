@@ -114,6 +114,11 @@ func (s *Sentinel) beginTopicListening(subscription pubsub.Subscription) {
 			log.Warn("Failed to read message", "topic", subscription.Topic(), "err", err)
 		}
 
+		// we skip messages from ourself
+		if msg.ReceivedFrom == s.host.ID() {
+			continue
+		}
+
 		log.Info("[Gossip] received message", "topic", subscription.Topic(), "message", msg)
 
 	}
