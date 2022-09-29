@@ -20,7 +20,7 @@ const (
 	// Mine is the mine flag
 	Mine = "--mine"
 	// NoDiscover is the nodiscover flag
-	NoDiscover = "nodiscover"
+	NoDiscover = "--nodiscover"
 	// PrivateApiAddrArg is the private.api.addr flag
 	PrivateApiAddrArg = "--private.api.addr"
 	// StaticPeersArg is the staticpeers flag

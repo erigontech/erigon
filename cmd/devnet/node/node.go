@@ -2,22 +2,23 @@ package node
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnet/utils"
-	"os"
-	"sync"
-	"time"
-
-	"github.com/urfave/cli"
-
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnet/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
+	"os"
+	"sync"
+	"time"
 )
+
+// Holds the number id of each node on the network, the first node is node 0
+var nodeNumber int
 
 // Start starts the process for two erigon nodes running on the dev chain
 func Start(wg *sync.WaitGroup) {
@@ -25,7 +26,7 @@ func Start(wg *sync.WaitGroup) {
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs())
+	go StartNode(wg, miningNodeArgs(), &nodeNumber)
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
@@ -40,17 +41,18 @@ func Start(wg *sync.WaitGroup) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
-	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(2, enode))
+	//start the second node, connect it to the mining node with the enode
+	go StartNode(wg, nonMiningNodeArgs(2, enode), &nodeNumber)
 }
 
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string) {
+func StartNode(wg *sync.WaitGroup, args []string, nodeNumber *int) {
+	fmt.Printf("Arguments for node %d are: %v\n", *nodeNumber, args)
+
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
 		panicResult := recover()
 		if panicResult == nil {
-			fmt.Println("Panic is nil")
 			wg.Done()
 			return
 		}
@@ -61,6 +63,7 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 	}()
 
 	app := erigonapp.MakeApp(runNode, erigoncli.DefaultFlags)
+	*nodeNumber++ // increment the number of nodes on the network
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
