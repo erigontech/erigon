@@ -75,6 +75,6 @@ func (p *Peers) banBadPeer(pid peer.ID) {
 }
 
 func (p *Peers) DisconnectPeer(pid peer.ID) {
-	// log.Info("[Peers] disconnecting from peer", "peer-id", pid)
+	//log.Info("[Peers] disconnecting from peer", "peer-id", pid)
 	p.host.Peerstore().RemovePeer(pid)
 }

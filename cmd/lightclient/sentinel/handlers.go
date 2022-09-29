@@ -71,7 +71,7 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
-		//	log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
+		//	log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpoint", ctx.Protocol)
 	}
 }
 
@@ -79,6 +79,9 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 // ping handler
 func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
 	// since packets are just structs, they can be resent with no issue
+	log.Info("[ReqResp] Ping->Host",
+		"from", ctx.Stream.Conn().ID(),
+		"id", dat.Id)
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
@@ -93,12 +96,17 @@ func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
 
 func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
 	log.Info("[Incoming Request] Status",
+		"from", ctx.Stream.Conn().ID(),
 		"epoch", dat.FinalizedEpoch,
 		"final root", hexb(dat.FinalizedRoot),
 		"head root", hexb(dat.HeadRoot),
 		"head slot", dat.HeadSlot,
 		"fork digest", hexb(dat.ForkDigest),
 	)
+	_, err := ctx.Codec.WritePacket(dat)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -107,7 +115,9 @@ func hexb(b []byte) string {
 }
 
 func (s *Sentinel) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) error {
-	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	log.Info("[Lightclient] Goodbye->Host",
+		"from", ctx.Stream.Conn().ID(),
+		"reason", dat.Reason)
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err

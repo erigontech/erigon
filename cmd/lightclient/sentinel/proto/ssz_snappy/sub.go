@@ -35,7 +35,6 @@ func (d *SubCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.SubCo
 		Packet: p,
 		Codec:  d,
 	}
-	//log.Info("[SubCodec] Waiting for msg...", "topic", d.sub.Topic())
 	// read the next message
 	msg, err := d.sub.Next(ctx)
 	if err != nil {

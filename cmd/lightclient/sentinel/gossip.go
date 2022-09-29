@@ -45,14 +45,14 @@ func subscribeGossipTopic[T proto.Packet](
 	if err != nil {
 		return err
 	}
-	sub_sub, err := top.Subscribe(pubsub.WithBufferSize(1024))
+	sub_sub, err := top.Subscribe(pubsub.WithBufferSize(32))
 	if err != nil {
 		return err
 	}
 	go func() {
 		for {
 			log.Info("[Gossip] Topic Peers", "topic", topic, "peers", len(top.ListPeers()))
-			time.Sleep(5 * time.Second)
+			time.Sleep(30 * time.Second)
 		}
 	}()
 	go runSubscriptionHandler(s, sub_sub, newcodec, fn)
@@ -81,6 +81,7 @@ func runSubscriptionHandler[T proto.Packet](
 		err = fn(ctx, val)
 		if err != nil {
 			log.Warn("failed handling gossip ", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(val))
+			continue
 		}
 		log.Info("[Gossip] Received Subscription", "topic", ctx.Topic)
 	}
