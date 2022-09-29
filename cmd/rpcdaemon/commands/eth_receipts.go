@@ -326,7 +326,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var lastRules *params.Rules
 	stateReader := state.NewHistoryReader22(ac)
 	stateReader.SetTx(tx)
-	stateReader.SetTrace(true)
+	//stateReader.SetTrace(true)
 	iter := txNumbers.Iterator()
 
 	chainConfig, err := api.chainConfig(tx)
