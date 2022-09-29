@@ -354,7 +354,7 @@ func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Lo
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	common2.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat",
+	log.Info("[Snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
