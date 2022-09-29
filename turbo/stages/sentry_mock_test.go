@@ -605,7 +605,6 @@ func TestPoSDownloader(t *testing.T) {
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
-	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	// Point forkChoice to the head
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -617,6 +616,7 @@ func TestPoSDownloader(t *testing.T) {
 	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, initialCycle, m.UpdateHead, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
 
 	payloadStatus = m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
