@@ -46,12 +46,12 @@ func (d *SubCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.SubCo
 		//TODO: we can use a bufpool here and improve performance. we can pick up used packet write buffers.
 		c.Raw, err = snappy.Decode(nil, msg.Data)
 		if err != nil {
-			return c, fmt.Errorf("readPacket: %s", err)
+			return c, fmt.Errorf("readPacket: %w", err)
 		}
 		if val, ok := p.(ssz.Unmarshaler); ok {
 			err = val.UnmarshalSSZ(c.Raw)
 			if err != nil {
-				return c, fmt.Errorf("unmarshalPacket: %s", err)
+				return c, fmt.Errorf("unmarshalPacket: %w", err)
 			}
 		}
 	}
