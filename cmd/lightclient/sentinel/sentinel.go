@@ -206,7 +206,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 
-	if err := s.BeginSubscription(blockSubnetTopicFormat); err != nil {
+	if err := s.BeginSubscription("/eth2/4a26c58b/beacon_block/ssz_snappy"); err != nil {
 		return err
 	}
 

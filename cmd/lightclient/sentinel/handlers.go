@@ -29,12 +29,12 @@ var (
 )
 
 var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   pingHandler,
-	protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
-	protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                goodbyeHandler,
-	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
-	protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
-	protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
+	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"): pingHandler,
+	// protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
+	// protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                goodbyeHandler,
+	// protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
+	// protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
+	// protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
 }
 
 func setDeadLines(stream network.Stream) {

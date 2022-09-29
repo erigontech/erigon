@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -50,7 +51,12 @@ func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
 		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
 	}
 
-	s.runningSubscriptions[subscription.Topic()] = subscription
+	if _, ok := s.runningSubscriptions[subscription.Topic()]; !ok {
+		s.runningSubscriptions[subscription.Topic()] = subscription
+		log.Info("[Gossip] began subscription", "topic", subscription.Topic())
+		go s.beginTopicListening(*subscription)
+	}
+
 	return nil
 }
 
@@ -67,6 +73,7 @@ func (s *Sentinel) AddToTopic(topic string, opts ...pubsub.TopicOpt) (topicHandl
 		}
 
 		s.subscribedTopics[topic] = topicHandle
+		log.Info("[Gossip] joined", "topic", topic)
 	} else {
 		topicHandle = s.subscribedTopics[topic]
 	}
@@ -92,4 +99,22 @@ func (s *Sentinel) UnsubscribeToTopic(topic string) error {
 	}
 
 	return nil
+}
+
+func (s *Sentinel) beginTopicListening(subscription pubsub.Subscription) {
+	log.Info("[Gossip] began listening to subscription", "topic", subscription.Topic())
+	for _, ok := s.subscribedTopics[subscription.Topic()]; ok; _, ok = s.subscribedTopics[subscription.Topic()] {
+		select {
+		case <-s.ctx.Done():
+			break
+		default:
+		}
+		msg, err := subscription.Next(s.ctx)
+		if err != nil {
+			log.Warn("Failed to read message", "topic", subscription.Topic(), "err", err)
+		}
+
+		log.Info("[Gossip] received message", "topic", subscription.Topic(), "message", msg)
+
+	}
 }
