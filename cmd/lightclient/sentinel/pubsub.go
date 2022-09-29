@@ -103,7 +103,7 @@ func (s *Sentinel) UnsubscribeToTopic(topic string) error {
 
 func (s *Sentinel) beginTopicListening(subscription pubsub.Subscription) {
 	log.Info("[Gossip] began listening to subscription", "topic", subscription.Topic())
-	for _, ok := s.subscribedTopics[subscription.Topic()]; ok; _, ok = s.subscribedTopics[subscription.Topic()] {
+	for _, ok := s.runningSubscriptions[subscription.Topic()]; ok; _, ok = s.runningSubscriptions[subscription.Topic()] {
 		select {
 		case <-s.ctx.Done():
 			break
