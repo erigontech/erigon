@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"sync"
 
-	"gfx.cafe/util/go/bufpool"
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
@@ -37,16 +36,13 @@ func NewStreamCodec(
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 	if val, ok := pkt.(ssz.Marshaler); ok {
 		sz := val.SizeSSZ()
-		bp := bufpool.Get(sz)
-		defer bufpool.Put(bp)
-		p := bp.Bytes()
-		p = append(p, make([]byte, 10)...)
+		p := make([]byte, 10+sz)
 		vin := binary.PutVarint(p, int64(sz))
-		_, err = val.MarshalSSZTo(p[vin:])
+		enc, err := val.MarshalSSZ()
 		if err != nil {
 			return 0, fmt.Errorf("marshal ssz: %w", err)
 		}
-		n, err := d.sw.Write(p)
+		n, err := d.sw.Write(append(p[:vin], enc...))
 		if err != nil {
 			return 0, err
 		}

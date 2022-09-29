@@ -1,10 +1,8 @@
 package ssz_snappy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"sync"
 
 	ssz "github.com/ferranbt/fastssz"
@@ -45,23 +43,15 @@ func (d *SubCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.SubCo
 	c.Topic = msg.GetTopic()
 	c.Msg = msg
 	if p != nil {
-		s := bytes.NewBuffer(msg.Data)
-		sr := snappy.NewReader(s)
-
-		ln, _, err := proto.ReadUvarint(s)
+		//TODO: we can use a bufpool here and improve performance. we can pick up used packet write buffers.
+		c.Raw, err = snappy.Decode(nil, msg.Data)
 		if err != nil {
-			return c, err
-		}
-		//TODO: we should probably take this from a buffer pool.
-		c.Raw = make([]byte, ln)
-		_, err = io.ReadFull(sr, c.Raw)
-		if err != nil {
-			return c, fmt.Errorf("readPacket: %w", err)
+			return c, fmt.Errorf("readPacket: %s", err)
 		}
 		if val, ok := p.(ssz.Unmarshaler); ok {
 			err = val.UnmarshalSSZ(c.Raw)
 			if err != nil {
-				return c, fmt.Errorf("readPacket: %w", err)
+				return c, fmt.Errorf("unmarshalPacket: %s", err)
 			}
 		}
 	}
