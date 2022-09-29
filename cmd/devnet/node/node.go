@@ -2,6 +2,12 @@ package node
 
 import (
 	"fmt"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -11,10 +17,6 @@ import (
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
-	"os"
-	"sync"
-	"time"
 )
 
 // Holds the number id of each node on the network, the first node is node 0
@@ -114,7 +116,7 @@ func nonMiningNodeArgs(nodeNumber int, enode string) []string {
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
-	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, fmt.Sprintf("%s", enode))
+	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
 
 	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, verbosity}
 }
