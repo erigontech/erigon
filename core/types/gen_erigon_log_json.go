@@ -14,7 +14,7 @@ var _ = (*logMarshaling)(nil)
 
 // MarshalJSON marshals as JSON.
 func (l ErigonLog) MarshalJSON() ([]byte, error) {
-	type Log struct {
+	type ErigonLog struct {
 		Address     common.Address `json:"address" gencodec:"required"`
 		Topics      []common.Hash  `json:"topics" gencodec:"required"`
 		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
@@ -24,35 +24,27 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 		BlockHash   common.Hash    `json:"blockHash"`
 		Index       hexutil.Uint   `json:"logIndex"`
 		Removed     bool           `json:"removed"`
+		Timestamp   hexutil.Uint64 `json:"timestamp"`
 	}
 
-	type ErigonLog struct {
-		Log Log `json:"log" gencoded:"required"`
-		Timestamp hexutil.Uint64 `json:"timestamp"`
-	}
-
-	var enc Log
-	enc.Address = l.Log.Address
-	enc.Topics = l.Log.Topics
-	enc.Data = l.Log.Data
-	enc.BlockNumber = hexutil.Uint64(l.Log.BlockNumber)
-	enc.TxHash = l.Log.TxHash
-	enc.TxIndex = hexutil.Uint(l.Log.TxIndex)
-	enc.BlockHash = l.Log.BlockHash
-	enc.Index = hexutil.Uint(l.Log.Index)
-	enc.Removed = l.Log.Removed
-
-	var encodedErigonLog ErigonLog
-	encodedErigonLog.Log = enc
-	encodedErigonLog.Timestamp = hexutil.Uint64(l.Timestamp)
-
+	var enc ErigonLog
+	enc.Address = l.Address
+	enc.Topics = l.Topics
+	enc.Data = l.Data
+	enc.BlockNumber = hexutil.Uint64(l.BlockNumber)
+	enc.TxHash = l.TxHash
+	enc.TxIndex = hexutil.Uint(l.TxIndex)
+	enc.BlockHash = l.BlockHash
+	enc.Index = hexutil.Uint(l.Index)
+	enc.Removed = l.Removed
+	enc.Timestamp = hexutil.Uint64(l.Timestamp)
 
 	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
 func (l *ErigonLog) UnmarshalJSON(input []byte) error {
-	type Log struct {
+	type ErigonLog struct {
 		Address     *common.Address `json:"address" gencodec:"required"`
 		Topics      []common.Hash   `json:"topics" gencodec:"required"`
 		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
@@ -62,53 +54,49 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 		BlockHash   *common.Hash    `json:"blockHash"`
 		Index       *hexutil.Uint   `json:"logIndex"`
 		Removed     *bool           `json:"removed"`
-	}
-
-	type ErigonLog struct {
-		Log Log `json:"log" gencodec:"required"`
-		Timestamp *hexutil.Uint64 `json:"timestamp"`
+		Timestamp   *hexutil.Uint64 `json:"timestamp"`
 	}
 
 	var dec ErigonLog
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	if dec.Log.Address == nil {
-		return errors.New("missing required field 'address' for Log")
+	if dec.Address == nil {
+		return errors.New("missing required field 'address' for ErigonLog")
 	}
-	l.Log.Address = *dec.Log.Address
-	if dec.Log.Topics == nil {
-		return errors.New("missing required field 'topics' for Log")
+	l.Address = *dec.Address
+	if dec.Topics == nil {
+		return errors.New("missing required field 'topics' for ErigonLog")
 	}
-	l.Log.Topics = dec.Log.Topics
-	if dec.Log.Data == nil {
-		return errors.New("missing required field 'data' for Log")
+	l.Topics = dec.Topics
+	if dec.Data == nil {
+		return errors.New("missing required field 'data' for ErigonLog")
 	}
-	l.Log.Data = *dec.Log.Data
-	if dec.Log.BlockNumber != nil {
-		l.Log.BlockNumber = uint64(*dec.Log.BlockNumber)
+	l.Data = *dec.Data
+	if dec.BlockNumber != nil {
+		l.BlockNumber = uint64(*dec.BlockNumber)
 	}
 
-	if dec.Log.TxHash == nil {
-		return errors.New("missing required field 'transactionHash' for Log")
+	if dec.TxHash == nil {
+		return errors.New("missing required field 'transactionHash' for ErigonLog")
 	}
-	l.Log.TxHash = *dec.Log.TxHash
-	if dec.Log.TxIndex != nil {
-		l.Log.TxIndex = uint(*dec.Log.TxIndex)
+	l.TxHash = *dec.TxHash
+	if dec.TxIndex != nil {
+		l.TxIndex = uint(*dec.TxIndex)
 	}
-	if dec.Log.BlockHash != nil {
-		l.Log.BlockHash = *dec.Log.BlockHash
+	if dec.BlockHash != nil {
+		l.BlockHash = *dec.BlockHash
 	}
-	if dec.Log.Index != nil {
-		l.Log.Index = uint(*dec.Log.Index)
+	if dec.Index != nil {
+		l.Index = uint(*dec.Index)
 	}
-	if dec.Log.Removed != nil {
-		l.Log.Removed = *dec.Log.Removed
+	if dec.Removed != nil {
+		l.Removed = *dec.Removed
 	}
 
 	if dec.Timestamp != nil {
 		l.Timestamp = uint64(*dec.Timestamp)
 	}
-	
+
 	return nil
 }

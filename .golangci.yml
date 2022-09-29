@@ -17,6 +17,7 @@ linters:
     - gosec
 #    - forcetypeassert
     - prealloc
+    - unconvert
 
 linters-settings:
   gocritic:

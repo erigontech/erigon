@@ -14,41 +14,27 @@
 package sentinel
 
 import (
-	"time"
-
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
-var (
-	ProtocolPrefix = "/eth2/beacon_chain/req"
-	reservedBytes  = 128
-)
+var ProtocolPrefix = "/eth2/beacon_chain/req"
 
-var handlers map[protocol.ID]network.StreamHandler = map[protocol.ID]network.StreamHandler{
-	protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"): pingHandler,
-	// protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 statusHandler,
-	// protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                goodbyeHandler,
-	// protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): blocksByRangeHandler,
-	// protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  beaconBlocksByRootHandler,
-	// protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               metadataHandler,
-}
-
-func setDeadLines(stream network.Stream) {
-	if err := stream.SetReadDeadline(time.Now().Add(clparams.TtfbTimeout)); err != nil {
-		log.Error("failed to set stream read dead line", "err", err)
-	}
-	if err := stream.SetWriteDeadline(time.Now().Add(clparams.RespTimeout)); err != nil {
-		log.Error("failed to set stream write dead line", "err", err)
+func getHandlers(s *Sentinel) map[protocol.ID]network.StreamHandler {
+	return map[protocol.ID]network.StreamHandler{
+		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   s.pingHandler,
+		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 s.statusHandler,
+		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                s.goodbyeHandler,
+		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): s.blocksByRangeHandler,
+		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  s.beaconBlocksByRootHandler,
+		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               s.metadataHandler,
 	}
 }
 
-func pingHandler(stream network.Stream) {
+func (s *Sentinel) pingHandler(stream network.Stream) {
 	pingBytes := make([]byte, 8)
-	setDeadLines(stream)
 	n, err := stream.Read(pingBytes)
 	if err != nil {
 		log.Warn("handler crashed", "err", err)
@@ -70,16 +56,18 @@ func pingHandler(stream network.Stream) {
 	}
 }
 
-func statusHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) statusHandler(stream network.Stream) {
 
 	log.Info("Got status request")
 }
 
-func goodbyeHandler(stream network.Stream) {
+func (s *Sentinel) goodbyeHandler(stream network.Stream) {
 	goodByeBytes := make([]byte, 8)
-	setDeadLines(stream)
 	n, err := stream.Read(goodByeBytes)
+	if err == network.ErrReset {
+		// Handle data race.
+		return
+	}
 	if err != nil {
 		log.Warn("Goodbye handler crashed", "err", err)
 		return
@@ -92,6 +80,10 @@ func goodbyeHandler(stream network.Stream) {
 
 	log.Info("[Lightclient] Received", "goodbye", ssz.UnmarshallUint64(goodByeBytes))
 	n, err = stream.Write(goodByeBytes)
+	if err == network.ErrReset {
+		// We disconnected prior so this error can be ignored.
+		return
+	}
 	if err != nil {
 		log.Warn("Goodbye handler crashed", "err", err)
 		return
@@ -101,27 +93,23 @@ func goodbyeHandler(stream network.Stream) {
 		log.Warn("Could not send Goodbye")
 	}
 
-	peerId := stream.Conn().RemotePeer()
-	disconnectPeerCh <- peerId
+	s.peers.DisconnectPeer(stream.Conn().RemotePeer())
 }
 
-func blocksByRangeHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) blocksByRangeHandler(stream network.Stream) {
 	log.Info("Got block by range handler call")
 }
 
-func beaconBlocksByRootHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) beaconBlocksByRootHandler(stream network.Stream) {
 	log.Info("Got beacon block by root handler call")
 }
 
-func metadataHandler(stream network.Stream) {
-	setDeadLines(stream)
+func (s *Sentinel) metadataHandler(stream network.Stream) {
 	log.Info("Got metadata handler call")
 }
 
 func (s *Sentinel) setupHandlers() {
-	for id, handler := range handlers {
+	for id, handler := range getHandlers(s) {
 		s.host.SetStreamHandler(id, handler)
 	}
 }

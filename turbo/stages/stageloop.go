@@ -166,11 +166,14 @@ func StageLoopStep(
 		notifications.Accumulator.Reset(tx.ViewID())
 	}
 
-	err = sync.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle, false /* quiet */)
 	if err != nil {
 		return headBlockHash, err
 	}
+	logCtx := sync.PrintTimings()
+	var tableSizes []interface{}
 	if canRunCycleInOneTransaction {
+		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := tx.Commit()
 		if errTx != nil {
@@ -198,6 +201,12 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
+	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+		log.Info("Timings (slower than 50ms)", logCtx...)
+		if len(tableSizes) > 0 {
+			log.Info("Tables", tableSizes...)
+		}
+	}
 
 	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
 		err = snapshotMigratorFinal(rotx)
@@ -249,14 +258,14 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	miningBatch := memdb.NewMemoryBatch(tx)
 	defer miningBatch.Rollback()
 
-	if err = mining.Run(nil, miningBatch, false); err != nil {
+	if err = mining.Run(nil, miningBatch, false /* firstCycle */, false /* quiet */); err != nil {
 		return err
 	}
 	tx.Rollback()
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -352,7 +361,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		}
 	}
 	// Run state sync
-	if err = stateSync.Run(nil, batch, false); err != nil {
+	if err = stateSync.Run(nil, batch, false /* firstCycle */, quiet); err != nil {
 		return err
 	}
 	return nil
@@ -400,7 +409,6 @@ func NewStagedSync(ctx context.Context,
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
-				cfg.MemoryOverlay,
 				snapshots,
 				blockReader,
 				dirs.Tmp,
@@ -462,7 +470,6 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				controlServer.Penalize,
 				cfg.BatchSize,
 				false,
-				cfg.MemoryOverlay,
 				snapshots,
 				blockReader,
 				dirs.Tmp,
