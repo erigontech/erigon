@@ -154,29 +154,27 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	t := time.Now()
-	if err := decompressor.WithReadAhead(func() error {
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
 		g := decompressor.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	log.Info("decompress speed", "took", time.Since(t))
-	t = time.Now()
-	if err := decompressor.WithReadAhead(func() error {
+		log.Info("decompress speed", "took", time.Since(t))
+	}()
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
 		g := decompressor.MakeGetter()
 		for g.HasNext() {
 			_ = g.Skip()
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	log.Info("decompress skip speed", "took", time.Since(t))
+		log.Info("decompress skip speed", "took", time.Since(t))
+	}()
 	return nil
 }
 func doRam(cliCtx *cli.Context) error {
@@ -258,32 +256,29 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	var i uint
 	var numBuf [binary.MaxVarintLen64]byte
-	if err := decompressor.WithReadAhead(func() error {
-		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 1*datasize.MB)
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-			if _, err := wr.Write(numBuf[:n]); err != nil {
-				return err
-			}
-			if _, err := wr.Write(buf); err != nil {
-				return err
-			}
-			i++
-			select {
-			case <-logEvery.C:
-				_, fileName := filepath.Split(decompressor.FilePath())
-				progress := 100 * float64(i) / float64(decompressor.Count())
-				log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	defer decompressor.EnableReadAhead().DisableReadAhead()
+
+	g := decompressor.MakeGetter()
+	buf := make([]byte, 0, 1*datasize.MB)
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+		if _, err := wr.Write(numBuf[:n]); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		return err
+		if _, err := wr.Write(buf); err != nil {
+			return err
+		}
+		i++
+		select {
+		case <-logEvery.C:
+			_, fileName := filepath.Split(decompressor.FilePath())
+			progress := 100 * float64(i) / float64(decompressor.Count())
+			log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
@@ -417,7 +412,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 		return err
 	}
 
-	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers); err != nil {
 		return err
 	}
 	return nil
