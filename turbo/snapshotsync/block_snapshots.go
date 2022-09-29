@@ -764,7 +764,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int, lvl log.Lvl) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -799,7 +799,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chain
 					p := &background.Progress{}
 					ps.Add(p)
 					defer ps.Delete(p)
-					if err := buildIdx(ctx, sn, chainID, tmpDir, p, lvl); err != nil {
+					if err := buildIdx(ctx, sn, chainID, tmpDir, p, log.LvlInfo); err != nil {
 						errs <- err
 					}
 				}(segment)
@@ -823,10 +823,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chain
 			return ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			if lvl >= log.LvlInfo {
-				common2.ReadMemStats(&m)
-			}
-			log.Log(lvl, fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			common2.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }
