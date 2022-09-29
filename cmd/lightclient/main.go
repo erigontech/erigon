@@ -35,14 +35,14 @@ func main() {
 		log.Error("error", "err", err)
 		return
 	}
-	sent, err := sentinel.New(context.Background(), sentinel.SentinelConfig{
+	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
 		IpAddr:         defaultIpAddr,
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
-		GenesisConfig:  genesisCfg,
-		NetworkConfig:  networkCfg,
-		BeaconConfig:   beaconCfg,
+		GenesisConfig:  &genesisCfg,
+		NetworkConfig:  &networkCfg,
+		BeaconConfig:   &beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)

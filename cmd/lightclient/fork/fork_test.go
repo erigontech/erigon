@@ -8,7 +8,9 @@ import (
 )
 
 func TestMainnetFork(t *testing.T) {
-	digest, err := ComputeForkDigest(clparams.BeaconConfigs[clparams.MainnetNetwork], clparams.GenesisConfigs[clparams.MainnetNetwork])
+	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
+	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
+	digest, err := ComputeForkDigest(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
 	require.Equal(t, digest, [4]byte{74, 38, 197, 139})
 }

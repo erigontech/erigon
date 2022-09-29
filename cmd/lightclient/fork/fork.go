@@ -13,8 +13,8 @@ import (
 )
 
 func ComputeForkDigest(
-	beaconConfig clparams.BeaconChainConfig,
-	genesisConfig clparams.GenesisConfig,
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
 ) ([4]byte, error) {
 	if genesisConfig.GenesisTime == 0 {
 		return [4]byte{}, errors.New("genesis time is not set")
@@ -68,8 +68,8 @@ func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (
 }
 
 func ComputeForkId(
-	beaconConfig clparams.BeaconChainConfig,
-	genesisConfig clparams.GenesisConfig,
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
 ) ([]byte, error) {
 	digest, err := ComputeForkDigest(beaconConfig, genesisConfig)
 	if err != nil {
