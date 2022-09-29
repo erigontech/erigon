@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -127,36 +126,22 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 	}
 }
 
-func (ii *InvertedIndex) BuildMissedIndices() (err error) {
-	var missedIndices []uint64
+func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 	ii.files.Ascend(func(item *filesItem) bool { // don't run slow logic while iterating on btree
 		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-		if !dir.Exist(idxPath) {
-			missedIndices = append(missedIndices, fromStep, toStep)
+		if !dir.FileExist(filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))) {
+			l = append(l, item)
 		}
 		return true
 	})
-	if len(missedIndices) == 0 {
-		return nil
-	}
-	var logItems []string
-	for i := 0; i < len(missedIndices); i += 2 {
-		fromStep, toStep := missedIndices[i], missedIndices[i+1]
-		logItems = append(logItems, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-	}
-	log.Info("[snapshots] BuildMissedIndices", "files", strings.Join(logItems, ","))
+	return l
+}
 
-	for i := 0; i < len(missedIndices); i += 2 {
-		fromStep, toStep := missedIndices[i], missedIndices[i+1]
+// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
+func (ii *InvertedIndex) BuildMissedIndices() (err error) {
+	for _, item := range ii.missedIdxFiles() {
+		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-		if dir.Exist(idxPath) {
-			return nil
-		}
-		item, ok := ii.files.Get(&filesItem{startTxNum: fromStep * ii.aggregationStep, endTxNum: toStep * ii.aggregationStep})
-		if !ok {
-			return nil
-		}
 		if _, err := buildIndex(item.decompressor, idxPath, ii.dir, item.decompressor.Count()/2, false /* values */); err != nil {
 			return err
 		}
@@ -167,28 +152,36 @@ func (ii *InvertedIndex) BuildMissedIndices() (err error) {
 func (ii *InvertedIndex) openFiles() error {
 	var err error
 	var totalKeys uint64
+	var invalidFileItems []*filesItem
 	ii.files.Ascend(func(item *filesItem) bool {
-		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-		if item.decompressor == nil {
-			datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
-			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-				log.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
-				return false
-			}
+		if item.decompressor != nil {
+			item.decompressor.Close()
 		}
+		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+		if !dir.FileExist(datPath) {
+			invalidFileItems = append(invalidFileItems, item)
+		}
+		if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+			log.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
+			return false
+		}
+
 		if item.index == nil {
 			idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-			if !dir.Exist(idxPath) {
-				return false
-			}
-			if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-				log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-				return false
+			if dir.FileExist(idxPath) {
+				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+					log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					return false
+				}
+				totalKeys += item.index.KeyCount()
 			}
 		}
-		totalKeys += item.index.KeyCount()
 		return true
 	})
+	for _, item := range invalidFileItems {
+		ii.files.Delete(item)
+	}
 	if err != nil {
 		return err
 	}
@@ -249,6 +242,10 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{ii: ii}
 	ic.files = btree.NewG[ctxItem](32, ctxItemLess)
 	ii.files.Ascend(func(item *filesItem) bool {
+		if item.index == nil {
+			return false
+		}
+
 		ic.files.ReplaceOrInsert(ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,

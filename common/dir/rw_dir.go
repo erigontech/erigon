@@ -20,6 +20,17 @@ func Exist(path string) bool {
 	return true
 }
 
+func FileExist(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil && os.IsNotExist(err) {
+		return false
+	}
+	if !fi.Mode().IsRegular() {
+		return false
+	}
+	return true
+}
+
 func Recreate(dir string) {
 	if Exist(dir) {
 		_ = os.RemoveAll(dir)

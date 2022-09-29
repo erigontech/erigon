@@ -32,6 +32,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -181,8 +182,12 @@ func (d *Domain) openFiles() error {
 
 	invalidFileItems := make([]*filesItem, 0)
 	d.files.Ascend(func(item *filesItem) bool {
-		datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
-		if fi, err := os.Stat(datPath); err != nil || fi.IsDir() {
+		if item.decompressor != nil {
+			item.decompressor.Close()
+		}
+		fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+		datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+		if !dir.FileExist(datPath) {
 			invalidFileItems = append(invalidFileItems, item)
 			return true
 		}
@@ -190,15 +195,16 @@ func (d *Domain) openFiles() error {
 			return false
 		}
 
-		idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
-		if fi, err := os.Stat(idxPath); err != nil || fi.IsDir() {
-			invalidFileItems = append(invalidFileItems, item)
-			return true
+		if item.index == nil {
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+			if dir.FileExist(idxPath) {
+				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+					log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					return false
+				}
+				totalKeys += item.index.KeyCount()
+			}
 		}
-		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-			return false
-		}
-		totalKeys += item.index.KeyCount()
 		return true
 	})
 	if err != nil {
@@ -410,6 +416,9 @@ func (d *Domain) MakeContext() *DomainContext {
 	var datsz, idxsz, files uint64
 
 	d.files.Ascend(func(item *filesItem) bool {
+		if item.index == nil {
+			return false
+		}
 		getter := item.decompressor.MakeGetter()
 		datsz += uint64(getter.Size())
 		idxsz += uint64(item.index.Size())
@@ -708,6 +717,29 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 	}, nil
 }
 
+func (d *Domain) missedIdxFiles() (l []*filesItem) {
+	d.files.Ascend(func(item *filesItem) bool { // don't run slow logic while iterating on btree
+		fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+		if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))) {
+			l = append(l, item)
+		}
+		return true
+	})
+	return l
+}
+
+// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
+func (d *Domain) BuildMissedIndices() (err error) {
+	if err := d.History.BuildMissedIndices(); err != nil {
+		return err
+	}
+	for _, item := range d.missedIdxFiles() {
+		//TODO: build .kvi
+		_ = item
+	}
+	return d.openFiles()
+}
+
 func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values bool) (*recsplit.Index, error) {
 	var rs *recsplit.RecSplit
 	var err error
@@ -722,6 +754,8 @@ func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
+	defer d.EnableReadAhead().DisableReadAhead()
+
 	word := make([]byte, 0, 256)
 	var keyPos, valPos uint64
 	g := d.MakeGetter()
