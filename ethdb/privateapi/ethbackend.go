@@ -418,7 +418,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 	}
 
 	if !s.hd.POSSync() {
-		log.Debug(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
+		log.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -485,7 +485,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
-		log.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
+		log.Info(fmt.Sprintf("[%s] stage loop is busy", prefix))
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 

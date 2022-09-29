@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -156,8 +157,12 @@ func HeadersPOS(
 	preProgress uint64,
 ) error {
 	if initialCycle {
-		// Let execution and other stages to finish before waiting for CL
-		return nil
+		// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
+		if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		} else if s.BlockNumber >= execProgress {
+			return nil
+		}
 	}
 
 	cfg.hd.SetPOSSync(true)
