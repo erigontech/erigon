@@ -1,4 +1,4 @@
-package sentinel
+package lightclient
 
 import (
 	"context"

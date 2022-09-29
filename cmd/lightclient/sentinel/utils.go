@@ -101,17 +101,25 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	return multiAddrs
 }
 
-func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (digest [4]byte) {
+func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (digest [4]byte, err error) {
 	data := p2p.ForkData{
 		CurrentVersion:        currentVersion,
 		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}
-	dataRoot, err := data.HashTreeRoot()
+	var dataRoot [32]byte
+	dataRoot, err = data.HashTreeRoot()
 	if err != nil {
-		//TODO: not sure what to actually do here
-		panic(err)
+		return
 	}
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
+}
+
+func mustComputeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) [4]byte {
+	res, err := computeForkDigest(currentVersion, genesisValidatorsRoot)
+	if err != nil {
+		panic(err)
+	}
+	return res
 }
