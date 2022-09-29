@@ -51,16 +51,16 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 		if err != nil {
 			// the stream reset error is ignored, because
 			if !strings.Contains(err.Error(), "stream reset") {
-				log.Warn("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+				log.Debug("fail to decode packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			}
 			return
 		}
 		err = fn(ctx, val)
 		if err != nil {
-			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
+			log.Debug("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
-		log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
+		log.Trace("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpoint", ctx.Protocol, "msg", val)
 	}
 }
 

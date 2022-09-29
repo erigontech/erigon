@@ -39,7 +39,7 @@ type Sentinel struct {
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
 	host     host.Host
-	cfg      SentinelConfig
+	cfg      *SentinelConfig
 	peers    *peers.Peers
 
 	state                *lightclient.LightState
@@ -143,7 +143,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
+func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:                      ctx,
 		cfg:                      cfg,

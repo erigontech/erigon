@@ -32,8 +32,9 @@ import (
 
 type SentinelConfig struct {
 	DiscoverConfig discover.Config
-	NetworkConfig  clparams.NetworkConfig
-	GenesisConfig  clparams.GenesisConfig
+	NetworkConfig  *clparams.NetworkConfig
+	GenesisConfig  *clparams.GenesisConfig
+	BeaconConfig   *clparams.BeaconChainConfig
 	IpAddr         string
 	Port           int
 	TCPPort        uint
@@ -76,7 +77,7 @@ func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) 
 	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%d", ipAddr, port))
 }
 
-func buildOptions(cfg SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
+func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 	var priKey = cfg.DiscoverConfig.PrivateKey
 
 	listen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
