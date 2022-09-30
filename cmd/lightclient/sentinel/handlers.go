@@ -60,7 +60,7 @@ func curryStreamHandler[T proto.Packet](newcodec func(network.Stream) proto.Stre
 			log.Warn("failed handling packet", "err", err, "path", ctx.Protocol, "pkt", reflect.TypeOf(val))
 			return
 		}
-		log.Info("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
+		log.Trace("[ReqResp] Req->Host", "from", ctx.Stream.ID(), "endpount", ctx.Protocol, "msg", val)
 	}
 }
 

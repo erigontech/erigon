@@ -16,6 +16,8 @@ package sentinel
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
@@ -126,14 +129,21 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
+	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
+			// TODO: note that this is incorrect
+			// i am simply doing this for now so we can get a unique id so that we can distinguish messages.
+			hs := sha256.Sum256(pmsg.Data)
+			return hex.EncodeToString(hs[:])
+		}),
 		pubsub.WithNoAuthor(),
 		pubsub.WithSubscriptionFilter(nil),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(pubsub.DefaultGossipSubParams()),
+		pubsub.WithGossipSubParams(gsp),
 	}
 	return psOpts
 }
