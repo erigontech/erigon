@@ -10,7 +10,7 @@ import (
 
 func (s *Sentinel) pingRequest() {
 	pingPacket := &p2p.Ping{
-		Id: uint64(1),
+		Id: uint64(0),
 	}
 
 	_, peerInfo, err := connectToRandomPeer(s)
@@ -31,11 +31,13 @@ func (s *Sentinel) pingRequest() {
 	n, err := sc.WritePacket(pingPacket)
 	if err != nil {
 		log.Warn("[Req] failed to write ping request packet", "err", err)
+		s.peers.DisconnectPeer(peerInfo.ID)
 		return
 	}
 
 	if n != 8 {
 		log.Warn("[Req] wrong ping packet size")
+		s.peers.DisconnectPeer(peerInfo.ID)
 		return
 	}
 	log.Info("[Req] sent ping request", "peer", peerInfo.ID)
@@ -43,23 +45,26 @@ func (s *Sentinel) pingRequest() {
 	code, err := sc.ReadByte()
 	if err != nil {
 		log.Warn("[Resp] failed to read byte", "err", err)
+		s.peers.DisconnectPeer(peerInfo.ID)
 		return
 	}
 
 	switch code {
 	case 0:
 		responsePing := &p2p.Ping{}
-		pctx, err := sc.Decode(responsePing)
+		protoCtx, err := sc.Decode(responsePing)
 		if err != nil {
-			log.Warn("fail ping success", "err", err, "got", string(pctx.Raw))
+			log.Warn("fail ping success", "err", err, "got", string(protoCtx.Raw))
+			s.peers.DisconnectPeer(peerInfo.ID)
 			return
 		}
 		log.Info("[Resp] ping success", "peer", peerInfo.ID, "code", code, "pong", responsePing.Id)
 	case 1, 2, 3:
 		errMessage := &proto.ErrorMessage{}
-		pctx, err := sc.Decode(errMessage)
+		protoCtx, err := sc.Decode(errMessage)
 		if err != nil {
-			log.Warn("fail decode ping error", "err", err, "got", string(pctx.Raw))
+			log.Warn("fail decode ping error", "err", err, "got", string(protoCtx.Raw))
+			s.peers.DisconnectPeer(peerInfo.ID)
 			return
 		}
 		log.Info("[Resp] ping error ", "peer", peerInfo.ID, "code", code, "msg", string(errMessage.Message))
