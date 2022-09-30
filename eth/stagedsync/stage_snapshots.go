@@ -480,6 +480,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 // retiring blocks in a single thread in the brackground
 func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
+	fmt.Printf("retireBlocksInSingleBackgroundThread\n")
 	// if something already happens in background - noop
 	if blockRetire.Working() {
 		return nil
