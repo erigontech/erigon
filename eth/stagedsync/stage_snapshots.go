@@ -465,7 +465,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	sn := cfg.blockRetire.Snapshots()
-	fmt.Printf("Snapshots prune, sn==nil %t\n", sn == nil)
 	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
 		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
 			return err
@@ -487,7 +486,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 // retiring blocks in a single thread in the brackground
 func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
-	fmt.Printf("retireBlocksInSingleBackgroundThread\n")
 	// if something already happens in background - noop
 	if blockRetire.Working() {
 		return nil
@@ -502,7 +500,6 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		}
 	}
 
-	fmt.Printf("RetireBlocksInBackground forwardProgress: %d\n", s.ForwardProgress)
 	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
 
 	return nil
