@@ -99,3 +99,34 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	}
 	return multiAddrs
 }
+
+func connectToRandomPeer(s *Sentinel) (node *enode.Node, peerInfo *peer.AddrInfo, err error) {
+	iterator := s.listener.RandomNodes()
+	defer iterator.Close()
+
+	connectedPeer := false
+	for !connectedPeer {
+
+		if exists := iterator.Next(); !exists {
+			break
+		}
+
+		node = iterator.Node()
+		peerInfo, _, err = convertToAddrInfo(node)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error converting to addres info, err=%s", err)
+		}
+
+		if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
+			log.Debug("couldn't connect to peer", "err", err)
+			continue
+		}
+		connectedPeer = true
+	}
+
+	if !connectedPeer {
+		return nil, nil, fmt.Errorf("failed to connect to peer")
+	}
+
+	return node, peerInfo, nil
+}
