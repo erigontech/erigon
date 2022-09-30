@@ -1,9 +1,6 @@
 package fork
 
 import (
-	"encoding/hex"
-	"strings"
-
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -109,26 +106,4 @@ func postAltairMsgID(pmsg *pubsubpb.Message, fEpoch uint64, networkConfig *clpar
 	combinedData = append(combinedData, decodedData...)
 	h := utils.Keccak256(combinedData)
 	return string(h[:20])
-}
-
-func extractGossipDigest(topic string) ([4]byte, bool) {
-	// Ensure the topic prefix is correct.
-	if len(topic) < len(gossipTopicPrefix)+1 || topic[:len(gossipTopicPrefix)] != gossipTopicPrefix {
-		return [4]byte{}, true
-	}
-	start := len(gossipTopicPrefix)
-	end := strings.Index(topic[start:], "/")
-	if end == -1 { // Ensure a topic suffix exists.
-		return [4]byte{}, true
-	}
-	end += start
-	strDigest := topic[start:end]
-	digest, err := hex.DecodeString(strDigest)
-	if err != nil {
-		return [4]byte{}, true
-	}
-	if len(digest) != digestLength {
-		return [4]byte{}, true
-	}
-	return utils.BytesToBytes4(digest), false
 }
