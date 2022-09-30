@@ -1,6 +1,8 @@
 package ssz_snappy
 
 import (
+	"bufio"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"sync"
@@ -14,7 +16,6 @@ import (
 type StreamCodec struct {
 	s  network.Stream
 	sr *snappy.Reader
-	sw *snappy.Writer
 
 	mu sync.Mutex
 }
@@ -25,7 +26,6 @@ func NewStreamCodec(
 	return &StreamCodec{
 		s:  s,
 		sr: snappy.NewReader(s),
-		sw: snappy.NewWriter(s),
 	}
 }
 
@@ -42,6 +42,32 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 	p, err := EncodePacket(pkt, d.s)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to write packet err=%s", err)
+	if val, ok := pkt.(ssz.Marshaler); ok {
+		wr := bufio.NewWriter(d.s)
+		sw := snappy.NewWriter(wr)
+		p := make([]byte, 10)
+		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
+		enc, err := val.MarshalSSZ()
+		if err != nil {
+			return 0, fmt.Errorf("marshal ssz: %w", err)
+		}
+		_, err = wr.Write(p[:vin])
+		if err != nil {
+			return 0, fmt.Errorf("write varint: %w", err)
+		}
+		n, err = sw.Write(enc)
+		if err != nil {
+			return 0, fmt.Errorf("snappy compress: %w", err)
+		}
+		err = sw.Flush()
+		if err != nil {
+			return 0, fmt.Errorf("flush packet: %w", err)
+		}
+		err = wr.Flush()
+		if err != nil {
+			return 0, fmt.Errorf("flush packet: %w", err)
+		}
+		return n, nil
 	}
 
 	n, err = d.sw.Write(p)
