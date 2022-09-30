@@ -458,6 +458,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	sn := cfg.blockRetire.Snapshots()
+	fmt.Printf("Snapshots prune, sn==nil %t\n", sn == nil)
 	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
 		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
 			return err
