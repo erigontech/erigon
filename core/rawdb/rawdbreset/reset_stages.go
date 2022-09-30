@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
@@ -158,6 +159,7 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 		kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 	}
 	for _, b := range stateBuckets {
+		log.Info("Clear", "table", b)
 		if err := tx.ClearBucket(b); err != nil {
 			return err
 		}
@@ -181,6 +183,7 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 			kv.TracesToKeys, kv.TracesToIdx,
 		}
 		for _, b := range buckets {
+			log.Info("Clear", "table", b)
 			if err := tx.ClearBucket(b); err != nil {
 				return err
 			}
