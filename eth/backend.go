@@ -331,7 +331,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, header, body, unwindPoint, headersChain, bodiesChain, false /* quiet */); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -339,9 +339,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
-		expected := headersChain[len(headersChain)-1].Number.Uint64()
-		if progress < expected {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, expected)
+		if progress < header.Number.Uint64() {
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
 		}
 		return nil
 	}
