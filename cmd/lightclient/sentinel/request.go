@@ -25,9 +25,8 @@ func (s *Sentinel) pingRequest() {
 		log.Warn("[Req] failed to create stream to send ping request", "err", err)
 		return
 	}
-	defer stream.Close()
-
 	sc := ssz_snappy.NewStreamCodec(stream)
+	defer sc.Close()
 
 	n, err := sc.WritePacket(pingPacket)
 	if err != nil {

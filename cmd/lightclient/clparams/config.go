@@ -30,6 +30,7 @@ const (
 	MainnetNetwork NetworkType = 0
 	GoerliNetwork  NetworkType = 1
 	SepoliaNetwork NetworkType = 2
+	MaxChunkSize   uint64      = 1 << 20
 )
 
 var (

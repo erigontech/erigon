@@ -45,6 +45,8 @@ type SubContext struct {
 
 // PacketCodec describes a wire format.
 type StreamCodec interface {
+	Close() error
+
 	Write(payload []byte) (n int, err error)
 	WritePacket(pck Packet) (n int, err error)
 	Decode(Packet) (ctx *StreamContext, err error)

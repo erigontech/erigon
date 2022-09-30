@@ -29,6 +29,13 @@ func NewStreamCodec(
 	}
 }
 
+func (d *StreamCodec) Close() error {
+	if err := d.s.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
