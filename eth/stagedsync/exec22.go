@@ -35,8 +35,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func NewProgress(prevOutputBlockNum uint64) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold}
 }
 
 type Progress struct {
@@ -44,6 +44,7 @@ type Progress struct {
 	prevCount          uint64
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
+	commitThreshold    uint64
 }
 
 func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
@@ -67,7 +68,7 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"result queue", rws.Len(),
 		"results size", common.ByteCount(resultsSize),
 		"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"buffer", common.ByteCount(sizeEstimate),
+		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	p.prevTime = currentTime
@@ -145,7 +146,7 @@ func Exec3(ctx context.Context,
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
-	progress := NewProgress(block)
+	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
