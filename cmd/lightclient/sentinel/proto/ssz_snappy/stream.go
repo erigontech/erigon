@@ -54,6 +54,10 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 		if err != nil {
 			return 0, fmt.Errorf("flush packet: %w", err)
 		}
+		err = wr.Flush()
+		if err != nil {
+			return 0, fmt.Errorf("flush packet: %w", err)
+		}
 		return n, nil
 	}
 	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
