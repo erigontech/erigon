@@ -85,6 +85,13 @@ func SpawnStageSnapshots(
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
 		return err
 	}
+	finishProgress, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	if err = s.Update(tx, finishProgress); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
