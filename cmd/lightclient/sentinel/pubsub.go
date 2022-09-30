@@ -159,7 +159,7 @@ func runSubscriptionHandler[T proto.Packet](
 			continue
 		}
 
-		log.Info("[Gossip] received message", "topic", subscription.Topic())
+		log.Info("[Gossip] received message", "topic", sub.Topic())
 
 		if ctx.Msg.ReceivedFrom == s.host.ID() {
 			continue

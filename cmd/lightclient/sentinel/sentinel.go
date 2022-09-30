@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
