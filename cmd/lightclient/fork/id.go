@@ -6,12 +6,6 @@ import (
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 
-// Specifies the prefix for any pubsub topic.
-const (
-	gossipTopicPrefix = "/eth2/"
-	digestLength      = 4
-)
-
 // MsgID is a content addressable ID function.
 //
 // Ethereum Beacon Chain spec defines the message ID as:
