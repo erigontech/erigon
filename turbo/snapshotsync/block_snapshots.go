@@ -1056,6 +1056,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		if !ok {
 			return
 		}
+		fmt.Printf("CanRetire %d - %d\n", blockFrom, blockTo)
 
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
 		br.result = &BlockRetireResult{
