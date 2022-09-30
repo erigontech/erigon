@@ -71,7 +71,8 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64        `json:"gossip_max_size"`                    // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64        `json:"gossip_max_size"` // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSizeBellatrix          uint64        `json:"gossip_max_size_bellatrix"`
 	MaxRequestBlocks                uint64        `json:"max_request_blocks"`                 // Maximum number of blocks in a single request
 	MinEpochsForBlockRequests       uint64        `json:"min_epochs_for_block_requests"`      // The minimum epoch range over which a node must serve blocks
 	MaxChunkSize                    uint64        `json:"max_chunk_size"`                     // The maximum allowed size of uncompressed req/resp chunked responses.
@@ -101,6 +102,7 @@ type GenesisConfig struct {
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10 * 1 << 20,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -120,6 +122,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 	SepoliaNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10 * 1 << 20,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -139,6 +142,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 	GoerliNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10 * 1 << 20,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
