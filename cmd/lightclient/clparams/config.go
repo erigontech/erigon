@@ -108,7 +108,7 @@ type GenesisConfig struct {
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10 * 1 << 20,
+		GossipMaxSizeBellatrix:          10485760,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -128,7 +128,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 	SepoliaNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10 * 1 << 20,
+		GossipMaxSizeBellatrix:          10485760,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -148,7 +148,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 	GoerliNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10 * 1 << 20,
+		GossipMaxSizeBellatrix:          10485760,
 		MaxChunkSize:                    1 << 20, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
