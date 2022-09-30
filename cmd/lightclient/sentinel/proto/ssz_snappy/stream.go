@@ -1,13 +1,10 @@
 package ssz_snappy
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
-	"reflect"
 	"sync"
 
-	"gfx.cafe/util/go/bufpool"
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
@@ -35,24 +32,16 @@ func NewStreamCodec(
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
-	if val, ok := pkt.(ssz.Marshaler); ok {
-		sz := val.SizeSSZ()
-		bp := bufpool.Get(sz)
-		defer bufpool.Put(bp)
-		p := bp.Bytes()
-		p = append(p, make([]byte, 10)...)
-		vin := binary.PutVarint(p, int64(sz))
-		_, err = val.MarshalSSZTo(p[vin:])
-		if err != nil {
-			return 0, fmt.Errorf("marshal ssz: %w", err)
-		}
-		n, err := d.sw.Write(p)
-		if err != nil {
-			return 0, err
-		}
-		return n, nil
+	p, err := EncodePacket(pkt)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to write packet err=%s", err)
 	}
-	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
+
+	n, err = d.sw.Write(p)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // write raw bytes to stream
