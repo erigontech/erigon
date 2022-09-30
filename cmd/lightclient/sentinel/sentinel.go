@@ -22,6 +22,7 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
@@ -41,7 +42,7 @@ type Sentinel struct {
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
 	host     host.Host
-	cfg      SentinelConfig
+	cfg      *SentinelConfig
 	peers    *peers.Peers
 
 	state  *lightclient.LightState
@@ -118,7 +119,9 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.setupHandlers()
+
+	// Start stream handlers
+	handlers.NewConsensusHandlers(s.host, s.peers).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -149,7 +152,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
+func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:        ctx,
 		cfg:        cfg,

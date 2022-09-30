@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220929051144-62dc68dd669a
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220930065347-4c1cda7c9379
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.2
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -240,7 +240,7 @@ require (
 	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/genproto v0.0.0-20211118181313-81c1377c94b1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/v3 v3.3.0 // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
 	modernc.org/cc/v3 v3.38.1 // indirect

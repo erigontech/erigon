@@ -55,7 +55,7 @@ func MiningStages(
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnHashStateStage(s, tx, hashStateCfg, ctx)
+				return SpawnHashStateStage(s, tx, hashStateCfg, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
 			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
@@ -64,7 +64,7 @@ func MiningStages(
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
+				stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, quiet)
 				if err != nil {
 					return err
 				}

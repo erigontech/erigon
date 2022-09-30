@@ -40,7 +40,7 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state
 	}
 }
 
-func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
+func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -66,7 +66,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
