@@ -1,6 +1,7 @@
 package sentinel
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
@@ -19,7 +20,7 @@ func (s *Sentinel) pingRequest() {
 		return
 	}
 
-	stream, err := s.host.NewStream(s.ctx, peerInfo.ID, protocol.ID(ProtocolPrefix+"/ping/1/ssz_snappy"))
+	stream, err := s.host.NewStream(s.ctx, peerInfo.ID, protocol.ID(handlers.ProtocolPrefix+"/ping/1/ssz_snappy"))
 	if err != nil {
 		log.Warn("[Req] failed to create stream to send ping request", "err", err)
 		return
@@ -31,13 +32,13 @@ func (s *Sentinel) pingRequest() {
 	n, err := sc.WritePacket(pingPacket)
 	if err != nil {
 		log.Warn("[Req] failed to write ping request packet", "err", err)
-		s.peers.DisconnectPeer(peerInfo.ID)
+		s.peers.Penalize(peerInfo.ID)
 		return
 	}
 
 	if n != 8 {
 		log.Warn("[Req] wrong ping packet size")
-		s.peers.DisconnectPeer(peerInfo.ID)
+		s.peers.Penalize(peerInfo.ID)
 		return
 	}
 	log.Info("[Req] sent ping request", "peer", peerInfo.ID)
@@ -45,7 +46,7 @@ func (s *Sentinel) pingRequest() {
 	code, err := sc.ReadByte()
 	if err != nil {
 		log.Warn("[Resp] failed to read byte", "err", err)
-		s.peers.DisconnectPeer(peerInfo.ID)
+		s.peers.Penalize(peerInfo.ID)
 		return
 	}
 
@@ -55,7 +56,7 @@ func (s *Sentinel) pingRequest() {
 		protoCtx, err := sc.Decode(responsePing)
 		if err != nil {
 			log.Warn("fail ping success", "err", err, "got", string(protoCtx.Raw))
-			s.peers.DisconnectPeer(peerInfo.ID)
+			s.peers.Penalize(peerInfo.ID)
 			return
 		}
 		log.Info("[Resp] ping success", "peer", peerInfo.ID, "code", code, "pong", responsePing.Id)
@@ -64,7 +65,7 @@ func (s *Sentinel) pingRequest() {
 		protoCtx, err := sc.Decode(errMessage)
 		if err != nil {
 			log.Warn("fail decode ping error", "err", err, "got", string(protoCtx.Raw))
-			s.peers.DisconnectPeer(peerInfo.ID)
+			s.peers.Penalize(peerInfo.ID)
 			return
 		}
 		log.Info("[Resp] ping error ", "peer", peerInfo.ID, "code", code, "msg", string(errMessage.Message))
