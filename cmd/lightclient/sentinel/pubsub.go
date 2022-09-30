@@ -119,7 +119,7 @@ func (s *Sentinel) beginTopicListening(subscription *pubsub.Subscription) {
 			continue
 		}
 
-		log.Info("[Gossip] received message", "topic", subscription.Topic(), "message", msg)
+		log.Info("[Gossip] received message", "topic", subscription.Topic())
 
 	}
 }

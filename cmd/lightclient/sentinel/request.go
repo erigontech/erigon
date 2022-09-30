@@ -48,21 +48,21 @@ func (s *Sentinel) pingRequest() {
 
 	switch code {
 	case 0:
-		rping := &p2p.Ping{}
-		pctx, err := sc.Decode(rping)
+		responsePing := &p2p.Ping{}
+		pctx, err := sc.Decode(responsePing)
 		if err != nil {
 			log.Warn("fail ping success", "err", err, "got", string(pctx.Raw))
 			return
 		}
-		log.Info("[Resp] ping success", "peer", peerInfo.ID, "code", code, "pong", rping.Id)
+		log.Info("[Resp] ping success", "peer", peerInfo.ID, "code", code, "pong", responsePing.Id)
 	case 1, 2, 3:
-		errm := &proto.ErrorMessage{}
-		pctx, err := sc.Decode(errm)
+		errMessage := &proto.ErrorMessage{}
+		pctx, err := sc.Decode(errMessage)
 		if err != nil {
 			log.Warn("fail decode ping error", "err", err, "got", string(pctx.Raw))
 			return
 		}
-		log.Info("[Resp] ping error ", "peer", peerInfo.ID, "code", code, "msg", string(errm.Message))
+		log.Info("[Resp] ping error ", "peer", peerInfo.ID, "code", code, "msg", string(errMessage.Message))
 	default:
 		log.Info("[Resp] ping unknown code", "peer", peerInfo.ID, "code", code)
 	}

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
@@ -197,6 +198,17 @@ func (s *Sentinel) Start() error {
 	if err := s.BeginSubscription("/eth2/4a26c58b/beacon_block/ssz_snappy"); err != nil {
 		return err
 	}
+
+	go func() {
+		tryEvery := time.NewTicker(5 * time.Second)
+		defer tryEvery.Stop()
+		for {
+			select {
+			case <-tryEvery.C:
+				s.pingRequest()
+			}
+		}
+	}()
 
 	return nil
 }
