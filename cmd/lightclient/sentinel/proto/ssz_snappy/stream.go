@@ -32,12 +32,16 @@ func NewStreamCodec(
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
-	p, err := EncodePacket(pkt)
+	p, err := EncodePacket(pkt, d.s)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to write packet err=%s", err)
 	}
 
 	n, err = d.sw.Write(p)
+	if err != nil {
+		return 0, err
+	}
+	err = d.sw.Flush()
 	if err != nil {
 		return 0, err
 	}
@@ -47,6 +51,21 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 // write raw bytes to stream
 func (d *StreamCodec) Write(payload []byte) (n int, err error) {
 	return d.s.Write(payload)
+}
+
+// read raw bytes to stream
+func (d *StreamCodec) Read(b []byte) (n int, err error) {
+	return d.s.Read(b)
+}
+
+// read raw bytes to stream
+func (d *StreamCodec) ReadByte() (b byte, err error) {
+	o := [1]byte{}
+	_, err = io.ReadFull(d.s, o[:])
+	if err != nil {
+		return
+	}
+	return o[0], nil
 }
 
 // decode into packet p, then return the packet context

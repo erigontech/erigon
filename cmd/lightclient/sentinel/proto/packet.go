@@ -48,6 +48,9 @@ type StreamCodec interface {
 	Write(payload []byte) (n int, err error)
 	WritePacket(pck Packet) (n int, err error)
 	Decode(Packet) (ctx *StreamContext, err error)
+
+	Read(payload []byte) (n int, err error)
+	ReadByte() (b byte, err error)
 }
 
 // SubCodec describes a wire format for pubsub messages
@@ -64,4 +67,18 @@ type EmptyPacket struct{}
 
 func (e *EmptyPacket) Clone() Packet {
 	return &EmptyPacket{}
+}
+
+// the error message skips decoding but does do the decompression.
+type ErrorMessage struct {
+	Message []byte `json:"message"`
+}
+
+func (typ *ErrorMessage) Clone() Packet {
+	return &ErrorMessage{}
+}
+
+func (typ *ErrorMessage) UnmarshalSSZ(buf []byte) error {
+	typ.Message = buf
+	return nil
 }
