@@ -16,12 +16,11 @@ package sentinel
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
@@ -137,10 +136,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
-			// TODO: note that this is incorrect
-			// i am simply doing this for now so we can get a unique id so that we can distinguish messages.
-			hs := sha256.Sum256(pmsg.Data)
-			return hex.EncodeToString(hs[:])
+			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 		}),
 		pubsub.WithNoAuthor(),
 		pubsub.WithSubscriptionFilter(nil),
