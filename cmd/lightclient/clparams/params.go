@@ -16,5 +16,8 @@ package clparams
 import "time"
 
 const (
-	MaxDialTimeout = 10 * time.Second
+	MaxDialTimeout            = 10 * time.Second
+	VersionLength      int    = 4
+	SepoliaEth1ChainId uint64 = 5
+	GoerliEth1ChainId  uint64 = 11155111
 )
