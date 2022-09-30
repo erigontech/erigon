@@ -1772,6 +1772,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
+	fmt.Printf("d.Count() = %d\n", d.Count())
 	rs.LogLvl(lvl)
 
 	defer d.EnableReadAhead().DisableReadAhead()
