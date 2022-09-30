@@ -48,13 +48,13 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers
 }
 
 func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
-	log.Info("Got block by range handler call")
 	defer stream.Close()
+	log.Info("Got block by range handler call")
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
-	log.Info("Got beacon block by root handler call")
 	defer stream.Close()
+	log.Info("Got beacon block by root handler call")
 }
 
 func (c *ConsensusHandlers) Start() {
