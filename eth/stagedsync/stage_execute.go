@@ -246,7 +246,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
-	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()-1))
+	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()-4))
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle && s.BlockNumber == 0 {
@@ -264,6 +264,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
+			log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "from", s.BlockNumber, "to", reconstituteToBlock)
 			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
