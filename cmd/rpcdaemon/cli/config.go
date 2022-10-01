@@ -345,6 +345,23 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `kvClient.Snapshots` after establish grpc connection
 			allSnapshots.OptimisticReopenWithDB(db)
 			allSnapshots.LogStat()
+
+			dirs := datadir.New(cfg.DataDir)
+			if agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
+			}
+			if err = agg.ReopenFiles(); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
+			}
+
+			db.View(context.Background(), func(tx kv.Tx) error {
+				agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress
+				})
+				return nil
+			})
+
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
 					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
@@ -356,6 +373,18 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()
+					}
+
+					if err = agg.ReopenFiles(); err != nil {
+						log.Error("[Snapshots] reopen", "err", err)
+					} else {
+						db.View(context.Background(), func(tx kv.Tx) error {
+							agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+								_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+								return histBlockNumProgress
+							})
+							return nil
+						})
 					}
 				}()
 			}
