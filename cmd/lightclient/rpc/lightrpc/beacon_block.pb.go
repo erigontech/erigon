@@ -25,9 +25,9 @@ type Eth1Data struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Root         []byte `protobuf:"bytes,1,opt,name=Root,json=deposit_root,proto3" json:"Root,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
+	Root         []byte `protobuf:"bytes,1,opt,name=Root,json=deposit_root,proto3" json:"Root,omitempty"` // @gotags: sszsize:"32"
 	DepositCount uint64 `protobuf:"varint,2,opt,name=DepositCount,json=deposit_count,proto3" json:"DepositCount,omitempty"`
-	BlockHash    []byte `protobuf:"bytes,3,opt,name=BlockHash,json=block_hash,proto3" json:"BlockHash,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
+	BlockHash    []byte `protobuf:"bytes,3,opt,name=BlockHash,json=block_hash,proto3" json:"BlockHash,omitempty"` // @gotags: sszsize:"32"
 }
 
 func (x *Eth1Data) Reset() {
@@ -90,9 +90,9 @@ type BeaconBlockHeader struct {
 
 	Slot          uint64 `protobuf:"varint,1,opt,name=Slot,json=slot,proto3" json:"Slot,omitempty"`
 	ProposerIndex uint64 `protobuf:"varint,2,opt,name=ProposerIndex,json=proposer_index,proto3" json:"ProposerIndex,omitempty"`
-	ParentRoot    []byte `protobuf:"bytes,3,opt,name=ParentRoot,json=parent_root,proto3" json:"ParentRoot,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
-	Root          []byte `protobuf:"bytes,4,opt,name=Root,json=root,proto3" json:"Root,omitempty" ssz-size:"32"`                    // @gotags: ssz-size:"32"
-	BodyRoot      []byte `protobuf:"bytes,5,opt,name=BodyRoot,json=body_root,proto3" json:"BodyRoot,omitempty" ssz-size:"32"`       // @gotags: ssz-size:"32"
+	ParentRoot    []byte `protobuf:"bytes,3,opt,name=ParentRoot,json=parent_root,proto3" json:"ParentRoot,omitempty"` // @gotags: sszsize:"32"
+	Root          []byte `protobuf:"bytes,4,opt,name=Root,json=root,proto3" json:"Root,omitempty"`                    // @gotags: sszsize:"32"
+	BodyRoot      []byte `protobuf:"bytes,5,opt,name=BodyRoot,json=body_root,proto3" json:"BodyRoot,omitempty"`       // @gotags: sszsize:"32"
 }
 
 func (x *BeaconBlockHeader) Reset() {
@@ -168,7 +168,7 @@ type SignedBeaconBlockHeader struct {
 	unknownFields protoimpl.UnknownFields
 
 	Header    *BeaconBlockHeader `protobuf:"bytes,1,opt,name=Header,json=message,proto3" json:"Header,omitempty"`
-	Signature []byte             `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	Signature []byte             `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty"` // @gotags: sszsize:"96"
 }
 
 func (x *SignedBeaconBlockHeader) Reset() {
@@ -280,7 +280,7 @@ type AttestationData struct {
 
 	Slot            uint64 `protobuf:"varint,1,opt,name=Slot,json=slot,proto3" json:"Slot,omitempty"`
 	Index           uint64 `protobuf:"varint,2,opt,name=Index,json=index,proto3" json:"Index,omitempty"`
-	BeaconBlockHash []byte `protobuf:"bytes,3,opt,name=BeaconBlockHash,json=beacon_block_hash,proto3" json:"BeaconBlockHash,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
+	BeaconBlockHash []byte `protobuf:"bytes,3,opt,name=BeaconBlockHash,json=beacon_block_hash,proto3" json:"BeaconBlockHash,omitempty"` // @gotags: sszsize:"32"
 }
 
 func (x *AttestationData) Reset() {
@@ -341,9 +341,9 @@ type Attestation struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	AggregationBits []byte           `protobuf:"bytes,1,opt,name=AggregationBits,json=aggregation_bits,proto3" json:"AggregationBits,omitempty" ssz-max:"2048" ssz:"bitlist"` // @gotags: ssz-max:"2048" ssz:"bitlist"
+	AggregationBits []byte           `protobuf:"bytes,1,opt,name=AggregationBits,json=aggregation_bits,proto3" json:"AggregationBits,omitempty"` // @gotags: sszmax:"2048" ssz:"bitlist"
 	Data            *AttestationData `protobuf:"bytes,2,opt,name=Data,json=data,proto3" json:"Data,omitempty"`
-	Signature       []byte           `protobuf:"bytes,3,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	Signature       []byte           `protobuf:"bytes,3,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty"` // @gotags: sszsize:"96"
 }
 
 func (x *Attestation) Reset() {
@@ -404,11 +404,11 @@ type DepositData struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	PubKey                []byte `protobuf:"bytes,1,opt,name=PubKey,json=pubkey,proto3" json:"PubKey,omitempty" ssz-size:"48"`                                               // @gotags: ssz-size:"48"
-	WithdrawalCredentials []byte `protobuf:"bytes,2,opt,name=WithdrawalCredentials,json=withdrawal_credentials,proto3" json:"WithdrawalCredentials,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
+	PubKey                []byte `protobuf:"bytes,1,opt,name=PubKey,json=pubkey,proto3" json:"PubKey,omitempty"`                                               // @gotags: sszsize:"48"
+	WithdrawalCredentials []byte `protobuf:"bytes,2,opt,name=WithdrawalCredentials,json=withdrawal_credentials,proto3" json:"WithdrawalCredentials,omitempty"` // @gotags: sszsize:"32"
 	Amount                uint64 `protobuf:"varint,3,opt,name=Amount,json=amount,proto3" json:"Amount,omitempty"`
-	Signature             []byte `protobuf:"bytes,4,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
-	Root                  []byte `protobuf:"bytes,5,opt,name=Root,proto3" json:"Root,omitempty" ssz:"-"`                          // @gotags: ssz:"-"
+	Signature             []byte `protobuf:"bytes,4,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty"` // @gotags: sszsize:"96"
+	Root                  []byte `protobuf:"bytes,5,opt,name=Root,proto3" json:"Root,omitempty"`                          // @gotags: ssz:"-"
 }
 
 func (x *DepositData) Reset() {
@@ -483,7 +483,7 @@ type Deposit struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Proof [][]byte     `protobuf:"bytes,1,rep,name=Proof,json=proof,proto3" json:"Proof,omitempty" ssz-size:"33,32"` // @gotags: ssz-size:"33,32"
+	Proof [][]byte     `protobuf:"bytes,1,rep,name=Proof,json=proof,proto3" json:"Proof,omitempty"` // @gotags: sszsize:"33,32"
 	Data  *DepositData `protobuf:"bytes,2,opt,name=Data,json=data,proto3" json:"Data,omitempty"`
 }
 
@@ -539,7 +539,7 @@ type SignedVoluntaryExit struct {
 	unknownFields protoimpl.UnknownFields
 
 	VolunaryExit *VoluntaryExit `protobuf:"bytes,1,opt,name=VolunaryExit,json=message,proto3" json:"VolunaryExit,omitempty"`
-	Signature    []byte         `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	Signature    []byte         `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty"` // @gotags: sszsize:"96"
 }
 
 func (x *SignedVoluntaryExit) Reset() {
@@ -648,8 +648,8 @@ type SyncAggregate struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	SyncCommiteeBits      []byte `protobuf:"bytes,1,opt,name=SyncCommiteeBits,json=sync_committee_bits,proto3" json:"SyncCommiteeBits,omitempty" ssz-size:"64"`                // @gotags: ssz-size:"64"
-	SyncCommiteeSignature []byte `protobuf:"bytes,2,opt,name=SyncCommiteeSignature,json=sync_committee_signature,proto3" json:"SyncCommiteeSignature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	SyncCommiteeBits      []byte `protobuf:"bytes,1,opt,name=SyncCommiteeBits,json=sync_committee_bits,proto3" json:"SyncCommiteeBits,omitempty"`                // @gotags: sszsize:"64"
+	SyncCommiteeSignature []byte `protobuf:"bytes,2,opt,name=SyncCommiteeSignature,json=sync_committee_signature,proto3" json:"SyncCommiteeSignature,omitempty"` // @gotags: sszsize:"96"
 }
 
 func (x *SyncAggregate) Reset() {
@@ -704,20 +704,20 @@ type ExecutionPayload struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	ParentHash    []byte   `protobuf:"bytes,1,opt,name=ParentHash,json=parent_hash,proto3" json:"ParentHash,omitempty" ssz-size:"32"`       // @gotags: ssz-size:"32"
-	FeeRecipient  []byte   `protobuf:"bytes,2,opt,name=FeeRecipient,json=fee_recipient,proto3" json:"FeeRecipient,omitempty" ssz-size:"20"` // @gotags: ssz-size:"20"
-	StateRoot     []byte   `protobuf:"bytes,3,opt,name=StateRoot,json=state_root,proto3" json:"StateRoot,omitempty" ssz-size:"32"`          // @gotags: ssz-size:"32"
-	ReceiptsRoot  []byte   `protobuf:"bytes,4,opt,name=ReceiptsRoot,json=receipts_root,proto3" json:"ReceiptsRoot,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
-	LogsBloom     []byte   `protobuf:"bytes,5,opt,name=LogsBloom,json=logs_bloom,proto3" json:"LogsBloom,omitempty" ssz-size:"256"`          // @gotags: ssz-size:"256"
-	PrevRandao    []byte   `protobuf:"bytes,6,opt,name=PrevRandao,json=prev_randao,proto3" json:"PrevRandao,omitempty" ssz-size:"32"`       // @gotags: ssz-size:"32"
+	ParentHash    []byte   `protobuf:"bytes,1,opt,name=ParentHash,json=parent_hash,proto3" json:"ParentHash,omitempty"`       // @gotags: sszsize:"32"
+	FeeRecipient  []byte   `protobuf:"bytes,2,opt,name=FeeRecipient,json=fee_recipient,proto3" json:"FeeRecipient,omitempty"` // @gotags: sszsize:"20"
+	StateRoot     []byte   `protobuf:"bytes,3,opt,name=StateRoot,json=state_root,proto3" json:"StateRoot,omitempty"`          // @gotags: sszsize:"32"
+	ReceiptsRoot  []byte   `protobuf:"bytes,4,opt,name=ReceiptsRoot,json=receipts_root,proto3" json:"ReceiptsRoot,omitempty"` // @gotags: sszsize:"32"
+	LogsBloom     []byte   `protobuf:"bytes,5,opt,name=LogsBloom,json=logs_bloom,proto3" json:"LogsBloom,omitempty"`          // @gotags: sszsize:"256"
+	PrevRandao    []byte   `protobuf:"bytes,6,opt,name=PrevRandao,json=prev_randao,proto3" json:"PrevRandao,omitempty"`       // @gotags: sszsize:"32"
 	BlockNumber   uint64   `protobuf:"varint,7,opt,name=BlockNumber,json=block_number,proto3" json:"BlockNumber,omitempty"`
 	GasLimit      uint64   `protobuf:"varint,8,opt,name=GasLimit,json=gas_limit,proto3" json:"GasLimit,omitempty"`
 	GasUsed       uint64   `protobuf:"varint,9,opt,name=GasUsed,json=gas_used,proto3" json:"GasUsed,omitempty"`
 	Timestamp     uint64   `protobuf:"varint,10,opt,name=Timestamp,json=timestamp,proto3" json:"Timestamp,omitempty"`
-	ExtraData     []byte   `protobuf:"bytes,11,opt,name=ExtraData,json=extra_data,proto3" json:"ExtraData,omitempty" ssz-size:"32"`               // @gotags: ssz-size:"32"
-	BaseFeePerGas []byte   `protobuf:"bytes,12,opt,name=BaseFeePerGas,json=base_fee_per_gas,proto3" json:"BaseFeePerGas,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
-	BlockHash     []byte   `protobuf:"bytes,13,opt,name=BlockHash,json=block_hash,proto3" json:"BlockHash,omitempty" ssz-size:"32"`               // @gotags: ssz-size:"32"
-	Transactions  [][]byte `protobuf:"bytes,14,rep,name=Transactions,json=transactions,proto3" json:"Transactions,omitempty" ssz-size:"?,?" ssz-max:"1048576,1073741824"`       // @gotags: ssz-size:"?,?" ssz-max:"1048576,1073741824"
+	ExtraData     []byte   `protobuf:"bytes,11,opt,name=ExtraData,json=extra_data,proto3" json:"ExtraData,omitempty"`               // @gotags: sszsize:"32"
+	BaseFeePerGas []byte   `protobuf:"bytes,12,opt,name=BaseFeePerGas,json=base_fee_per_gas,proto3" json:"BaseFeePerGas,omitempty"` // @gotags: sszsize:"32"
+	BlockHash     []byte   `protobuf:"bytes,13,opt,name=BlockHash,json=block_hash,proto3" json:"BlockHash,omitempty"`               // @gotags: sszsize:"32"
+	Transactions  [][]byte `protobuf:"bytes,14,rep,name=Transactions,json=transactions,proto3" json:"Transactions,omitempty"`       // @gotags: sszsize:"?,?" sszmax:"1048576,1073741824"
 }
 
 func (x *ExecutionPayload) Reset() {
@@ -855,14 +855,14 @@ type BeaconBodyBellatrix struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	RandaoReveal      []byte                 `protobuf:"bytes,1,opt,name=RandaoReveal,json=randao_reveal,proto3" json:"RandaoReveal,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	RandaoReveal      []byte                 `protobuf:"bytes,1,opt,name=RandaoReveal,json=randao_reveal,proto3" json:"RandaoReveal,omitempty"` // @gotags: sszsize:"96"
 	Eth1Data          *Eth1Data              `protobuf:"bytes,2,opt,name=Eth1Data,json=eth1_data,proto3" json:"Eth1Data,omitempty"`
-	Graffiti          []byte                 `protobuf:"bytes,3,opt,name=Graffiti,json=graffiti,proto3" json:"Graffiti,omitempty" ssz-size:"32"`                             // @gotags: ssz-size:"32"
-	ProposerSlashings []*Slashing            `protobuf:"bytes,4,rep,name=ProposerSlashings,json=proposer_slashings,proto3" json:"ProposerSlashings,omitempty" ssz-max:"16"` // @gotags: ssz-max:"16"
-	AttesterSlashings []*Slashing            `protobuf:"bytes,5,rep,name=AttesterSlashings,json=attester_slashings,proto3" json:"AttesterSlashings,omitempty" ssz-max:"2"` // @gotags: ssz-max:"2"
-	Attestations      []*Attestation         `protobuf:"bytes,6,rep,name=Attestations,json=attestations,proto3" json:"Attestations,omitempty" ssz-max:"128"`                 // @gotags: ssz-max:"128"
-	Deposits          []*Deposit             `protobuf:"bytes,7,rep,name=Deposits,json=deposits,proto3" json:"Deposits,omitempty" ssz-max:"16"`                             // @gotags: ssz-max:"16"
-	VoluntaryExits    []*SignedVoluntaryExit `protobuf:"bytes,8,rep,name=VoluntaryExits,json=voluntary_exits,proto3" json:"VoluntaryExits,omitempty" ssz-max:"16"`          // @gotags: ssz-max:"16"
+	Graffiti          []byte                 `protobuf:"bytes,3,opt,name=Graffiti,json=graffiti,proto3" json:"Graffiti,omitempty"`                             // @gotags: sszsize:"32"
+	ProposerSlashings []*Slashing            `protobuf:"bytes,4,rep,name=ProposerSlashings,json=proposer_slashings,proto3" json:"ProposerSlashings,omitempty"` // @gotags: sszmax:"16"
+	AttesterSlashings []*Slashing            `protobuf:"bytes,5,rep,name=AttesterSlashings,json=attester_slashings,proto3" json:"AttesterSlashings,omitempty"` // @gotags: sszmax:"2"
+	Attestations      []*Attestation         `protobuf:"bytes,6,rep,name=Attestations,json=attestations,proto3" json:"Attestations,omitempty"`                 // @gotags: sszmax:"128"
+	Deposits          []*Deposit             `protobuf:"bytes,7,rep,name=Deposits,json=deposits,proto3" json:"Deposits,omitempty"`                             // @gotags: sszmax:"16"
+	VoluntaryExits    []*SignedVoluntaryExit `protobuf:"bytes,8,rep,name=VoluntaryExits,json=voluntary_exits,proto3" json:"VoluntaryExits,omitempty"`          // @gotags: sszmax:"16"
 	SyncAggregate     *SyncAggregate         `protobuf:"bytes,9,opt,name=SyncAggregate,json=sync_aggregate,proto3" json:"SyncAggregate,omitempty"`
 	ExecutionPayload  *ExecutionPayload      `protobuf:"bytes,10,opt,name=ExecutionPayload,json=execution_payload,proto3" json:"ExecutionPayload,omitempty"`
 }
@@ -976,8 +976,8 @@ type BeaconBlockBellatrix struct {
 
 	Slot          uint64               `protobuf:"varint,1,opt,name=Slot,json=slot,proto3" json:"Slot,omitempty"`
 	ProposerIndex uint64               `protobuf:"varint,2,opt,name=ProposerIndex,json=proposer_index,proto3" json:"ProposerIndex,omitempty"`
-	Root          []byte               `protobuf:"bytes,3,opt,name=Root,json=root,proto3" json:"Root,omitempty" ssz-size:"32"`                    // @gotags: ssz-size:"32"
-	ParentRoot    []byte               `protobuf:"bytes,4,opt,name=ParentRoot,json=parent_root,proto3" json:"ParentRoot,omitempty" ssz-size:"32"` // @gotags: ssz-size:"32"
+	Root          []byte               `protobuf:"bytes,3,opt,name=Root,json=root,proto3" json:"Root,omitempty"`                    // @gotags: sszsize:"32"
+	ParentRoot    []byte               `protobuf:"bytes,4,opt,name=ParentRoot,json=parent_root,proto3" json:"ParentRoot,omitempty"` // @gotags: sszsize:"32"
 	Body          *BeaconBodyBellatrix `protobuf:"bytes,5,opt,name=Body,json=body,proto3" json:"Body,omitempty"`
 }
 
@@ -1054,7 +1054,7 @@ type SignedBeaconBlockBellatrix struct {
 	unknownFields protoimpl.UnknownFields
 
 	Block     *BeaconBlockBellatrix `protobuf:"bytes,1,opt,name=Block,json=message,proto3" json:"Block,omitempty"`
-	Signature []byte                `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty" ssz-size:"96"` // @gotags: ssz-size:"96"
+	Signature []byte                `protobuf:"bytes,2,opt,name=Signature,json=signature,proto3" json:"Signature,omitempty"` // @gotags: sszsize:"96"
 }
 
 func (x *SignedBeaconBlockBellatrix) Reset() {
