@@ -246,7 +246,6 @@ func Exec3(ctx context.Context,
 							panic(err)
 						}
 						log.Info("Committed", "time", time.Since(commitStart))
-						os.Exit(1)
 					}
 				}
 			}
