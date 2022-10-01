@@ -210,7 +210,10 @@ func (s *Sentinel) Start() error {
 			case <-s.ctx.Done():
 				break
 			case <-tryEvery.C:
-				s.pingRequest()
+				_, err := s.SendRequest(&p2p.MetadataV0{}, &p2p.MetadataV0{}, handlers.ProtocolPrefix+"/metadata/1/ssz_snappy")
+				if err != nil {
+					log.Warn("failed to send packet", "err", err)
+				}
 			}
 		}
 	}()

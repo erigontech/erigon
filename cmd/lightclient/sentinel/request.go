@@ -1,127 +1,63 @@
 package sentinel
 
 import (
-	"time"
+	"fmt"
+	"reflect"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-func (s *Sentinel) pingRequest() {
-	pingPacket := &p2p.Ping{
-		Id: uint64(1),
-	}
-
+func (s *Sentinel) SendRequest(requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
 	_, peerInfo, err := connectToRandomPeer(s)
 	if err != nil {
-		log.Warn("[Req] failed to ping request", "err", err)
-		return
+		return nil, fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
 
-	stream, err := s.host.NewStream(s.ctx, peerInfo.ID, protocol.ID(handlers.ProtocolPrefix+"/ping/1/ssz_snappy"))
+	peerId := peerInfo.ID
+	stream, err := s.host.NewStream(s.ctx, peerId, protocol.ID(topic))
+
 	if err != nil {
-		log.Warn("[Req] failed to create stream to send ping request", "err", err)
-		return
+		return nil, fmt.Errorf("failed to begin stream, err=%s", err)
 	}
 	sc := ssz_snappy.NewStreamCodec(stream)
 	defer sc.Close()
 
-	n, err := sc.WritePacket(pingPacket)
-	if err != nil {
-		log.Warn("[Req] failed to write ping request packet", "err", err)
-		s.peers.Penalize(peerInfo.ID)
-		return
+	if _, err := sc.WritePacket(requestPacket); err != nil {
+		return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
 	}
 
-	if n != 8 {
-		log.Warn("[Req] wrong ping packet size")
-		s.peers.Penalize(peerInfo.ID)
-		return
+	if err := sc.CloseWriter(); err != nil {
+		return nil, fmt.Errorf("failed to close write stream, err=%s", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	sc.CloseWriter()
-	log.Info("[Req] sent ping request", "peer", peerInfo.ID)
+	log.Info("[Req] sent request", "topic", topic, "peer", peerId)
 
-	code, err := sc.ReadByte()
-	if err != nil {
-		log.Warn("[Resp] failed to read byte", "err", err)
-		s.peers.Penalize(peerInfo.ID)
-		return
-	}
-
-	switch code {
-	case 0:
-		responsePing := &p2p.Ping{}
-		protoCtx, err := sc.Decode(responsePing)
-		if err != nil {
-			log.Warn("fail ping success", "err", err, "got", string(protoCtx.Raw))
-			s.peers.Penalize(peerInfo.ID)
-			return
-		}
-		log.Info("[Resp] ping success", "peer", peerInfo.ID, "code", code, "pong", responsePing.Id)
-	case 1, 2, 3:
-		errMessage := &proto.ErrorMessage{}
-		protoCtx, err := sc.Decode(errMessage)
-		if err != nil {
-			log.Warn("fail decode ping error", "err", err, "got", string(protoCtx.Raw))
-			s.peers.Penalize(peerInfo.ID)
-			return
-		}
-		log.Info("[Resp] ping error ", "peer", peerInfo.ID, "code", code, "msg", string(errMessage.Message))
-	default:
-		log.Info("[Resp] ping unknown code", "peer", peerInfo.ID, "code", code)
-	}
+	return decodeResponse(sc, responsePacket, peerId)
 }
 
-func (s *Sentinel) metadataRequest() {
-	_, peerInfo, err := connectToRandomPeer(s)
-	if err != nil {
-		log.Warn("[Req] failed to metadata request", "err", err)
-		return
-	}
-
-	stream, err := s.host.NewStream(s.ctx, peerInfo.ID, protocol.ID(handlers.ProtocolPrefix+"/metadata/1/ssz_snappy"))
-	if err != nil {
-		log.Warn("[Req] failed to create stream to send metadata request", "err", err)
-		return
-	}
-	sc := ssz_snappy.NewStreamCodec(stream)
-	defer sc.Close()
-
-	log.Info("[Req] sent metadata request", "peer", peerInfo.ID)
-	sc.CloseWriter()
-
+func decodeResponse(sc proto.StreamCodec, responsePacket proto.Packet, peerId peer.ID) (proto.Packet, error) {
 	code, err := sc.ReadByte()
 	if err != nil {
-		log.Warn("[Resp] failed to read byte", "err", err)
-		s.peers.Penalize(peerInfo.ID)
-		return
+		return nil, fmt.Errorf("failed to read code byte, err=%s", err)
 	}
 
-	switch code {
-	case 0:
-		responseMetadata := &p2p.MetadataV0{}
-		protoCtx, err := sc.Decode(responseMetadata)
+	if code != 0 {
+		errPacket := &proto.ErrorMessage{}
+		protoCtx, err := sc.Decode(errPacket)
 		if err != nil {
-			log.Warn("fail metadata success", "err", err, "got", string(protoCtx.Raw))
-			s.peers.Penalize(peerInfo.ID)
-			return
+			return nil, fmt.Errorf("failed to decode error packet got=%s, err=%s", string(protoCtx.Raw), err)
 		}
-		log.Info("[Resp] metadata success", "peer", peerInfo.ID, "code", code, "seq_number", responseMetadata.SeqNumber)
-	case 1, 2, 3:
-		errMessage := &proto.ErrorMessage{}
-		protoCtx, err := sc.Decode(errMessage)
-		if err != nil {
-			log.Warn("fail decode metadata error", "err", err, "got", string(protoCtx.Raw))
-			s.peers.Penalize(peerInfo.ID)
-			return
-		}
-		log.Info("[Resp] metadata error ", "peer", peerInfo.ID, "code", code, "msg", string(errMessage.Message))
-	default:
-		log.Info("[Resp] metadata unknown code", "peer", peerInfo.ID, "code", code)
+		return errPacket, nil
 	}
+
+	protoCtx, err := sc.Decode(responsePacket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode packet got=%s, err=%s", string(protoCtx.Raw), err)
+	}
+	log.Info("[Resp] got response from", "response", responsePacket, "peer", peerId)
+
+	return responsePacket, nil
 }
