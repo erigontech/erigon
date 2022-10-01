@@ -104,8 +104,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.snapshots.LogStat()
-	_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-	cfg.agg.LogStats(histBlockNumProgress)
+	cfg.agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+		_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress
+	})
 
 	// Create .idx files
 	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {

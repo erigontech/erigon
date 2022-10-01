@@ -480,6 +480,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		accountCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
 	t := time.Now()
@@ -500,8 +501,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	log.Info("Scan accounts history", "took", time.Since(t))
 
-	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 	defer accountCollectorX.Close()
+	accountCollectorX.LogLvl(log.LvlDebug)
 	for i := 0; i < workerCount; i++ {
 		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return accountCollectorX.Collect(k, v)
@@ -525,6 +527,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		storageCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
 	t = time.Now()
@@ -545,8 +548,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	log.Info("Scan storage history", "took", time.Since(t))
 
-	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 	defer storageCollectorX.Close()
+	storageCollectorX.LogLvl(log.LvlDebug)
 	for i := 0; i < workerCount; i++ {
 		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return storageCollectorX.Collect(k, v)
@@ -570,6 +574,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		codeCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
 	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
@@ -587,8 +592,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
-	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 	defer codeCollectorX.Close()
+	codeCollectorX.LogLvl(log.LvlDebug)
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(fillWorkers[i].Bitmap())
