@@ -67,10 +67,11 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	err = sw.Flush()
-	if err != nil {
+
+	if err := sw.Flush(); err != nil {
 		return 0, err
 	}
+
 	return n, nil
 }
 

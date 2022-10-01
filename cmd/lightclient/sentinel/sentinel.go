@@ -210,7 +210,7 @@ func (s *Sentinel) Start() error {
 			case <-s.ctx.Done():
 				break
 			case <-tryEvery.C:
-				_, err := s.sendMedataReqV1()
+				_, err := s.sendMetadataReqV1()
 				if err != nil {
 					log.Error("failed sending packet", "err", err)
 				}

@@ -18,18 +18,23 @@ func EncodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writ
 		wr := bufio.NewWriter(stream)
 		sw := snappy.NewWriter(wr)
 		p := make([]byte, 10)
+
 		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
+
 		enc, err := val.MarshalSSZ()
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal ssz: %w", err)
 		}
+
 		if len(enc) > int(clparams.MaxChunkSize) {
 			return nil, nil, fmt.Errorf("chunk size too big")
 		}
+
 		_, err = wr.Write(p[:vin])
 		if err != nil {
 			return nil, nil, fmt.Errorf("write varint: %w", err)
 		}
+
 		return enc, sw, nil
 	}
 
