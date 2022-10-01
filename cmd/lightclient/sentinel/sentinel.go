@@ -18,17 +18,17 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
@@ -42,13 +42,9 @@ type Sentinel struct {
 	cfg      *SentinelConfig
 	peers    *peers.Peers
 
-	state                *lightclient.LightState
-	pubsub               *pubsub.PubSub
-	subscribedTopics     map[string]*pubsub.Topic
-	runningSubscriptions map[string]*pubsub.Subscription
+	pubsub *pubsub.PubSub
 
-	subscribedTopicLock      sync.Mutex
-	runningSubscriptionsLock sync.Mutex
+	subManager subscriptionManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -119,7 +115,9 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.setupHandlers()
+
+	// Start stream handlers
+	handlers.NewConsensusHandlers(s.host, s.peers).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -130,14 +128,18 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
+	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
+			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+		}),
 		pubsub.WithNoAuthor(),
 		pubsub.WithSubscriptionFilter(nil),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(pubsub.DefaultGossipSubParams()),
+		pubsub.WithGossipSubParams(gsp),
 	}
 	return psOpts
 }
@@ -145,12 +147,9 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 // This is just one of the examples from the libp2p repository.
 func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:                      ctx,
-		cfg:                      cfg,
-		subscribedTopics:         make(map[string]*pubsub.Topic),
-		runningSubscriptions:     make(map[string]*pubsub.Subscription),
-		subscribedTopicLock:      sync.Mutex{},
-		runningSubscriptionsLock: sync.Mutex{},
+		ctx:        ctx,
+		cfg:        cfg,
+		subManager: newSubscriptionManager(),
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -166,15 +165,12 @@ func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
-	//TODO: populate with data from config
-	s.state = lightclient.NewLightState(ctx, &p2p.LightClientBootstrap{}, [32]byte{})
 
-	gossipSubscription, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
+	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
-		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%s", err)
+		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
 	}
 
-	s.pubsub = gossipSubscription
 	return s, nil
 }
 
@@ -186,16 +182,18 @@ func (s *Sentinel) Start() error {
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return fmt.Errorf("failed creating sentinel listener err=%s", err)
+		return fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
 	if err := s.connectToBootnodes(); err != nil {
-		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
+		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
-
 	go s.listenForPeers()
 
-	if err := s.BeginSubscription("/eth2/4a26c58b/beacon_block/ssz_snappy"); err != nil {
-		return err
+	//TODO: request and compute
+	prefix := "/eth2/4a26c58b"
+
+	if err := s.startGossip(prefix); err != nil {
+		return fmt.Errorf("failed to start gossip err=%w", err)
 	}
 
 	return nil
