@@ -203,10 +203,12 @@ func (s *Sentinel) Start() error {
 	}
 
 	go func() {
-		tryEvery := time.NewTicker(5 * time.Second)
+		tryEvery := time.NewTicker(1 * time.Second)
 		defer tryEvery.Stop()
 		for {
 			select {
+			case <-s.ctx.Done():
+				break
 			case <-tryEvery.C:
 				s.pingRequest()
 			}

@@ -100,6 +100,7 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	return multiAddrs
 }
 
+// will iterate onto randoms nodes until our sentinel connects to one
 func connectToRandomPeer(s *Sentinel) (node *enode.Node, peerInfo *peer.AddrInfo, err error) {
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()

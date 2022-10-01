@@ -11,7 +11,7 @@ import (
 
 func (s *Sentinel) pingRequest() {
 	pingPacket := &p2p.Ping{
-		Id: uint64(0),
+		Id: uint64(1),
 	}
 
 	_, peerInfo, err := connectToRandomPeer(s)
