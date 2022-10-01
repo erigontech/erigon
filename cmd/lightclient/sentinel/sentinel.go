@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -44,7 +45,7 @@ type Sentinel struct {
 
 	pubsub *pubsub.PubSub
 
-	subManager subscriptionManager
+	subManager *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -145,11 +146,13 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
+func New(
+	ctx context.Context,
+	cfg *SentinelConfig,
+) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:        ctx,
-		cfg:        cfg,
-		subManager: newSubscriptionManager(),
+		ctx: ctx,
+		cfg: cfg,
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -174,7 +177,9 @@ func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	return s, nil
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) Start(
+	gossipHandler func(*proto.SubContext) error,
+) error {
 	if s.started {
 		log.Warn("Sentinel already running")
 	}
@@ -189,13 +194,11 @@ func (s *Sentinel) Start() error {
 	}
 	go s.listenForPeers()
 
-	//TODO: request and compute
-	prefix := "/eth2/4a26c58b"
+	s.subManager = NewGossipManager(s.ctx, gossipHandler)
 
-	if err := s.startGossip(prefix); err != nil {
+	if err := s.startGossip(); err != nil {
 		return fmt.Errorf("failed to start gossip err=%w", err)
 	}
-
 	return nil
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -50,7 +51,7 @@ func main() {
 		log.Error("error", "err", err)
 		return
 	}
-	if err := sent.Start(); err != nil {
+	if err := sent.Start(handleGossipPacket); err != nil {
 		log.Error("failed to start sentinel", "err", err)
 		return
 	}
@@ -59,20 +60,27 @@ func main() {
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
-		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
-			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
-			log.Info("[Gossip] beacon_block",
-				"Slot", u.Block.Slot,
-				"Signature", hex.EncodeToString(u.Signature[:]),
-				"graffiti", string(u.Block.Body.Graffiti[:]),
-				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
-				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
-				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
-				"proposerIdx", u.Block.ProposerIndex,
-			)
-		default:
-			time.Sleep(100 * time.Millisecond)
+			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
 		}
 	}
+}
+
+func handleGossipPacket(pkt *proto.SubContext) error {
+	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
+	switch u := pkt.Packet.(type) {
+	case *p2p.SignedBeaconBlockBellatrix:
+		log.Info("[Gossip] beacon_block",
+			"Slot", u.Block.Slot,
+			"Signature", hex.EncodeToString(u.Signature[:]),
+			"graffiti", string(u.Block.Body.Graffiti[:]),
+			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+			"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+			"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+			"proposerIdx", u.Block.ProposerIndex,
+		)
+	case *p2p.LightClientFinalityUpdate:
+	case *p2p.LightClientOptimisticUpdate:
+	default:
+	}
+	return nil
 }
