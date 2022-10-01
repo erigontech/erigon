@@ -28,6 +28,8 @@ func (s *Sentinel) sendMedataReqV1() (proto.Packet, error) {
 	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
 }
 
+// TODO: add the request of the request topics
+
 func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
 	_, peerInfo, err := connectToRandomPeer(s)
 	if err != nil {
