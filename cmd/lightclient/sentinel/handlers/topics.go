@@ -8,7 +8,7 @@ const Schema1 = "/1"
 const Schema2 = "/2"
 
 // Request and Response topics
-const MetadataTopic = "/medata"
+const MetadataTopic = "/metadata"
 const PingTopic = "/ping"
 const StatusTopic = "/status"
 const GoodbyeTopic = "/goodbye"

@@ -4,14 +4,31 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-func (s *Sentinel) SendRequest(requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
+func (s *Sentinel) sendPingReqV1() (proto.Packet, error) {
+	requestPacket := &p2p.Ping{
+		Id: uint64(1),
+	}
+	responsePacket := &p2p.Ping{}
+	return sendRequest(s, requestPacket, responsePacket, handlers.PingProtocolV1)
+}
+
+func (s *Sentinel) sendMedataReqV1() (proto.Packet, error) {
+	requestPacket := &p2p.MetadataV1{}
+	responsePacket := &p2p.MetadataV1{}
+
+	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
+}
+
+func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
 	_, peerInfo, err := connectToRandomPeer(s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to a random peer err=%s", err)
@@ -35,13 +52,18 @@ func (s *Sentinel) SendRequest(requestPacket proto.Packet, responsePacket proto.
 	}
 	log.Info("[Req] sent request", "topic", topic, "peer", peerId)
 
-	return decodeResponse(sc, responsePacket, peerId)
+	responsePacket, err = decodeResponse(sc, responsePacket, peerId)
+	if err != nil {
+		return nil, err
+	}
+
+	return responsePacket, nil
 }
 
 func decodeResponse(sc proto.StreamCodec, responsePacket proto.Packet, peerId peer.ID) (proto.Packet, error) {
 	code, err := sc.ReadByte()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read code byte, err=%s", err)
+		return nil, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
 	}
 
 	if code != 0 {
