@@ -37,12 +37,12 @@ var roaring64Pool = sync.Pool{
 }
 
 func GetRoaring64() *roaring64.Bitmap {
-	a := roaringPool.Get().(*roaring64.Bitmap)
+	a := roaring64Pool.Get().(*roaring64.Bitmap)
 	a.Clear()
 	return a
 }
 func ReturnRoaring64(a *roaring64.Bitmap) {
-	roaringPool.Put(a)
+	roaring64Pool.Put(a)
 }
 
 const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX overflow pages appear: 4096 / 2 - (keySize + 8)
