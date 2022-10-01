@@ -119,7 +119,7 @@ func (s *Sentinel) startGossip(prefix string) (err error) {
 
 	go func() {
 		for {
-			log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
+			log.Debug("[Gossip] Network Update", "topic peers", s.subManager.String())
 			time.Sleep(30 * time.Second)
 		}
 	}()
@@ -148,7 +148,7 @@ func subscribeGossipTopic[T proto.Packet](
 	s.subManager.addTopicSub(topic, topicHandle, subscription)
 	s.subManager.gossipResults[topic] = make(chan interface{})
 
-	log.Info("[Gossip] began subscription", "topic", subscription.Topic())
+	log.Debug("[Gossip] began subscription", "topic", subscription.Topic())
 	var nothing T
 	go runSubscriptionHandler(s, subscription, newcodec, nothing)
 	return nil
@@ -179,7 +179,7 @@ func runSubscriptionHandler[T proto.Packet](
 			log.Warn("failed handling gossip ", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(t))
 			continue
 		}
-		log.Info("[Gossip] Received Subscription", "topic", ctx.Topic)
+		log.Debug("[Gossip] Received Subscription", "topic", ctx.Topic)
 	}
 }
 

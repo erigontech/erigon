@@ -36,7 +36,7 @@ func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
 }
 
 func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
-	log.Info("[ReqResp] Status",
+	log.Debug("[ReqResp] Status",
 		"epoch", dat.FinalizedEpoch,
 		"final root", utils.BytesToHex(dat.FinalizedRoot),
 		"head root", utils.BytesToHex(dat.HeadRoot),

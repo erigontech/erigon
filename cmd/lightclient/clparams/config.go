@@ -14,6 +14,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -34,8 +35,9 @@ const (
 const (
 	MaxDialTimeout            = 10 * time.Second
 	VersionLength      int    = 4
-	SepoliaEth1ChainId uint64 = 5
-	GoerliEth1ChainId  uint64 = 11155111
+	MainnetEth1ChainID uint64 = 1
+	SepoliaEth1ChainId uint64 = 11155111
+	GoerliEth1ChainId  uint64 = 5
 )
 
 var (
@@ -649,23 +651,40 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	GoerliNetwork:  goerliConfig(),
 }
 
-func GetConfigsByNetwork(net NetworkType) (*discover.Config, GenesisConfig, NetworkConfig, BeaconChainConfig, error) {
+func GetConfigsByNetwork(net NetworkType) (*discover.Config, *GenesisConfig, *NetworkConfig, *BeaconChainConfig, error) {
 	networkConfig := NetworkConfigs[net]
 	bootnodes := networkConfig.bootNodes
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
-		return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
+		return nil, &GenesisConfig{}, &NetworkConfig{}, &BeaconChainConfig{}, err
 	}
 	enodes := []*enode.Node{}
 	for _, addr := range bootnodes {
 		enode, err := enode.Parse(enode.ValidSchemes, addr)
 		if err != nil {
-			return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
+			return nil, &GenesisConfig{}, &NetworkConfig{}, &BeaconChainConfig{}, err
 		}
 		enodes = append(enodes, enode)
 	}
+	genesisConfig := GenesisConfigs[net]
+	beaconConfig := BeaconConfigs[net]
 	return &discover.Config{
 		PrivateKey: privateKey,
 		Bootnodes:  enodes,
-	}, GenesisConfigs[net], networkConfig, BeaconConfigs[net], nil
+	}, &genesisConfig, &networkConfig, &beaconConfig, nil
+}
+
+func GetConfigsByEth1ChainId(id uint64) (*discover.Config, *GenesisConfig, *NetworkConfig, *BeaconChainConfig, error) {
+	var net NetworkType
+	switch id {
+	case MainnetEth1ChainID:
+		net = MainnetNetwork
+	case SepoliaEth1ChainId:
+		net = SepoliaNetwork
+	case GoerliEth1ChainId:
+		net = GoerliNetwork
+	default:
+		return nil, nil, nil, nil, fmt.Errorf("chain id not supported")
+	}
+	return GetConfigsByNetwork(net)
 }

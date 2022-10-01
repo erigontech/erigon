@@ -19,13 +19,13 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -193,8 +193,13 @@ func (s *Sentinel) Start() error {
 	}
 	go s.listenForPeers()
 
+	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		return err
+	}
 	//TODO: request and compute
-	prefix := "/eth2/4a26c58b"
+	prefix := "/eth2/" +
+		utils.BytesToHex(digest[:])
 
 	if err := s.startGossip(prefix); err != nil {
 		return fmt.Errorf("failed to start gossip err=%w", err)
@@ -215,7 +220,7 @@ func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
 }
 
-func RunSentinelService(client lightrpc.LightclientClient, network clparams.NetworkType, cfg *SentinelConfig) {
+func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) {
 	ctx := context.Background()
 	sent, err := New(context.Background(), cfg)
 	if err != nil {
@@ -235,6 +240,31 @@ func RunSentinelService(client lightrpc.LightclientClient, network clparams.Netw
 			b := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
 			if _, err := client.NotifyBeaconBlock(context.Background(), rpc.ConvertSignedP2PBellatrixBlockToLightrpc(b)); err != nil {
 				panic(err)
+			}
+		}
+	}
+}
+
+func RunSentinelServiceInternally(client lightrpc.LightclientServer, cfg *SentinelConfig) {
+	ctx := context.Background()
+	sent, err := New(context.Background(), cfg)
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
+	if err := sent.Start(); err != nil {
+		log.Error("failed to start sentinel", "err", err)
+		return
+	}
+	log.Info("Sentinel started", "enr", sent.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case blockPacket := <-sent.GossipChannel(BeaconBlockTopic):
+			b := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
+			if _, err := client.NotifyBeaconBlock(context.Background(), rpc.ConvertSignedP2PBellatrixBlockToLightrpc(b)); err != nil {
+				log.Error("Error in sentinel", "err", err)
 			}
 		}
 	}

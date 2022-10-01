@@ -42,9 +42,9 @@ func main() {
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
-		GenesisConfig:  &genesisCfg,
-		NetworkConfig:  &networkCfg,
-		BeaconConfig:   &beaconCfg,
+		GenesisConfig:  genesisCfg,
+		NetworkConfig:  networkCfg,
+		BeaconConfig:   beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)
