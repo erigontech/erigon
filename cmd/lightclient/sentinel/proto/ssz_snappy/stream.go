@@ -34,6 +34,20 @@ func (d *StreamCodec) Close() error {
 	return nil
 }
 
+func (d *StreamCodec) CloseWriter() error {
+	if err := d.s.CloseWrite(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *StreamCodec) CloseReader() error {
+	if err := d.s.CloseRead(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
