@@ -470,8 +470,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				NetworkConfig:  networkCfg,
 				BeaconConfig:   beaconCfg,
 			})
+		} else {
+			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
 		}
-		log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
 	}
 
 	if stack.Config().PrivateApiAddr != "" {
