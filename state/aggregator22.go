@@ -20,10 +20,14 @@ import (
 	"context"
 	"fmt"
 	math2 "math"
+	"runtime"
+	"strings"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Aggregator22 struct {
@@ -404,6 +408,28 @@ func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {
 		return err
 	}
 	return nil
+}
+
+func (a *Aggregator22) LogStats(tx2block func(endTxNumMinimax uint64) uint64) {
+	maxTxNum := a.EndTxNumMinimax()
+	if maxTxNum == 0 {
+		return
+	}
+	histBlockNumProgress := tx2block(maxTxNum)
+	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
+	a.accounts.InvertedIndex.files.Ascend(func(it *filesItem) bool {
+		bn := tx2block(it.endTxNum)
+		str = append(str, fmt.Sprintf("%d=%d", it.endTxNum/a.aggregationStep, bn))
+		return true
+	})
+
+	var m runtime.MemStats
+	common2.ReadMemStats(&m)
+	log.Info("[Snapshots] History Stat",
+		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
+		"txs", fmt.Sprintf("%dk", maxTxNum/1000),
+		"txNum2blockNum", strings.Join(str, ","),
+		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
 func (a *Aggregator22) EndTxNumMinimax() uint64 {
