@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package lightrpc;
+
+message Eth1Data {
+    bytes Root =          1  [json_name = "deposit_root"]; // @gotags: sszsize:"32"
+    uint64 DepositCount = 2 [json_name = "deposit_count"];
+    bytes BlockHash =     3    [json_name = "block_hash"]; // @gotags: sszsize:"32"
+}
+
+message BeaconBlockHeader {
+    uint64 Slot = 1          [json_name = "slot"];
+    uint64 ProposerIndex = 2 [json_name = "proposer_index"];
+    bytes ParentRoot = 3     [json_name = "parent_root"]; // @gotags: sszsize:"32"
+    bytes Root = 4           [json_name = "root"]; // @gotags: sszsize:"32"
+    bytes BodyRoot = 5       [json_name = "body_root"]; // @gotags: sszsize:"32"
+}
+
+message SignedBeaconBlockHeader {
+    BeaconBlockHeader Header = 1 [json_name = "message"];
+    bytes Signature = 2          [json_name = "signature"]; // @gotags: sszsize:"96"
+}
+
+message Slashing {
+    SignedBeaconBlockHeader Header1 = 1 [json_name = "signed_header_1"];
+    SignedBeaconBlockHeader Header2 = 2 [json_name = "signed_header_2"];
+}
+
+// TODO(Giulio2002): Finish.
+message AttestationData {
+    uint64 Slot = 1  [json_name = "slot"];
+    uint64 Index = 2 [json_name = "index"];
+    bytes  BeaconBlockHash = 3 [json_name = "beacon_block_hash"]; // @gotags: sszsize:"32"
+}
+
+message Attestation {
+    bytes AggregationBits = 1 [json_name = "aggregation_bits"]; // @gotags: sszmax:"2048" ssz:"bitlist"
+    AttestationData Data = 2              [json_name = "data"];  
+    bytes Signature = 3              [json_name = "signature"]; // @gotags: sszsize:"96"
+}
+
+message DepositData {
+    bytes PubKey = 1                [json_name = "pubkey"]; // @gotags: sszsize:"48"
+    bytes WithdrawalCredentials = 2 [json_name = "withdrawal_credentials"]; // @gotags: sszsize:"32"
+    uint64 Amount = 3               [json_name = "amount"];
+    bytes Signature = 4             [json_name = "signature"]; // @gotags: sszsize:"96"
+    bytes Root = 5; // @gotags: ssz:"-"
+}
+
+message Deposit {
+    repeated bytes Proof = 1 [json_name = "proof"]; // @gotags: sszsize:"33,32"
+    DepositData Data = 2     [json_name = "data"];
+}
+
+message SignedVoluntaryExit {
+    VoluntaryExit VolunaryExit = 1  [json_name = "message"];
+    bytes Signature = 2          [json_name = "signature"]; // @gotags: sszsize:"96"
+}
+
+message VoluntaryExit {
+    uint64 Epoch = 1                    [json_name = "epoch"];
+    uint64 ValidatorIndex = 2 [json_name = "validator_index"];
+}
+
+message SyncAggregate {
+    bytes SyncCommiteeBits = 1      [json_name = "sync_committee_bits"]; // @gotags: sszsize:"64"
+    bytes SyncCommiteeSignature = 2 [json_name = "sync_committee_signature"]; // @gotags: sszsize:"96"
+}
+
+// Lightclient will sent this to Erigon once validation is done.
+message ExecutionPayload {
+    bytes ParentHash = 1              [json_name = "parent_hash"]; // @gotags: sszsize:"32"
+    bytes FeeRecipient = 2          [json_name = "fee_recipient"]; // @gotags: sszsize:"20"
+    bytes StateRoot = 3                [json_name = "state_root"]; // @gotags: sszsize:"32"
+    bytes ReceiptsRoot = 4          [json_name = "receipts_root"]; // @gotags: sszsize:"32"
+    bytes LogsBloom = 5                [json_name = "logs_bloom"]; // @gotags: sszsize:"256"
+    bytes PrevRandao = 6              [json_name = "prev_randao"]; // @gotags: sszsize:"32"
+    uint64 BlockNumber = 7           [json_name = "block_number"];
+    uint64 GasLimit = 8                 [json_name = "gas_limit"];
+    uint64 GasUsed = 9                   [json_name = "gas_used"];
+    uint64 Timestamp = 10               [json_name = "timestamp"];
+    bytes ExtraData = 11               [json_name = "extra_data"]; // @gotags: sszsize:"32"
+    bytes BaseFeePerGas = 12     [json_name = "base_fee_per_gas"]; // @gotags: sszsize:"32"
+    bytes BlockHash = 13               [json_name = "block_hash"]; // @gotags: sszsize:"32"
+    repeated bytes Transactions = 14 [json_name = "transactions"]; // @gotags: sszsize:"?,?" sszmax:"1048576,1073741824"
+}
+
+message BeaconBodyBellatrix {
+    bytes RandaoReveal =   1                        [json_name = "randao_reveal"]; // @gotags: sszsize:"96"
+    Eth1Data Eth1Data = 2                           [json_name = "eth1_data"];
+    bytes Graffiti = 3                              [json_name = "graffiti"]; // @gotags: sszsize:"32"
+    repeated Slashing ProposerSlashings = 4 [json_name = "proposer_slashings"]; // @gotags: sszmax:"16"
+    repeated Slashing AttesterSlashings = 5 [json_name = "attester_slashings"]; // @gotags: sszmax:"2"
+    repeated Attestation Attestations = 6           [json_name = "attestations"]; // @gotags: sszmax:"128"
+    repeated Deposit Deposits = 7                   [json_name = "deposits"]; // @gotags: sszmax:"16"
+    repeated SignedVoluntaryExit VoluntaryExits = 8 [json_name = "voluntary_exits"]; // @gotags: sszmax:"16"
+    SyncAggregate SyncAggregate = 9                 [json_name = "sync_aggregate"];
+    ExecutionPayload ExecutionPayload = 10          [json_name = "execution_payload"];
+}
+
+message BeaconBlockBellatrix {
+    uint64 Slot = 1              [json_name = "slot"];
+    uint64 ProposerIndex = 2     [json_name = "proposer_index"];
+    bytes Root =   3             [json_name = "root"]; // @gotags: sszsize:"32"
+    bytes ParentRoot = 4         [json_name = "parent_root"]; // @gotags: sszsize:"32"
+    BeaconBodyBellatrix Body = 5 [json_name = "body"];
+}
+
+message SignedBeaconBlockBellatrix {
+    BeaconBlockBellatrix Block = 1 [json_name = "message"];
+    bytes Signature = 2 [json_name = "signature"]; // @gotags: sszsize:"96"
+}

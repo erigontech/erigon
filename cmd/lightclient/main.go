@@ -66,7 +66,7 @@ func main() {
 				"Slot", u.Block.Slot,
 				"Signature", hex.EncodeToString(u.Signature[:]),
 				"graffiti", string(u.Block.Body.Graffiti[:]),
-				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+				"eth1_blockhash", hex.EncodeToString(u.Block.Body.ExecutionPayload.BlockHash[:]),
 				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
 				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
 				"proposerIdx", u.Block.ProposerIndex,
