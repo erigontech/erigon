@@ -2886,13 +2886,13 @@ func (l *LightClientUpdate) GetTree() (*ssz.Node, error) {
 	return ssz.ProofTree(l)
 }
 
-// MarshalSSZ ssz marshals the MetadataV1 object
-func (m *MetadataV1) MarshalSSZ() ([]byte, error) {
+// MarshalSSZ ssz marshals the MetadataV2 object
+func (m *MetadataV2) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(m)
 }
 
-// MarshalSSZTo ssz marshals the MetadataV1 object to a target array
-func (m *MetadataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+// MarshalSSZTo ssz marshals the MetadataV2 object to a target array
+func (m *MetadataV2) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
 
 	// Field (0) 'SeqNumber'
@@ -2907,8 +2907,8 @@ func (m *MetadataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// UnmarshalSSZ ssz unmarshals the MetadataV1 object
-func (m *MetadataV1) UnmarshalSSZ(buf []byte) error {
+// UnmarshalSSZ ssz unmarshals the MetadataV2 object
+func (m *MetadataV2) UnmarshalSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size != 24 {
@@ -2927,9 +2927,77 @@ func (m *MetadataV1) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
+// SizeSSZ returns the ssz encoded size in bytes for the MetadataV2 object
+func (m *MetadataV2) SizeSSZ() (size int) {
+	size = 24
+	return
+}
+
+// HashTreeRoot ssz hashes the MetadataV2 object
+func (m *MetadataV2) HashTreeRoot() ([32]byte, error) {
+	return ssz.HashWithDefaultHasher(m)
+}
+
+// HashTreeRootWith ssz hashes the MetadataV2 object with a hasher
+func (m *MetadataV2) HashTreeRootWith(hh ssz.HashWalker) (err error) {
+	indx := hh.Index()
+
+	// Field (0) 'SeqNumber'
+	hh.PutUint64(m.SeqNumber)
+
+	// Field (1) 'Attnets'
+	hh.PutUint64(uint64(m.Attnets))
+
+	// Field (2) 'Syncnets'
+	hh.PutUint64(uint64(m.Syncnets))
+
+	hh.Merkleize(indx)
+	return
+}
+
+// GetTree ssz hashes the MetadataV2 object
+func (m *MetadataV2) GetTree() (*ssz.Node, error) {
+	return ssz.ProofTree(m)
+}
+
+// MarshalSSZ ssz marshals the MetadataV1 object
+func (m *MetadataV1) MarshalSSZ() ([]byte, error) {
+	return ssz.MarshalSSZ(m)
+}
+
+// MarshalSSZTo ssz marshals the MetadataV1 object to a target array
+func (m *MetadataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+	dst = buf
+
+	// Field (0) 'SeqNumber'
+	dst = ssz.MarshalUint64(dst, m.SeqNumber)
+
+	// Field (1) 'Attnets'
+	dst = ssz.MarshalUint64(dst, uint64(m.Attnets))
+
+	return
+}
+
+// UnmarshalSSZ ssz unmarshals the MetadataV1 object
+func (m *MetadataV1) UnmarshalSSZ(buf []byte) error {
+	var err error
+	size := uint64(len(buf))
+	if size != 16 {
+		return ssz.ErrSize
+	}
+
+	// Field (0) 'SeqNumber'
+	m.SeqNumber = ssz.UnmarshallUint64(buf[0:8])
+
+	// Field (1) 'Attnets'
+	m.Attnets = Bitvector64(ssz.UnmarshallUint64(buf[8:16]))
+
+	return err
+}
+
 // SizeSSZ returns the ssz encoded size in bytes for the MetadataV1 object
 func (m *MetadataV1) SizeSSZ() (size int) {
-	size = 24
+	size = 16
 	return
 }
 
@@ -2948,80 +3016,12 @@ func (m *MetadataV1) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 	// Field (1) 'Attnets'
 	hh.PutUint64(uint64(m.Attnets))
 
-	// Field (2) 'Syncnets'
-	hh.PutUint64(uint64(m.Syncnets))
-
 	hh.Merkleize(indx)
 	return
 }
 
 // GetTree ssz hashes the MetadataV1 object
 func (m *MetadataV1) GetTree() (*ssz.Node, error) {
-	return ssz.ProofTree(m)
-}
-
-// MarshalSSZ ssz marshals the MetadataV0 object
-func (m *MetadataV0) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(m)
-}
-
-// MarshalSSZTo ssz marshals the MetadataV0 object to a target array
-func (m *MetadataV0) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'SeqNumber'
-	dst = ssz.MarshalUint64(dst, m.SeqNumber)
-
-	// Field (1) 'Attnets'
-	dst = ssz.MarshalUint64(dst, uint64(m.Attnets))
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the MetadataV0 object
-func (m *MetadataV0) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 16 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'SeqNumber'
-	m.SeqNumber = ssz.UnmarshallUint64(buf[0:8])
-
-	// Field (1) 'Attnets'
-	m.Attnets = Bitvector64(ssz.UnmarshallUint64(buf[8:16]))
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the MetadataV0 object
-func (m *MetadataV0) SizeSSZ() (size int) {
-	size = 16
-	return
-}
-
-// HashTreeRoot ssz hashes the MetadataV0 object
-func (m *MetadataV0) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(m)
-}
-
-// HashTreeRootWith ssz hashes the MetadataV0 object with a hasher
-func (m *MetadataV0) HashTreeRootWith(hh ssz.HashWalker) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'SeqNumber'
-	hh.PutUint64(m.SeqNumber)
-
-	// Field (1) 'Attnets'
-	hh.PutUint64(uint64(m.Attnets))
-
-	hh.Merkleize(indx)
-	return
-}
-
-// GetTree ssz hashes the MetadataV0 object
-func (m *MetadataV0) GetTree() (*ssz.Node, error) {
 	return ssz.ProofTree(m)
 }
 

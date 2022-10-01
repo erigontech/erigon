@@ -54,7 +54,7 @@ func (d *StreamCodec) CloseReader() error {
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 	// if its a metadata request we dont write anything
-	if reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV0{}) {
+	if reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV2{}) {
 		return 0, nil
 	}
 
