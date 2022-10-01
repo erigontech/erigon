@@ -17,7 +17,7 @@ func EncodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writ
 	if val, ok := pkt.(ssz.Marshaler); ok {
 		wr := bufio.NewWriter(stream)
 		sw := snappy.NewWriter(wr)
-		p := make([]byte, val.SizeSSZ())
+		p := make([]byte, 10)
 		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
 		enc, err := val.MarshalSSZ()
 		if err != nil {
