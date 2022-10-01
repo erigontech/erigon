@@ -2886,13 +2886,13 @@ func (l *LightClientUpdate) GetTree() (*ssz.Node, error) {
 	return ssz.ProofTree(l)
 }
 
-// MarshalSSZ ssz marshals the MetaDataV1 object
-func (m *MetaDataV1) MarshalSSZ() ([]byte, error) {
+// MarshalSSZ ssz marshals the MetadataV1 object
+func (m *MetadataV1) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(m)
 }
 
-// MarshalSSZTo ssz marshals the MetaDataV1 object to a target array
-func (m *MetaDataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+// MarshalSSZTo ssz marshals the MetadataV1 object to a target array
+func (m *MetadataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
 
 	// Field (0) 'SeqNumber'
@@ -2907,8 +2907,8 @@ func (m *MetaDataV1) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// UnmarshalSSZ ssz unmarshals the MetaDataV1 object
-func (m *MetaDataV1) UnmarshalSSZ(buf []byte) error {
+// UnmarshalSSZ ssz unmarshals the MetadataV1 object
+func (m *MetadataV1) UnmarshalSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size != 24 {
@@ -2927,19 +2927,19 @@ func (m *MetaDataV1) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the MetaDataV1 object
-func (m *MetaDataV1) SizeSSZ() (size int) {
+// SizeSSZ returns the ssz encoded size in bytes for the MetadataV1 object
+func (m *MetadataV1) SizeSSZ() (size int) {
 	size = 24
 	return
 }
 
-// HashTreeRoot ssz hashes the MetaDataV1 object
-func (m *MetaDataV1) HashTreeRoot() ([32]byte, error) {
+// HashTreeRoot ssz hashes the MetadataV1 object
+func (m *MetadataV1) HashTreeRoot() ([32]byte, error) {
 	return ssz.HashWithDefaultHasher(m)
 }
 
-// HashTreeRootWith ssz hashes the MetaDataV1 object with a hasher
-func (m *MetaDataV1) HashTreeRootWith(hh ssz.HashWalker) (err error) {
+// HashTreeRootWith ssz hashes the MetadataV1 object with a hasher
+func (m *MetadataV1) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 	indx := hh.Index()
 
 	// Field (0) 'SeqNumber'
@@ -2955,8 +2955,8 @@ func (m *MetaDataV1) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 	return
 }
 
-// GetTree ssz hashes the MetaDataV1 object
-func (m *MetaDataV1) GetTree() (*ssz.Node, error) {
+// GetTree ssz hashes the MetadataV1 object
+func (m *MetadataV1) GetTree() (*ssz.Node, error) {
 	return ssz.ProofTree(m)
 }
 

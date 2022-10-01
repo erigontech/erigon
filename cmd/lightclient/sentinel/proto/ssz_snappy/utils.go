@@ -33,11 +33,5 @@ func EncodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writ
 		return enc, sw, nil
 	}
 
-	if reflect.TypeOf(pkt) == reflect.TypeOf(&proto.EmptyPacket{}) {
-		wr := bufio.NewWriter(stream)
-		sw := snappy.NewWriter(wr)
-		return make([]byte, 10), sw, nil
-	}
-
 	return nil, nil, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
 }

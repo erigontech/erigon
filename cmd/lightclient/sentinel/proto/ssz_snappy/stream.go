@@ -3,11 +3,13 @@ package ssz_snappy
 import (
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -51,6 +53,11 @@ func (d *StreamCodec) CloseReader() error {
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
+	// if its a metadata request we dont write anything
+	if reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV0{}) {
+		return 0, nil
+	}
+
 	p, sw, err := EncodePacket(pkt, d.s)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to write packet err=%s", err)
