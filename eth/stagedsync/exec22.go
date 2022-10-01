@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -34,8 +35,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func NewProgress(prevOutputBlockNum uint64) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold}
 }
 
 type Progress struct {
@@ -43,9 +44,10 @@ type Progress struct {
 	prevCount          uint64
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
+	commitThreshold    uint64
 }
 
-func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -57,7 +59,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 	if count > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
 	}
-	log.Info("Transaction replay",
+	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
 		"at blk", outputBlockNum,
 		"input blk", atomic.LoadUint64(&inputBlockNum),
@@ -66,7 +68,7 @@ func (p *Progress) Log(rs *state.State22, rws state.TxTaskQueue, count, inputBlo
 		"result queue", rws.Len(),
 		"results size", common.ByteCount(resultsSize),
 		"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"buffer", common.ByteCount(sizeEstimate),
+		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	p.prevTime = currentTime
@@ -144,7 +146,7 @@ func Exec3(ctx context.Context,
 	}
 	commitThreshold := uint64(1024 * 1024 * 1024)
 	resultsThreshold := int64(1024 * 1024 * 1024)
-	progress := NewProgress(block)
+	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
@@ -173,7 +175,7 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -218,13 +220,16 @@ func Exec3(ctx context.Context,
 								txTask := heap.Pop(&rws).(*state.TxTask)
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
+								syncMetrics[stages.Execution].Set(txTask.BlockNum)
 							}
 							if err := rs.Flush(tx); err != nil {
 								return err
 							}
+							tx.CollectMetrics()
 							if err = tx.Commit(); err != nil {
 								return err
 							}
+
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
@@ -315,7 +320,7 @@ loop:
 				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
-					progress.Log(rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -328,6 +333,7 @@ loop:
 							if err = execStage.Update(applyTx, stageProgress); err != nil {
 								return err
 							}
+							applyTx.CollectMetrics()
 							if err := applyTx.Commit(); err != nil {
 								return err
 							}
@@ -403,13 +409,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
-	reconDbPath := path.Join(dirs.DataDir, "recondb")
+	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
 	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
 	var ok bool
