@@ -90,7 +90,7 @@ reqRetryLoop:
 	for err != nil {
 		select {
 		case <-s.ctx.Done():
-			log.Warn("[Req] sentinel has been shutdown")
+			log.Warn("[Resp] sentinel has been shutdown")
 			return nil, nil
 		case <-respRetryTimer.C:
 			log.Warn("[Resp] timeout", "topic", topic, "peer", peerId)
