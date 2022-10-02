@@ -347,7 +347,10 @@ loop:
 								return err
 							}
 							agg.SetTx(applyTx)
+							fmt.Printf("commit yes!\n")
 							reconWorkers[0].ResetTx(applyTx)
+						} else {
+							fmt.Printf("commit no!\n")
 						}
 						log.Info("Committed", "time", time.Since(commitStart))
 					}
