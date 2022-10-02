@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -83,7 +84,7 @@ func Exec3(ctx context.Context,
 	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
-	genesis *core.Genesis, initialCycle bool,
+	genesis *core.Genesis, useExternalTx bool,
 ) (err error) {
 
 	var block, stageProgress uint64
@@ -221,6 +222,7 @@ func Exec3(ctx context.Context,
 								txTask := heap.Pop(&rws).(*state.TxTask)
 								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
 								rs.AddWork(txTask)
+								syncMetrics[stages.Execution].Set(txTask.BlockNum)
 							}
 							if err := rs.Flush(tx); err != nil {
 								return err
@@ -322,33 +324,33 @@ loop:
 				}
 
 				stageProgress = blockNum
+
+				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
+					commitStart := time.Now()
+					log.Info("Committing...")
+					if err := rs.Flush(applyTx); err != nil {
+						return err
+					}
+					if !useExternalTx {
+						if err = execStage.Update(applyTx, stageProgress); err != nil {
+							return err
+						}
+						applyTx.CollectMetrics()
+						if err := applyTx.Commit(); err != nil {
+							return err
+						}
+						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(applyTx)
+						reconWorkers[0].ResetTx(applyTx)
+						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+					}
+				}
+
 				select {
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
-					sizeEstimate := rs.SizeEstimate()
-					//prevTriggerCount = triggerCount
-					if sizeEstimate >= commitThreshold {
-						commitStart := time.Now()
-						log.Info("Committing...")
-						if err := rs.Flush(applyTx); err != nil {
-							return err
-						}
-						if !initialCycle {
-							if err = execStage.Update(applyTx, stageProgress); err != nil {
-								return err
-							}
-							applyTx.CollectMetrics()
-							if err := applyTx.Commit(); err != nil {
-								return err
-							}
-							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
-								return err
-							}
-							agg.SetTx(applyTx)
-							reconWorkers[0].ResetTx(applyTx)
-						}
-						log.Info("Committed", "time", time.Since(commitStart))
-					}
 				default:
 				}
 			}
