@@ -102,7 +102,7 @@ func (l *LightState) validateLightClientUpdate(u *lightrpc.LightClientUpdate) er
 	// if u.SyncAggregate.SyncCommiteeBits < min_sync_participants  {
 	// return fmt.Errorf("not enough participants in commmittee (%d/%d)", )
 	//}
-	if l.CurrentSlot() < uint64(u.SignatureSlot) {
+	if l.CurrentSlot() < u.SignatureSlot {
 		return fmt.Errorf("current slot must be bigger or eq to sig slot")
 	}
 	if u.SignatureSlot <= u.AttestedHeader.Slot {
@@ -111,8 +111,8 @@ func (l *LightState) validateLightClientUpdate(u *lightrpc.LightClientUpdate) er
 	if u.AttestedHeader.Slot < u.FinalizedHeader.Slot {
 		return fmt.Errorf("attested header slot must be lower than finalized header slot")
 	}
-	storePeriod := computeSyncCommitteePeriodAtSlot(uint64(l.finalized_header.Slot))
-	updateSigPeriod := computeSyncCommitteePeriodAtSlot(uint64(u.SignatureSlot))
+	storePeriod := computeSyncCommitteePeriodAtSlot(l.finalized_header.Slot)
+	updateSigPeriod := computeSyncCommitteePeriodAtSlot(u.SignatureSlot)
 
 	if l.next_sync_committee != nil {
 		if updateSigPeriod != storePeriod && updateSigPeriod != storePeriod+1 {
@@ -124,7 +124,7 @@ func (l *LightState) validateLightClientUpdate(u *lightrpc.LightClientUpdate) er
 		}
 	}
 
-	updateAttestedPeriod := computeSyncCommitteePeriodAtSlot(uint64(u.AttestedHeader.Slot))
+	updateAttestedPeriod := computeSyncCommitteePeriodAtSlot(u.AttestedHeader.Slot)
 	if !(l.next_sync_committee == nil && (isSyncCommitteeUpdate(u) && updateAttestedPeriod == storePeriod)) {
 		if u.AttestedHeader.Slot <= l.finalized_header.Slot {
 			return fmt.Errorf("if up has next sync committee, the update header slot must be strictly larger than the store's finalized header")
