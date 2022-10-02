@@ -1557,7 +1557,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
+		return fmt.Errorf("pre index building, expect: %d, got %d", expectedCount, d.Count())
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1657,7 +1657,7 @@ RETRY:
 	}
 
 	if i != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
+		return fmt.Errorf("post index building, expect: %d, got %d", expectedCount, i)
 	}
 
 	if err := txnHashIdx.Build(); err != nil {
