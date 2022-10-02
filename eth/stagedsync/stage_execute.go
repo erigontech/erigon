@@ -302,7 +302,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	rs := state.NewState22()
-	if err := Exec3(execCtx, s, workersCount, cfg.db, tx, rs,
+	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {

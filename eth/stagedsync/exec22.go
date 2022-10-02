@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -78,7 +79,7 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 }
 
 func Exec3(ctx context.Context,
-	execStage *StageState, workerCount int, chainDb kv.RwDB, applyTx kv.RwTx,
+	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
 	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
@@ -144,8 +145,8 @@ func Exec3(ctx context.Context,
 			return err
 		}
 	}
-	commitThreshold := uint64(1024 * 1024 * 1024)
-	resultsThreshold := int64(1024 * 1024 * 1024)
+	commitThreshold := batchSize.Bytes() * 4
+	resultsThreshold := int64(batchSize.Bytes() * 4)
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
