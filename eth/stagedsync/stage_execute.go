@@ -74,7 +74,7 @@ type ExecuteBlockCfg struct {
 	hd            *headerdownload.HeaderDownload
 
 	dirs         datadir.Dirs
-	exec22       bool
+	historyV3    bool
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
@@ -115,7 +115,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		exec22:        exec22,
+		historyV3:     exec22,
 		workersCount:  workersCount,
 		agg:           agg,
 	}
@@ -250,17 +250,9 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
-		var found bool
-		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
-		if tx == nil {
-			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-				return err
-			}); err != nil {
-				return err
-			}
-		} else {
-			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
+		if err != nil {
+			return err
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
@@ -301,7 +293,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 
 	rs := state.NewState22()
-	if err := Exec3(execCtx, s, workersCount, cfg.db, tx, rs,
+	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
@@ -313,6 +305,21 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 	}
 	return nil
+}
+
+// reconstituteBlock - First block which is not covered by the history snapshot files
+func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	if tx == nil {
+		if err = db.View(context.Background(), func(tx kv.Tx) error {
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			return err
+		}); err != nil {
+			return
+		}
+	} else {
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	}
+	return
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
@@ -366,7 +373,7 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
-	if cfg.exec22 {
+	if cfg.historyV3 {
 		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
 
@@ -622,7 +629,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	if cfg.exec22 {
+	if cfg.historyV3 {
 		return unwindExec3(u, s, tx, ctx, cfg)
 	}
 
