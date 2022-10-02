@@ -99,8 +99,8 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if end > roaring.MaxUint32 {
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
-	blockNumbers := bitmapdb.GetRoaring()
-	defer bitmapdb.ReturnRoaring(blockNumbers)
+	blockNumbers := bitmapdb.NewBitmap()
+	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))

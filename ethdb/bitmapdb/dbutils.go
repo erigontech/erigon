@@ -21,12 +21,12 @@ var roaringPool = sync.Pool{
 	},
 }
 
-func GetRoaring() *roaring.Bitmap {
+func NewBitmap() *roaring.Bitmap {
 	a := roaringPool.Get().(*roaring.Bitmap)
 	a.Clear()
 	return a
 }
-func ReturnRoaring(a *roaring.Bitmap) {
+func ReturnToPool(a *roaring.Bitmap) {
 	roaringPool.Put(a)
 }
 
@@ -36,12 +36,12 @@ var roaring64Pool = sync.Pool{
 	},
 }
 
-func GetRoaring64() *roaring64.Bitmap {
+func NewBitmap64() *roaring64.Bitmap {
 	a := roaring64Pool.Get().(*roaring64.Bitmap)
 	a.Clear()
 	return a
 }
-func ReturnRoaring64(a *roaring64.Bitmap) {
+func ReturnToPool64(a *roaring64.Bitmap) {
 	roaring64Pool.Put(a)
 }
 
@@ -168,8 +168,8 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
-		bm := GetRoaring()
-		defer ReturnRoaring(bm)
+		bm := NewBitmap()
+		defer ReturnToPool(bm)
 		if _, err := bm.ReadFrom(bytes.NewReader(v)); err != nil {
 			return nil, err
 		}
@@ -324,8 +324,8 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
-		bm := GetRoaring64()
-		defer ReturnRoaring64(bm)
+		bm := NewBitmap64()
+		defer ReturnToPool64(bm)
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return nil, err
