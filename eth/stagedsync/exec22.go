@@ -348,7 +348,7 @@ loop:
 							}
 							agg.SetTx(applyTx)
 							reconWorkers[0].ResetTx(applyTx)
-							log.Info("Committed", "time", time.Since(commitStart))
+							log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
 						}
 					}
 				default:
