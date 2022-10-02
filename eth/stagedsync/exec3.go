@@ -700,9 +700,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", common.ByteCount(sizeEstimate),
-					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-				)
+				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
+					"tx/s", fmt.Sprintf("%.1f", speedTx),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
 					err := func() error {
 						lock.Lock()
@@ -791,48 +793,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 	defer roTx.Rollback()
-	cursor, err := roTx.Cursor(kv.PlainStateR)
-	if err != nil {
+	if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
+		return plainStateCollector.Collect(k[8:], v)
+	}); err != nil {
 		return err
 	}
-	defer cursor.Close()
-	var k, v []byte
-	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
-		if err = plainStateCollector.Collect(k[8:], v); err != nil {
-			return err
-		}
-	}
-	if err != nil {
+	if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
+		return codeCollector.Collect(k[8:], v)
+	}); err != nil {
 		return err
 	}
-	cursor.Close()
-	if cursor, err = roTx.Cursor(kv.CodeR); err != nil {
+	if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
+		return plainContractCollector.Collect(k[8:], v)
+	}); err != nil {
 		return err
 	}
-	defer cursor.Close()
-	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
-		if err = codeCollector.Collect(k[8:], v); err != nil {
-			return err
-		}
-	}
-	if err != nil {
-		return err
-	}
-	cursor.Close()
-	if cursor, err = roTx.Cursor(kv.PlainContractR); err != nil {
-		return err
-	}
-	defer cursor.Close()
-	for k, v, err = cursor.First(); err == nil && k != nil; k, v, err = cursor.Next() {
-		if err = plainContractCollector.Collect(k[8:], v); err != nil {
-			return err
-		}
-	}
-	if err != nil {
-		return err
-	}
-	cursor.Close()
 	roTx.Rollback()
+
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
 			return err
