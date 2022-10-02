@@ -239,7 +239,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		<-sigs
 		cancel()
 	}()
-	ctx = context.Background()
 
 	workersCount := cfg.workersCount
 	//workersCount := 2
