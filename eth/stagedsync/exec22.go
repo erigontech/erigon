@@ -341,6 +341,11 @@ loop:
 						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
+						defer func() {
+							if err != nil {
+								applyTx.Rollback()
+							}
+						}()
 						agg.SetTx(applyTx)
 						reconWorkers[0].ResetTx(applyTx)
 						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
