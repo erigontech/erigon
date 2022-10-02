@@ -323,9 +323,11 @@ loop:
 					return fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
 				}
 
+				stageProgress = blockNum
+
 				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
 					commitStart := time.Now()
-					log.Info("Committing...")
+					log.Info("Committing...", "blockNum", blockNum, "txTask.BlockNum", txTask.BlockNum)
 					if err := rs.Flush(applyTx); err != nil {
 						return err
 					}
@@ -346,7 +348,6 @@ loop:
 					}
 				}
 
-				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
