@@ -326,7 +326,7 @@ loop:
 
 				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
 					commitStart := time.Now()
-					log.Info("Committing...", "blockNum", blockNum, "txTask.BlockNum", txTask.BlockNum)
+					log.Info("Committing...")
 					if err := rs.Flush(applyTx); err != nil {
 						return err
 					}
