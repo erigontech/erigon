@@ -84,8 +84,21 @@ func Exec3(ctx context.Context,
 	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
-	genesis *core.Genesis, useExternalTx bool,
+	genesis *core.Genesis,
 ) (err error) {
+	useExternalTx := applyTx != nil
+	if !useExternalTx {
+		applyTx, err = chainDb.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer applyTx.Rollback()
+	}
+	//if workerCount > 1 {
+	//	applyTx.Rollback()
+	//	applyTx = nil
+	//}
+
 	var block, stageProgress uint64
 	var outputTxNum, inputTxNum, maxTxNum uint64
 	var count, repeatCount, triggerCount uint64
@@ -100,7 +113,7 @@ func Exec3(ctx context.Context,
 		block = execStage.BlockNumber + 1
 	}
 
-	// erigon22 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
+	// erigon3 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
 	// too keep consistency
 	// will improve it in future versions
 	interruptCh := ctx.Done()
@@ -341,11 +354,7 @@ loop:
 						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
-						defer func() {
-							if err != nil {
-								applyTx.Rollback()
-							}
-						}()
+						defer applyTx.Rollback()
 						agg.SetTx(applyTx)
 						reconWorkers[0].ResetTx(applyTx)
 						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
@@ -391,6 +400,11 @@ loop:
 		}
 	}
 
+	if !useExternalTx && applyTx != nil {
+		if err = applyTx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -239,7 +239,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		<-sigs
 		cancel()
 	}()
-	ctx = context.Background()
 
 	workersCount := cfg.workersCount
 	//workersCount := 2
@@ -263,15 +262,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 	}
 
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	prevStageProgress, err := senderStageProgress(tx, cfg.db)
 	if err != nil {
 		return err
@@ -288,23 +278,14 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	if workersCount > 1 {
-		tx.Rollback()
-		tx = nil
-	}
-
 	rs := state.NewState22()
 	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
-		cfg.chainConfig, cfg.genesis, useExternalTx); err != nil {
+		cfg.chainConfig, cfg.genesis); err != nil {
 		return err
 	}
-	if !useExternalTx && tx != nil {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 
