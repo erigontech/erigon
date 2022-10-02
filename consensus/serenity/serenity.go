@@ -81,7 +81,8 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 		return err
 	}
 	if !reached {
-		return s.eth1Engine.VerifyHeader(chain, header, seal)
+		// Not verifying seals if the TTD is passed
+		return s.eth1Engine.VerifyHeader(chain, header, !chain.Config().TerminalTotalDifficultyPassed)
 	}
 	// Short circuit if the parent is not known
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
@@ -230,9 +231,6 @@ func IsPoSHeader(header *types.Header) bool {
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
 func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
-	if chain.Config().TerminalTotalDifficultyPassed {
-		return true, nil
-	}
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}
