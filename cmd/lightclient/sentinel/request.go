@@ -3,7 +3,6 @@ package sentinel
 import (
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
@@ -29,7 +28,7 @@ func (s *Sentinel) SendMetadataReqV1() (proto.Packet, error) {
 	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
 }
 
-// TODO: add the request of the request topics
+// TODO: add the rest of the request topics
 
 func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
 	_, peerInfo, err := connectToRandomPeer(s)
@@ -55,7 +54,6 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 	}
 	log.Info("[Req] sent request", "topic", topic, "peer", peerId)
 
-	time.Sleep(1 * time.Second)
 	responsePacket, err = decodeResponse(sc, responsePacket, peerId)
 	if err != nil {
 		return nil, err
