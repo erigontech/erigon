@@ -86,7 +86,6 @@ func Exec3(ctx context.Context,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis, useExternalTx bool,
 ) (err error) {
-	log.Info("dbg!", "useExternalTx", useExternalTx)
 	var block, stageProgress uint64
 	var outputTxNum, inputTxNum, maxTxNum uint64
 	var count, repeatCount, triggerCount uint64
