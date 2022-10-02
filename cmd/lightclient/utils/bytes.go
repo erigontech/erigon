@@ -38,3 +38,15 @@ func Uint64ToLE(i uint64) []byte {
 	binary.LittleEndian.PutUint64(buf, i)
 	return buf
 }
+
+func BytesToBytes32(b []byte) (ret [32]byte) {
+	copy(ret[:], b)
+	return
+}
+
+func BytesSliceToBytes32Slice(b [][]byte) (ret [][32]byte) {
+	for _, str := range b {
+		ret = append(ret, BytesToBytes32(str))
+	}
+	return
+}
