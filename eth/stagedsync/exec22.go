@@ -323,34 +323,33 @@ loop:
 					return fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
 				}
 
+				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
+					commitStart := time.Now()
+					log.Info("Committing...")
+					if err := rs.Flush(applyTx); err != nil {
+						return err
+					}
+					if !useExternalTx {
+						if err = execStage.Update(applyTx, stageProgress); err != nil {
+							return err
+						}
+						applyTx.CollectMetrics()
+						if err := applyTx.Commit(); err != nil {
+							return err
+						}
+						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(applyTx)
+						reconWorkers[0].ResetTx(applyTx)
+						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+					}
+				}
+
 				stageProgress = blockNum
 				select {
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
-					sizeEstimate := rs.SizeEstimate()
-					//prevTriggerCount = triggerCount
-					if sizeEstimate >= commitThreshold {
-						commitStart := time.Now()
-						log.Info("Committing...")
-						if err := rs.Flush(applyTx); err != nil {
-							return err
-						}
-						if !useExternalTx {
-							if err = execStage.Update(applyTx, stageProgress); err != nil {
-								return err
-							}
-							applyTx.CollectMetrics()
-							if err := applyTx.Commit(); err != nil {
-								return err
-							}
-							if applyTx, err = chainDb.BeginRw(ctx); err != nil {
-								return err
-							}
-							agg.SetTx(applyTx)
-							reconWorkers[0].ResetTx(applyTx)
-							log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
-						}
-					}
 				default:
 				}
 			}
