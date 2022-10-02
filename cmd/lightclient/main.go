@@ -61,8 +61,10 @@ func main() {
 		case <-logInterval.C:
 			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
 		case <-sendReqInterval.C:
-			_, err := sent.SendMetadataReqV1()
-			if err != nil {
+			if _, err := sent.SendPingReqV1(); err != nil {
+				log.Warn("failed to send ping request", "err", err)
+			}
+			if _, err := sent.SendMetadataReqV1(); err != nil {
 				log.Warn("failed to send metadata request", "err", err)
 			}
 		default:
