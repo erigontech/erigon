@@ -84,7 +84,7 @@ func Exec3(ctx context.Context,
 	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
-	genesis *core.Genesis, initialCycle bool,
+	genesis *core.Genesis, useExternalTx bool,
 ) (err error) {
 
 	var block, stageProgress uint64
@@ -335,7 +335,7 @@ loop:
 						if err := rs.Flush(applyTx); err != nil {
 							return err
 						}
-						if !initialCycle {
+						if !useExternalTx {
 							if err = execStage.Update(applyTx, stageProgress); err != nil {
 								return err
 							}
