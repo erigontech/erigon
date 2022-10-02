@@ -63,14 +63,15 @@ func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wa
 		genesis:  genesis,
 		resultCh: resultCh,
 		engine:   engine,
-		getHeader: func(hash common.Hash, number uint64) *types.Header {
-			h, err := blockReader.Header(ctx, nil, hash, number)
-			if err != nil {
-				panic(err)
-			}
-			return h
-		},
 	}
+	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
+	}
+
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
 	return w
 }
