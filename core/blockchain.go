@@ -474,6 +474,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+	// TODO(yperbasis): Isn't it infinite in src/Nethermind/Nethermind.Consensus.AuRa/Contracts/RewardContract.cs?
 	gp := new(GasPool).AddGas(50_000_000)
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
