@@ -14,7 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-func (s *Sentinel) sendPingReqV1() (proto.Packet, error) {
+func (s *Sentinel) SendPingReqV1() (proto.Packet, error) {
 	requestPacket := &p2p.Ping{
 		Id: uint64(1),
 	}
@@ -22,7 +22,7 @@ func (s *Sentinel) sendPingReqV1() (proto.Packet, error) {
 	return sendRequest(s, requestPacket, responsePacket, handlers.PingProtocolV1)
 }
 
-func (s *Sentinel) sendMetadataReqV1() (proto.Packet, error) {
+func (s *Sentinel) SendMetadataReqV1() (proto.Packet, error) {
 	requestPacket := &p2p.MetadataV1{}
 	responsePacket := &p2p.MetadataV1{}
 

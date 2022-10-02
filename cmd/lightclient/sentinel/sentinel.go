@@ -18,7 +18,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
@@ -201,22 +200,6 @@ func (s *Sentinel) Start() error {
 	if err := s.startGossip(prefix); err != nil {
 		return fmt.Errorf("failed to start gossip err=%w", err)
 	}
-
-	go func() {
-		tryEvery := time.NewTicker(1 * time.Second)
-		defer tryEvery.Stop()
-		for {
-			select {
-			case <-s.ctx.Done():
-				break
-			case <-tryEvery.C:
-				_, err := s.sendMetadataReqV1()
-				if err != nil {
-					log.Error("failed sending packet", "err", err)
-				}
-			}
-		}
-	}()
 
 	return nil
 }
