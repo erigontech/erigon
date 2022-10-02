@@ -232,6 +232,7 @@ func newStateReaderWriter(
 // ================ Erigon3 ================
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+	log.Info("dbg ! ", "initial cycle", initialCycle)
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	execCtx, cancel := context.WithCancel(ctx)
