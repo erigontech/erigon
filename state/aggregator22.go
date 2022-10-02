@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 type Aggregator22 struct {
@@ -44,10 +45,13 @@ type Aggregator22 struct {
 	logPrefix       string
 	rwTx            kv.RwTx
 	maxTxNum        uint64
+
+	backgroundResult *BackgroundResult
+	working          atomic.Bool
 }
 
 func NewAggregator22(dir string, aggregationStep uint64) (*Aggregator22, error) {
-	return &Aggregator22{dir: dir, aggregationStep: aggregationStep}, nil
+	return &Aggregator22{dir: dir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}}, nil
 }
 
 func (a *Aggregator22) ReopenFiles() error {
@@ -75,7 +79,7 @@ func (a *Aggregator22) ReopenFiles() error {
 	if a.tracesTo, err = NewInvertedIndex(dir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
-	a.maxTxNum = a.EndTxNumMinimax()
+	a.recalcMaxTxNum()
 	return nil
 }
 
@@ -343,6 +347,7 @@ func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo ui
 	a.logTopics.integrateFiles(sf.logTopics, txNumFrom, txNumTo)
 	a.tracesFrom.integrateFiles(sf.tracesFrom, txNumFrom, txNumTo)
 	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
+	a.recalcMaxTxNum()
 }
 
 func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
@@ -385,14 +390,14 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	return nil
 }
 
-func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {
-	if err := a.accounts.prune(step, txFrom, txTo); err != nil {
+func (a *Aggregator22) prune(txFrom, txTo uint64) error {
+	if err := a.accounts.prune(txFrom, txTo); err != nil {
 		return err
 	}
-	if err := a.storage.prune(step, txFrom, txTo); err != nil {
+	if err := a.storage.prune(txFrom, txTo); err != nil {
 		return err
 	}
-	if err := a.code.prune(step, txFrom, txTo); err != nil {
+	if err := a.code.prune(txFrom, txTo); err != nil {
 		return err
 	}
 	if err := a.logAddrs.prune(txFrom, txTo); err != nil {
@@ -411,11 +416,10 @@ func (a *Aggregator22) prune(step uint64, txFrom, txTo uint64) error {
 }
 
 func (a *Aggregator22) LogStats(tx2block func(endTxNumMinimax uint64) uint64) {
-	maxTxNum := a.EndTxNumMinimax()
-	if maxTxNum == 0 {
+	if a.maxTxNum == 0 {
 		return
 	}
-	histBlockNumProgress := tx2block(maxTxNum)
+	histBlockNumProgress := tx2block(a.maxTxNum)
 	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
 	a.accounts.InvertedIndex.files.Ascend(func(it *filesItem) bool {
 		bn := tx2block(it.endTxNum)
@@ -427,12 +431,13 @@ func (a *Aggregator22) LogStats(tx2block func(endTxNumMinimax uint64) uint64) {
 	common2.ReadMemStats(&m)
 	log.Info("[Snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dk", maxTxNum/1000),
+		"txs", fmt.Sprintf("%dk", a.maxTxNum/1000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func (a *Aggregator22) EndTxNumMinimax() uint64 {
+func (a *Aggregator22) EndTxNumMinimax() uint64 { return a.maxTxNum }
+func (a *Aggregator22) recalcMaxTxNum() {
 	min := a.accounts.endTxNumMinimax()
 	if txNum := a.storage.endTxNumMinimax(); txNum < min {
 		min = txNum
@@ -452,7 +457,7 @@ func (a *Aggregator22) EndTxNumMinimax() uint64 {
 	if txNum := a.tracesTo.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
-	return min
+	a.maxTxNum = min
 }
 
 type Ranges22 struct {
@@ -697,18 +702,14 @@ func (a *Aggregator22) ReadyToFinishTx() bool {
 }
 
 func (a *Aggregator22) FinishTx() error {
-	if (a.txNum + 1) <= a.maxTxNum+a.aggregationStep {
+	if (a.txNum + 1) <= a.maxTxNum+2*a.aggregationStep { // Leave one step worth in the DB
 		return nil
 	}
-	if (a.txNum+1)%a.aggregationStep != 0 {
+	step := a.maxTxNum / a.aggregationStep
+	if a.working.Load() {
 		return nil
 	}
 	closeAll := true
-	step := a.txNum / a.aggregationStep
-	if step == 0 {
-		return nil
-	}
-	step-- // Leave one step worth in the DB
 	collation, err := a.collate(step, step*a.aggregationStep, (step+1)*a.aggregationStep, a.rwTx)
 	if err != nil {
 		return err
@@ -718,6 +719,10 @@ func (a *Aggregator22) FinishTx() error {
 			collation.Close()
 		}
 	}()
+
+	a.working.Store(true)
+	//go func() {
+	defer a.working.Store(false)
 	sf, err := a.buildFiles(step, collation)
 	if err != nil {
 		return err
@@ -728,12 +733,11 @@ func (a *Aggregator22) FinishTx() error {
 		}
 	}()
 	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	if err = a.prune(step, step*a.aggregationStep, (step+1)*a.aggregationStep); err != nil {
+	if err := a.prune(0, a.maxTxNum); err != nil {
 		return err
 	}
-	maxEndTxNum := a.EndTxNumMinimax()
 	maxSpan := uint64(32) * a.aggregationStep
-	for r := a.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = a.findMergeRange(maxEndTxNum, maxSpan) {
+	for r := a.findMergeRange(a.maxTxNum, maxSpan); r.any(); r = a.findMergeRange(a.maxTxNum, maxSpan) {
 		outs := a.staticFilesInRange(r)
 		defer func() {
 			if closeAll {
@@ -946,3 +950,18 @@ func (a *Aggregator22) MakeContext() *Aggregator22Context {
 	}
 }
 func (ac *Aggregator22Context) SetTx(tx kv.Tx) { ac.tx = tx }
+
+// BackgroundResult - used only indicate that some work is done
+// no much reason to pass exact results by this object, just get latest state when need
+type BackgroundResult struct {
+	has bool
+	err error
+}
+
+func (br *BackgroundResult) Has() bool     { return br.has }
+func (br *BackgroundResult) Set(err error) { br.has, br.err = true, err }
+func (br *BackgroundResult) GetAndReset() (bool, error) {
+	has, err := br.has, br.err
+	br.has, br.err = false, nil
+	return has, err
+}

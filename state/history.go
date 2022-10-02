@@ -648,7 +648,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 }
 
 // [txFrom; txTo)
-func (h *History) prune(step uint64, txFrom, txTo uint64) error {
+func (h *History) prune(txFrom, txTo uint64) error {
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)

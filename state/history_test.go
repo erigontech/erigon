@@ -202,7 +202,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 	h.integrateFiles(sf, 0, 16)
 
-	err = h.prune(0, 0, 16)
+	err = h.prune(0, 16)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -313,7 +313,7 @@ func TestHistoryHistory(t *testing.T) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			h.SetTx(tx)
-			err = h.prune(step, step*h.aggregationStep, (step+1)*h.aggregationStep)
+			err = h.prune(step*h.aggregationStep, (step+1)*h.aggregationStep)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -346,7 +346,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(tb, err)
 			h.SetTx(tx)
-			err = h.prune(step, step*h.aggregationStep, (step+1)*h.aggregationStep)
+			err = h.prune(step*h.aggregationStep, (step+1)*h.aggregationStep)
 			require.NoError(tb, err)
 			err = tx.Commit()
 			require.NoError(tb, err)
