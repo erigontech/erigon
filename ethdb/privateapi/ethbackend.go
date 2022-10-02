@@ -485,7 +485,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
-		log.Info(fmt.Sprintf("[%s] stage loop is busy", prefix))
+		log.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
