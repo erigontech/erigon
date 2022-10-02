@@ -939,8 +939,6 @@ func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 
 type BlockRetire struct {
 	working atomic.Bool
-	wg      *sync.WaitGroup
-	result  *BlockRetireResult
 
 	workers   int
 	tmpDir    string
@@ -949,24 +947,16 @@ type BlockRetire struct {
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
-}
 
-type BlockRetireResult struct {
-	BlockFrom, BlockTo uint64
-	Err                error
+	BackgroundResult *BackgroundResult
 }
 
 func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, BackgroundResult: &BackgroundResult{}}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
-func (br *BlockRetire) Wait()                   { br.wg.Wait() }
-func (br *BlockRetire) Result() *BlockRetireResult {
-	r := br.result
-	br.result = nil
-	return r
-}
+
 func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
 		return
@@ -1041,16 +1031,14 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		// go-routine is still working
 		return
 	}
-	if br.result != nil {
+	if br.BackgroundResult.Has() {
 		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
 		return
 	}
 
-	br.wg.Add(1)
+	br.working.Store(true)
 	go func() {
-		br.working.Store(true)
 		defer br.working.Store(false)
-		defer br.wg.Done()
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.Snapshots())
 		if !ok {
@@ -1058,10 +1046,10 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		}
 
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
-		br.result = &BlockRetireResult{
-			BlockFrom: blockFrom,
-			BlockTo:   blockTo,
-			Err:       err,
+		if err != nil {
+			br.BackgroundResult.Set(fmt.Errorf("retire blocks error: %w, fromBlock=%d, toBlock=%d", err, blockFrom, blockTo))
+		} else {
+			br.BackgroundResult.Set(nil)
 		}
 	}()
 }
@@ -2101,37 +2089,17 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, f func(blockNum uint64
 	return nil
 }
 
-func AssertCount(snapDir string) {
-	segments, _, err := Segments(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	for _, s := range segments {
-		if s.T != snap.Transactions {
-			continue
-		}
-		blockFrom, blockTo := s.From, s.To
-		_, expectedCount, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
-		if err != nil {
-			panic(err)
-		}
-		bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
-		bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
-		if err != nil {
-			panic(err)
-		}
-		defer bodiesSegment.Close()
+// BackgroundResult - used only indicate that some work is done
+// no much reason to pass exact results by this object, just get latest state when need
+type BackgroundResult struct {
+	has bool
+	err error
+}
 
-		segFileName := snap.SegmentFileName(blockFrom, blockTo, snap.Transactions)
-		segmentFilePath := filepath.Join(snapDir, segFileName)
-		d, err := compress.NewDecompressor(segmentFilePath)
-		if err != nil {
-			panic(err)
-		}
-		defer d.Close()
-		if uint64(d.Count()) != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
-		}
-	}
-
+func (br *BackgroundResult) Has() bool     { return br.has }
+func (br *BackgroundResult) Set(err error) { br.has, br.err = true, err }
+func (br *BackgroundResult) GetAndReset() (bool, error) {
+	has, err := br.has, br.err
+	br.has, br.err = false, nil
+	return has, err
 }

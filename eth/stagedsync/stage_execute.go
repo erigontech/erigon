@@ -250,17 +250,9 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle && s.BlockNumber == 0 {
-		var found bool
-		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
-		if tx == nil {
-			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-				return err
-			}); err != nil {
-				return err
-			}
-		} else {
-			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
+		if err != nil {
+			return err
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
@@ -314,6 +306,21 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 	}
 	return nil
+}
+
+// reconstituteBlock - First block which is not covered by the history snapshot files
+func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	if tx == nil {
+		if err = db.View(context.Background(), func(tx kv.Tx) error {
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			return err
+		}); err != nil {
+			return
+		}
+	} else {
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	}
+	return
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
