@@ -104,7 +104,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.snapshots.LogStat()
-	cfg.agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
 	})

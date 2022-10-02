@@ -1169,7 +1169,7 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 			}
 			_allSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
-				_aggSingleton.LogStats(func(endTxNumMinimax uint64) uint64 {
+				_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress
 				})
