@@ -148,6 +148,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV3, pm := fromdb.ChainConfig(db), fromdb.HistoryV3(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
+	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -184,7 +185,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV3, dirs, getBlockReader(db), nil, genesis, int(workers), agg())
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, false, historyV3, dirs, getBlockReader(db), nil, genesis, int(workers), agg)
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
@@ -411,6 +412,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
 	historyV3 := fromdb.HistoryV3(db)
+	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -425,12 +427,12 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	to := execStage.BlockNumber - unwind
 	_ = sync.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{ID: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3, agg()), ctx); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3, agg), ctx); err != nil {
 		return err
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV3, agg()), ctx); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV3, agg), ctx); err != nil {
 		return err
 	}
 	must(tx.Commit())
@@ -477,6 +479,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
+	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -502,7 +505,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV3, dirs, getBlockReader(db), nil, genesis, int(workers), agg())
+		/*badBlockHalt=*/ false, historyV3, dirs, getBlockReader(db), nil, genesis, int(workers), agg)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {

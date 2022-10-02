@@ -111,6 +111,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.snapshots.LogStat()
+	cfg.agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+		_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress
+	})
 
 	// Create .idx files
 	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
@@ -490,14 +494,15 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 	if blockRetire.Working() {
 		return nil
 	}
-	if res := blockRetire.Result(); res != nil {
-		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
-		}
-
-		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
-			return err
-		}
+	ok, err := blockRetire.BackgroundResult.GetAndReset()
+	if !ok {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+	}
+	if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+		return err
 	}
 
 	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
