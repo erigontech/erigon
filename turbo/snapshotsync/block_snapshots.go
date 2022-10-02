@@ -1088,7 +1088,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true)
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
 	if err != nil {
 		return err
 	}
@@ -1557,7 +1557,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		return fmt.Errorf("pre index building, expect: %d, got %d", expectedCount, d.Count())
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1657,7 +1657,7 @@ RETRY:
 	}
 
 	if i != expectedCount {
-		return fmt.Errorf("post index building, expect: %d, got %d", expectedCount, i)
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, i)
 	}
 
 	if err := txnHashIdx.Build(); err != nil {

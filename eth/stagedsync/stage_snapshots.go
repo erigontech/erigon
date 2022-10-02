@@ -226,7 +226,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			ok, err := sn.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
 				lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-				if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
 					return err
 				}
 				return nil
