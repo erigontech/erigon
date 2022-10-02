@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -122,7 +121,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey[:20], key[:20])
-			binary.BigEndian.PutUint64(key[20:], state2.FirstContractIncarnation)
+			binary.BigEndian.PutUint64(compositeKey[20:], state2.FirstContractIncarnation)
 			copy(compositeKey[20+8:], key[20:])
 
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
@@ -234,44 +233,42 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 type ReconWorker struct {
-	lock         sync.Locker
-	wg           *sync.WaitGroup
-	rs           *state2.ReconState
-	blockReader  services.FullBlockReader
-	allSnapshots *snapshotsync.RoSnapshots
-	stateWriter  *state2.StateReconWriter
-	stateReader  *state2.HistoryReaderNoState
-	getHeader    func(hash common.Hash, number uint64) *types.Header
-	ctx          context.Context
-	engine       consensus.Engine
-	chainConfig  *params.ChainConfig
-	logger       log.Logger
-	genesis      *core.Genesis
-	epoch        EpochReader
-	chain        ChainReader
-	isPoSA       bool
-	posa         consensus.PoSA
+	lock        sync.Locker
+	wg          *sync.WaitGroup
+	rs          *state2.ReconState
+	blockReader services.FullBlockReader
+	stateWriter *state2.StateReconWriter
+	stateReader *state2.HistoryReaderNoState
+	getHeader   func(hash common.Hash, number uint64) *types.Header
+	ctx         context.Context
+	engine      consensus.Engine
+	chainConfig *params.ChainConfig
+	logger      log.Logger
+	genesis     *core.Genesis
+	epoch       EpochReader
+	chain       ChainReader
+	isPoSA      bool
+	posa        consensus.PoSA
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
-	a *state.Aggregator22, blockReader services.FullBlockReader, allSnapshots *snapshotsync.RoSnapshots,
+	a *state.Aggregator22, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	ac := a.MakeContext()
 	rw := &ReconWorker{
-		lock:         lock,
-		wg:           wg,
-		rs:           rs,
-		blockReader:  blockReader,
-		allSnapshots: allSnapshots,
-		ctx:          context.Background(),
-		stateWriter:  state2.NewStateReconWriter(ac, rs),
-		stateReader:  state2.NewHistoryReaderNoState(ac, rs),
-		chainConfig:  chainConfig,
-		logger:       logger,
-		genesis:      genesis,
-		engine:       engine,
+		lock:        lock,
+		wg:          wg,
+		rs:          rs,
+		blockReader: blockReader,
+		ctx:         context.Background(),
+		stateWriter: state2.NewStateReconWriter(ac, rs),
+		stateReader: state2.NewHistoryReaderNoState(ac, rs),
+		chainConfig: chainConfig,
+		logger:      logger,
+		genesis:     genesis,
+		engine:      engine,
 	}
 	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)

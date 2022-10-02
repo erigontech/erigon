@@ -18,11 +18,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
+	"github.com/prysmaticlabs/go-bitfield"
 )
 
 func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) error {
@@ -47,7 +50,6 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 		return err
 	}
 	for _, peerInfo := range addrInfos {
-		// make each dial non-blocking
 		go func(peerInfo peer.AddrInfo) {
 			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
@@ -57,18 +59,15 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	return nil
 }
 
-// listen for new nodes watches for new nodes in the network and adds them to the peerstore.
 func (s *Sentinel) listenForPeers() {
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {
-		// Exit if service's context is canceled
+
 		if s.ctx.Err() != nil {
 			break
 		}
 		if s.HasTooManyPeers() {
-			// Pause the main loop for a period to stop looking
-			// for new peers.
 			log.Trace("Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -84,7 +83,6 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		// Make sure that peer is not dialed too often, for each connection attempt there's a backoff period.
 		go func(peerInfo *peer.AddrInfo) {
 			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)
@@ -95,7 +93,6 @@ func (s *Sentinel) listenForPeers() {
 
 func (s *Sentinel) connectToBootnodes() error {
 	for i := range s.cfg.DiscoverConfig.Bootnodes {
-		// do not dial bootnodes with their tcp ports not set
 		if err := s.cfg.DiscoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
 				log.Error("Could not retrieve tcp port")
@@ -106,4 +103,17 @@ func (s *Sentinel) connectToBootnodes() error {
 	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
 	s.connectWithAllPeers(multiAddresses)
 	return nil
+}
+
+func (s *Sentinel) setupENR(
+	node *enode.LocalNode,
+) (*enode.LocalNode, error) {
+	forkId, err := fork.ComputeForkId(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		return nil, err
+	}
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
+	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
+	return node, nil
 }

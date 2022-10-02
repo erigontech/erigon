@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -43,7 +44,6 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
-	memoryOverlay     bool
 	tmpdir            string
 
 	snapshots     *snapshotsync.RoSnapshots
@@ -62,7 +62,6 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	memoryOverlay bool,
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
@@ -83,7 +82,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
-		memoryOverlay:     memoryOverlay,
 	}
 }
 
@@ -111,11 +109,11 @@ func SpawnStageHeaders(
 		}
 	}
 
-	var blockNumber uint64
+	var preProgress uint64
 	if s == nil {
-		blockNumber = 0
+		preProgress = 0
 	} else {
-		blockNumber = s.BlockNumber
+		preProgress = s.BlockNumber
 	}
 
 	notBorAndParlia := cfg.chainConfig.Bor == nil && cfg.chainConfig.Parlia == nil
@@ -128,18 +126,18 @@ func SpawnStageHeaders(
 	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
 	if notBorAndParlia && !transitionedToPoS {
 		var err error
-		transitionedToPoS, err = rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+		transitionedToPoS, err = rawdb.Transitioned(tx, preProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
 		if transitionedToPoS {
-			cfg.hd.SetFirstPoSHeight(blockNumber)
+			cfg.hd.SetFirstPoSHeight(preProgress)
 		}
 	}
 
 	if transitionedToPoS {
 		libcommon.SafeClose(cfg.hd.QuitPoWMining)
-		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx, preProgress)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -156,10 +154,15 @@ func HeadersPOS(
 	initialCycle bool,
 	test bool,
 	useExternalTx bool,
+	preProgress uint64,
 ) error {
 	if initialCycle {
-		// Let execution and other stages to finish before waiting for CL
-		return nil
+		// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
+		if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		} else if s.BlockNumber >= execProgress {
+			return nil
+		}
 	}
 
 	cfg.hd.SetPOSSync(true)
@@ -196,7 +199,7 @@ func HeadersPOS(
 
 	var payloadStatus *engineapi.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter)
+		payloadStatus, err = startHandlingForkChoice(forkChoiceMessage, requestStatus, requestId, s, u, ctx, tx, cfg, test, headerInserter, preProgress)
 	} else {
 		payloadMessage := request.(*types.Block)
 		payloadStatus, err = handleNewPayload(payloadMessage, requestStatus, requestId, s, ctx, tx, cfg, test, headerInserter)
@@ -277,10 +280,9 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	test bool,
 	headerInserter *headerdownload.HeaderInserter,
+	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
-	if cfg.memoryOverlay {
-		defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
-	}
+	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
@@ -314,7 +316,7 @@ func startHandlingForkChoice(
 	}
 
 	if header == nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
+		log.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 		} else {
@@ -327,8 +329,8 @@ func startHandlingForkChoice(
 
 	headerNumber := header.Number.Uint64()
 
-	if cfg.memoryOverlay && headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
-		log.Info("Flushing in-memory state")
+	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
+		log.Info(fmt.Sprintf("[%s] Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
 		if err := cfg.forkValidator.FlushExtendingFork(tx); err != nil {
 			return nil, err
 		}
@@ -353,21 +355,54 @@ func startHandlingForkChoice(
 	if err != nil {
 		return nil, err
 	}
+	if forkingPoint < preProgress {
 
-	log.Info(fmt.Sprintf("[%s] Fork choice re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
+		log.Info(fmt.Sprintf("[%s] Fork choice: re-org", s.LogPrefix()), "goal", headerNumber, "from", preProgress, "unwind to", forkingPoint)
 
-	if requestStatus == engineapi.New {
-		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			// TODO(yperbasis): what if some bodies are missing and we have to download them?
-			cfg.hd.SetPendingPayloadHash(headerHash)
+		if requestStatus == engineapi.New {
+			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
+				// TODO(yperbasis): what if some bodies are missing and we have to download them?
+				cfg.hd.SetPendingPayloadHash(headerHash)
+			} else {
+				cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			}
+		}
+
+		u.UnwindTo(forkingPoint, common.Hash{})
+
+		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
+	} else {
+		// Extend canonical chain by the new header
+		log.Info(fmt.Sprintf("[%s] Fork choice: chain extension", s.LogPrefix()), "from", preProgress, "to", headerNumber)
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
+			return nil, err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+			return nil, err
+		}
+
+		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := s.Update(tx, headerNumber); err != nil {
+			return nil, err
+		}
+
+		if canonical {
+			return &engineapi.PayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: currentHeadHash,
+			}, nil
 		} else {
-			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+			return &engineapi.PayloadStatus{
+				CriticalError: &privateapi.InvalidForkchoiceStateErr,
+			}, nil
 		}
 	}
-
-	u.UnwindTo(forkingPoint, common.Hash{})
-
-	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
 	return nil, nil
 }
@@ -436,7 +471,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
 
-	log.Debug(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
@@ -444,7 +479,7 @@ func handleNewPayload(
 		return nil, err
 	}
 	if parent == nil {
-		log.Info(fmt.Sprintf("[%s] New payload: need to download parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		log.Debug(fmt.Sprintf("[%s] New payload: need to download parent", s.LogPrefix()), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if test {
 			cfg.hd.BeaconRequestList.Remove(requestId)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
@@ -521,69 +556,24 @@ func verifyAndSaveNewPoSHeader(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
-	forkingPoint, err := forkingPoint(ctx, tx, headerInserter, cfg.blockReader, header)
-	if err != nil {
+	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
+	if criticalError != nil {
+		return nil, false, criticalError
+	}
+	success = validationError == nil
+	if !success {
+		log.Warn("Validation failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
+		cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
+	} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
 	}
-	forkingHash, err := cfg.blockReader.CanonicalHash(ctx, tx, forkingPoint)
-
-	canExtendCanonical := forkingHash == currentHeadHash
-
-	if cfg.memoryOverlay {
-		extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-		extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
-		status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
-		if criticalError != nil {
-			return nil, false, criticalError
-		}
-		success = validationError == nil
-		if !success {
-			log.Warn("Validation failed for header", "hash", headerHash, "height", headerNumber, "err", validationError)
-			cfg.hd.ReportBadHeaderPoS(headerHash, latestValidHash)
-		} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-			return nil, false, err
-		}
-		return &engineapi.PayloadStatus{
-			Status:          status,
-			LatestValidHash: latestValidHash,
-			ValidationError: validationError,
-		}, success, nil
-	}
-
-	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-		return nil, false, err
-	}
-
-	if !canExtendCanonical {
-		log.Info("Side chain", "parentHash", header.ParentHash, "currentHead", currentHeadHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}, true, nil
-	}
-
-	// OK, we're on the canonical chain
-	if requestStatus == engineapi.New {
-		cfg.hd.SetPendingPayloadHash(headerHash)
-	}
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	// Extend canonical chain by the new header
-	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
-	if err != nil {
-		return nil, false, err
-	}
-
-	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-	if err != nil {
-		return nil, false, err
-	}
-
-	err = s.Update(tx, headerNumber)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return nil, true, nil
+	return &engineapi.PayloadStatus{
+		Status:          status,
+		LatestValidHash: latestValidHash,
+		ValidationError: validationError,
+	}, success, nil
 }
 
 func schedulePoSDownload(
@@ -597,11 +587,15 @@ func schedulePoSDownload(
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
-		log.Debug(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
+		log.Info(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 		return false
 	}
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+	if heightToDownload == 0 {
+		log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", "unknown", "hash", hashToDownload, "requestId", requestId)
+	} else {
+		log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+	}
 
 	cfg.hd.SetRequestId(requestId)
 	cfg.hd.SetPoSDownloaderTip(downloaderTip)
@@ -1077,6 +1071,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	if speed == 0 {
 		// Don't log "Wrote block ..." unless we're actually writing something
+		log.Info(fmt.Sprintf("[%s] No block headers to write in this log period", logPrefix), "block number", now, "blk/second", speed)
 		return now
 	}
 

@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
+	atomic2 "go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -165,7 +166,7 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
-		if to-from != 8 {
+		if to-from != snap.Erigon3SeedableSteps {
 			continue
 		}
 		res = append(res, filepath.Join("history", f.Name()))
@@ -219,12 +220,14 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	wg := &sync.WaitGroup{}
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
 	var sem = semaphore.NewWeighted(int64(workers))
-	for i, f := range files {
+	i := atomic2.NewInt32(0)
+	for _, f := range files {
 		wg.Add(1)
 		if err := sem.Acquire(ctx, 1); err != nil {
 			return nil, err
 		}
-		go func(f string, i int) {
+		go func(f string) {
+			defer i.Inc()
 			defer sem.Release(1)
 			defer wg.Done()
 			err = buildTorrentIfNeed(f, snapDir)
@@ -237,9 +240,9 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			case <-ctx.Done():
 				errs <- ctx.Err()
 			case <-logEvery.C:
-				log.Info("[Snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
+				log.Info("[Snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			}
-		}(f, i)
+		}(f)
 	}
 	go func() {
 		wg.Wait()

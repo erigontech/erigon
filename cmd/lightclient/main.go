@@ -15,10 +15,12 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -30,18 +32,19 @@ var (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	discCfg, genesisCfg, networkCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	discCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	if err != nil {
 		log.Error("error", "err", err)
 		return
 	}
-	sent, err := sentinel.New(context.Background(), sentinel.SentinelConfig{
+	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
 		IpAddr:         defaultIpAddr,
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
-		GenesisConfig:  genesisCfg,
-		NetworkConfig:  networkCfg,
+		GenesisConfig:  &genesisCfg,
+		NetworkConfig:  &networkCfg,
+		BeaconConfig:   &beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)
@@ -57,6 +60,17 @@ func main() {
 		select {
 		case <-logInterval.C:
 			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
+		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
+			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
+			log.Info("[Gossip] beacon_block",
+				"Slot", u.Block.Slot,
+				"Signature", hex.EncodeToString(u.Signature[:]),
+				"graffiti", string(u.Block.Body.Graffiti[:]),
+				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+				"proposerIdx", u.Block.ProposerIndex,
+			)
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}

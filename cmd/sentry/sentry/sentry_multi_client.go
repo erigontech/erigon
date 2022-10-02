@@ -287,6 +287,9 @@ func NewMultiClient(
 		engine,
 		blockReader,
 	)
+	if chainConfig.TerminalTotalDifficultyPassed {
+		hd.SetPOSSync(true)
+	}
 
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)

@@ -104,6 +104,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	cfg.snapshots.LogStat()
+	cfg.agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+		_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress
+	})
 
 	// Create .idx files
 	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
@@ -119,14 +123,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.snapshots.Dir(), *chainID, cfg.tmpdir, workers); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
-				}
-			}
-
-			if cfg.historyV3 {
-				if err := cfg.agg.BuildMissedIndices(); err != nil {
-					return err
 				}
 			}
 
@@ -136,6 +134,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if cfg.dbEventNotifier != nil {
 				cfg.dbEventNotifier.OnNewSnapshot()
 			}
+		}
+	}
+
+	if cfg.historyV3 {
+		if err := cfg.agg.BuildMissedIndices(); err != nil {
+			return err
+		}
+		if cfg.dbEventNotifier != nil {
+			cfg.dbEventNotifier.OnNewSnapshot()
 		}
 	}
 
@@ -480,14 +487,15 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 	if blockRetire.Working() {
 		return nil
 	}
-	if res := blockRetire.Result(); res != nil {
-		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
-		}
-
-		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
-			return err
-		}
+	ok, err := blockRetire.BackgroundResult.GetAndReset()
+	if !ok {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+	}
+	if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+		return err
 	}
 
 	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
