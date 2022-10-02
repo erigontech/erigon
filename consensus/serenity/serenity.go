@@ -230,6 +230,9 @@ func IsPoSHeader(header *types.Header) bool {
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
 func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
+	if chain.Config().TerminalTotalDifficultyPassed {
+		return true, nil
+	}
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}
