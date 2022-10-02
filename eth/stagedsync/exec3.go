@@ -700,9 +700,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress), "tx/s", fmt.Sprintf("%.1f", speedTx), "repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "buffer", common.ByteCount(sizeEstimate),
-					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-				)
+				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
+					"tx/s", fmt.Sprintf("%.1f", speedTx),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
 					err := func() error {
 						lock.Lock()
