@@ -79,7 +79,7 @@ message ExecutionPayload {
     uint64 GasLimit = 8                 [json_name = "gas_limit"];
     uint64 GasUsed = 9                   [json_name = "gas_used"];
     uint64 Timestamp = 10               [json_name = "timestamp"];
-    bytes ExtraData = 11               [json_name = "extra_data"]; // @gotags: sszsize:"32"
+    bytes ExtraData = 11               [json_name = "extra_data"]; // @gotags: sszmax:"32"
     bytes BaseFeePerGas = 12     [json_name = "base_fee_per_gas"]; // @gotags: sszsize:"32"
     bytes BlockHash = 13               [json_name = "block_hash"]; // @gotags: sszsize:"32"
     repeated bytes Transactions = 14 [json_name = "transactions"]; // @gotags: sszsize:"?,?" sszmax:"1048576,1073741824"
@@ -101,12 +101,46 @@ message BeaconBodyBellatrix {
 message BeaconBlockBellatrix {
     uint64 Slot = 1              [json_name = "slot"];
     uint64 ProposerIndex = 2     [json_name = "proposer_index"];
-    bytes Root =   3             [json_name = "root"]; // @gotags: sszsize:"32"
-    bytes ParentRoot = 4         [json_name = "parent_root"]; // @gotags: sszsize:"32"
+    bytes ParentRoot = 3         [json_name = "parent_root"]; // @gotags: sszsize:"32"
+    bytes StateRoot =   4        [json_name = "root"]; // @gotags: sszsize:"32"
     BeaconBodyBellatrix Body = 5 [json_name = "body"];
 }
 
 message SignedBeaconBlockBellatrix {
     BeaconBlockBellatrix Block = 1 [json_name = "message"];
     bytes Signature = 2 [json_name = "signature"]; // @gotags: sszsize:"96"
+}
+
+message LightClientBootstrap {
+    BeaconBlockHeader Header = 1 [json_name = "header"];
+    SyncCommittee CurrentSyncCommittee = 2 [json_name = "current_sync_committee"];
+    repeated bytes CurrentSyncCommitteeBranch = 3 [json_name = "current_sync_committee_branch"]; // @gotags: sszsize:",32" sszmax:"5"
+}
+
+message SyncCommittee {
+    repeated bytes PubKeys = 1 [json_name = "current_sync_committee"]; // @gotags: sszsize:"512,48"
+}
+
+message LightClientUpdate {
+    BeaconBlockHeader AttestedHeader = 1                  [json_name = "attested_header"];
+    SyncCommittee NextSyncCommitee = 2                 [json_name = "next_sync_committee"];
+    repeated bytes NextSyncCommitteeBranch = 3 [json_name = "next_sync_committee_branch"]; // @gotags: sszsize:",32" sszmax:"5"
+    BeaconBlockHeader FinalizedHeader = 4                [json_name = "finalized_header"];
+    repeated bytes FinalityBranch = 5                     [json_name = "finality_branch"]; // @gotags: sszsize:",32" sszmax:"6"
+    SyncAggregate SyncAggregate = 6                        [json_name = "sync_aggregate"];
+    uint64 SignatureSlot = 7                               [json_name = "signature_slot"];
+}
+
+message LightClientFinalityUpdate {
+    BeaconBlockHeader AttestedHeader = 1   [json_name = "attested_header"];
+    BeaconBlockHeader FinalizedHeader = 2 [json_name = "finalized_header"];
+    repeated bytes FinalityBranch = 3      [json_name = "finality_branch"]; // @gotags: sszsize:",32" sszmax:"6"
+    SyncAggregate SyncAggregate = 4         [json_name = "sync_aggregate"];
+    uint64 SignatureSlot = 5                [json_name = "signature_slot"];
+}
+
+message LightClientOptimisticUpdate {
+    BeaconBlockHeader AttestedHeader = 1   [json_name = "attested_header"];
+    SyncAggregate SyncAggregate = 2         [json_name = "sync_aggregate"];
+    uint64 SignatureSlot = 3                [json_name = "signature_slot"];
 }

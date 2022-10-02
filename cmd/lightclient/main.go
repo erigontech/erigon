@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -61,7 +61,7 @@ func main() {
 		case <-logInterval.C:
 			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
 		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
-			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
+			u := blockPacket.(*lightrpc.SignedBeaconBlockBellatrix)
 			log.Info("[Gossip] beacon_block",
 				"Slot", u.Block.Slot,
 				"Signature", hex.EncodeToString(u.Signature[:]),

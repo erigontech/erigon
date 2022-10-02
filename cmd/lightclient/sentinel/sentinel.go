@@ -20,11 +20,9 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -237,8 +235,8 @@ func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) 
 		case <-ctx.Done():
 			return
 		case blockPacket := <-sent.GossipChannel(BeaconBlockTopic):
-			b := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
-			if _, err := client.NotifyBeaconBlock(context.Background(), rpc.ConvertSignedP2PBellatrixBlockToLightrpc(b)); err != nil {
+			b := blockPacket.(*lightrpc.SignedBeaconBlockBellatrix)
+			if _, err := client.NotifyBeaconBlock(context.Background(), b); err != nil {
 				panic(err)
 			}
 		}
@@ -262,8 +260,8 @@ func RunSentinelServiceInternally(client lightrpc.LightclientServer, cfg *Sentin
 		case <-ctx.Done():
 			return
 		case blockPacket := <-sent.GossipChannel(BeaconBlockTopic):
-			b := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
-			if _, err := client.NotifyBeaconBlock(context.Background(), rpc.ConvertSignedP2PBellatrixBlockToLightrpc(b)); err != nil {
+			b := blockPacket.(*lightrpc.SignedBeaconBlockBellatrix)
+			if _, err := client.NotifyBeaconBlock(context.Background(), b); err != nil {
 				log.Error("Error in sentinel", "err", err)
 			}
 		}
