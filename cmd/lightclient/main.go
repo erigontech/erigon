@@ -55,6 +55,7 @@ func main() {
 		return
 	}
 	log.Info("Sentinel started", "enr", sent.String())
+
 	logInterval := time.NewTicker(5 * time.Second)
 	sendReqInterval := time.NewTicker(100 * time.Millisecond)
 
