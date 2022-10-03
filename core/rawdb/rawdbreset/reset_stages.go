@@ -116,6 +116,9 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Headers, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Bodies, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
 	}
 
 	return nil
