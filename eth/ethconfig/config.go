@@ -40,7 +40,8 @@ import (
 )
 
 // AggregationStep number of transactions in smallest static file
-const HistoryV3AggregationStep = 3_125_000 // 100M / 32
+// const HistoryV3AggregationStep = 3_125_000 // 100M / 32
+const HistoryV3AggregationStep = 3_125_000 / 8 // 100M / 32
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
