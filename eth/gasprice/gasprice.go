@@ -233,7 +233,6 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	}
 
 	if block == nil {
-		log.Warn("gasprice.go: getBlockPrices found no block", "blockNum", blockNum)
 		return nil
 	}
 
