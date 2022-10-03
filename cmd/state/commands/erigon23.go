@@ -17,11 +17,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common"
@@ -68,18 +69,15 @@ func initSeparatedLogging(logPath string, filePrefix string) (log.Logger, error)
 	}
 
 	logger := log.New()
-	userLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-user.log"), log.LogfmtFormat(), 1<<27) // 128Mb
-	if err != nil {
-		return nil, err
-	}
 	errLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
 	if err != nil {
 		return nil, err
 	}
-
-	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(log.LvlInfo, userLog), log.LvlFilterHandler(log.LvlError, errLog))
-	logger.SetHandler(mux)
-	log.SetRootHandler(mux)
+	fh := log.LvlFilterHandler(log.LvlTrace, errLog)
+	logger.SetHandler(log.MultiHandler(log.Root().GetHandler(), fh))
+	//log.SetRootHandler()
+	//
+	//log.SetRootHandler(fh)
 	return logger, nil
 }
 
@@ -131,7 +129,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, 15000)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -218,6 +216,9 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	writeWrapper := &WriterWrapper23{w: agg}
 
 	commitFn := func(txn uint64) error {
+		if db == nil || rwTx == nil {
+			return fmt.Errorf("commit failed due to invalid db/rwTx")
+		}
 		var spaceDirty uint64
 		if spaceDirty, _, err = rwTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
 			return fmt.Errorf("retrieving spaceDirty: %w", err)
@@ -241,13 +242,6 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		readWrapper.roTx = rwTx
 		return nil
 	}
-
-	defer func() {
-		interrupt = true
-		if err := commitFn(txNum); err != nil {
-			log.Error("commit on exit failed", "err", err)
-		}
-	}()
 
 	agg.SetCommitFn(commitFn)
 
@@ -437,16 +431,6 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 
-		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
-			rootHash, err := ww.w.ComputeCommitment(true, trace)
-			if err != nil {
-				return 0, nil, err
-			}
-			if !bytes.Equal(rootHash, header.Root[:]) {
-				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
-			}
-		}
-
 		if err := ww.w.FinishTx(); err != nil {
 			return 0, nil, fmt.Errorf("failed to finish tx: %w", err)
 		}
@@ -457,6 +441,15 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
+	if commitments && txNum >= startTxNum && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+		rootHash, err := ww.w.ComputeCommitment(true, trace)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !bytes.Equal(rootHash, header.Root[:]) {
+			return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
+		}
+	}
 	if err := ww.w.FinishTx(); err != nil {
 		return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
 	}
