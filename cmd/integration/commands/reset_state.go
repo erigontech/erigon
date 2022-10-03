@@ -24,7 +24,8 @@ var cmdResetState = &cobra.Command{
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
+		sn, _ := allSnapshots(db)
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
 
@@ -36,7 +37,8 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, allSnapshots(db)) }); err != nil {
+		sn, _ = allSnapshots(db)
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
 
