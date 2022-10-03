@@ -63,16 +63,19 @@ reqRetryLoop:
 
 			if err != nil {
 				err = fmt.Errorf("failed to begin stream, err=%s", err)
+				continue reqRetryLoop
 			}
 			sc = ssz_snappy.NewStreamCodec(stream)
 			defer sc.Close()
 
 			if _, err = sc.WritePacket(requestPacket); err != nil {
 				err = fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+				continue reqRetryLoop
 			}
 
 			if err = sc.CloseWriter(); err != nil {
 				err = fmt.Errorf("failed to close write stream, err=%s", err)
+				continue reqRetryLoop
 			}
 			break reqRetryLoop
 		}
