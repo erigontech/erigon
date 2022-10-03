@@ -426,7 +426,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 	}
 }
 
-func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB,
+func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
@@ -670,7 +670,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].Run()
 	}
-	commitThreshold := uint64(256 * 1024 * 1024)
+	commitThreshold := batchSize.Bytes()
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
