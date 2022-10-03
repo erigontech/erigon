@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	gfx.cafe/util/go/bufpool v0.0.0-20221001013022-0560a0526470
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.22.2
@@ -86,6 +87,7 @@ require (
 )
 
 require (
+	gfx.cafe/util/go/bytepool v0.0.0-20221003014715-6000e93338e0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/containerd/cgroups v1.0.4 // indirect

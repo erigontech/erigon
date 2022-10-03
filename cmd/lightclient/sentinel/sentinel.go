@@ -178,7 +178,7 @@ func New(
 }
 
 func (s *Sentinel) Start(
-	gossipHandler func(*proto.SubContext) error,
+	gossipHandler func(*proto.GossipContext) error,
 ) error {
 	if s.started {
 		log.Warn("Sentinel already running")

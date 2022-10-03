@@ -49,8 +49,8 @@ const (
 )
 
 type GossipManager struct {
-	ch            chan *proto.SubContext
-	handler       func(*proto.SubContext) error
+	ch            chan *proto.GossipContext
+	handler       func(*proto.GossipContext) error
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
@@ -58,10 +58,10 @@ type GossipManager struct {
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(
 	ctx context.Context,
-	handler func(*proto.SubContext) error,
+	handler func(*proto.GossipContext) error,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *proto.SubContext, 128),
+		ch:            make(chan *proto.GossipContext, 128),
 		subscriptions: map[string]*GossipSubscription{},
 		handler:       handler,
 	}
@@ -71,7 +71,7 @@ func NewGossipManager(
 
 // run loop for gossip manager, not meant to be called
 func (g *GossipManager) run(ctx context.Context) {
-	do := func(p *proto.SubContext) {
+	do := func(p *proto.GossipContext) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("[Gossip] Message Handler Crashed", "err", r)
@@ -129,7 +129,7 @@ func (s *GossipManager) String() string {
 func SentinelGossipSubscribe[T proto.Packet](
 	s *Sentinel,
 	topic string,
-	newcodec func(*pubsub.Subscription) proto.SubCodec,
+	newcodec func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec,
 	opts ...pubsub.TopicOpt,
 ) error {
 	g := s.subManager
@@ -150,15 +150,15 @@ func SentinelGossipSubscribe[T proto.Packet](
 }
 
 func (s *Sentinel) startGossip() (err error) {
-	err = SentinelGossipSubscribe[*p2p.SignedBeaconBlockBellatrix](s, s.getTopicByName(BeaconBlockTopic), ssz_snappy.NewSubCodec)
+	err = SentinelGossipSubscribe[*p2p.SignedBeaconBlockBellatrix](s, s.getTopicByName(BeaconBlockTopic), ssz_snappy.NewGossipCodec)
 	if err != nil {
 		return err
 	}
-	err = SentinelGossipSubscribe[*p2p.LightClientFinalityUpdate](s, s.getTopicByName(LightClientFinalityUpdateTopic), ssz_snappy.NewSubCodec)
+	err = SentinelGossipSubscribe[*p2p.LightClientFinalityUpdate](s, s.getTopicByName(LightClientFinalityUpdateTopic), ssz_snappy.NewGossipCodec)
 	if err != nil {
 		return err
 	}
-	err = SentinelGossipSubscribe[*p2p.LightClientOptimisticUpdate](s, s.getTopicByName(LightClientOptimisticUpdateTopic), ssz_snappy.NewSubCodec)
+	err = SentinelGossipSubscribe[*p2p.LightClientOptimisticUpdate](s, s.getTopicByName(LightClientOptimisticUpdateTopic), ssz_snappy.NewGossipCodec)
 	if err != nil {
 		return err
 	}

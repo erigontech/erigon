@@ -65,7 +65,7 @@ func main() {
 	}
 }
 
-func handleGossipPacket(pkt *proto.SubContext) error {
+func handleGossipPacket(pkt *proto.GossipContext) error {
 	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
 	switch u := pkt.Packet.(type) {
 	case *p2p.SignedBeaconBlockBellatrix:
@@ -78,6 +78,10 @@ func handleGossipPacket(pkt *proto.SubContext) error {
 			"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
 			"proposerIdx", u.Block.ProposerIndex,
 		)
+		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		if err != nil {
+			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		}
 	case *p2p.LightClientFinalityUpdate:
 	case *p2p.LightClientOptimisticUpdate:
 	default:
