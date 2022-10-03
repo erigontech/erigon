@@ -44,8 +44,8 @@ type TopicName string
 
 const (
 	BeaconBlockTopic                 TopicName = "beacon_block"
-	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update_v0"
-	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update_v0"
+	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
+	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
 
 type subscriptionManager struct {
@@ -149,7 +149,7 @@ func subscribeGossipTopic[T proto.Packet](
 	s.subManager.addTopicSub(topic, topicHandle, subscription)
 	s.subManager.gossipResults[topic] = make(chan interface{})
 
-	log.Debug("[Gossip] began subscription", "topic", subscription.Topic())
+	log.Info("[Gossip] began subscription", "topic", subscription.Topic())
 	var nothing T
 	go runSubscriptionHandler(s, subscription, newcodec, nothing)
 	return nil
