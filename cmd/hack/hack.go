@@ -39,12 +39,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -491,8 +494,83 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 	return nil
 }
 
-func extractBodies(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
+func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, expectedCount uint64, err error) {
+	bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+	if err != nil {
+		return
+	}
+	defer bodiesSegment.Close()
+
+	gg := bodiesSegment.MakeGetter()
+	buf, _ := gg.Next(nil)
+	firstBody := &types.BodyForStorage{}
+	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
+		return
+	}
+	firstTxID = firstBody.BaseTxId
+
+	lastBody := new(types.BodyForStorage)
+	i := uint64(0)
+	for gg.HasNext() {
+		i++
+		if i == blockTo-blockFrom-1 {
+			buf, _ = gg.Next(buf[:0])
+			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
+				return
+			}
+			if gg.HasNext() {
+				panic(1)
+			}
+		} else {
+			gg.Skip()
+		}
+	}
+
+	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
+	return
+}
+
+func extractBodies(datadir string) error {
+	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
+		Enabled:    true,
+		KeepBlocks: true,
+		Produce:    false,
+	}, filepath.Join(datadir, "snapshots"))
+	snaps.ReopenFolder()
+	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
+		for _, sn := range sns {
+			var firstBlockNum, firstBaseTxNum, firstAmount uint64
+			var lastBlockNum, lastBaseTxNum, lastAmount uint64
+			var prevBlockNum, prevBaseTxNum, prevAmount uint64
+			first := true
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+				if first {
+					firstBlockNum = blockNum
+					firstBaseTxNum = baseTxNum
+					firstAmount = txAmount
+					first = false
+				} else {
+					if blockNum != prevBlockNum+1 {
+						fmt.Printf("Discount block Num: %d => %d\n", prevBlockNum, blockNum)
+					}
+					if baseTxNum != prevBaseTxNum+prevAmount {
+						fmt.Printf("Wrong baseTxNum: %d+%d => %d\n", prevBaseTxNum, prevAmount, baseTxNum)
+					}
+				}
+				prevBlockNum = blockNum
+				lastBlockNum = blockNum
+				prevBaseTxNum = baseTxNum
+				lastBaseTxNum = baseTxNum
+				prevAmount = txAmount
+				lastAmount = txAmount
+				return nil
+			})
+			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
+		}
+		return nil
+	})
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -504,10 +582,9 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
 	i := 0
 	var txId uint64
-	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -531,10 +608,10 @@ func extractBodies(chaindata string, block uint64) error {
 				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
 			}
 		}
-		txId += uint64(txAmount) + 2
-		//if i == 1 {
-		//	break
-		//}
+		txId = baseTxId + uint64(txAmount) + 2
+		if i == 50 {
+			break
+		}
 	}
 	return nil
 }
@@ -1324,7 +1401,7 @@ func main() {
 		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
-		err = extractBodies(*chaindata, uint64(*block))
+		err = extractBodies(*chaindata)
 
 	case "repairCurrent":
 		repairCurrent()
