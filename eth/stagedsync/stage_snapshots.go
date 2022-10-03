@@ -504,17 +504,15 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		return nil
 	}
 	ok, err := blockRetire.BackgroundResult.GetAndReset()
-	if !ok {
-		fmt.Printf("not ok\n")
-		return nil
-	}
 	if err != nil {
 		fmt.Printf("error1: %v\n", err)
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
-	if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
-		fmt.Printf("erro2: %v\n", err)
-		return err
+	if ok {
+		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+			fmt.Printf("erro2: %v\n", err)
+			return err
+		}
 	}
 
 	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
