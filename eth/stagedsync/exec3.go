@@ -430,6 +430,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	defer agg.EnableMadvNormalReadAhead().DisableReadAhead()
+
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
 	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
@@ -539,9 +541,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		accountCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XAccount, k, v)
-		}, etl.TransformArgs{})
+		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -586,9 +586,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		storageCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XStorage, k, v)
-		}, etl.TransformArgs{})
+		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -632,9 +630,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		codeCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XCode, k, v)
-		}, etl.TransformArgs{})
+		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
