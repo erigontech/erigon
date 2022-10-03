@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -40,7 +39,6 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 	}
 
 	peerId := peerInfo.ID
-	var sc proto.StreamCodec
 
 	reqRetryTimer := time.NewTimer(clparams.ReqTimeout)
 	defer reqRetryTimer.Stop()
@@ -48,42 +46,21 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 	retryTicker := time.NewTicker(10 * time.Millisecond)
 	defer retryTicker.Stop()
 
-reqRetryLoop:
-	for {
+	sc, err := writeRequest(s, requestPacket, peerId, topic)
+	for err != nil {
 		select {
 		case <-s.ctx.Done():
 			log.Warn("[Req] sentinel has been shut down")
 			return nil, nil
 		case <-reqRetryTimer.C:
 			log.Warn("[Req] timeout", "topic", topic, "peer", peerId)
-			break reqRetryLoop
+			return nil, err
 		case <-retryTicker.C:
-			var stream network.Stream
-			stream, err = s.host.NewStream(s.ctx, peerId, protocol.ID(topic))
-
-			if err != nil {
-				err = fmt.Errorf("failed to begin stream, err=%s", err)
-				continue reqRetryLoop
-			}
-			sc = ssz_snappy.NewStreamCodec(stream)
-			defer sc.Close()
-
-			if _, err = sc.WritePacket(requestPacket); err != nil {
-				err = fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
-				continue reqRetryLoop
-			}
-
-			if err = sc.CloseWriter(); err != nil {
-				err = fmt.Errorf("failed to close write stream, err=%s", err)
-				continue reqRetryLoop
-			}
-			break reqRetryLoop
+			sc, err = writeRequest(s, requestPacket, peerId, topic)
 		}
 	}
 
-	if err != nil {
-		return nil, err
-	}
+	defer sc.Close()
 	log.Info("[Req] sent request", "topic", topic, "peer", peerId)
 
 	respRetryTimer := time.NewTimer(clparams.RespTimeout)
@@ -104,6 +81,25 @@ reqRetryLoop:
 	}
 
 	return responsePacket, nil
+}
+
+func writeRequest(s *Sentinel, requestPacket proto.Packet, peerId peer.ID, topic string) (proto.StreamCodec, error) {
+	stream, err := s.host.NewStream(s.ctx, peerId, protocol.ID(topic))
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin stream, err=%s", err)
+	}
+
+	sc := ssz_snappy.NewStreamCodec(stream)
+
+	if _, err := sc.WritePacket(requestPacket); err != nil {
+		return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+	}
+
+	if err := sc.CloseWriter(); err != nil {
+		return nil, fmt.Errorf("failed to close write stream, err=%s", err)
+	}
+
+	return sc, nil
 }
 
 func decodeResponse(sc proto.StreamCodec, responsePacket proto.Packet, peerId peer.ID) (proto.Packet, error) {
