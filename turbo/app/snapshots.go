@@ -357,8 +357,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
 				return err
 			}
-			if err := br.PruneAncientBlocks(tx); err != nil {
-				return err
+			log.Info("prune blocks from db\n")
+			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
+				if err := br.PruneAncientBlocks(tx); err != nil {
+					return err
+				}
 			}
 			return nil
 		}); err != nil {
