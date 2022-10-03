@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"runtime"
@@ -13,12 +12,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -65,6 +61,7 @@ func BodiesForward(
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
 	useExternalTx := tx != nil
+	cfg.bd.UsingExternalTx = useExternalTx
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
@@ -135,16 +132,15 @@ func BodiesForward(
 	// create a temporary bucket to fire the bodies into as we start to collect them
 	// this will allow us to restart the bodies stage and not request bodies we already have
 	// once the bodies stage is complete this bucket is dropped
-	err = tx.CreateBucket("BodiesStage")
-	if err != nil {
-		return err
-	}
-	err = tx.ClearBucket("BodiesStage")
-	if err != nil {
-		return err
-	}
-
 	if !useExternalTx {
+		err = tx.CreateBucket("BodiesStage")
+		if err != nil {
+			return err
+		}
+		err = tx.ClearBucket("BodiesStage")
+		if err != nil {
+			return err
+		}
 		err = tx.Commit()
 		if err != nil {
 			return err
@@ -238,34 +234,23 @@ func BodiesForward(
 			var i uint64
 			for i = 0; i < toProcess; i++ {
 				nextBlock := requestedLow + i
-				key := dbutils.EncodeBlockNumber(nextBlock)
-				body, err := innerTx.GetOne("BodiesStage", key)
-				if err != nil {
-					return false, err
-				}
-				if body == nil {
-					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
-				}
 
 				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, innerTx)
 				if err != nil {
 					return false, err
 				}
-
-				var rawBody types.RawBody
-				fromHex := common.CopyBytes(common.FromHex(string(body)))
-				bodyReader := bytes.NewReader(fromHex)
-				stream := rlp.NewStream(bodyReader, 0)
-				err = rawBody.DecodeRLP(stream)
-				if err != nil {
-					log.Error("Unexpected body from bucket", "err", err, "block", nextBlock)
-					return false, fmt.Errorf("%w, nextBlock=%d", err, nextBlock)
-				}
-
 				blockHeight := header.Number.Uint64()
-
 				if blockHeight != nextBlock {
 					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
+				}
+
+				rawBody, err := cfg.bd.GetBlockFromCache(innerTx, nextBlock)
+				if err != nil {
+					log.Error(fmt.Sprintf("[%s] Error getting body from cache", logPrefix), "err", err)
+					return false, err
+				}
+				if rawBody == nil {
+					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
 				}
 
 				// Txn & uncle roots are verified via bd.requestedMap
@@ -277,7 +262,7 @@ func BodiesForward(
 				}
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(innerTx, header.Hash(), blockHeight, &rawBody)
+				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(innerTx, header.Hash(), blockHeight, rawBody)
 				if err != nil {
 					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 				}
@@ -373,7 +358,7 @@ func BodiesForward(
 			return err
 		}
 	} else {
-		tx.ClearBucket("BodiesStage")
+		cfg.bd.ClearBodyCache()
 	}
 
 	if stopped {
