@@ -56,10 +56,19 @@ func main() {
 	}
 	log.Info("Sentinel started", "enr", sent.String())
 	logInterval := time.NewTicker(5 * time.Second)
+	sendReqInterval := time.NewTicker(10 * time.Second)
+
 	for {
 		select {
 		case <-logInterval.C:
 			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
+		case <-sendReqInterval.C:
+			if _, err := sent.SendPingReqV1(); err != nil {
+				log.Warn("failed to send ping request", "err", err)
+			}
+			if _, err := sent.SendMetadataReqV1(); err != nil {
+				log.Warn("failed to send metadata request", "err", err)
+			}
 		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
 			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
 			log.Info("[Gossip] beacon_block",
