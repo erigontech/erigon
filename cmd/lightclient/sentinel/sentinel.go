@@ -179,6 +179,7 @@ func New(
 
 func (s *Sentinel) Start(
 	gossipHandler func(*proto.GossipContext) error,
+	// potentially we can put the req/resp handler here as well?
 ) error {
 	if s.started {
 		log.Warn("Sentinel already running")

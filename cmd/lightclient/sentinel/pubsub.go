@@ -61,7 +61,7 @@ func NewGossipManager(
 	handler func(*proto.GossipContext) error,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *proto.GossipContext, 128),
+		ch:            make(chan *proto.GossipContext, 1),
 		subscriptions: map[string]*GossipSubscription{},
 		handler:       handler,
 	}
