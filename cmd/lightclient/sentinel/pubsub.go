@@ -171,6 +171,9 @@ func runSubscriptionHandler[T proto.Packet](
 			log.Warn("fail to decode gossip packet", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(t))
 			continue
 		}
+
+		log.Info("[Gossip] received message", "topic", sub.Topic())
+
 		if ctx.Msg.ReceivedFrom == s.host.ID() {
 			continue
 		}

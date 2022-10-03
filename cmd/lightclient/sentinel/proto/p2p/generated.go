@@ -25,9 +25,9 @@ type BeaconBlockHeader struct {
 
 	ProposerIndex uint64 `json:"proposer_index" `
 
-	ParentRoot Root `json:"parent_root" ssz-size:"32" `
+	ParentRoot Root `ssz-size:"32" json:"parent_root" `
 
-	StateRoot Root `ssz-size:"32" json:"state_root" `
+	StateRoot Root `json:"state_root" ssz-size:"32" `
 
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
@@ -39,7 +39,7 @@ func (typ *BeaconBlockHeader) Clone() proto.Packet {
 type Checkpoint struct {
 	Epoch uint64 `json:"epoch" `
 
-	Root Root `ssz-size:"32" json:"root" `
+	Root Root `json:"root" ssz-size:"32" `
 }
 
 func (typ *Checkpoint) Clone() proto.Packet {
@@ -115,7 +115,7 @@ func (typ *SingleRoot) Clone() proto.Packet {
 }
 
 type Status struct {
-	ForkDigest Bytea `ssz-size:"4" json:"fork_digest,omitempty" `
+	ForkDigest Bytea `json:"fork_digest,omitempty" ssz-size:"4" `
 
 	FinalizedRoot Bytea `json:"finalized_root,omitempty" ssz-size:"32" `
 

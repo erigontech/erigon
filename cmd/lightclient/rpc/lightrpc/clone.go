@@ -13,3 +13,11 @@ func (*LightClientFinalityUpdate) Clone() proto.Packet {
 func (*LightClientOptimisticUpdate) Clone() proto.Packet {
 	return &LightClientOptimisticUpdate{}
 }
+
+func (*MetadataV1) Clone() proto.Packet {
+	return &MetadataV1{}
+}
+
+func (*MetadataV2) Clone() proto.Packet {
+	return &MetadataV2{}
+}

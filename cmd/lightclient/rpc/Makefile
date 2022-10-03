@@ -4,7 +4,7 @@ all:
 	protoc-go-inject-tag -input="lightrpc/*.pb.go"
 	sed -i 's/sszsize/ssz-size/g' lightrpc/*.pb.go
 	sed -i 's/sszmax/ssz-max/g' lightrpc/*.pb.go
-	go run github.com/ferranbt/fastssz/sszgen -path lightrpc/*.go -exclude-objs {{range $key, $val := .Aliases}}{{$key}},{{end}}Ignore
+	go run github.com/ferranbt/fastssz/sszgen -path lightrpc/metadata.pb.go lightrpc/beacon_block.pb.go -exclude-objs {{range $key, $val := .Aliases}}{{$key}},{{end}}Ignore
 
 clean:
 	rm lightrpc/*.pb.go

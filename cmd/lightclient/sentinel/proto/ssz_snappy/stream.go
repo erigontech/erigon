@@ -1,8 +1,6 @@
 package ssz_snappy
 
 import (
-	"bufio"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"reflect"
@@ -10,6 +8,7 @@ import (
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/libp2p/go-libp2p/core/network"
 )
@@ -30,42 +29,70 @@ func NewStreamCodec(
 	}
 }
 
+func (d *StreamCodec) Close() error {
+	if err := d.s.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *StreamCodec) CloseWriter() error {
+	if err := d.s.CloseWrite(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *StreamCodec) CloseReader() error {
+	if err := d.s.CloseRead(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
-	if val, ok := pkt.(ssz.Marshaler); ok {
-		wr := bufio.NewWriter(d.s)
-		sw := snappy.NewWriter(wr)
-		p := make([]byte, 10)
-		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
-		enc, err := val.MarshalSSZ()
-		if err != nil {
-			return 0, fmt.Errorf("marshal ssz: %w", err)
-		}
-		_, err = wr.Write(p[:vin])
-		if err != nil {
-			return 0, fmt.Errorf("write varint: %w", err)
-		}
-		n, err = sw.Write(enc)
-		if err != nil {
-			return 0, fmt.Errorf("snappy compress: %w", err)
-		}
-		err = sw.Flush()
-		if err != nil {
-			return 0, fmt.Errorf("flush packet: %w", err)
-		}
-		err = wr.Flush()
-		if err != nil {
-			return 0, fmt.Errorf("flush packet: %w", err)
-		}
-		return n, nil
+	// if its a metadata request we dont write anything
+	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
+		return 0, nil
 	}
-	return 0, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
+
+	p, sw, err := EncodePacket(pkt, d.s)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to write packet err=%s", err)
+	}
+
+	n, err = sw.Write(p)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := sw.Flush(); err != nil {
+		return 0, err
+	}
+
+	return n, nil
 }
 
 // write raw bytes to stream
 func (d *StreamCodec) Write(payload []byte) (n int, err error) {
 	return d.s.Write(payload)
+}
+
+// read raw bytes to stream
+func (d *StreamCodec) Read(b []byte) (n int, err error) {
+	return d.s.Read(b)
+}
+
+// read raw bytes to stream
+func (d *StreamCodec) ReadByte() (b byte, err error) {
+	o := [1]byte{}
+	_, err = io.ReadFull(d.s, o[:])
+	if err != nil {
+		return
+	}
+	return o[0], nil
 }
 
 // decode into packet p, then return the packet context
