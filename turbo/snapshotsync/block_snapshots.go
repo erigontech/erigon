@@ -1041,7 +1041,6 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		defer br.working.Store(false)
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.Snapshots())
-		fmt.Printf("blockFrom %d, blockTo %d, ok %t\n", blockFrom, blockTo, ok)
 		if !ok {
 			return
 		}

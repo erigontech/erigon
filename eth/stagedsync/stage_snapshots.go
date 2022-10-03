@@ -500,17 +500,14 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
 	// if something already happens in background - noop
 	if blockRetire.Working() {
-		fmt.Printf("already working\n")
 		return nil
 	}
 	ok, err := blockRetire.BackgroundResult.GetAndReset()
 	if err != nil {
-		fmt.Printf("error1: %v\n", err)
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 	if ok {
 		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
-			fmt.Printf("erro2: %v\n", err)
 			return err
 		}
 	}
