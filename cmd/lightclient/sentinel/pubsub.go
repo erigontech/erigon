@@ -44,8 +44,8 @@ type TopicName string
 
 const (
 	BeaconBlockTopic                 TopicName = "beacon_block"
-	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
-	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
+	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update_v0"
+	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update_v0"
 )
 
 type subscriptionManager struct {
@@ -112,6 +112,7 @@ func (s *Sentinel) startGossip(prefix string) (err error) {
 	if err != nil {
 		return err
 	}
+
 	err = subscribeGossipTopic(s, s.getTopicByName(LightClientOptimisticUpdateTopic), ssz_snappy.NewSubCodec, &lightrpc.LightClientOptimisticUpdate{})
 	if err != nil {
 		return err
@@ -172,7 +173,7 @@ func runSubscriptionHandler[T proto.Packet](
 			continue
 		}
 
-		log.Info("[Gossip] received message", "topic", sub.Topic())
+		log.Debug("[Gossip] received message", "topic", sub.Topic())
 
 		if ctx.Msg.ReceivedFrom == s.host.ID() {
 			continue

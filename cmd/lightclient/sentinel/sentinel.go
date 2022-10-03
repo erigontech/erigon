@@ -195,7 +195,7 @@ func (s *Sentinel) Start() error {
 	if err != nil {
 		return err
 	}
-	//TODO: request and compute
+
 	prefix := "/eth2/" +
 		utils.BytesToHex(digest[:])
 
