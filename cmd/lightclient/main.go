@@ -58,10 +58,11 @@ func main() {
 	log.Info("Sentinel started", "enr", sent.String())
 	logInterval := time.NewTicker(5 * time.Second)
 	for {
-		select {
-		case <-logInterval.C:
-			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
-		}
+		//select {
+		//case <-logInterval.C:
+		<-logInterval.C
+		log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
+		//	}
 	}
 }
 
