@@ -2,7 +2,6 @@ package lightclient
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -51,7 +50,6 @@ func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *t
 			panic("NewPayload BaseFeePerGas overflow")
 		}
 	}
-	fmt.Println(baseFee.Bytes())
 	return &types.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(common.BytesToHash(e.ParentHash)),
 		Coinbase:      gointerfaces.ConvertAddressToH160(common.BytesToAddress(e.FeeRecipient)),
