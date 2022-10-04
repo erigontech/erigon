@@ -83,6 +83,9 @@ func main() {
 				"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
 				"proposerIdx", u.Block.ProposerIndex,
 			)
+		case <-sent.GossipChannel(sentinel.LightClientFinalityUpdateTopic):
+			log.Info("[Gossip] Finalty update")
+			return
 		default:
 			time.Sleep(100 * time.Millisecond)
 		}

@@ -2,7 +2,11 @@ package lightclient
 
 import (
 	"context"
+	"fmt"
+	"math/big"
+	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -30,6 +34,24 @@ func NewLightclientServerInternal(executionServer remote.ETHBACKENDServer) light
 }
 
 func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *types.ExecutionPayload {
+	var baseFee *uint256.Int
+
+	if e.BaseFeePerGas != nil {
+		// Trim and reverse it.
+		baseFeeBytes := common.CopyBytes(e.BaseFeePerGas)
+		for baseFeeBytes[len(baseFeeBytes)-1] == 0 && len(baseFeeBytes) > 0 {
+			baseFeeBytes = baseFeeBytes[:len(baseFeeBytes)-1]
+		}
+		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+		}
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(new(big.Int).SetBytes(baseFeeBytes))
+		if overflow {
+			panic("NewPayload BaseFeePerGas overflow")
+		}
+	}
+	fmt.Println(baseFee.Bytes())
 	return &types.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(common.BytesToHash(e.ParentHash)),
 		Coinbase:      gointerfaces.ConvertAddressToH160(common.BytesToAddress(e.FeeRecipient)),
@@ -42,9 +64,9 @@ func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *t
 		GasUsed:       e.GasUsed,
 		Timestamp:     e.Timestamp,
 		ExtraData:     e.ExtraData,
-		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.BytesToHash(e.BaseFeePerGas)),
+		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(common.BytesToHash(e.BlockHash)),
-		// Transactions:  e.Transactions,
+		Transactions:  e.Transactions,
 	}
 }
 
@@ -52,16 +74,15 @@ func (l *LightClientServer) NotifyBeaconBlock(ctx context.Context, beaconBlock *
 	payloadHash := gointerfaces.ConvertHashToH256(
 		common.BytesToHash(beaconBlock.Block.Body.ExecutionPayload.BlockHash))
 
-	// payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
-	// Send forkchoice
+	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
 	var err error
 	if l.executionClient != nil {
-		/*_, err = l.executionClient.EngineNewPayloadV1(ctx, payload)
+		_, err = l.executionClient.EngineNewPayloadV1(ctx, payload)
 		if err != nil {
 			return nil, err
 		}
 		// Wait a bit
-		time.Sleep(100 * time.Millisecond)*/
+		time.Sleep(500 * time.Millisecond)
 		_, err = l.executionClient.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 			ForkchoiceState: &remote.EngineForkChoiceState{
 				HeadBlockHash:      payloadHash,
@@ -70,12 +91,12 @@ func (l *LightClientServer) NotifyBeaconBlock(ctx context.Context, beaconBlock *
 			},
 		})
 	} else {
-		/*_, err = l.executionServer.EngineNewPayloadV1(ctx, payload)
+		_, err = l.executionServer.EngineNewPayloadV1(ctx, payload)
 		if err != nil {
 			return nil, err
 		}
 		// Wait a bit
-		time.Sleep(100 * time.Millisecond)*/
+		time.Sleep(500 * time.Millisecond)
 		_, err = l.executionServer.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 			ForkchoiceState: &remote.EngineForkChoiceState{
 				HeadBlockHash:      payloadHash,
