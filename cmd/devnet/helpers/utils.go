@@ -1,4 +1,4 @@
-package utils
+package helpers
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 func ClearDevDB() {
 	fmt.Printf("\nDeleting ./dev folders\n")
 
-	cmd := exec.Command("rm", "-rf", "./dev")
+	cmd := exec.Command("rm", "-rf", "./dev0")
 	err := cmd.Run()
 	if err != nil {
 		fmt.Println("Error occurred clearing Dev DB")
@@ -23,7 +23,25 @@ func ClearDevDB() {
 		panic("could not clear dev2 DB")
 	}
 
-	fmt.Printf("SUCCESS => Deleted ./dev and ./dev2\n")
+	fmt.Printf("SUCCESS => Deleted ./dev0 and ./dev2\n")
+}
+
+func DeleteLogs() {
+	fmt.Printf("\nRemoving old logs to create new ones...\nBefore re-running the devnet tool, make sure to copy out old logs if you need them!!!\n\n")
+
+	cmd := exec.Command("rm", "-rf", "./erigon_node_1")
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println("Error occurred removing log node_1")
+		panic("could not remove old logs")
+	}
+
+	cmd2 := exec.Command("rm", "-rf", "./erigon_node_2")
+	err2 := cmd2.Run()
+	if err2 != nil {
+		fmt.Println("Error occurred removing log node_2")
+		panic("could not remove old logs")
+	}
 }
 
 // UniqueIDFromEnode returns the unique ID from a node's enode, removing the `?discport=0` part

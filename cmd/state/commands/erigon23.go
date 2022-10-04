@@ -51,7 +51,7 @@ func init() {
 
 var erigon23Cmd = &cobra.Command{
 	Use:   "erigon23",
-	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
+	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, err := initSeparatedLogging(logdir, "erigon23")
 		if err != nil {
