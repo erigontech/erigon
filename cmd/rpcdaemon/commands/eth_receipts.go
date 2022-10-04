@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"gfx.cafe/util/go/generic"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -665,21 +664,9 @@ Logs:
 	return result
 }
 
-var addrMapPool = generic.HookPool[map[common.Address]struct{}]{
-	New: func() map[common.Address]struct{} {
-		return map[common.Address]struct{}{}
-	},
-	FnGet: func(s map[common.Address]struct{}) {
-		for k := range s {
-			delete(s, k)
-		}
-	},
-}
-
 func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
-	addrMap := addrMapPool.Get()
-	defer addrMapPool.Put(addrMap)
+	addrMap := map[common.Address]struct{}{}
 	if len(addresses) > 0 {
 		for _, v := range addresses {
 			addrMap[v] = struct{}{}
@@ -695,17 +682,23 @@ func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common
 		if len(topics) > len(log.Topics) {
 			continue
 		}
+		var match bool
 		for i, sub := range topics {
-			match := len(sub) == 0 // empty rule set == wildcard
+			match = len(sub) == 0 // empty rule set == wildcard
+			// iterate over the subtopics and look for any match.
 			for _, topic := range sub {
 				if log.Topics[i] == topic {
 					match = true
 					break
 				}
 			}
+			// there was no match, so this log is invalid.
 			if !match {
-				continue
+				break
 			}
+		}
+		if !match {
+			continue
 		}
 		result = append(result, log)
 	}
