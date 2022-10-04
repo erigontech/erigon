@@ -251,7 +251,7 @@ func Exec3(ctx context.Context,
 							//for i := 0; i < len(reconWorkers); i++ {
 							//	reconWorkers[i].ResetTx(nil)
 							//}
-							agg.SetTx(tx)
+							//agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
