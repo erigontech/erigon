@@ -320,13 +320,14 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		roTxLimit := int64(16)
+		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
 		opts := mdbx.NewMDBX(logger).
-			WriteMap().Path(dbPath).
+			WriteMap().
+			Path(dbPath).
 			Label(label).DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {
 			opts = opts.Exclusive()
