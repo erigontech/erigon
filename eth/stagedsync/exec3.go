@@ -266,20 +266,27 @@ func Exec3(ctx context.Context,
 		}()
 	}
 
-	var header *types.Header
+	var blockHash common2.Hash
+	var b *types.Block
 	var blockNum uint64
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)
 		rules := chainConfig.Rules(blockNum)
-		if header, err = blockReader.HeaderByNumber(ctx, applyTx, blockNum); err != nil {
+		if err = chainDb.View(ctx, func(tx kv.Tx) error {
+			blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			b, _, err = blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		blockHash := header.Hash()
-		b, _, err := blockReader.BlockWithSenders(ctx, applyTx, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
+
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -293,7 +300,6 @@ loop:
 				}()
 			}
 			txTask := &state.TxTask{
-				Header:    header,
 				BlockNum:  blockNum,
 				Rules:     rules,
 				Block:     b,
@@ -304,6 +310,11 @@ loop:
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+				if err != nil {
+					panic(err)
+				}
+
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
@@ -736,30 +747,33 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	var inputTxNum uint64
 	var blockHash common2.Hash
+	var b *types.Block
 	var txKey [8]byte
 	for bn := uint64(0); bn <= blockNum; bn++ {
+		rules := chainConfig.Rules(bn)
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
 			blockHash, err = rawdb.ReadCanonicalHash(tx, bn)
 			if err != nil {
 				return err
 			}
+			b, _, err = blockReader.BlockWithSenders(ctx, tx, blockHash, bn)
+			if err != nil {
+				return err
+			}
+
 			return nil
 		}); err != nil {
 			return err
 		}
 
-		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, bn)
-		if err != nil {
-			panic(err)
-		}
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
-					Header:    b.Header(),
 					BlockNum:  bn,
 					Block:     b,
+					Rules:     rules,
 					TxNum:     inputTxNum,
 					TxIndex:   txIndex,
 					BlockHash: blockHash,
@@ -767,6 +781,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+					if err != nil {
+						panic(err)
+					}
 				}
 				workCh <- txTask
 			}
