@@ -354,7 +354,7 @@ func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Lo
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	common2.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat",
+	log.Info("[Snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -365,6 +365,79 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
+}
+
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (s *RoSnapshots) DisableReadAhead() {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.DisableReadAhead()
+	}
+}
+func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableReadAhead()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableWillNeed()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableMadvNormal()
+	}
+	return s
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
