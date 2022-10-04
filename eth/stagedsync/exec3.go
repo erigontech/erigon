@@ -48,7 +48,7 @@ type Progress struct {
 	commitThreshold    uint64
 }
 
-func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -66,9 +66,10 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"input blk", atomic.LoadUint64(&inputBlockNum),
 		"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"result queue", rws.Len(),
-		"results size", common.ByteCount(resultsSize),
-		"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
+		"resultQueue", rws.Len(),
+		"resultsSize", common.ByteCount(resultsSize),
+		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
@@ -185,7 +186,7 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -279,18 +280,18 @@ loop:
 		if err != nil {
 			return err
 		}
+		if parallel {
+			func() {
+				rwsLock.Lock()
+				defer rwsLock.Unlock()
+				for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+					rwsReceiveCond.Wait()
+				}
+			}()
+		}
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			if parallel {
-				func() {
-					rwsLock.Lock()
-					defer rwsLock.Unlock()
-					for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-						rwsReceiveCond.Wait()
-					}
-				}()
-			}
 			txTask := &state.TxTask{
 				Header:    header,
 				BlockNum:  blockNum,
@@ -331,41 +332,39 @@ loop:
 				}
 
 				stageProgress = blockNum
-
-				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
-					commitStart := time.Now()
-					log.Info("Committing...")
-					if err := rs.Flush(applyTx); err != nil {
-						return err
-					}
-					if !useExternalTx {
-						if err = execStage.Update(applyTx, stageProgress); err != nil {
-							return err
-						}
-						applyTx.CollectMetrics()
-						if err := applyTx.Commit(); err != nil {
-							return err
-						}
-						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
-							return err
-						}
-						defer applyTx.Rollback()
-						agg.SetTx(applyTx)
-						reconWorkers[0].ResetTx(applyTx)
-						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
-					}
-				}
-
-				select {
-				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
-				default:
-				}
 			}
+
 			inputTxNum++
 		}
+
+		if rs.SizeEstimate() >= commitThreshold {
+			commitStart := time.Now()
+			log.Info("Committing...")
+			if err := rs.Flush(applyTx); err != nil {
+				return err
+			}
+			if !useExternalTx {
+				if err = execStage.Update(applyTx, stageProgress); err != nil {
+					return err
+				}
+				applyTx.CollectMetrics()
+				if err := applyTx.Commit(); err != nil {
+					return err
+				}
+				if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+					return err
+				}
+				defer applyTx.Rollback()
+				agg.SetTx(applyTx)
+				reconWorkers[0].ResetTx(applyTx)
+				log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+			}
+		}
+
 		// Check for interrupts
 		select {
+		case <-logEvery.C:
+			progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			atomic.StoreUint64(&maxTxNum, inputTxNum)
