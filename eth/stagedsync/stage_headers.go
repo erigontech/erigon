@@ -330,6 +330,7 @@ func startHandlingForkChoice(
 
 	headerNumber := header.Number.Uint64()
 
+	fmt.Printf("headerHash = %x, cfg.forkValidator.ExtendingForkHeadHash() = %x\n", headerHash, cfg.forkValidator.ExtendingForkHeadHash())
 	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
 		log.Info(fmt.Sprintf("[%s] Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
 		if err := cfg.forkValidator.FlushExtendingFork(tx, cfg.notifications.Accumulator); err != nil {
