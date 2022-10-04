@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"gfx.cafe/util/go/generic"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -632,16 +633,14 @@ func includes(addresses []common.Address, a common.Address) bool {
 			return true
 		}
 	}
-
 	return false
 }
 
 // filterLogs creates a slice of logs matching the given criteria.
-func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogs2(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 Logs:
 	for _, log := range logs {
-
 		if len(addresses) > 0 && !includes(addresses, log.Address) {
 			continue
 		}
@@ -659,6 +658,53 @@ Logs:
 			}
 			if !match {
 				continue Logs
+			}
+		}
+		result = append(result, log)
+	}
+	return result
+}
+
+var addrMapPool = generic.HookPool[map[common.Address]struct{}]{
+	New: func() map[common.Address]struct{} {
+		return map[common.Address]struct{}{}
+	},
+	FnGet: func(s map[common.Address]struct{}) {
+		for k := range s {
+			delete(s, k)
+		}
+	},
+}
+
+func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+	result := make(types.Logs, 0, len(logs))
+	addrMap := addrMapPool.Get()
+	defer addrMapPool.Put(addrMap)
+	if len(addresses) > 0 {
+		for _, v := range addresses {
+			addrMap[v] = struct{}{}
+		}
+	}
+	for _, log := range logs {
+		if len(addresses) > 0 {
+			if _, ok := addrMap[log.Address]; !ok {
+				continue
+			}
+		}
+		// If the to filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(log.Topics) {
+			continue
+		}
+		for i, sub := range topics {
+			match := len(sub) == 0 // empty rule set == wildcard
+			for _, topic := range sub {
+				if log.Topics[i] == topic {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
 			}
 		}
 		result = append(result, log)
