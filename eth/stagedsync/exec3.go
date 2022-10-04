@@ -496,7 +496,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
-	workCh := make(chan *state.TxTask, workerCount*16)
+	workCh := make(chan *state.TxTask, workerCount*64)
 	rs := state.NewReconState(workCh)
 	var fromKey, toKey []byte
 	bigCount := big.NewInt(int64(workerCount))
