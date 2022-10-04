@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"math/big"
 	"reflect"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -267,4 +269,95 @@ func makeBenchBlock() *Block {
 		}
 	}
 	return NewBlock(header, txs, uncles, receipts)
+}
+
+func TestCanEncodeAndDecodeRawBody(t *testing.T) {
+	body := &RawBody{
+		Uncles: []*Header{
+			{
+				ParentHash:    common.Hash{},
+				UncleHash:     common.Hash{},
+				Coinbase:      common.Address{},
+				Root:          common.Hash{},
+				TxHash:        common.Hash{},
+				ReceiptHash:   common.Hash{},
+				Bloom:         Bloom{},
+				Difficulty:    big.NewInt(100),
+				Number:        big.NewInt(1000),
+				GasLimit:      50,
+				GasUsed:       60,
+				Time:          90,
+				Extra:         []byte("testing"),
+				MixDigest:     common.Hash{},
+				Nonce:         BlockNonce{},
+				BaseFee:       nil,
+				Eip1559:       false,
+				Seal:          nil,
+				WithSeal:      false,
+				Verkle:        false,
+				VerkleProof:   nil,
+				VerkleKeyVals: nil,
+			},
+			{
+				GasUsed:    108,
+				GasLimit:   100,
+				Difficulty: big.NewInt(99),
+				Number:     big.NewInt(1000),
+			},
+		},
+		Transactions: [][]byte{
+			{
+				10, 20, 30,
+			},
+			{
+				40, 50, 60,
+			},
+		},
+	}
+	expectedJson, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := bytes.NewBuffer(nil)
+	err = body.EncodeRLP(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rlpBytes := common.CopyBytes(writer.Bytes())
+	writer.Reset()
+	writer.WriteString(hexutil.Encode(rlpBytes))
+
+	var rawBody RawBody
+	fromHex := common.CopyBytes(common.FromHex(writer.String()))
+	bodyReader := bytes.NewReader(fromHex)
+	stream := rlp.NewStream(bodyReader, 0)
+
+	err = rawBody.DecodeRLP(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resultJson, err := json.Marshal(rawBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rawBody.Transactions) != 2 {
+		t.Fatalf("expected there to be 1 transaction once decoded")
+	}
+	if rawBody.Transactions[0][0] != 10 {
+		t.Fatal("expected first element in transactions to be 10")
+	}
+	if rawBody.Transactions[1][2] != 60 {
+		t.Fatal("expected 2nd element in transactions to end in 60")
+	}
+	if rawBody.Uncles[0].GasLimit != 50 {
+		t.Fatal("expected gas limit of first uncle to be 50")
+	}
+	if rawBody.Uncles[1].GasLimit != 100 {
+		t.Fatal("expected gas limit of 2nd uncle to be 100")
+	}
+	if string(resultJson) != string(expectedJson) {
+		t.Fatalf("encoded and decoded json do not match, got\n%s\nwant\n%s", resultJson, expectedJson)
+	}
 }
