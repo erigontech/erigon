@@ -23,8 +23,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-var ProtocolPrefix = "/eth2/beacon_chain/req"
-
 type ConsensusHandlers struct {
 	handlers map[protocol.ID]network.StreamHandler
 	host     host.Host
@@ -37,12 +35,12 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers
 		host:  host,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
-		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
-		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
-		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): c.blocksByRangeHandler,
-		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  c.beaconBlocksByRootHandler,
+		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
+		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
+		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
+		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
+		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
 	return c
 }

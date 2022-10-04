@@ -175,7 +175,6 @@ func (s *Sentinel) getTopic(topic GossipTopic) string {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
 	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
-
 }
 
 // TODO: this should check the current block i believe?

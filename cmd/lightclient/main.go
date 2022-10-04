@@ -57,6 +57,7 @@ func main() {
 	}
 	log.Info("Sentinel started", "enr", sent.String())
 
+<<<<<<< HEAD
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
 		sentinel.LightClientFinalityUpdateSsz,
@@ -75,7 +76,11 @@ func main() {
 		}
 	}
 
+=======
+>>>>>>> 2217b2785e44e46e860e43517b2c1a9abdedeea6
 	logInterval := time.NewTicker(5 * time.Second)
+	sendReqInterval := time.NewTicker(1 * time.Second)
+
 	for {
 		select {
 		case <-logInterval.C:
@@ -83,6 +88,13 @@ func main() {
 			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
 		case pkt := <-sent.RecvGossip():
 			handleGossipPacket(pkt)
+		case <-sendReqInterval.C:
+			if _, err := sent.SendPingReqV1(); err != nil {
+				log.Warn("failed to send ping request", "err", err)
+			}
+			if _, err := sent.SendMetadataReqV1(); err != nil {
+				log.Warn("failed to send metadata request", "err", err)
+			}
 		}
 	}
 }

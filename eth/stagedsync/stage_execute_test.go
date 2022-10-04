@@ -132,7 +132,6 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &state.TxTask{
-				Header:     nil,
 				BlockNum:   n,
 				Rules:      params.TestRules,
 				Block:      nil,
@@ -166,7 +165,7 @@ func newAgg(t *testing.T) *libstate.Aggregator22 {
 func TestExec22(t *testing.T) {
 	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
 	agg := newAgg(t)
-	cfg := ExecuteBlockCfg{exec22: true, agg: agg}
+	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 
 	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)

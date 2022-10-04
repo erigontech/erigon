@@ -280,7 +280,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			return err
 		}
 	}
-	// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {
 		currentHeader := headersChain[i]
 		currentBody := bodiesChain[i]
