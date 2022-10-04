@@ -9,6 +9,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -18,8 +20,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
+
+const requestLoopCutOff int = 50
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -58,6 +61,7 @@ func BodiesForward(
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
 	useExternalTx := tx != nil
+	cfg.bd.UsingExternalTx = useExternalTx
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
@@ -117,27 +121,59 @@ func BodiesForward(
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
-	var blockNum uint64
 	var req *bodydownload.BodyRequest
 	var peer [64]byte
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
 	noProgressCount := 0 // How many time the progress was printed without actual progress
-Loop:
-	for !stopped {
-		// TODO: this is incorrect use
-		if req == nil {
-			start := time.Now()
-			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
-			if err != nil {
-				return fmt.Errorf("request more bodies: %w", err)
-			}
-			d1 += time.Since(start)
+	var totalDelivered uint64 = 0
+
+	// create a temporary bucket to fire the bodies into as we start to collect them
+	// this will allow us to restart the bodies stage and not request bodies we already have
+	// once the bodies stage is complete this bucket is dropped
+	if !useExternalTx {
+		err = tx.CreateBucket("BodiesStage")
+		if err != nil {
+			return err
 		}
+		err = tx.ClearBucket("BodiesStage")
+		if err != nil {
+			return err
+		}
+		err = tx.Commit()
+		if err != nil {
+			return err
+		}
+	}
+
+	loopBody := func() (bool, error) {
+		// innerTx is used for the temporary stage bucket to hold on to bodies as they're downloaded
+		// offering restart capability for the stage bodies process
+		var innerTx kv.RwTx
+		if !useExternalTx {
+			innerTx, err = cfg.db.BeginRw(context.Background())
+			if err != nil {
+				return false, err
+			}
+			defer innerTx.Rollback()
+		} else {
+			innerTx = tx
+		}
+
+		// always check if a new request is needed at the start of the loop
+		// this will check for timed out old requests and attempt to send them again
+		start := time.Now()
+		currentTime := uint64(time.Now().Unix())
+		req, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, currentTime, cfg.blockPropagator, logPrefix)
+		if err != nil {
+			return false, fmt.Errorf("request more bodies: %w", err)
+		}
+		d1 += time.Since(start)
+
 		peer = [64]byte{}
 		sentToPeer = false
+
 		if req != nil {
 			start := time.Now()
 			peer, sentToPeer = cfg.bodyReqSend(ctx, req)
@@ -149,12 +185,18 @@ Loop:
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
 		}
+
+		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
+		// having some time out so requesting again and cycling like that forever.  We'll cap it
+		// and break the loop so we can see if there are any records to actually process further down
+		// then come back here again in the next cycle
+		loopCount := 0
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+			req, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, currentTime, cfg.blockPropagator, logPrefix)
 			if err != nil {
-				return fmt.Errorf("request more bodies: %w", err)
+				return false, fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 			peer = [64]byte{}
@@ -169,56 +211,100 @@ Loop:
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 			}
+
+			loopCount++
+			if loopCount >= requestLoopCutOff {
+				break
+			}
 		}
-		start := time.Now()
-		headers, rawBodies, err := cfg.bd.GetDeliveries()
+
+		start = time.Now()
+		requestedLow, delivered, err := cfg.bd.GetDeliveries(innerTx)
 		if err != nil {
-			return err
+			return false, err
 		}
+		totalDelivered += delivered
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
-		for i, header := range headers {
-			rawBody := rawBodies[i]
-			blockHeight := header.Number.Uint64()
-			// Txn & uncle roots are verified via bd.requestedMap
-			err := cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
-			if err != nil {
-				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-				u.UnwindTo(blockHeight-1, header.Hash())
-				break Loop
-			}
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: innerTx}
 
-			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
-			if err != nil {
-				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
-			}
-			if cfg.historyV3 && ok {
-				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
-					return err
+		toProcess := cfg.bd.NextProcessingCount()
+
+		if toProcess > 0 {
+			var i uint64
+			for i = 0; i < toProcess; i++ {
+				nextBlock := requestedLow + i
+
+				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, innerTx)
+				if err != nil {
+					return false, err
 				}
-				//cfg.txNums.Append(blockHeight, lastTxnNum)
-			}
+				blockHeight := header.Number.Uint64()
+				if blockHeight != nextBlock {
+					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
+				}
 
-			if blockHeight > bodyProgress {
-				bodyProgress = blockHeight
-				if err = s.Update(tx, blockHeight); err != nil {
-					return fmt.Errorf("saving Bodies progress: %w", err)
+				rawBody, err := cfg.bd.GetBlockFromCache(innerTx, nextBlock)
+				if err != nil {
+					log.Error(fmt.Sprintf("[%s] Error getting body from cache", logPrefix), "err", err)
+					return false, err
+				}
+				if rawBody == nil {
+					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
+				}
+
+				// Txn & uncle roots are verified via bd.requestedMap
+				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
+				if err != nil {
+					log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
+					u.UnwindTo(blockHeight-1, header.Hash())
+					return true, nil
+				}
+
+				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(innerTx, header.Hash(), blockHeight, rawBody)
+				if err != nil {
+					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+				}
+				if cfg.historyV3 && ok {
+					if err := rawdb.TxNums.Append(innerTx, blockHeight, lastTxnNum); err != nil {
+						return false, err
+					}
+				}
+
+				if blockHeight > bodyProgress {
+					bodyProgress = blockHeight
+					if err = s.Update(innerTx, blockHeight); err != nil {
+						return false, fmt.Errorf("saving Bodies progress: %w", err)
+					}
 				}
 			}
 		}
+
+		// if some form of work has happened then commit the transaction
+		if !useExternalTx && (cfg.bd.HasAddedBodies() || toProcess > 0) {
+			err = innerTx.Commit()
+			if err != nil {
+				return false, err
+			}
+			cfg.bd.ResetAddedBodies()
+		}
+
+		if toProcess > 0 {
+			logWritingBodies(logPrefix, bodyProgress, headerProgress)
+		}
+
 		d5 += time.Since(start)
 		start = time.Now()
 		if bodyProgress == headerProgress {
-			break
+			return true, nil
 		}
 		if test {
 			stopped = true
-			break
+			return true, nil
 		}
 		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
-			break
+			return true, nil
 		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
@@ -232,7 +318,7 @@ Loop:
 			} else {
 				noProgressCount = 0 // Reset, there was progress
 			}
-			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
+			logDownloadingBodies(logPrefix, bodyProgress, headerProgress-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
 			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
@@ -243,15 +329,38 @@ Loop:
 			log.Trace("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
+
+		return false, nil
 	}
-	if err := s.Update(tx, bodyProgress); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+
+	// kick off the loop and check for any reason to stop and break early
+	for !stopped {
+		shouldBreak, err := loopBody()
+		if err != nil {
 			return err
 		}
+		if shouldBreak {
+			break
+		}
 	}
+
+	// remove the temporary bucket for bodies stage
+	if !useExternalTx {
+		bucketTx, err := cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer bucketTx.Rollback()
+
+		bucketTx.ClearBucket("BodiesStage")
+		err = bucketTx.Commit()
+		if err != nil {
+			return err
+		}
+	} else {
+		cfg.bd.ClearBodyCache()
+	}
+
 	if stopped {
 		return libcommon.ErrStopped
 	}
@@ -261,7 +370,7 @@ Loop:
 	return nil
 }
 
-func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
+func logDownloadingBodies(logPrefix string, committed, requested uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
@@ -272,10 +381,24 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
-	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
+	log.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
+		"open_requests", requested,
+		"delivered", totalDelivered,
+		"alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys),
+	)
+}
+
+func logWritingBodies(logPrefix string, committed, headerProgress uint64) {
+	var m runtime.MemStats
+	libcommon.ReadMemStats(&m)
+	remaining := headerProgress - committed
+	log.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
+		"block_num", committed,
+		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),
 	)
