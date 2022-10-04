@@ -63,7 +63,7 @@ func (d *GossipCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.Go
 	c.Topic = d.top
 	c.Msg = msg
 	if p != nil {
-		//TODO: we can use a bufpool here and improve performance. we can possibly pick up used packet write buffers.
+		//TODO: we can use a bufpool here and improve performance? we can possibly pick up used packet write buffers. (or get them from other running components)
 		c.Raw, err = snappy.Decode(nil, msg.Data)
 		if err != nil {
 			return c, fmt.Errorf("readPacket: %w", err)

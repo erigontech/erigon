@@ -49,25 +49,29 @@ const (
 )
 
 type GossipTopic struct {
-	Name  TopicName
-	Codec func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
-	Typ   proto.Packet
+	Name     TopicName
+	Codec    func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
+	Typ      proto.Packet
+	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
-	Name:  BeaconBlockTopic,
-	Typ:   &p2p.SignedBeaconBlockBellatrix{},
-	Codec: ssz_snappy.NewGossipCodec,
+	Name:     BeaconBlockTopic,
+	Typ:      &p2p.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
 }
 var LightClientFinalityUpdateSsz = GossipTopic{
-	Name:  LightClientFinalityUpdateTopic,
-	Typ:   &p2p.LightClientFinalityUpdate{},
-	Codec: ssz_snappy.NewGossipCodec,
+	Name:     LightClientFinalityUpdateTopic,
+	Typ:      &p2p.LightClientFinalityUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
 }
 var LightClientOptimisticUpdateSsz = GossipTopic{
-	Name:  LightClientOptimisticUpdateTopic,
-	Typ:   &p2p.LightClientOptimisticUpdate{},
-	Codec: ssz_snappy.NewGossipCodec,
+	Name:     LightClientOptimisticUpdateTopic,
+	Typ:      &p2p.LightClientOptimisticUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
 }
 
 type GossipManager struct {
@@ -170,7 +174,7 @@ func (s *Sentinel) getTopic(topic GossipTopic) string {
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
-	return fmt.Sprintf("/eth2/%x/%s/ssz_snappy", o, topic.Name)
+	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
 
 }
 
