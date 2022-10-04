@@ -567,6 +567,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
+	} else {
+		log.Info("Returned from getQuickPayloadStatusIfPossible", "status", fmt.Sprintf("%+v", status))
 	}
 
 	// No need for payload building
