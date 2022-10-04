@@ -42,7 +42,7 @@ type ValidatorSetJson struct {
 	List []common.Address `json:"list"`
 	// Address of a contract that indicates the list of authorities.
 	SafeContract *common.Address `json:"safeContract"`
-	// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
+	// Address of a contract that indicates the list of authorities and enables reporting of their misbehaviour using transactions.
 	Contract *common.Address `json:"contract"`
 	// A map of starting blocks for each validator set.
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
@@ -57,8 +57,8 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{
-			contractAddress:  *j.SafeContract,
-			validators:       ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition},
+			contractAddress:  *j.Contract,
+			validators:       ValidatorSafeContract{contractAddress: *j.Contract, posdaoTransition: posdaoTransition},
 			posdaoTransition: posdaoTransition,
 		}
 	}
