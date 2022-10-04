@@ -246,10 +246,10 @@ func Exec3(ctx context.Context,
 							//if tx, err = chainDb.BeginRw(ctx); err != nil {
 							//	return err
 							//}
-							for i := 0; i < len(reconWorkers); i++ {
-								reconWorkers[i].ResetTx(nil)
-							}
-							agg.SetTx(tx)
+							//for i := 0; i < len(reconWorkers); i++ {
+							//	reconWorkers[i].ResetTx(nil)
+							//}
+							//agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
