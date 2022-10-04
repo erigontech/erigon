@@ -57,6 +57,24 @@ func MadviseSequential(mmapHandle1 []byte) error {
 	return nil
 }
 
+func MadviseNormal(mmapHandle1 []byte) error {
+	err := unix.Madvise(mmapHandle1, syscall.MADV_NORMAL)
+	if err != nil && !errors.Is(err, syscall.ENOSYS) {
+		// Ignore not implemented error in kernel because it still works.
+		return fmt.Errorf("madvise: %w", err)
+	}
+	return nil
+}
+
+func MadviseWillNeed(mmapHandle1 []byte) error {
+	err := unix.Madvise(mmapHandle1, syscall.MADV_WILLNEED)
+	if err != nil && !errors.Is(err, syscall.ENOSYS) {
+		// Ignore not implemented error in kernel because it still works.
+		return fmt.Errorf("madvise: %w", err)
+	}
+	return nil
+}
+
 func MadviseRandom(mmapHandle1 []byte) error {
 	err := unix.Madvise(mmapHandle1, syscall.MADV_RANDOM)
 	if err != nil && !errors.Is(err, syscall.ENOSYS) {

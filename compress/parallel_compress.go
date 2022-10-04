@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -304,6 +303,8 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
+	totalWords := datFile.count
+
 	if err = datFile.ForEach(func(v []byte, compression bool) error {
 		select {
 		case <-ctx.Done():
@@ -396,16 +397,9 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		}
 
 		select {
-		default:
 		case <-logEvery.C:
-			var m runtime.MemStats
-			if lvl >= log.LvlInfo {
-				common.ReadMemStats(&m)
-			}
-			log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix),
-				"processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(datFile.count)),
-				//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch))
+		default:
 		}
 		return nil
 	}); err != nil {
@@ -706,8 +700,10 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			}
 		}
 		wc++
-		if wc%10_000_000 == 0 {
-			log.Info(fmt.Sprintf("[%s] Compressed", logPrefix), "millions", wc/1_000_000)
+		select {
+		case <-logEvery.C:
+			log.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+		default:
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
