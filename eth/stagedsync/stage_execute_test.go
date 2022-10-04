@@ -132,7 +132,6 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &state.TxTask{
-				Header:     nil,
 				BlockNum:   n,
 				Rules:      params.TestRules,
 				Block:      nil,
