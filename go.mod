@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	gfx.cafe/util/go/generic v0.0.0-20221003014715-6000e93338e0
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.22.2
