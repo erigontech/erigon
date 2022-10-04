@@ -48,7 +48,7 @@ type Progress struct {
 	commitThreshold    uint64
 }
 
-func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -66,9 +66,10 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"input blk", atomic.LoadUint64(&inputBlockNum),
 		"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"result queue", rws.Len(),
-		"results size", common.ByteCount(resultsSize),
-		"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
+		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
+		"resultQueue", rws.Len(),
+		"resultsSize", common.ByteCount(resultsSize),
+		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
@@ -117,7 +118,7 @@ func Exec3(ctx context.Context,
 	ctx = context.Background()
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
@@ -185,7 +186,7 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -358,7 +359,7 @@ loop:
 
 				select {
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)))
+					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
 				default:
 				}
 			}
