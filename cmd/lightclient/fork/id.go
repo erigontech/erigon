@@ -21,14 +21,12 @@ func MsgID(pmsg *pubsubpb.Message, networkConfig *clparams.NetworkConfig, beacon
 	if fEpoch >= beaconConfig.AltairForkEpoch {
 		return postAltairMsgID(pmsg, fEpoch, networkConfig, beaconConfig)
 	}
-
 	decodedData, err := utils.DecompressSnappy(pmsg.Data)
 	if err != nil {
 		msg := make([]byte, 20)
 		copy(msg, "invalid")
 		return string(msg)
 	}
-
 	if err != nil {
 		combinedData := append(networkConfig.MessageDomainInvalidSnappy[:], pmsg.Data...)
 		h := utils.Keccak256(combinedData)

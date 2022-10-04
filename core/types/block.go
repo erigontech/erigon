@@ -31,6 +31,7 @@ import (
 
 	"github.com/gballet/go-verkle"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -755,16 +756,19 @@ func (b *Body) SendersFromTxs() []common.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _ := rb.payloadSize()
+	payloadSize, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize int, txsLen, unclesLen int) {
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen int, transactionsSizes []int) {
+	transactionsSizes = make([]int, len(rb.Transactions))
+
 	// size of Transactions
 	payloadSize++
-	for _, tx := range rb.Transactions {
+	for idx, tx := range rb.Transactions {
 		txsLen++
 		var txLen = len(tx)
+		transactionsSizes[idx] = txLen
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -788,11 +792,11 @@ func (rb RawBody) payloadSize() (payloadSize int, txsLen, unclesLen int) {
 		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
 	}
 	payloadSize += unclesLen
-	return payloadSize, txsLen, unclesLen
+	return payloadSize, txsLen, unclesLen, transactionsSizes
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, txSizes := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -802,7 +806,10 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	for _, tx := range rb.Transactions {
+	for idx, tx := range rb.Transactions {
+		if err := EncodeStructSizePrefix(txSizes[idx], w, b[:]); err != nil {
+			return err
+		}
 		if _, err := w.Write(tx); err != nil {
 			return nil
 		}
@@ -830,7 +837,11 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	}
 	var tx []byte
 	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		rb.Transactions = append(rb.Transactions, tx)
+		_, txContent, _, err := rlp.Split(tx)
+		if err != nil {
+			return err
+		}
+		rb.Transactions = append(rb.Transactions, txContent)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -843,6 +854,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
+
 	for err == nil {
 		var uncle Header
 		if err = uncle.DecodeRLP(s); err != nil {

@@ -2,6 +2,7 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -28,9 +29,8 @@ type BodyDownload struct {
 	Engine           consensus.Engine
 	delivered        *roaring64.Bitmap
 	prefetchedBlocks *PrefetchedBlocks
-	deliveriesH      []*types.Header
-	deliveriesB      []*types.RawBody
-	requests         []*BodyRequest
+	deliveriesH      map[uint64]*types.Header
+	requests         map[uint64]*BodyRequest
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
 	requestHigh      uint64
@@ -38,6 +38,9 @@ type BodyDownload struct {
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	deliveredCount   float64
 	wastedCount      float64
+	bodiesAdded      bool
+	bodyCache        map[uint64]*types.RawBody
+	UsingExternalTx  bool
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -54,9 +57,8 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		requestedMap:     make(map[DoubleHash]uint64),
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
-		deliveriesH:      make([]*types.Header, outstandingLimit+MaxBodiesInRequest),
-		deliveriesB:      make([]*types.RawBody, outstandingLimit+MaxBodiesInRequest),
-		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
+		deliveriesH:      make(map[uint64]*types.Header),
+		requests:         make(map[uint64]*BodyRequest),
 		peerMap:          make(map[[64]byte]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
 		// DeliveryNotify has capacity 1, and it is also used so that senders never block
@@ -69,6 +71,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		// deliveris, this is a good number for the channel capacity
 		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
 		Engine:     engine,
+		bodyCache:  make(map[uint64]*types.RawBody),
 	}
 	return bd
 }

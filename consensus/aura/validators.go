@@ -650,7 +650,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	data := common.FromHex("75286211")
+	data := common.FromHex("75286211") // TODO(yperbasis): where does this come from?
 	_, err := caller(s.contractAddress, data)
 	if err != nil {
 		return err
