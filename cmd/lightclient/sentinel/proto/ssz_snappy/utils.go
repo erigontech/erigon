@@ -97,7 +97,7 @@ func nextLogBase2(v uint32) uint32 {
 }
 func prevLogBase2(num uint32) uint32 {
 	next := nextLogBase2(num)
-	if num == (1 << uint32(next)) {
+	if num == (1 << next) {
 		return next
 	}
 	return next - 1
