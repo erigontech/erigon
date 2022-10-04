@@ -669,7 +669,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].Run()
 	}
-	commitThreshold := batchSize.Bytes()
+	commitThreshold := batchSize.Bytes() * 4
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
