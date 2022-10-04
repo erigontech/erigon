@@ -227,10 +227,15 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		return err
 	}
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
-	if block == nil {
+	if err != nil {
 		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
+
+	if block == nil {
+		return nil
+	}
+
 	blockTxs := block.Transactions()
 	plainTxs := make([]types.Transaction, len(blockTxs))
 	copy(plainTxs, blockTxs)
