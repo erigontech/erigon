@@ -476,7 +476,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		state.SystemAddress,
 		&contract,
 		0, u256.Num0,
-		50_000_000, u256.Num0,
+		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
 	)
@@ -503,10 +503,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		msg.Value(),
 		false,
 	)
-	if err != nil {
-		return nil, nil
-	}
-	return ret, nil
+	return ret, err
 }
 
 // from the null sender, with 50M gas.
