@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -49,7 +50,7 @@ type HeadersCfg struct {
 	snapshots     *snapshotsync.RoSnapshots
 	blockReader   services.FullBlockReader
 	forkValidator *engineapi.ForkValidator
-	notifications *Notifications
+	notifications *shards.Notifications
 }
 
 func StageHeadersCfg(
@@ -65,7 +66,7 @@ func StageHeadersCfg(
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	tmpdir string,
-	notifications *Notifications,
+	notifications *shards.Notifications,
 	forkValidator *engineapi.ForkValidator) HeadersCfg {
 	return HeadersCfg{
 		db:                db,

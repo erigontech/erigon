@@ -1,4 +1,4 @@
-package privateapi
+package shards
 
 import (
 	"sync"
@@ -136,4 +136,10 @@ func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
 	for _, ch := range e.logsSubscriptions {
 		common.PrioritizedSend(ch, logs)
 	}
+}
+
+type Notifications struct {
+	Events               *Events
+	Accumulator          *Accumulator
+	StateChangesConsumer StateChangeConsumer
 }
