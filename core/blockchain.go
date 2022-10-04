@@ -503,6 +503,9 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		msg.Value(),
 		false,
 	)
+	if isBor && err != nil {
+		return nil, nil
+	}
 	return ret, err
 }
 
