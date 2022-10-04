@@ -1360,9 +1360,17 @@ func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCal
 	if err != nil {
 		panic(err)
 	}
-	_ = res[0]
-	_ = res[1]
-	return nil, nil
+	beneficiariesRes := res[0].([]common.Address)
+	rewardsBig := res[1].([]*big.Int)
+	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
+	for i := 0; i < len(rewardsBig); i++ {
+		var overflow bool
+		rewardsU256[i], overflow = uint256.FromBig(rewardsBig[i])
+		if overflow {
+			panic("Overflow in callBlockRewardAbi")
+		}
+	}
+	return beneficiariesRes, rewardsU256
 }
 
 func blockRewardAbi() abi.ABI {

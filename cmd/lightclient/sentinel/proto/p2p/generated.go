@@ -328,7 +328,7 @@ func (typ *LightClientUpdate) Clone() proto.Packet {
 	return &LightClientUpdate{}
 }
 
-type MetaDataV1 struct {
+type MetadataV2 struct {
 	SeqNumber uint64 `json:"seq_number,omitempty" `
 
 	Attnets Bitvector64 `json:"attnets,omitempty" ssz-size:"8" `
@@ -336,18 +336,18 @@ type MetaDataV1 struct {
 	Syncnets Bitvector64 `json:"syncnets,omitempty" ssz-size:"1" `
 }
 
-func (typ *MetaDataV1) Clone() proto.Packet {
-	return &MetaDataV1{}
+func (typ *MetadataV2) Clone() proto.Packet {
+	return &MetadataV2{}
 }
 
-type MetadataV0 struct {
+type MetadataV1 struct {
 	SeqNumber uint64 `json:"seq_number,omitempty" `
 
 	Attnets Bitvector64 `json:"attnets,omitempty" ssz-size:"8" `
 }
 
-func (typ *MetadataV0) Clone() proto.Packet {
-	return &MetadataV0{}
+func (typ *MetadataV1) Clone() proto.Packet {
+	return &MetadataV1{}
 }
 
 type Ping struct {

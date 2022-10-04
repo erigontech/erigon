@@ -86,18 +86,15 @@ func Exec3(ctx context.Context,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
 ) (err error) {
+	parallel := workerCount > 1
 	useExternalTx := applyTx != nil
-	if !useExternalTx {
+	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer applyTx.Rollback()
 	}
-	//if workerCount > 1 {
-	//	applyTx.Rollback()
-	//	applyTx = nil
-	//}
 
 	var block, stageProgress uint64
 	var outputTxNum, inputTxNum, maxTxNum uint64
@@ -118,7 +115,6 @@ func Exec3(ctx context.Context,
 	// will improve it in future versions
 	interruptCh := ctx.Done()
 	ctx = context.Background()
-	parallel := workerCount > 1
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
 	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
@@ -244,10 +240,9 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-							//if err = tx.Commit(); err != nil {
-							//	return err
-							//}
-
+							if err = tx.Commit(); err != nil {
+								return err
+							}
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
