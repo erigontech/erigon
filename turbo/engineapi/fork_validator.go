@@ -110,6 +110,9 @@ func (fv *ForkValidator) notifyTxPool(to uint64, accumulator *shards.Accumulator
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	if fv.currentHeight == currentHeight {
+		return
+	}
 	fv.currentHeight = currentHeight
 	// If the head changed,e previous assumptions on head are incorrect now.
 	if fv.extendingFork != nil {
