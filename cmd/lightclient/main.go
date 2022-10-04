@@ -51,18 +51,39 @@ func main() {
 		log.Error("error", "err", err)
 		return
 	}
-	if err := sent.Start(handleGossipPacket); err != nil {
+	if err := sent.Start(); err != nil {
 		log.Error("failed to start sentinel", "err", err)
 		return
 	}
 	log.Info("Sentinel started", "enr", sent.String())
+
+	gossip_topics := []sentinel.GossipTopic{
+		sentinel.BeaconBlockSsz,
+		sentinel.LightClientFinalityUpdateSsz,
+		sentinel.LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+
 	logInterval := time.NewTicker(5 * time.Second)
 	for {
-		//select {
-		//case <-logInterval.C:
-		<-logInterval.C
-		log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
-		//	}
+		select {
+		case <-logInterval.C:
+			sent.LogTopicPeers()
+			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
+		case pkt := <-sent.RecvGossip():
+			handleGossipPacket(pkt)
+		}
 	}
 }
 

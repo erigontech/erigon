@@ -48,6 +48,28 @@ const (
 	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
 
+type GossipTopic struct {
+	Name  TopicName
+	Codec func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
+	Typ   proto.Packet
+}
+
+var BeaconBlockSsz = GossipTopic{
+	Name:  BeaconBlockTopic,
+	Typ:   &p2p.SignedBeaconBlockBellatrix{},
+	Codec: ssz_snappy.NewGossipCodec,
+}
+var LightClientFinalityUpdateSsz = GossipTopic{
+	Name:  LightClientFinalityUpdateTopic,
+	Typ:   &p2p.LightClientFinalityUpdate{},
+	Codec: ssz_snappy.NewGossipCodec,
+}
+var LightClientOptimisticUpdateSsz = GossipTopic{
+	Name:  LightClientOptimisticUpdateTopic,
+	Typ:   &p2p.LightClientOptimisticUpdate{},
+	Codec: ssz_snappy.NewGossipCodec,
+}
+
 type GossipManager struct {
 	ch            chan *proto.GossipContext
 	handler       func(*proto.GossipContext) error
@@ -58,40 +80,16 @@ type GossipManager struct {
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(
 	ctx context.Context,
-	handler func(*proto.GossipContext) error,
 ) *GossipManager {
 	g := &GossipManager{
 		ch:            make(chan *proto.GossipContext, 1),
 		subscriptions: map[string]*GossipSubscription{},
-		handler:       handler,
 	}
-	go g.run(ctx)
 	return g
 }
 
-// run loop for gossip manager, not meant to be called
-func (g *GossipManager) run(ctx context.Context) {
-	do := func(p *proto.GossipContext) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error("[Gossip] Message Handler Crashed", "err", r)
-			}
-		}()
-		if g.handler != nil {
-			err := g.handler(p)
-			if err != nil {
-				log.Warn("[Gossip] Message Handler Erorr", "err", err)
-			}
-		}
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt := <-g.ch:
-			do(pkt)
-		}
-	}
+func (s *GossipManager) Recv() <-chan *proto.GossipContext {
+	return s.ch
 }
 
 // closes a specific topic
@@ -102,6 +100,26 @@ func (s *GossipManager) CloseTopic(topic string) {
 		val.Close()
 		delete(s.subscriptions, topic)
 	}
+}
+
+// get a specific topic
+func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val, true
+	}
+	return nil, false
+}
+
+// starts listening to a specific topic (forwarding its messages to the gossip manager channel)
+func (s *GossipManager) ListenTopic(topic string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val.Listen()
+	}
+	return nil
 }
 
 // closes the gossip manager
@@ -125,53 +143,48 @@ func (s *GossipManager) String() string {
 	s.mu.RUnlock()
 	return sb.String()
 }
-
-func SentinelGossipSubscribe[T proto.Packet](
-	s *Sentinel,
-	topic string,
-	newcodec func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec,
-	opts ...pubsub.TopicOpt,
-) error {
-	g := s.subManager
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	sub, err := NewGossipSubscription[T](
-		s,
-		topic,
-		g.ch,
-		newcodec,
-		opts...,
-	)
-	if err != nil {
-		return err
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+	sub = &GossipSubscription{
+		gossip_topic: topic,
+		ch:           s.subManager.ch,
+		host:         s.host.ID(),
+		ctx:          s.ctx,
 	}
-	g.subscriptions[topic] = sub
-	return nil
+	path := s.getTopic(topic)
+	sub.topic, err = s.pubsub.Join(path, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
+	}
+	s.subManager.mu.Lock()
+	s.subManager.subscriptions[path] = sub
+	s.subManager.mu.Unlock()
+	return sub, nil
 }
 
-func (s *Sentinel) startGossip() (err error) {
-	err = SentinelGossipSubscribe[*p2p.SignedBeaconBlockBellatrix](s, s.getTopicByName(BeaconBlockTopic), ssz_snappy.NewGossipCodec)
-	if err != nil {
-		return err
-	}
-	err = SentinelGossipSubscribe[*p2p.LightClientFinalityUpdate](s, s.getTopicByName(LightClientFinalityUpdateTopic), ssz_snappy.NewGossipCodec)
-	if err != nil {
-		return err
-	}
-	err = SentinelGossipSubscribe[*p2p.LightClientOptimisticUpdate](s, s.getTopicByName(LightClientOptimisticUpdateTopic), ssz_snappy.NewGossipCodec)
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
-			time.Sleep(30 * time.Second)
-		}
-	}()
-	return nil
+func (s *Sentinel) LogTopicPeers() {
+	log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
 }
 
-func (s *Sentinel) getTopicByName(name TopicName) string {
-	prefix := "/eth2/4a26c58b"
-	return fmt.Sprintf("%s/%s/ssz_snappy", prefix, name)
+func (s *Sentinel) getTopic(topic GossipTopic) string {
+	o, err := s.getCurrentForkChoice()
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+	}
+	return fmt.Sprintf("/eth2/%x/%s/ssz_snappy", o, topic.Name)
+
+}
+
+// TODO: this should check the current block i believe?
+func (s *Sentinel) getCurrentForkChoice() (o [4]byte, err error) {
+	bt := (*[4]byte)(s.cfg.BeaconConfig.BellatrixForkVersion[:4])
+	fd := &p2p.ForkData{
+		CurrentVersion:        *bt,
+		GenesisValidatorsRoot: p2p.Root(s.cfg.GenesisConfig.GenesisValidatorRoot),
+	}
+	root, err := fd.HashTreeRoot()
+	if err != nil {
+		return [4]byte{}, err
+	}
+	copy(o[:], root[:4])
+	return
 }

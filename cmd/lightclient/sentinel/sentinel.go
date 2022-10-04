@@ -177,14 +177,16 @@ func New(
 	return s, nil
 }
 
+func (s *Sentinel) RecvGossip() <-chan *proto.GossipContext {
+	return s.subManager.Recv()
+}
+
 func (s *Sentinel) Start(
-	gossipHandler func(*proto.GossipContext) error,
-	// potentially we can put the req/resp handler here as well?
+// potentially we can put the req/resp handler here as well?
 ) error {
 	if s.started {
 		log.Warn("Sentinel already running")
 	}
-
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
@@ -194,12 +196,7 @@ func (s *Sentinel) Start(
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
 	go s.listenForPeers()
-
-	s.subManager = NewGossipManager(s.ctx, gossipHandler)
-
-	if err := s.startGossip(); err != nil {
-		return fmt.Errorf("failed to start gossip err=%w", err)
-	}
+	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 
