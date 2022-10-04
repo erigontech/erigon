@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
@@ -82,7 +81,6 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 func Exec3(ctx context.Context,
 	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
@@ -95,6 +93,9 @@ func Exec3(ctx context.Context,
 			return err
 		}
 		defer applyTx.Rollback()
+	}
+	if !useExternalTx {
+		defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
 	}
 
 	var block, stageProgress uint64
