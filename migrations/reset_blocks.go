@@ -87,6 +87,7 @@ var resetBlocks4 = Migration{
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
 				return err
 			}
+			// ReadBody is not returning baseTxId which is written into the DB record, but that value + 1
 			_, baseTxId, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 			if hash != blockHash {
 				continue

@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"runtime/debug"
 	"sort"
 	"time"
 
@@ -592,7 +591,6 @@ func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
 		return err
 	}
-	fmt.Printf("Reset sequence %s to %d from %s\n", bucket, newValue, debug.Stack())
 	return nil
 }
 
