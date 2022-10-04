@@ -91,8 +91,8 @@ var resetBlocks4 = Migration{
 			if hash != blockHash {
 				continue
 			}
-			if lastBaseTxNum+lastAmount != baseTxId {
-				log.Info("Fix required, last block in seg files", "height", lastBlockNum, "baseTxNum", lastBaseTxNum, "txAmount", lastAmount, "first txId in DB", baseTxId, "expected", lastBaseTxNum+lastAmount)
+			if lastBaseTxNum+lastAmount+1 != baseTxId {
+				log.Info("Fix required, last block in seg files", "height", lastBlockNum, "baseTxNum", lastBaseTxNum, "txAmount", lastAmount, "first txId in DB", baseTxId, "expected", lastBaseTxNum+lastAmount+1)
 				fixNeeded = true
 			}
 		}
