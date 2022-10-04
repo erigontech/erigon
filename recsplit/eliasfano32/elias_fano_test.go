@@ -17,6 +17,7 @@
 package eliasfano32
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,9 @@ func TestEliasFano(t *testing.T) {
 	v, ok = ef.Search(11)
 	assert.True(t, ok, "search4")
 	assert.Equal(t, uint64(14), v, "search4")
+	buf := bytes.NewBuffer(nil)
+	ef.Write(buf)
+	assert.Equal(t, ef.Max(), Max(buf.Bytes()))
 }
 
 func TestIterator(t *testing.T) {

@@ -312,6 +312,8 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	return ef, 16 + 8*len(ef.data)
 }
 
+func Max(r []byte) uint64 { return binary.BigEndian.Uint64(r[8:16]) - 1 }
+
 // DoubleEliasFano can be used to encode two monotone sequences
 // it is called "double" because the lower bits array contains two sequences interleaved
 type DoubleEliasFano struct {

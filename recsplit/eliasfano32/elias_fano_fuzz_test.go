@@ -18,6 +18,7 @@ limitations under the License.
 package eliasfano32
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -53,6 +54,12 @@ func FuzzSingleEliasFano(f *testing.F) {
 			if ef.Get(uint64(i)) != keys[i] {
 				t.Fatalf("i %d: got %d, expected %d", i, ef.Get(uint64(i)), keys[i])
 			}
+		}
+
+		buf := bytes.NewBuffer(nil)
+		ef.Write(buf)
+		if ef.Max() != Max(buf.Bytes()) {
+			t.Fatalf("max: got %d, expected %d", ef.Max(), Max(buf.Bytes()))
 		}
 	})
 }

@@ -48,9 +48,8 @@ func (hc *HistoryContext) IsMaxTxNum(key []byte, txNum uint64) bool {
 		g.Reset(offset)
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
 			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 			found = true
-			foundTxNum = ef.Max()
+			foundTxNum = eliasfano32.Max(eliasVal)
 			// if there is still chance to find higher ef.Max() than txNum, we continue
 			return foundTxNum == txNum
 		}
@@ -138,8 +137,7 @@ func (si *ScanIterator) advance() {
 		}
 		if !bytes.Equal(key, si.key) {
 			si.key = key
-			ef, _ := eliasfano32.ReadEliasFano(val)
-			max := ef.Max()
+			max := eliasfano32.Max(val)
 			if max < si.uptoTxNum {
 				si.nextTxNum = max
 				si.nextKey = key
