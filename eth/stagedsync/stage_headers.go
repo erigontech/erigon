@@ -332,7 +332,7 @@ func startHandlingForkChoice(
 
 	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
 		log.Info(fmt.Sprintf("[%s] Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
-		if err := cfg.forkValidator.FlushExtendingFork(tx); err != nil {
+		if err := cfg.forkValidator.FlushExtendingFork(tx, cfg.notifications.Accumulator); err != nil {
 			return nil, err
 		}
 		cfg.hd.BeaconRequestList.Remove(requestId)

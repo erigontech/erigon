@@ -121,13 +121,14 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx) error {
+func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accumulator) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	// Flush changes to db.
 	if err := fv.extendingFork.Flush(tx); err != nil {
 		return err
 	}
+	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.extendingFork.Rollback()
 	fv.extendingForkHeadHash = common.Hash{}

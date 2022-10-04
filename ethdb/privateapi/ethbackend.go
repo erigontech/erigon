@@ -558,18 +558,16 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	defer s.lock.Unlock()
 
 	if status == nil {
-		log.Info("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
 		statusDeref := <-s.hd.PayloadStatusCh
 		status = &statusDeref
-		log.Info("[ForkChoiceUpdated] got reply", "payloadStatus", status)
+		log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
-	} else {
-		log.Info("Returned from getQuickPayloadStatusIfPossible", "status", fmt.Sprintf("%+v", status))
 	}
 
 	// No need for payload building

@@ -158,3 +158,14 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	storageChange.Location = gointerfaces.ConvertHashToH256(location)
 	storageChange.Data = data
 }
+
+func (a *Accumulator) CopyAndReset(target *Accumulator) {
+	target.changes = a.changes
+	a.changes = nil
+	target.latestChange = a.latestChange
+	a.latestChange = nil
+	target.accountChangeIndex = a.accountChangeIndex
+	a.accountChangeIndex = nil
+	target.storageChangeIndex = a.storageChangeIndex
+	a.storageChangeIndex = nil
+}
