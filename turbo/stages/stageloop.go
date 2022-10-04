@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -230,6 +231,7 @@ func StageLoopStep(
 				if header.Number.Uint64() == 0 {
 					notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
 				}
+				log.Info("Send notification %d from %s\n", header.Number.Uint64(), debug.Stack())
 				notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
 				if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, rotx); err != nil {
