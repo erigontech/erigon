@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"gfx.cafe/util/go/bytepool"
-
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
@@ -37,14 +35,14 @@ func (d *GossipCodec) Decode(ctx context.Context, p proto.Packet) (sctx *proto.G
 
 func (d *GossipCodec) WritePacket(ctx context.Context, p proto.Packet) error {
 	if val, ok := p.(ssz.Marshaler); ok {
-		bts := bytepool.Get(val.SizeSSZ())
-		defer bytepool.Put(bts)
+		bts := bp.Get(val.SizeSSZ())
+		defer bp.Put(bts)
 		enc, err := val.MarshalSSZTo(bts[:0])
 		if err != nil {
 			return err
 		}
-		cmp := bytepool.Get(val.SizeSSZ())
-		defer bytepool.Put(cmp)
+		cmp := bp.Get(val.SizeSSZ())
+		defer bp.Put(cmp)
 		ans := snappy.Encode(cmp, enc)
 		return d.top.Publish(ctx, ans)
 	}
