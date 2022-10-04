@@ -469,18 +469,6 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
-
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		if err != nil {
-			return nil, err
-		}
-
-		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
-		// because otherwise (when FCU points to the head) we want go to stage headers
-		// so that it calls writeForkChoiceHashes.
-		if blockHash != headHash && canonicalHash == blockHash {
-			return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
-		}
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
