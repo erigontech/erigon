@@ -330,7 +330,6 @@ func startHandlingForkChoice(
 
 	headerNumber := header.Number.Uint64()
 
-	fmt.Printf("headerHash = %x, cfg.forkValidator.ExtendingForkHeadHash() = %x\n", headerHash, cfg.forkValidator.ExtendingForkHeadHash())
 	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
 		log.Info(fmt.Sprintf("[%s] Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
 		if err := cfg.forkValidator.FlushExtendingFork(tx, cfg.notifications.Accumulator); err != nil {
@@ -562,7 +561,6 @@ func verifyAndSaveNewPoSHeader(
 
 	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
-	fmt.Printf("currentHeadHash = %x, extendingHash = %x, header.ParentHash = %x, extendCanonical = %t\n", currentHeadHash, extendingHash, header.ParentHash, extendCanonical)
 	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, false, criticalError
