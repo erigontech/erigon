@@ -732,6 +732,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}()
 
+	defer blockReader.(WithSnapshots).Snapshots().EnableReadAhead().DisableReadAhead()
+
 	var inputTxNum uint64
 	var blockHash common2.Hash
 	var txKey [8]byte

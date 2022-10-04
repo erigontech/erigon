@@ -367,6 +367,79 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	return nil
 }
 
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (s *RoSnapshots) DisableReadAhead() {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.DisableReadAhead()
+	}
+}
+func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableReadAhead()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableWillNeed()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableMadvNormal()
+	}
+	return s
+}
+
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
 	for _, seg := range s.Headers.segments {
