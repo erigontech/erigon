@@ -326,7 +326,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, backend.notifications, allSnapshots, backend.agg)
+		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
+		notifications := &stagedsync.Notifications{
+			Events:      privateapi.NewEvents(),
+			Accumulator: shards.NewAccumulator(chainConfig),
+		}
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg)
 		if err != nil {
 			return err
 		}
