@@ -242,16 +242,16 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-							//if err = tx.Commit(); err != nil {
-							//	return err
-							//}
-							//if tx, err = chainDb.BeginRw(ctx); err != nil {
-							//	return err
-							//}
-							//for i := 0; i < len(reconWorkers); i++ {
-							//	reconWorkers[i].ResetTx(nil)
-							//}
-							//agg.SetTx(tx)
+							if err = tx.Commit(); err != nil {
+								return err
+							}
+							if tx, err = chainDb.BeginRw(ctx); err != nil {
+								return err
+							}
+							for i := 0; i < len(reconWorkers); i++ {
+								reconWorkers[i].ResetTx(nil)
+							}
+							agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
