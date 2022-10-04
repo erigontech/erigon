@@ -240,10 +240,9 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-							//if err = tx.Commit(); err != nil {
-							//	return err
-							//}
-
+							if err = tx.Commit(); err != nil {
+								return err
+							}
 							if tx, err = chainDb.BeginRw(ctx); err != nil {
 								return err
 							}
