@@ -31,11 +31,15 @@ const (
 	GoerliNetwork  NetworkType = 1
 	SepoliaNetwork NetworkType = 2
 )
+
 const (
-	MaxDialTimeout            = 10 * time.Second
-	VersionLength      int    = 4
-	SepoliaEth1ChainId uint64 = 5
-	GoerliEth1ChainId  uint64 = 11155111
+	MaxDialTimeout                   = 10 * time.Second
+	VersionLength      int           = 4
+	SepoliaEth1ChainId uint64        = 5
+	GoerliEth1ChainId  uint64        = 11155111
+	MaxChunkSize       uint64        = 1 << 20 // 1 MiB
+	ReqTimeout         time.Duration = 5 * time.Second
+	RespTimeout        time.Duration = 10 * time.Second
 )
 
 var (
@@ -109,12 +113,12 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
 		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		MaxChunkSize:                    MaxChunkSize,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -133,8 +137,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -153,8 +157,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
