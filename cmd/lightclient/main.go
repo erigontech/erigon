@@ -57,7 +57,6 @@ func main() {
 	}
 	log.Info("Sentinel started", "enr", sent.String())
 
-<<<<<<< HEAD
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
 		sentinel.LightClientFinalityUpdateSsz,
@@ -76,8 +75,6 @@ func main() {
 		}
 	}
 
-=======
->>>>>>> 2217b2785e44e46e860e43517b2c1a9abdedeea6
 	logInterval := time.NewTicker(5 * time.Second)
 	sendReqInterval := time.NewTicker(1 * time.Second)
 
