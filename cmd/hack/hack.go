@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -494,43 +493,6 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 	return nil
 }
 
-func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, expectedCount uint64, err error) {
-	bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
-	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
-	if err != nil {
-		return
-	}
-	defer bodiesSegment.Close()
-
-	gg := bodiesSegment.MakeGetter()
-	buf, _ := gg.Next(nil)
-	firstBody := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
-		return
-	}
-	firstTxID = firstBody.BaseTxId
-
-	lastBody := new(types.BodyForStorage)
-	i := uint64(0)
-	for gg.HasNext() {
-		i++
-		if i == blockTo-blockFrom-1 {
-			buf, _ = gg.Next(buf[:0])
-			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
-				return
-			}
-			if gg.HasNext() {
-				panic(1)
-			}
-		} else {
-			gg.Skip()
-		}
-	}
-
-	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
-	return
-}
-
 func extractBodies(datadir string) error {
 	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
 		Enabled:    true,
@@ -608,9 +570,7 @@ func extractBodies(datadir string) error {
 			continue
 		}
 		i++
-		if txId == 0 {
-			txId = baseTxId
-		} else {
+		if txId > 0 {
 			if txId != baseTxId {
 				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
 			}
