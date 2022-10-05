@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -56,13 +57,34 @@ func main() {
 	}
 	log.Info("Sentinel started", "enr", sent.String())
 
+	gossip_topics := []sentinel.GossipTopic{
+		sentinel.BeaconBlockSsz,
+		sentinel.LightClientFinalityUpdateSsz,
+		sentinel.LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+
 	logInterval := time.NewTicker(5 * time.Second)
 	sendReqInterval := time.NewTicker(1 * time.Second)
 
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
+			sent.LogTopicPeers()
+			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
+		case pkt := <-sent.RecvGossip():
+			handleGossipPacket(pkt)
 		case <-sendReqInterval.C:
 			if _, err := sent.SendPingReqV1(); err != nil {
 				log.Warn("failed to send ping request", "err", err)
@@ -70,19 +92,30 @@ func main() {
 			if _, err := sent.SendMetadataReqV1(); err != nil {
 				log.Warn("failed to send metadata request", "err", err)
 			}
-		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
-			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
-			log.Info("[Gossip] beacon_block",
-				"Slot", u.Block.Slot,
-				"Signature", hex.EncodeToString(u.Signature[:]),
-				"graffiti", string(u.Block.Body.Graffiti[:]),
-				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
-				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
-				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
-				"proposerIdx", u.Block.ProposerIndex,
-			)
-		default:
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
+}
+
+func handleGossipPacket(pkt *proto.GossipContext) error {
+	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
+	switch u := pkt.Packet.(type) {
+	case *p2p.SignedBeaconBlockBellatrix:
+		log.Info("[Gossip] beacon_block",
+			"Slot", u.Block.Slot,
+			"Signature", hex.EncodeToString(u.Signature[:]),
+			"graffiti", string(u.Block.Body.Graffiti[:]),
+			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+			"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+			"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+			"proposerIdx", u.Block.ProposerIndex,
+		)
+		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		if err != nil {
+			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		}
+	case *p2p.LightClientFinalityUpdate:
+	case *p2p.LightClientOptimisticUpdate:
+	default:
+	}
+	return nil
 }

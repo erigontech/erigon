@@ -118,7 +118,7 @@ func Exec3(ctx context.Context,
 	ctx = context.Background()
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, allSnapshots, chainConfig, logger, genesis, engine, workerCount)
+	reconWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
@@ -241,16 +241,16 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-							//if err = tx.Commit(); err != nil {
-							//	return err
-							//}
-							//if tx, err = chainDb.BeginRw(ctx); err != nil {
-							//	return err
-							//}
-							//for i := 0; i < len(reconWorkers); i++ {
-							//	reconWorkers[i].ResetTx(nil)
-							//}
-							//agg.SetTx(tx)
+							if err = tx.Commit(); err != nil {
+								return err
+							}
+							if tx, err = chainDb.BeginRw(ctx); err != nil {
+								return err
+							}
+							for i := 0; i < len(reconWorkers); i++ {
+								reconWorkers[i].ResetTx(nil)
+							}
+							agg.SetTx(tx)
 							return nil
 						}()
 						if err != nil {
@@ -266,17 +266,13 @@ func Exec3(ctx context.Context,
 		}()
 	}
 
-	var header *types.Header
+	var b *types.Block
 	var blockNum uint64
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		atomic.StoreUint64(&inputBlockNum, blockNum)
 		rules := chainConfig.Rules(blockNum)
-		if header, err = blockReader.HeaderByNumber(ctx, applyTx, blockNum); err != nil {
-			return err
-		}
-		blockHash := header.Hash()
-		b, _, err := blockReader.BlockWithSenders(ctx, applyTx, blockHash, blockNum)
+		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -293,17 +289,21 @@ loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
-				Header:    header,
 				BlockNum:  blockNum,
 				Rules:     rules,
 				Block:     b,
 				TxNum:     inputTxNum,
 				TxIndex:   txIndex,
-				BlockHash: blockHash,
+				BlockHash: b.Hash(),
 				Final:     txIndex == len(txs),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+				if err != nil {
+					panic(err)
+				}
+
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
@@ -400,6 +400,24 @@ loop:
 		}
 	}
 	return nil
+}
+func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+	if tx == nil {
+		tx, err = db.BeginRo(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+	}
+	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	b, _, err = blockReader.BlockWithSenders(context.Background(), tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
@@ -730,32 +748,33 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}()
 	var inputTxNum uint64
-	var header *types.Header
+	var b *types.Block
 	var txKey [8]byte
 	for bn := uint64(0); bn <= blockNum; bn++ {
-		if header, err = blockReader.HeaderByNumber(ctx, nil, bn); err != nil {
-			panic(err)
-		}
-		blockHash := header.Hash()
-		b, _, err := blockReader.BlockWithSenders(ctx, nil, blockHash, bn)
+		rules := chainConfig.Rules(bn)
+		b, err = blockWithSenders(chainDb, nil, blockReader, blockNum)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
-					Header:    header,
 					BlockNum:  bn,
 					Block:     b,
+					Rules:     rules,
 					TxNum:     inputTxNum,
 					TxIndex:   txIndex,
-					BlockHash: blockHash,
+					BlockHash: b.Hash(),
 					Final:     txIndex == len(txs),
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+					if err != nil {
+						panic(err)
+					}
 				}
 				workCh <- txTask
 			}
