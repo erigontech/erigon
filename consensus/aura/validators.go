@@ -650,15 +650,8 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	packed, err := s.abi.Pack("finalizeChange")
-	if err != nil {
-		return err
-	}
-	data, err := caller(s.contractAddress, packed)
-	if err != nil {
-		return err
-	}
-	_, err = caller(s.contractAddress, data)
+	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
+	_, err := caller(s.contractAddress, data)
 	if err != nil {
 		return err
 	}
