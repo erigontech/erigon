@@ -741,6 +741,8 @@ func (d *Domain) BuildMissedIndices() (err error) {
 }
 
 func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values bool) (*recsplit.Index, error) {
+	_, fName := filepath.Split(idxPath)
+	log.Debug("[snapshots] build idx", "file", fName)
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{

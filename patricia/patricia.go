@@ -19,10 +19,10 @@ package patricia
 import (
 	"fmt"
 	"math/bits"
-	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/sais"
+	"golang.org/x/exp/slices"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string
@@ -697,7 +697,9 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 	if len(mf2.matches) < 2 {
 		return mf2.matches
 	}
-	sort.Sort(&mf2.matches)
+	//sort.Sort(&mf2.matches)
+	slices.SortFunc(mf2.matches, func(i, j Match) bool { return i.Start < j.Start })
+
 	lastEnd := mf2.matches[0].End
 	j := 1
 	for i, m := range mf2.matches {

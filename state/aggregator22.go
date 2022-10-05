@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	math2 "math"
 	"runtime"
@@ -265,6 +266,47 @@ func (sf Agg22StaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
+func (a *Aggregator22) buildFilesInBackground(step uint64, collation Agg22Collation) error {
+	log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
+	closeAll := true
+	sf, err := a.buildFiles(step, collation)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeAll {
+			sf.Close()
+		}
+	}()
+	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+	log.Info("[snapshots] history build done", "step", fmt.Sprintf("%d-%d", step, step+1))
+	maxSpan := uint64(32) * a.aggregationStep
+	for r := a.findMergeRange(a.maxTxNum, maxSpan); r.any(); r = a.findMergeRange(a.maxTxNum, maxSpan) {
+		outs := a.staticFilesInRange(r)
+		defer func() {
+			if closeAll {
+				outs.Close()
+			}
+		}()
+		in, err := a.mergeFiles(outs, r, maxSpan)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if closeAll {
+				in.Close()
+			}
+		}()
+		a.integrateMergedFiles(outs, in)
+		if err = a.deleteFiles(outs); err != nil {
+			return err
+		}
+	}
+
+	closeAll = false
+	return nil
+}
+
 func (a *Aggregator22) buildFiles(step uint64, collation Agg22Collation) (Agg22StaticFiles, error) {
 	var sf Agg22StaticFiles
 	closeFiles := true
@@ -409,7 +451,7 @@ func (a *Aggregator22) prune(txFrom, txTo uint64) error {
 	return nil
 }
 
-func (a *Aggregator22) LogStats(tx2block func(endTxNumMinimax uint64) uint64) {
+func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
 	if a.maxTxNum == 0 {
 		return
 	}
@@ -421,12 +463,28 @@ func (a *Aggregator22) LogStats(tx2block func(endTxNumMinimax uint64) uint64) {
 		return true
 	})
 
+	c, err := tx.CursorDupSort(a.accounts.InvertedIndex.indexTable)
+	if err != nil {
+		// TODO pass error properly around
+		panic(err)
+	}
+	_, v, err := c.First()
+	if err != nil {
+		// TODO pass error properly around
+		panic(err)
+	}
+	var firstHistoryIndexBlockInDB uint64
+	if len(v) != 0 {
+		firstHistoryIndexBlockInDB = tx2block(binary.BigEndian.Uint64(v))
+	}
+
 	var m runtime.MemStats
 	common2.ReadMemStats(&m)
 	log.Info("[Snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dk", a.maxTxNum/1000),
 		"txNum2blockNum", strings.Join(str, ","),
+		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
@@ -703,6 +761,11 @@ func (a *Aggregator22) FinishTx() error {
 	if a.working.Load() {
 		return nil
 	}
+
+	if err := a.prune(0, a.maxTxNum); err != nil {
+		return err
+	}
+
 	closeAll := true
 	collation, err := a.collate(step, step*a.aggregationStep, (step+1)*a.aggregationStep, a.rwTx)
 	if err != nil {
@@ -715,43 +778,12 @@ func (a *Aggregator22) FinishTx() error {
 	}()
 
 	a.working.Store(true)
-	//go func() {
-	defer a.working.Store(false)
-	sf, err := a.buildFiles(step, collation)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeAll {
-			sf.Close()
+	go func() {
+		defer a.working.Store(false)
+		if err := a.buildFilesInBackground(step, collation); err != nil {
+			log.Warn("buildFilesInBackground", "err", err)
 		}
 	}()
-	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	if err := a.prune(0, a.maxTxNum); err != nil {
-		return err
-	}
-	maxSpan := uint64(32) * a.aggregationStep
-	for r := a.findMergeRange(a.maxTxNum, maxSpan); r.any(); r = a.findMergeRange(a.maxTxNum, maxSpan) {
-		outs := a.staticFilesInRange(r)
-		defer func() {
-			if closeAll {
-				outs.Close()
-			}
-		}()
-		in, err := a.mergeFiles(outs, r, maxSpan)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if closeAll {
-				in.Close()
-			}
-		}()
-		a.integrateMergedFiles(outs, in)
-		if err = a.deleteFiles(outs); err != nil {
-			return err
-		}
-	}
 	closeAll = false
 	return nil
 }

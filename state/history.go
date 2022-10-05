@@ -47,6 +47,8 @@ type History struct {
 	files            *btree.BTreeG[*filesItem]
 	compressVals     bool
 	workers          int
+
+	historyKey []byte
 }
 
 func NewHistory(
@@ -65,6 +67,7 @@ func NewHistory(
 		settingsTable:    settingsTable,
 		compressVals:     compressVals,
 		workers:          1,
+		historyKey:       make([]byte, 256),
 	}
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
@@ -287,6 +290,8 @@ func iterateForVi(historyItem, iiItem *filesItem, compressVals bool, f func(v []
 }
 
 func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count int, values, compressVals bool) error {
+	_, fName := filepath.Split(historyIdxPath)
+	log.Debug("[snapshots] build idx", "file", fName)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   count,
 		Enums:      false,
@@ -348,6 +353,7 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count i
 
 func (h *History) AddPrevValue(key1, key2, original []byte) error {
 	lk := len(key1) + len(key2)
+	//historyKey := h.historyKey[:lk+8]
 	historyKey := make([]byte, lk+8)
 	copy(historyKey, key1)
 	if len(key2) > 0 {
@@ -788,7 +794,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	var foundEndTxNum uint64
 	var foundStartTxNum uint64
 	var found bool
-	//hc.indexFiles.Ascend(func(item *ctxItem) bool {
 	hc.indexFiles.AscendGreaterOrEqual(ctxItem{startTxNum: txNum, endTxNum: txNum}, func(item ctxItem) bool {
 		//fmt.Printf("ef item %d-%d, key %x\n", item.startTxNum, item.endTxNum, key)
 		if item.reader.Empty() {

@@ -238,7 +238,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl) error {
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
@@ -256,7 +256,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		code2pattern = append(code2pattern, p)
 	})
 	dictBuilder.Close()
-	log.Debug(fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
+	log.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	ch := make(chan *CompressionWord, 10_000)
 	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 
@@ -290,6 +290,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			go reduceDictWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
 		}
 	}
+	t := time.Now()
 
 	var err error
 	intermediatePath := segmentFilePath + ".tmp"
@@ -299,7 +300,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	defer intermediateFile.Close()
-	intermediateW := bufio.NewWriterSize(intermediateFile, etl.BufIOSize)
+	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -438,6 +439,8 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		return err
 	}
 	wg.Wait()
+	log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "took", time.Since(t))
+
 	if _, err = intermediateFile.Seek(0, 0); err != nil {
 		return fmt.Errorf("return to the start of intermediate file: %w", err)
 	}
@@ -453,14 +456,18 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	}
 	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
+	distribution := make([]int, maxPatternLen+1)
 	for _, p := range code2pattern {
 		if p.uses > 0 {
 			patternList = append(patternList, p)
+			distribution[len(p.word)]++
 		}
 	}
 	slices.SortFunc(patternList, patternListLess)
+	logCtx := make([]interface{}, 0, 8)
+	logCtx = append(logCtx, "patternList.Len", patternList.Len())
+
 	i := 0
-	log.Debug(fmt.Sprintf("[%s] Effective dictionary", logPrefix), "size", patternList.Len())
 	// Build Huffman tree for codes
 	var codeHeap PatternHeap
 	heap.Init(&codeHeap)
@@ -510,6 +517,16 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		n := binary.PutUvarint(numBuf[:], uint64(len(p.word))) // Length of the word's length
 		patternsSize += uint64(ns + n + len(p.word))
 	}
+
+	logCtx = append(logCtx, "patternsSize", common.ByteCount(patternsSize))
+	for i, n := range distribution {
+		if n == 0 {
+			continue
+		}
+		logCtx = append(logCtx, fmt.Sprintf("%d", i), fmt.Sprintf("%d", n))
+	}
+	log.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
+
 	var cf *os.File
 	if cf, err = os.Create(segmentFilePath); err != nil {
 		return err
@@ -546,7 +563,6 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		}
 		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pattern=[%x]\n", p.depth, p.code, p.codeBits, p.word)
 	}
-	log.Debug(fmt.Sprintf("[%s] Dictionary", logPrefix), "size", common.ByteCount(patternsSize))
 
 	var positionList PositionList
 	pos2code := make(map[uint64]*Position)
@@ -557,7 +573,6 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	}
 	slices.SortFunc(positionList, positionListLess)
 	i = 0
-	log.Debug(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", positionList.Len())
 	// Build Huffman tree for codes
 	var posHeap PositionHeap
 	heap.Init(&posHeap)
@@ -626,12 +641,12 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		}
 		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pos=%d\n", p.depth, p.code, p.codeBits, p.pos)
 	}
-	log.Debug(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", common.ByteCount(posSize))
+	log.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
 	// Re-encode all the words with the use of optimised (via Huffman coding) dictionaries
 	wc := 0
 	var hc HuffmanCoder
 	hc.w = cw
-	r := bufio.NewReaderSize(intermediateFile, etl.BufIOSize)
+	r := bufio.NewReaderSize(intermediateFile, 8*etl.BufIOSize)
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
@@ -718,6 +733,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	if err = cf.Close(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -889,9 +905,11 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector) (*DictionaryBuilder, error) {
-	dictCollector := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl) (*DictionaryBuilder, error) {
+	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer dictCollector.Close()
+	dictCollector.LogLvl(lvl)
+
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
 		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

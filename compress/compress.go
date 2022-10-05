@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -59,10 +60,12 @@ type Compressor struct {
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
 	superstring      []byte
+	superstringLen   int
 	superstrings     chan []byte
 	wg               *sync.WaitGroup
 	suffixCollectors []*etl.Collector
 	wordsCount       uint64
+	superstringCount uint64
 
 	ctx       context.Context
 	logPrefix string
@@ -92,7 +95,9 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector.LogLvl(lvl)
+
 		suffixCollectors[i] = collector
 		go processSuperstring(superstrings, collector, minPatternScore, wg)
 	}
@@ -128,15 +133,23 @@ func (c *Compressor) Count() int { return int(c.wordsCount) }
 
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
+	l := 2*len(word) + 2
+	if c.superstringLen+l > superstringLimit {
+		if c.superstringCount%samplingFactor == 0 {
+			c.superstrings <- c.superstring
+		}
+		c.superstringCount++
+		c.superstring = make([]byte, 0, 1024*1024)
+		c.superstringLen = 0
+	}
+	c.superstringLen += l
 
-	if len(c.superstring)+2*len(word)+2 > superstringLimit {
-		c.superstrings <- c.superstring
-		c.superstring = nil
+	if c.superstringCount%samplingFactor == 0 {
+		for _, a := range word {
+			c.superstring = append(c.superstring, 1, a)
+		}
+		c.superstring = append(c.superstring, 0, 0)
 	}
-	for _, a := range word {
-		c.superstring = append(c.superstring, 1, a)
-	}
-	c.superstring = append(c.superstring, 0, 0)
 
 	return c.uncompressedFile.Append(word)
 }
@@ -156,7 +169,9 @@ func (c *Compressor) Compress() error {
 	close(c.superstrings)
 	c.wg.Wait()
 
-	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors)
+	log.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.workers)
+	t := time.Now()
+	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors, c.lvl)
 	if err != nil {
 
 		return err
@@ -167,8 +182,10 @@ func (c *Compressor) Compress() error {
 			return err
 		}
 	}
-
 	defer os.Remove(c.tmpOutFilePath)
+	log.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
+
+	t = time.Now()
 	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db, c.lvl); err != nil {
 		return err
 	}
@@ -180,6 +197,9 @@ func (c *Compressor) Compress() error {
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}
+
+	_, fName := filepath.Split(c.outputFile)
+	log.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.logPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
 
 	return nil
 }
@@ -195,7 +215,25 @@ const maxPatternLen = 128
 
 // maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
 // Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 1 * 1024 * 1024
+/*
+Experiments on 74Gb uncompressed file (bsc 012500-013000-transactions.seg)
+Ram - needed just to open compressed file (Huff tables, etc...)
+dec_speed - loop with `word, _ = g.Next(word[:0])`
+skip_speed - loop with `g.Skip()`
+| DictSize | Ram  | file_size | dec_speed | skip_speed |
+| -------- | ---- | --------- | --------- | ---------- |
+| 1M       | 70Mb | 35871Mb   | 4m06s     | 1m58s      |
+| 512K     | 42Mb | 36496Mb   | 3m49s     | 1m51s      |
+| 256K     | 21Mb | 37100Mb   | 3m44s     | 1m48s      |
+| 128K     | 11Mb | 37782Mb   | 3m25s     | 1m44s      |
+| 64K      | 7Mb  | 38597Mb   | 3m16s     | 1m34s      |
+| 32K      | 5Mb  | 39626Mb   | 3m0s      | 1m29s      |
+
+*/
+const maxDictPatterns = 64 * 1024
+
+// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
+const samplingFactor = 4
 
 // nolint
 const compressLogPrefix = "compress"
@@ -706,7 +744,7 @@ func NewUncompressedFile(filePath string) (*DecompressedFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
+	w := bufio.NewWriterSize(f, 8*etl.BufIOSize)
 	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func (f *DecompressedFile) Close() {
@@ -751,8 +789,8 @@ func (f *DecompressedFile) ForEach(walker func(v []byte, compressed bool) error)
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f.f, etl.BufIOSize)
-	buf := make([]byte, 4096)
+	r := bufio.NewReaderSize(f.f, int(8*datasize.MB))
+	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
 		// extract lowest bit of length prefix as "uncompressed" flag and shift to obtain correct length
