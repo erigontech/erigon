@@ -66,11 +66,10 @@ var LightClientGPO = gasprice.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		UseSnapshots:                 false,
-		ExecWorkerCount:              1,
-		StateReconstituteWorkerCount: 1,
-		BlockDownloaderWindow:        32768,
-		BodyDownloadTimeoutSeconds:   30,
+		UseSnapshots:               false,
+		ExecWorkerCount:            1,
+		BlockDownloaderWindow:      32768,
+		BodyDownloadTimeoutSeconds: 30,
 	},
 	Ethash: ethash.Config{
 		CachesInMem:      2,
@@ -243,9 +242,8 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle                 time.Duration
-	ExecWorkerCount              int
-	StateReconstituteWorkerCount int
+	LoopThrottle    time.Duration
+	ExecWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
