@@ -43,7 +43,7 @@ func TestBlockchain(t *testing.T) {
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
 	if ethconfig.EnableHistoryV3InTest {
 		// HistoryV3: doesn't produce receipts on execution by design
-		bt.skipLoad(`^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom.json`)
+		bt.skipLoad(`^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
 	}
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
