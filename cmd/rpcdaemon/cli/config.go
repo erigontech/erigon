@@ -357,7 +357,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 
 			db.View(context.Background(), func(tx kv.Tx) error {
-				agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+				agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress
 				})
@@ -381,7 +381,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						db.View(context.Background(), func(tx kv.Tx) error {
-							agg.LogStats(func(endTxNumMinimax uint64) uint64 {
+							agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 								_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
 								return histBlockNumProgress
 							})
@@ -437,16 +437,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}()
 
 	ff = rpchelper.New(ctx, eth, txPool, mining, onNewSnapshot)
-	if cfg.WithDatadir {
-		dirs := datadir.New(cfg.DataDir)
-		if agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
-		}
-		if err = agg.ReopenFiles(); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
-		}
-
-	}
 	return db, borDb, eth, txPool, mining, stateCache, blockReader, ff, agg, err
 }
 

@@ -230,8 +230,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			defer i.Inc()
 			defer sem.Release(1)
 			defer wg.Done()
-			err = buildTorrentIfNeed(f, snapDir)
-			if err != nil {
+			if err := buildTorrentIfNeed(f, snapDir); err != nil {
 				errs <- err
 			}
 

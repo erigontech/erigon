@@ -110,7 +110,7 @@ var resetBlocks4 = Migration{
 			log.Warn("NOTE: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, should not take very long")
 		}
 
-		if err := rawdbreset.ResetBlocks(tx, nil, nil); err != nil {
+		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, dirs.Tmp); err != nil {
 			return err
 		}
 

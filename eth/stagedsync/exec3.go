@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
@@ -82,7 +81,6 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 func Exec3(ctx context.Context,
 	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
 	rs *state.State22, blockReader services.FullBlockReader,
-	allSnapshots *snapshotsync.RoSnapshots,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
@@ -95,6 +93,9 @@ func Exec3(ctx context.Context,
 			return err
 		}
 		defer applyTx.Rollback()
+	}
+	if !useExternalTx {
+		defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
 	}
 
 	var block, stageProgress uint64
@@ -276,18 +277,18 @@ loop:
 		if err != nil {
 			return err
 		}
+		if parallel {
+			func() {
+				rwsLock.Lock()
+				defer rwsLock.Unlock()
+				for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+					rwsReceiveCond.Wait()
+				}
+			}()
+		}
 		txs := b.Transactions()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			if parallel {
-				func() {
-					rwsLock.Lock()
-					defer rwsLock.Unlock()
-					for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-						rwsReceiveCond.Wait()
-					}
-				}()
-			}
 			txTask := &state.TxTask{
 				BlockNum:  blockNum,
 				Rules:     rules,
@@ -332,41 +333,39 @@ loop:
 				}
 
 				stageProgress = blockNum
-
-				if txTask.Final && rs.SizeEstimate() >= commitThreshold {
-					commitStart := time.Now()
-					log.Info("Committing...")
-					if err := rs.Flush(applyTx); err != nil {
-						return err
-					}
-					if !useExternalTx {
-						if err = execStage.Update(applyTx, stageProgress); err != nil {
-							return err
-						}
-						applyTx.CollectMetrics()
-						if err := applyTx.Commit(); err != nil {
-							return err
-						}
-						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
-							return err
-						}
-						defer applyTx.Rollback()
-						agg.SetTx(applyTx)
-						reconWorkers[0].ResetTx(applyTx)
-						log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
-					}
-				}
-
-				select {
-				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
-				default:
-				}
 			}
+
 			inputTxNum++
 		}
+
+		if rs.SizeEstimate() >= commitThreshold {
+			commitStart := time.Now()
+			log.Info("Committing...")
+			if err := rs.Flush(applyTx); err != nil {
+				return err
+			}
+			if !useExternalTx {
+				if err = execStage.Update(applyTx, stageProgress); err != nil {
+					return err
+				}
+				applyTx.CollectMetrics()
+				if err := applyTx.Commit(); err != nil {
+					return err
+				}
+				if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+					return err
+				}
+				defer applyTx.Rollback()
+				agg.SetTx(applyTx)
+				reconWorkers[0].ResetTx(applyTx)
+				log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+			}
+		}
+
 		// Check for interrupts
 		select {
+		case <-logEvery.C:
+			progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			atomic.StoreUint64(&maxTxNum, inputTxNum)
@@ -443,14 +442,20 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.S
 	}
 }
 
-func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, chainDb kv.RwDB,
+func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	defer agg.EnableMadvNormal().DisableReadAhead()
+
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
 	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
-	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
+	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).
+		WriteMergeThreshold(8192).
+		PageSize(uint64(16 * datasize.KB)).
+		WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
+		Open()
 	if err != nil {
 		return err
 	}
@@ -490,7 +495,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
-	workCh := make(chan *state.TxTask, 128)
+	workCh := make(chan *state.TxTask, workerCount*64)
 	rs := state.NewReconState(workCh)
 	var fromKey, toKey []byte
 	bigCount := big.NewInt(int64(workerCount))
@@ -552,9 +557,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		accountCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return accountCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XAccount, k, v)
-		}, etl.TransformArgs{})
+		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -599,9 +602,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		storageCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return storageCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XStorage, k, v)
-		}, etl.TransformArgs{})
+		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -645,9 +646,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		codeCollectorsX[i] = nil
 	}
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return codeCollectorX.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return tx.Put(kv.XCode, k, v)
-		}, etl.TransformArgs{})
+		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return err
 	}
@@ -687,7 +686,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].Run()
 	}
-	commitThreshold := uint64(256 * 1024 * 1024)
+	commitThreshold := batchSize.Bytes() * 4
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
@@ -715,7 +714,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				prevCount = count
 				prevRollbackCount = rollbackCount
 				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
-					"tx/s", fmt.Sprintf("%.1f", speedTx),
+					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
@@ -749,6 +748,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 		}
 	}()
+
+	defer blockReader.(WithSnapshots).Snapshots().EnableReadAhead().DisableReadAhead()
+
 	var inputTxNum uint64
 	var b *types.Block
 	var txKey [8]byte
