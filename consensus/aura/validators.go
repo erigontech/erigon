@@ -650,18 +650,25 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	data := common.FromHex("75286211") // TODO(yperbasis): where does this come from?
-	_, err := caller(s.contractAddress, data)
+	packed, err := s.abi.Pack("finalizeChange")
+	if err != nil {
+		return err
+	}
+	data, err := caller(s.contractAddress, packed)
+	if err != nil {
+		return err
+	}
+	_, err = caller(s.contractAddress, data)
 	if err != nil {
 		return err
 	}
 
 	/*
-	 let data = validator_set::functions::finalize_change::encode_input();
-	        caller(self.contract_address, data)
-	            .map(|_| ())
-	            .map_err(::engines::EngineError::FailedSystemCall)
-	            .map_err(Into::into)
+	   let data = validator_set::functions::finalize_change::encode_input();
+	   caller(self.contract_address, data)
+	       .map(|_| ())
+	       .map_err(::engines::EngineError::FailedSystemCall)
+	       .map_err(Into::into)
 	*/
 	return nil
 }
