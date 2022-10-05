@@ -415,6 +415,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	allSnapshots.LogStat()
 
 	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers); err != nil {
 		return err
