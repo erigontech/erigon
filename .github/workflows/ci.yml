@@ -108,16 +108,17 @@ jobs:
       - name: Test
         run: .\wmake.ps1 test
 
-  docker:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    runs-on: self-hosted
+  docker-build-check:
+    # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
+    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
+    runs-on: ubuntu-20.04
     steps:
       - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
 
-      - name: make docker
+      - name: make docker (see dockerhub for image builds)
         run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
       # check with root permissions, should be cached from previous build
@@ -125,12 +126,11 @@ jobs:
         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
   hive:
+     if: ${{ github.ref == 'refs/heads/devel' }}
      needs:
        - tests
        - tests-windows
-       - docker
      runs-on: self-hosted
-     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
      steps:
        - uses: AutoModality/action-clean@v1
        - uses: actions/checkout@v3
@@ -156,3 +156,65 @@ jobs:
          with:
            name: test-results
            path: results-${{ github.run_id }}/*.xml
+
+       - name: clean up containers
+         if: always()
+         run: |
+          ids=$(docker ps -a -q)
+          for id in $ids
+          do
+            echo "stopping/removing container: $id"
+            docker stop $id && docker rm $id
+          done
+
+  hive-results:
+    needs: hive
+    name: Hive results
+    runs-on: self-hosted
+
+    permissions:
+      checks: write
+      pull-requests: write
+      actions: read
+
+    steps:
+    - name: parse hive results
+      uses: phoenix-actions/test-reporting@v8
+      with:
+        artifact: test-results
+        name: Tests
+        path: '*.xml'
+        reporter: java-junit
+
+    - name: set badge color
+      shell: bash
+      run: |
+        case ${{ fromJSON( steps.test-results.outputs.json ).conclusion }} in
+          success)
+            echo "BADGE_COLOR=31c653" >> $GITHUB_ENV
+            ;;
+          failure)
+            echo "BADGE_COLOR=800000" >> $GITHUB_ENV
+            ;;
+          neutral)
+            echo "BADGE_COLOR=696969" >> $GITHUB_ENV
+            ;;
+        esac
+
+    - name: create badge
+      uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+      with:
+        label: Hive
+        status: '${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.tests }} tests, ${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.runs }} runs: ${{ fromJSON( steps.test-results.outputs.json ).conclusion }}'
+        color: ${{ env.BADGE_COLOR }}
+        path: badge.svg
+
+    - name: upload badge to gist
+      if: >
+        github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'devel' ||
+        github.event_name != 'workflow_run' && github.ref == 'refs/heads/devel'
+      uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+      with:
+        token: ${{ secrets.GIST_TOKEN }}
+        gistURL: https://gist.githubusercontent.com/revitteth/dc492845ba6eb694e6c7279224634b20
+        file: badge.svg

@@ -15,10 +15,13 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -30,18 +33,19 @@ var (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	discCfg, genesisCfg, networkCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	discCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	if err != nil {
 		log.Error("error", "err", err)
 		return
 	}
-	sent, err := sentinel.New(context.Background(), sentinel.SentinelConfig{
+	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
 		IpAddr:         defaultIpAddr,
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
-		GenesisConfig:  genesisCfg,
-		NetworkConfig:  networkCfg,
+		GenesisConfig:  &genesisCfg,
+		NetworkConfig:  &networkCfg,
+		BeaconConfig:   &beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)
@@ -52,13 +56,66 @@ func main() {
 		return
 	}
 	log.Info("Sentinel started", "enr", sent.String())
+
+	gossip_topics := []sentinel.GossipTopic{
+		sentinel.BeaconBlockSsz,
+		sentinel.LightClientFinalityUpdateSsz,
+		sentinel.LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+
 	logInterval := time.NewTicker(5 * time.Second)
+	sendReqInterval := time.NewTicker(1 * time.Second)
+
 	for {
 		select {
 		case <-logInterval.C:
-			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
-		default:
-			time.Sleep(100 * time.Millisecond)
+			sent.LogTopicPeers()
+			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
+		case pkt := <-sent.RecvGossip():
+			handleGossipPacket(pkt)
+		case <-sendReqInterval.C:
+			if _, err := sent.SendPingReqV1(); err != nil {
+				log.Warn("failed to send ping request", "err", err)
+			}
+			if _, err := sent.SendMetadataReqV1(); err != nil {
+				log.Warn("failed to send metadata request", "err", err)
+			}
 		}
 	}
+}
+
+func handleGossipPacket(pkt *proto.GossipContext) error {
+	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
+	switch u := pkt.Packet.(type) {
+	case *p2p.SignedBeaconBlockBellatrix:
+		log.Info("[Gossip] beacon_block",
+			"Slot", u.Block.Slot,
+			"Signature", hex.EncodeToString(u.Signature[:]),
+			"graffiti", string(u.Block.Body.Graffiti[:]),
+			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+			"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+			"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+			"proposerIdx", u.Block.ProposerIndex,
+		)
+		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		if err != nil {
+			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		}
+	case *p2p.LightClientFinalityUpdate:
+	case *p2p.LightClientOptimisticUpdate:
+	default:
+	}
+	return nil
 }

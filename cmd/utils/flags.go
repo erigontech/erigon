@@ -384,7 +384,7 @@ var (
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: cmp.Max(10, runtime.GOMAXPROCS(-1)*2),
+		Value: cmp.Max(10, runtime.GOMAXPROCS(-1)*4),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -401,10 +401,6 @@ var (
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
 	}
 
-	MemoryOverlayFlag = cli.BoolTFlag{
-		Name:  "experimental.overlay",
-		Usage: "Enables In-Memory Overlay for PoS",
-	}
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
 		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
@@ -1430,7 +1426,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
-	cfg.MemoryOverlay = ctx.GlobalBool(MemoryOverlayFlag.Name)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.GlobalBool(NoDownloaderFlag.Name)

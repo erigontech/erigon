@@ -216,7 +216,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		}
 		stateReader = state.NewCachedReader2(cacheView, dbtx)
 	} else {
-		stateReader = state.NewPlainState(dbtx, blockNumber)
+		stateReader = state.NewPlainState(dbtx, blockNumber+1)
 	}
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {

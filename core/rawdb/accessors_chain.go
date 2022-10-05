@@ -1315,6 +1315,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
+	sequenceTo := map[string]uint64{}
 	for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
 		if err != nil {
 			return err
@@ -1346,9 +1347,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			}); err != nil {
 				return err
 			}
-			if err := ResetSequence(tx, bucket, b.BaseTxId); err != nil {
-				return err
-			}
+			sequenceTo[bucket] = b.BaseTxId
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
@@ -1366,6 +1365,11 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		case <-logEvery.C:
 			log.Info("TruncateBlocks", "block", n)
 		default:
+		}
+	}
+	for bucket, sequence := range sequenceTo {
+		if err := ResetSequence(tx, bucket, sequence); err != nil {
+			return err
 		}
 	}
 
@@ -1848,7 +1852,7 @@ func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {
 		encoded []byte
 		err     error
 	)
-	root = node.ComputeCommitment().Bytes()
+	root = node.Commitment().Bytes()
 	encoded, err = node.Serialize()
 	if err != nil {
 		return err

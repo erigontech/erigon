@@ -37,12 +37,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/bloombits"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
@@ -78,8 +76,6 @@ type SimulatedBackend struct {
 	pendingReader   *state.PlainStateReader
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
-	events *filters.EventSystem // Event system for filtering log events live
-
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
@@ -104,7 +100,6 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
@@ -120,6 +115,7 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) HistoryV3() bool           { return b.m.HistoryV3 }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
@@ -722,94 +718,18 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 //
 // TODO(karalabe): Deprecate when the subscription one can return past data too.
 func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	var filter *filters.Filter
-	if query.BlockHash != nil {
-		// Block filter requested, construct a single-shot filter
-		filter = filters.NewBlockFilter(&filterBackend{b.m.DB, b}, *query.BlockHash, query.Addresses, query.Topics)
-	} else {
-		// Initialize unset filter boundaries to run from genesis to chain head
-		from := int64(0)
-		if query.FromBlock != nil {
-			from = query.FromBlock.Int64()
-		}
-		to := int64(-1)
-		if query.ToBlock != nil {
-			to = query.ToBlock.Int64()
-		}
-		// Construct the range filter
-		filter = filters.NewRangeFilter(&filterBackend{b.m.DB, b}, from, to, query.Addresses, query.Topics)
-	}
-	// Run the filter and return all the logs
-	logs, err := filter.Logs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]types.Log, len(logs))
-	for i, nLog := range logs {
-		res[i] = *nLog
-	}
-	return res, nil
+	return nil, nil
 }
 
 // SubscribeFilterLogs creates a background log filtering operation, returning a
 // subscription immediately, which can be used to stream the found events.
 func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
-	// Subscribe to contract events
-	sink := make(chan []*types.Log)
-
-	sub, err := b.events.SubscribeLogs(query, sink)
-	if err != nil {
-		return nil, err
-	}
-	// Since we're getting logs in batches, we need to flatten them into a plain stream
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case logs := <-sink:
-				for _, nlog := range logs {
-					select {
-					case ch <- *nlog:
-					case err := <-sub.Err():
-						return err
-					case <-quit:
-						return nil
-					}
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
+	return nil, nil
 }
 
 // SubscribeNewHead returns an event subscription for a new header.
 func (b *SimulatedBackend) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
-	// subscribe to a new head
-	sink := make(chan *types.Header)
-	sub := b.events.SubscribeNewHeads(sink)
-
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case head := <-sink:
-				select {
-				case ch <- head:
-				case err := <-sub.Err():
-					return err
-				case <-quit:
-					return nil
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
+	return nil, nil
 }
 
 // AdjustTime adds a time shift to the simulated clock.
@@ -943,10 +863,6 @@ func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event
 }
 
 func (fb *filterBackend) BloomStatus() (uint64, uint64) { return 4096, 0 }
-
-func (fb *filterBackend) ServiceFilter(ctx context.Context, ms *bloombits.MatcherSession) {
-	panic("not supported")
-}
 
 func nullSubscription() event.Subscription {
 	return event.NewSubscription(func(quit <-chan struct{}) error {

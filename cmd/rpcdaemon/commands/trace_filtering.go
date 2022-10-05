@@ -178,22 +178,27 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	}
 
 	difficulty := block.Difficulty()
-	// block and uncle reward traces are not returned for PoS blocks
+
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	var tr ParityTrace
+	var rewardAction = &RewardTraceAction{}
+	rewardAction.Author = block.Coinbase()
+	rewardAction.RewardType = "block" // nolint: goconst
 	if difficulty.Cmp(big.NewInt(0)) != 0 {
-		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		var tr ParityTrace
-		var rewardAction = &RewardTraceAction{}
-		rewardAction.Author = block.Coinbase()
-		rewardAction.RewardType = "block" // nolint: goconst
+		// block reward is not returned in POS
 		rewardAction.Value.ToInt().Set(minerReward.ToBig())
-		tr.Action = rewardAction
-		tr.BlockHash = &common.Hash{}
-		copy(tr.BlockHash[:], block.Hash().Bytes())
-		tr.BlockNumber = new(uint64)
-		*tr.BlockNumber = block.NumberU64()
-		tr.Type = "reward" // nolint: goconst
-		tr.TraceAddress = []int{}
-		out = append(out, tr)
+	}
+	tr.Action = rewardAction
+	tr.BlockHash = &common.Hash{}
+	copy(tr.BlockHash[:], block.Hash().Bytes())
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = block.NumberU64()
+	tr.Type = "reward" // nolint: goconst
+	tr.TraceAddress = []int{}
+	out = append(out, tr)
+
+	// Uncles are not returned in POS
+	if difficulty.Cmp(big.NewInt(0)) != 0 {
 		for i, uncle := range block.Uncles() {
 			if i < len(uncleRewards) {
 				var tr ParityTrace
@@ -246,7 +251,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if api.historyV3(dbtx) {
-		return api.filter22(ctx, dbtx, fromBlock, toBlock, req, stream)
+		return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream)
 	}
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
@@ -510,7 +515,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	return stream.Flush()
 }
 
-func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {

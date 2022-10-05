@@ -3,6 +3,7 @@ package bodydownload
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -68,10 +70,11 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator, logPrefix string) (*BodyRequest, error) {
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
+	timedOutPeers := false
 
 	// go right back to the start of the earliest request that it still outstanding here so that we can
 	// check for timeouts, as requests are delivered from peers bd.requestedLow will be incremented so this loop will move forwards over time.
@@ -93,6 +96,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			if currentTime < req.waitUntil {
 				continue
 			}
+			timedOutPeers = true
 			bd.peerMap[req.peerID]++
 			bd.requests[bNum] = nil
 		}
@@ -102,10 +106,16 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		// the body request altogether
 		var err error
 		key := dbutils.EncodeBlockNumber(bNum)
-		bodyInBucket, err := tx.Has("BodiesStage", key)
-		if err != nil {
-			return nil, err
+		var bodyInBucket bool
+		if !bd.UsingExternalTx {
+			bodyInBucket, err = tx.Has("BodiesStage", key)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			_, bodyInBucket = bd.bodyCache[bNum]
 		}
+
 		if bodyInBucket {
 			bd.delivered.Add(bNum)
 			continue
@@ -185,6 +195,15 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			bd.requests[num] = bodyReq
 		}
 	}
+
+	if timedOutPeers {
+		stats := bd.GetAndResetPeerStats()
+		for k, v := range stats {
+			printablePeerID := hex.EncodeToString(k[:])[:20]
+			log.Info(fmt.Sprintf("[%s] Peer timed out", logPrefix), "peer", printablePeerID, "count", v)
+		}
+	}
+
 	return bodyReq, nil
 }
 
@@ -376,6 +395,15 @@ func (bd *BodyDownload) PrintPeerMap() {
 	bd.peerMap = make(map[[64]byte]int)
 }
 
+func (bd *BodyDownload) GetAndResetPeerStats() map[[64]byte]int {
+	peers := make(map[[64]byte]int)
+	for k, v := range bd.peerMap {
+		peers[k] = v
+	}
+	bd.peerMap = make(map[[64]byte]int)
+	return peers
+}
+
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
 	if hash := types.CalcUncleHash(block.Uncles()); hash != block.UncleHash() {
 		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", block.UncleHash())
@@ -418,23 +446,57 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 }
 
 func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawBody) error {
-	writer := bytes.NewBuffer(nil)
-	err := body.EncodeRLP(writer)
-	if err != nil {
-		return err
-	}
-	rlpBytes := common.CopyBytes(writer.Bytes())
-	writer.Reset()
-	writer.WriteString(hexutil.Encode(rlpBytes))
+	if !bd.UsingExternalTx {
+		// use the kv store to hold onto bodies as we're anticipating a lot of memory usage
+		writer := bytes.NewBuffer(nil)
+		err := body.EncodeRLP(writer)
+		if err != nil {
+			return err
+		}
+		rlpBytes := common.CopyBytes(writer.Bytes())
+		writer.Reset()
+		writer.WriteString(hexutil.Encode(rlpBytes))
 
-	k := dbutils.EncodeBlockNumber(key)
-	err = tx.Put("BodiesStage", k, writer.Bytes())
-	if err != nil {
-		return err
+		k := dbutils.EncodeBlockNumber(key)
+		err = tx.Put("BodiesStage", k, writer.Bytes())
+		if err != nil {
+			return err
+		}
+	} else {
+		// use an in memory cache as we're near the top of the chain
+		bd.bodyCache[key] = body
 	}
 
 	bd.bodiesAdded = true
 	return nil
+}
+
+func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
+	if !bd.UsingExternalTx {
+		key := dbutils.EncodeBlockNumber(blockNum)
+		body, err := tx.GetOne("BodiesStage", key)
+		if err != nil {
+			return nil, err
+		}
+
+		var rawBody types.RawBody
+		fromHex := common.CopyBytes(common.FromHex(string(body)))
+		bodyReader := bytes.NewReader(fromHex)
+		stream := rlp.NewStream(bodyReader, 0)
+		err = rawBody.DecodeRLP(stream)
+		if err != nil {
+			log.Error("Unexpected body from bucket", "err", err, "block", blockNum)
+			return nil, fmt.Errorf("%w, nextBlock=%d", err, blockNum)
+		}
+
+		return &rawBody, nil
+	} else {
+		return bd.bodyCache[blockNum], nil
+	}
+}
+
+func (bd *BodyDownload) ClearBodyCache() {
+	bd.bodyCache = make(map[uint64]*types.RawBody)
 }
 
 func (bd *BodyDownload) HasAddedBodies() bool {

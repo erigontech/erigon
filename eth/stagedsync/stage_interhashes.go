@@ -54,7 +54,7 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, quiet bool) (common.Hash, error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -92,7 +92,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		headerHash = syncHeadHeader.Hash()
 	}
 	logPrefix := s.LogPrefix()
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	var root common.Hash

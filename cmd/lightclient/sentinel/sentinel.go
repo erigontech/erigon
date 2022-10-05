@@ -19,12 +19,17 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/pkg/errors"
@@ -35,8 +40,12 @@ type Sentinel struct {
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
 	host     host.Host
-	cfg      SentinelConfig
+	cfg      *SentinelConfig
 	peers    *peers.Peers
+
+	pubsub *pubsub.PubSub
+
+	subManager *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -108,16 +117,39 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
+	// Start stream handlers
+	handlers.NewConsensusHandlers(s.host, s.peers).Start()
+
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
-
 	return net, err
 }
 
+func (s *Sentinel) pubsubOptions() []pubsub.Option {
+	pubsubQueueSize := 600
+	gsp := pubsub.DefaultGossipSubParams()
+	psOpts := []pubsub.Option{
+		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
+			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+		}),
+		pubsub.WithNoAuthor(),
+		pubsub.WithSubscriptionFilter(nil),
+		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
+		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
+		pubsub.WithValidateQueueSize(pubsubQueueSize),
+		pubsub.WithGossipSubParams(gsp),
+	}
+	return psOpts
+}
+
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
+func New(
+	ctx context.Context,
+	cfg *SentinelConfig,
+) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
@@ -136,24 +168,35 @@ func New(ctx context.Context, cfg SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
+
+	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
+	if err != nil {
+		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
+	}
+
 	return s, nil
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) RecvGossip() <-chan *proto.GossipContext {
+	return s.subManager.Recv()
+}
+
+func (s *Sentinel) Start(
+// potentially we can put the req/resp handler here as well?
+) error {
 	if s.started {
 		log.Warn("Sentinel already running")
 	}
-
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return fmt.Errorf("failed creating sentinel listener err=%s", err)
+		return fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
 	if err := s.connectToBootnodes(); err != nil {
-		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
+		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
 	go s.listenForPeers()
-
+	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 

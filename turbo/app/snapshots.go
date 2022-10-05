@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -123,7 +122,7 @@ var (
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
 		Usage: "Amount of blocks in each segment",
-		Value: snap.Erigon21SegmentSize,
+		Value: snap.Erigon2SegmentSize,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -154,29 +153,27 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	t := time.Now()
-	if err := decompressor.WithReadAhead(func() error {
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
 		g := decompressor.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	log.Info("decompress speed", "took", time.Since(t))
-	t = time.Now()
-	if err := decompressor.WithReadAhead(func() error {
+		log.Info("decompress speed", "took", time.Since(t))
+	}()
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
 		g := decompressor.MakeGetter()
 		for g.HasNext() {
 			_ = g.Skip()
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	log.Info("decompress skip speed", "took", time.Since(t))
+		log.Info("decompress skip speed", "took", time.Since(t))
+	}()
 	return nil
 }
 func doRam(cliCtx *cli.Context) error {
@@ -254,27 +251,24 @@ func doUncompress(cliCtx *cli.Context) error {
 	wr := bufio.NewWriterSize(os.Stdout, 512*1024*1024)
 	defer wr.Flush()
 	var numBuf [binary.MaxVarintLen64]byte
-	if err := decompressor.WithReadAhead(func() error {
-		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 16*etl.BufIOSize)
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-			if _, err := wr.Write(numBuf[:n]); err != nil {
-				return err
-			}
-			if _, err := wr.Write(buf); err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	defer decompressor.EnableReadAhead().DisableReadAhead()
+
+	g := decompressor.MakeGetter()
+	buf := make([]byte, 0, 16*etl.BufIOSize)
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+		if _, err := wr.Write(numBuf[:n]); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		return err
+		if _, err := wr.Write(buf); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
@@ -381,24 +375,25 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	dir.MustExist(dirs.Snap)
-	dir.MustExist(filepath.Join(dirs.Snap, "db")) // this folder will be checked on existance - to understand that snapshots are ready
+	dir.MustExist(dirs.SnapHistory)
 	dir.MustExist(dirs.Tmp)
 
 	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
-		log.Error("Error", "err", err)
-	}
-
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), dirs.Snap)
-	if err := allSnapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, allSnapshots.Files())
-	}); err != nil {
-		return err
+	{
+		if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
+			log.Error("Error", "err", err)
+		}
+		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), dirs.Snap)
+		if err := allSnapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteSnapshots(tx, allSnapshots.Files())
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -412,7 +407,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 		return err
 	}
 
-	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers); err != nil {
 		return err
 	}
 	return nil

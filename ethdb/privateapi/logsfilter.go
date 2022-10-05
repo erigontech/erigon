@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 type LogsFilterAggregator struct {
@@ -16,7 +17,7 @@ type LogsFilterAggregator struct {
 	logsFilters    map[uint64]*LogsFilter // Filter for each subscriber, keyed by filterID
 	logsFilterLock sync.Mutex
 	nextFilterId   uint64
-	events         *Events
+	events         *shards.Events
 }
 
 // LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
@@ -32,7 +33,7 @@ type LogsFilter struct {
 	sender    remote.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
-func NewLogsFilterAggregator(events *Events) *LogsFilterAggregator {
+func NewLogsFilterAggregator(events *shards.Events) *LogsFilterAggregator {
 	return &LogsFilterAggregator{
 		aggLogsFilter: LogsFilter{
 			addrs:  make(map[common.Address]int),

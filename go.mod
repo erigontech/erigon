@@ -3,7 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220926081755-a1fc97d6527c
+	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221004095151-0d6bc2eca418
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.2
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -22,16 +23,16 @@ require (
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
-	github.com/consensys/gnark-crypto v0.4.0
-	github.com/crate-crypto/go-ipa v0.0.0-20220523130400-f11357ae11c7
+	github.com/consensys/gnark-crypto v0.4.1-0.20210426202927-39ac3d4b3f1f
+	github.com/crate-crypto/go-ipa v0.0.0-20220916134416-c5abbdbdf644
 	github.com/davecgh/go-spew v1.1.1
-	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
+	github.com/deckarep/golang-set v1.8.0
+	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
+	github.com/ferranbt/fastssz v0.1.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/gballet/go-verkle v0.0.0-20220722103930-acd34254ebff
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.1
@@ -49,6 +50,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/libp2p/go-libp2p v0.23.2
 	github.com/libp2p/go-libp2p-core v0.20.1
+	github.com/libp2p/go-libp2p-pubsub v0.8.1
 	github.com/multiformats/go-multiaddr v0.7.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -73,7 +75,7 @@ require (
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
 	golang.org/x/exp v0.0.0-20220916125017-b168a2c6b86b
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab
+	golang.org/x/sys v0.0.0-20220919091848-fb04ddd9f9c8
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	google.golang.org/grpc v1.48.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
@@ -102,6 +104,7 @@ require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/ipfs/go-cid v0.3.2 // indirect
+	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/klauspost/compress v1.15.10 // indirect
@@ -128,6 +131,7 @@ require (
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
+	github.com/mitchellh/mapstructure v1.3.2 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.1.0 // indirect
@@ -140,12 +144,14 @@ require (
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
+	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
+	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
@@ -233,7 +239,7 @@ require (
 	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/genproto v0.0.0-20211118181313-81c1377c94b1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/v3 v3.3.0 // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
 	modernc.org/cc/v3 v3.38.1 // indirect

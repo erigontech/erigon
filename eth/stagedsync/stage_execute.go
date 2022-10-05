@@ -8,7 +8,6 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
-	"path"
 	"runtime"
 	"syscall"
 	"time"
@@ -16,11 +15,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
@@ -46,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -78,7 +74,7 @@ type ExecuteBlockCfg struct {
 	hd            *headerdownload.HeaderDownload
 
 	dirs         datadir.Dirs
-	exec22       bool
+	historyV3    bool
 	workersCount int
 	genesis      *core.Genesis
 	agg          *libstate.Aggregator22
@@ -119,7 +115,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		exec22:        exec22,
+		historyV3:     exec22,
 		workersCount:  workersCount,
 		agg:           agg,
 	}
@@ -158,7 +154,7 @@ func executeBlock(
 	vmConfig.Tracer = callTracer
 
 	var receipts types.Receipts
-	var stateSyncReceipt *types.ReceiptForStorage
+	var stateSyncReceipt *types.Receipt
 	var execRs *core.EphemeralExecResult
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	isBor := cfg.chainConfig.Bor != nil
@@ -175,14 +171,14 @@ func executeBlock(
 		return err
 	}
 	receipts = execRs.Receipts
-	stateSyncReceipt = execRs.ReceiptForStorage
+	stateSyncReceipt = execRs.StateSyncReceipt
 
 	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
 
-		if stateSyncReceipt != nil {
+		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
@@ -243,52 +239,26 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		<-sigs
 		cancel()
 	}()
-	ctx = context.Background()
 
 	workersCount := cfg.workersCount
 	//workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
+	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()-1))
 
 	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
 	if initialCycle {
-		var found bool
-		var reconstituteToBlock uint64 // First block which is not covered by the history snapshot files
-		if tx == nil {
-			if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-				found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-				return err
-			}); err != nil {
-				return err
-			}
-		} else {
-			found, reconstituteToBlock, err = rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-		}
-
-		if found && reconstituteToBlock > s.BlockNumber+1 {
-			reconDbPath := path.Join(cfg.dirs.DataDir, "recondb")
-			dir.Recreate(reconDbPath)
-			limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
-			reconDB, err := kv2.NewMDBX(log.New()).Path(reconDbPath).RoTxsLimiter(limiterB).WriteMap().WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).Open()
-			if err != nil {
-				return err
-			}
-
-			if err := Recon22(execCtx, s, cfg.dirs, workersCount, cfg.db, reconDB, cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
-				return err
-			}
-			os.RemoveAll(reconDbPath)
-		}
-	}
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
+		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+
+		if found && reconstituteToBlock > s.BlockNumber+1 {
+			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+				return err
+			}
+		}
 	}
 
 	prevStageProgress, err := senderStageProgress(tx, cfg.db)
@@ -307,24 +277,30 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	if workersCount > 1 {
-		tx.Rollback()
-		tx = nil
-	}
-
 	rs := state.NewState22()
-	if err := Exec3(execCtx, s, workersCount, cfg.db, tx, rs,
+	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
 		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
 		to,
-		cfg.chainConfig, cfg.genesis, initialCycle); err != nil {
+		cfg.chainConfig, cfg.genesis); err != nil {
 		return err
 	}
-	if !useExternalTx && tx != nil {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
+
 	return nil
+}
+
+// reconstituteBlock - First block which is not covered by the history snapshot files
+func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	if tx == nil {
+		if err = db.View(context.Background(), func(tx kv.Tx) error {
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			return err
+		}); err != nil {
+			return
+		}
+	} else {
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	}
+	return
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
@@ -377,8 +353,8 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 // ================ Erigon3 End ================
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	if cfg.exec22 {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
+	if cfg.historyV3 {
 		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
 	}
 
@@ -410,7 +386,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if to <= s.BlockNumber {
 		return nil
 	}
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
@@ -550,7 +526,9 @@ Loop:
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+	}
 	return stoppedErr
 }
 
@@ -632,7 +610,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	if cfg.exec22 {
+	if cfg.historyV3 {
 		return unwindExec3(u, s, tx, ctx, cfg)
 	}
 

@@ -39,6 +39,8 @@ type BodyDownload struct {
 	deliveredCount   float64
 	wastedCount      float64
 	bodiesAdded      bool
+	bodyCache        map[uint64]*types.RawBody
+	UsingExternalTx  bool
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -69,6 +71,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		// deliveris, this is a good number for the channel capacity
 		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
 		Engine:     engine,
+		bodyCache:  make(map[uint64]*types.RawBody),
 	}
 	return bd
 }

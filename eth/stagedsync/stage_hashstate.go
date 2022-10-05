@@ -40,7 +40,7 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state
 	}
 }
 
-func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
+func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -66,7 +66,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
 	}
 
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
@@ -74,7 +74,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx.Done(), quiet); err != nil {
 			return err
 		}
 	}
@@ -494,8 +494,8 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage, codes bool) error {
-	if to > from+16 {
+func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage, codes bool, quiet bool) error {
+	if !quiet && to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "storage", storage)
 	}
 
@@ -616,14 +616,14 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22,
 	}
 	return nil
 }
-func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool) error {
+func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool, quiet bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
 	} else {
 		changeSetBucket = kv.AccountChangeSet
 	}
-	if to > from+16 {
+	if !quiet && to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 	}
 
@@ -822,29 +822,29 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}, quiet bool) error {
 	prom := NewPromoter(tx, cfg.dirs, quit)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, true); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, true, quiet); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, false); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, false, quiet); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, true, false); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, true, false, quiet); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	if err := prom.Promote(logPrefix, from, to, false, true); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, true, quiet); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, false, false); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, false, quiet); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
+	if err := prom.Promote(logPrefix, from, to, true, false, quiet); err != nil {
 		return err
 	}
 	return nil
