@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -50,7 +51,7 @@ type EthBackendServer struct {
 
 	ctx         context.Context
 	eth         EthBackend
-	events      *Events
+	events      *shards.Events
 	db          kv.RoDB
 	blockReader services.BlockAndTxnReader
 	config      *params.ChainConfig
@@ -73,7 +74,7 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remote.PeersReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockAndTxnReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.BlockAndTxnReader,
 	config *params.ChainConfig, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -468,18 +469,6 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
 			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
-		}
-
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		if err != nil {
-			return nil, err
-		}
-
-		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
-		// because otherwise (when FCU points to the head) we want go to stage headers
-		// so that it calls writeForkChoiceHashes.
-		if blockHash != headHash && canonicalHash == blockHash {
-			return &engineapi.PayloadStatus{Status: remote.EngineStatus_VALID, LatestValidHash: blockHash}, nil
 		}
 	}
 

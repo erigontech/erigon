@@ -7,21 +7,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
 	viewID             uint64 // mdbx's txID
-	chainConfig        *params.ChainConfig
 	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
-func NewAccumulator(chainConfig *params.ChainConfig) *Accumulator {
-	return &Accumulator{chainConfig: chainConfig}
+func NewAccumulator() *Accumulator {
+	return &Accumulator{}
 }
 
 type StateChangeConsumer interface {
@@ -35,7 +33,6 @@ func (a *Accumulator) Reset(viewID uint64) {
 	a.storageChangeIndex = nil
 	a.viewID = viewID
 }
-func (a *Accumulator) ChainConfig() *params.ChainConfig { return a.chainConfig }
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, blockGasLimit uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
@@ -160,4 +157,15 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	storageChange := accountChange.StorageChanges[j]
 	storageChange.Location = gointerfaces.ConvertHashToH256(location)
 	storageChange.Data = data
+}
+
+func (a *Accumulator) CopyAndReset(target *Accumulator) {
+	target.changes = a.changes
+	a.changes = nil
+	target.latestChange = a.latestChange
+	a.latestChange = nil
+	target.accountChangeIndex = a.accountChangeIndex
+	a.accountChangeIndex = nil
+	target.storageChangeIndex = a.storageChangeIndex
+	a.storageChangeIndex = nil
 }
