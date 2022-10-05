@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/stretchr/testify/require"
 )
@@ -92,7 +93,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 	hd.SetPOSSync(true)
-	events := NewEvents()
+	events := shards.NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
@@ -151,7 +152,7 @@ func TestMockValidExecution(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 	hd.SetPOSSync(true)
 
-	events := NewEvents()
+	events := shards.NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
@@ -187,7 +188,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 	hd.SetPOSSync(true)
 
-	events := NewEvents()
+	events := shards.NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
 
 	var err error
@@ -222,7 +223,7 @@ func TestNoTTD(t *testing.T) {
 
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 
-	events := NewEvents()
+	events := shards.NewEvents()
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, nil, hd, false)
 
 	var err error

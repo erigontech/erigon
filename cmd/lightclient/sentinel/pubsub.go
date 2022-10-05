@@ -1,8 +1,8 @@
 package sentinel
 
 import (
+	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,148 +48,146 @@ const (
 	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
 
-type subscriptionManager struct {
-	subscribedTopics     map[string]*pubsub.Topic
-	runningSubscriptions map[string]*pubsub.Subscription
-	gossipResults        map[string]chan interface{} // we map each topic with a goroutine where then we handle data.
-	prefix               string
-	mu                   sync.RWMutex
+type GossipTopic struct {
+	Name     TopicName
+	Codec    func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
+	Typ      proto.Packet
+	CodecStr string
 }
 
-func newSubscriptionManager() subscriptionManager {
-	return subscriptionManager{
-		subscribedTopics:     make(map[string]*pubsub.Topic),
-		runningSubscriptions: make(map[string]*pubsub.Subscription),
-		gossipResults:        make(map[string]chan interface{}),
+var BeaconBlockSsz = GossipTopic{
+	Name:     BeaconBlockTopic,
+	Typ:      &p2p.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var LightClientFinalityUpdateSsz = GossipTopic{
+	Name:     LightClientFinalityUpdateTopic,
+	Typ:      &p2p.LightClientFinalityUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var LightClientOptimisticUpdateSsz = GossipTopic{
+	Name:     LightClientOptimisticUpdateTopic,
+	Typ:      &p2p.LightClientOptimisticUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+
+type GossipManager struct {
+	ch            chan *proto.GossipContext
+	handler       func(*proto.GossipContext) error
+	subscriptions map[string]*GossipSubscription
+	mu            sync.RWMutex
+}
+
+// construct a new gossip manager that will handle packets with the given handlerfunc
+func NewGossipManager(
+	ctx context.Context,
+) *GossipManager {
+	g := &GossipManager{
+		ch:            make(chan *proto.GossipContext, 1),
+		subscriptions: map[string]*GossipSubscription{},
 	}
+	return g
 }
 
-func (s *subscriptionManager) addTopicSub(k string, t *pubsub.Topic, sub *pubsub.Subscription) {
+func (s *GossipManager) Recv() <-chan *proto.GossipContext {
+	return s.ch
+}
+
+// closes a specific topic
+func (s *GossipManager) CloseTopic(topic string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.subscribedTopics[k] = t
-	s.runningSubscriptions[k] = sub
+	if val, ok := s.subscriptions[topic]; ok {
+		val.Close()
+		delete(s.subscriptions, topic)
+	}
 }
 
-func (s *subscriptionManager) clearTopicSub(k string, t *pubsub.Topic, sub *pubsub.Subscription) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if val, ok := s.runningSubscriptions[k]; ok {
-		val.Cancel()
+// get a specific topic
+func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val, true
 	}
-	if val, ok := s.subscribedTopics[k]; ok {
-		err := val.Close()
-		if err != nil {
-			return err
-		}
+	return nil, false
+}
+
+// starts listening to a specific topic (forwarding its messages to the gossip manager channel)
+func (s *GossipManager) ListenTopic(topic string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val.Listen()
 	}
-	delete(s.runningSubscriptions, k)
-	delete(s.subscribedTopics, k)
 	return nil
 }
 
-func (s *subscriptionManager) String() string {
+// closes the gossip manager
+func (s *GossipManager) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, val := range s.subscriptions {
+		val.Close()
+	}
+	close(s.ch)
+}
+func (s *GossipManager) String() string {
 	sb := new(strings.Builder)
 	s.mu.RLock()
-	for _, v := range s.subscribedTopics {
-		sb.Write([]byte(v.String()))
+	for _, v := range s.subscriptions {
+		sb.Write([]byte(v.topic.String()))
 		sb.WriteString("=")
-		sb.WriteString(strconv.Itoa(len(v.ListPeers())))
+		sb.WriteString(strconv.Itoa(len(v.topic.ListPeers())))
 		sb.WriteString(" ")
 	}
 	s.mu.RUnlock()
 	return sb.String()
 }
-
-func (s *Sentinel) startGossip(prefix string) (err error) {
-	s.subManager.prefix = prefix
-
-	err = subscribeGossipTopic(s, s.getTopicByName(BeaconBlockTopic), ssz_snappy.NewSubCodec, &p2p.SignedBeaconBlockBellatrix{})
-	if err != nil {
-		return err
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+	sub = &GossipSubscription{
+		gossip_topic: topic,
+		ch:           s.subManager.ch,
+		host:         s.host.ID(),
+		ctx:          s.ctx,
 	}
-	err = subscribeGossipTopic(s, s.getTopicByName(LightClientFinalityUpdateTopic), ssz_snappy.NewSubCodec, &p2p.LightClientFinalityUpdate{})
+	path := s.getTopic(topic)
+	sub.topic, err = s.pubsub.Join(path, opts...)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	err = subscribeGossipTopic(s, s.getTopicByName(LightClientOptimisticUpdateTopic), ssz_snappy.NewSubCodec, &p2p.LightClientOptimisticUpdate{})
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
-			time.Sleep(30 * time.Second)
-		}
-	}()
-	return nil
+	s.subManager.mu.Lock()
+	s.subManager.subscriptions[path] = sub
+	s.subManager.mu.Unlock()
+	return sub, nil
 }
 
-func subscribeGossipTopic[T proto.Packet](
-	s *Sentinel,
-	topic string,
-	newcodec func(*pubsub.Subscription) proto.SubCodec,
-	_ T,
-	opts ...pubsub.TopicOpt,
-) error {
-	topicHandle, err := s.pubsub.Join(topic, opts...)
+func (s *Sentinel) LogTopicPeers() {
+	log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
+}
+
+func (s *Sentinel) getTopic(topic GossipTopic) string {
+	o, err := s.getCurrentForkChoice()
 	if err != nil {
-		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
-	if topicHandle == nil {
-		return fmt.Errorf("failed to get topic handle while subscribing")
-	}
+	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
+}
 
-	subscription, err := topicHandle.Subscribe()
+// TODO: this should check the current block i believe?
+func (s *Sentinel) getCurrentForkChoice() (o [4]byte, err error) {
+	bt := (*[4]byte)(s.cfg.BeaconConfig.BellatrixForkVersion[:4])
+	fd := &p2p.ForkData{
+		CurrentVersion:        *bt,
+		GenesisValidatorsRoot: p2p.Root(s.cfg.GenesisConfig.GenesisValidatorRoot),
+	}
+	root, err := fd.HashTreeRoot()
 	if err != nil {
-		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
+		return [4]byte{}, err
 	}
-	s.subManager.addTopicSub(topic, topicHandle, subscription)
-	s.subManager.gossipResults[topic] = make(chan interface{})
-
-	log.Info("[Gossip] began subscription", "topic", subscription.Topic())
-	var nothing T
-	go runSubscriptionHandler(s, subscription, newcodec, nothing)
-	return nil
-}
-
-// currySubHandler uses a func(ctx *proto.StreamContext, dat proto.Packet) error to handle a *pubsub.Subscription
-// this allows us to write encoding non specific type safe handler without performance overhead
-func runSubscriptionHandler[T proto.Packet](
-	s *Sentinel,
-	sub *pubsub.Subscription,
-	newcodec func(*pubsub.Subscription) proto.SubCodec,
-	_ T,
-) {
-	sd := newcodec(sub)
-	for {
-		var t T
-		val := t.Clone().(T)
-		ctx, err := sd.Decode(s.ctx, val)
-		if err != nil {
-			log.Warn("fail to decode gossip packet", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(t))
-			continue
-		}
-
-		log.Info("[Gossip] received message", "topic", sub.Topic())
-
-		if ctx.Msg.ReceivedFrom == s.host.ID() {
-			continue
-		}
-		s.subManager.gossipResults[sub.Topic()] <- val
-		if err != nil {
-			log.Warn("failed handling gossip ", "err", err, "topic", ctx.Topic, "pkt", reflect.TypeOf(t))
-			continue
-		}
-		log.Info("[Gossip] Received Subscription", "topic", ctx.Topic)
-	}
-}
-
-func (s *Sentinel) getTopicByName(name TopicName) string {
-	return fmt.Sprintf("%s/%s/ssz_snappy", s.subManager.prefix, name)
-}
-
-func (s *Sentinel) GossipChannel(topic TopicName) chan interface{} {
-	return s.subManager.gossipResults[s.getTopicByName(topic)]
+	copy(o[:], root[:4])
+	return
 }

@@ -70,6 +70,9 @@ func TestWaitDeployed(t *testing.T) {
 				},
 				10000000,
 			)
+			if backend.HistoryV3() {
+				t.Skip("HistoryV3 doesn't store receipts")
+			}
 
 			// Create the transaction.
 			// Create the transaction.

@@ -131,7 +131,7 @@ type Ethereum struct {
 
 	downloaderClient proto_downloader.DownloaderClient
 
-	notifications      *stagedsync.Notifications
+	notifications      *shards.Notifications
 	unsubscribeEthstat func()
 
 	waitForStageLoopStop chan struct{}
@@ -257,9 +257,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: shards.NewAccumulator(chainConfig),
+		notifications: &shards.Notifications{
+			Events:      shards.NewEvents(),
+			Accumulator: shards.NewAccumulator(),
 		},
 	}
 	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
@@ -325,8 +325,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, backend.notifications, allSnapshots, backend.agg)
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+		notifications *shards.Notifications) error {
+		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg)
 		if err != nil {
 			return err
 		}
@@ -890,7 +892,7 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.Sync.LoopThrottle)
+	go stages2.StageLoop(s.sentryCtx, s.chainConfig, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.Sync.LoopThrottle)
 
 	return nil
 }
@@ -942,11 +944,15 @@ func (s *Ethereum) ChainDB() kv.RwDB {
 	return s.chainDB
 }
 
+func (s *Ethereum) ChainConfig() *params.ChainConfig {
+	return s.chainConfig
+}
+
 func (s *Ethereum) StagedSync() *stagedsync.Sync {
 	return s.stagedSync
 }
 
-func (s *Ethereum) Notifications() *stagedsync.Notifications {
+func (s *Ethereum) Notifications() *shards.Notifications {
 	return s.notifications
 }
 

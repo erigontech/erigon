@@ -7,8 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 type ChainEventNotifier interface {
@@ -16,12 +14,6 @@ type ChainEventNotifier interface {
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remote.SubscribeLogsReply)
 	HasLogSubsriptions() bool
-}
-
-type Notifications struct {
-	Events               *privateapi.Events
-	Accumulator          *shards.Accumulator
-	StateChangesConsumer shards.StateChangeConsumer
 }
 
 func MiningStages(
