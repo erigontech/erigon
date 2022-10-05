@@ -955,7 +955,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		plainContractCollector.Close()
-		log.Info("saving reconst progress", "blockNum", blockNum)
 		if err := s.Update(tx, blockNum); err != nil {
 			return err
 		}
