@@ -230,10 +230,6 @@ func (rs *State22) AddWork(txTask *TxTask) {
 	rs.receiveWork.Signal()
 }
 
-func (rs *State22) Len() int {
-	return len(rs.queue)
-}
-
 func (rs *State22) Finish() {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
