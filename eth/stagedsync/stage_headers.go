@@ -391,6 +391,8 @@ func startHandlingForkChoice(
 		if err := s.Update(tx, headerNumber); err != nil {
 			return nil, err
 		}
+		// Referesh currentHeadHash
+		currentHeadHash = rawdb.ReadHeadHeaderHash(tx)
 
 		if canonical {
 			return &engineapi.PayloadStatus{

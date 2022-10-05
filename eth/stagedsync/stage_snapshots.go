@@ -85,6 +85,21 @@ func SpawnStageSnapshots(
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
 		return err
 	}
+	var minProgress uint64
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.Senders, stages.TxLookup} {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return err
+		}
+		if minProgress == 0 || progress < minProgress {
+			minProgress = progress
+		}
+	}
+	if minProgress > s.BlockNumber {
+		if err = s.Update(tx, minProgress); err != nil {
+			return err
+		}
+	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -223,7 +238,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			ok, err := sn.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
 				lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-				if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
 					return err
 				}
 				return nil
@@ -488,14 +503,13 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		return nil
 	}
 	ok, err := blockRetire.BackgroundResult.GetAndReset()
-	if !ok {
-		return nil
-	}
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
-	if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
-		return err
+	if ok {
+		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+			return err
+		}
 	}
 
 	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
