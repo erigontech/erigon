@@ -710,3 +710,44 @@ func (ii *InvertedIndex) prune(txFrom, txTo uint64) error {
 	}
 	return nil
 }
+
+func (ii *InvertedIndex) DisableReadAhead() {
+	ii.files.Ascend(func(item *filesItem) bool {
+		item.decompressor.DisableReadAhead()
+		if item.index != nil {
+			item.index.DisableReadAhead()
+		}
+		return true
+	})
+}
+
+func (ii *InvertedIndex) EnableReadAhead() *InvertedIndex {
+	ii.files.Ascend(func(item *filesItem) bool {
+		item.decompressor.EnableReadAhead()
+		if item.index != nil {
+			item.index.EnableReadAhead()
+		}
+		return true
+	})
+	return ii
+}
+func (ii *InvertedIndex) EnableMadvWillNeed() *InvertedIndex {
+	ii.files.Ascend(func(item *filesItem) bool {
+		item.decompressor.EnableWillNeed()
+		if item.index != nil {
+			item.index.EnableWillNeed()
+		}
+		return true
+	})
+	return ii
+}
+func (ii *InvertedIndex) EnableMadvNormalReadAhead() *InvertedIndex {
+	ii.files.Ascend(func(item *filesItem) bool {
+		item.decompressor.EnableMadvNormal()
+		if item.index != nil {
+			item.index.EnableMadvNormal()
+		}
+		return true
+	})
+	return ii
+}

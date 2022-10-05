@@ -354,19 +354,13 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	stateChanges := etl.NewCollector(a.logPrefix, "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer stateChanges.Close()
 
-	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-		if err := stateChanges.Collect(k, v); err != nil {
-			return err
-		}
-		return nil
+	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
+		return stateChanges.Collect(k, v)
 	}); err != nil {
 		return err
 	}
-	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNu uint64, k, v []byte) error {
-		if err := stateChanges.Collect(k, v); err != nil {
-			return err
-		}
-		return nil
+	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
+		return stateChanges.Collect(k, v)
 	}); err != nil {
 		return err
 	}
@@ -798,6 +792,47 @@ func (a *Aggregator22) AddLogAddr(addr []byte) error {
 
 func (a *Aggregator22) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
+}
+
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (a *Aggregator22) DisableReadAhead() {
+	a.accounts.DisableReadAhead()
+	a.storage.DisableReadAhead()
+	a.code.DisableReadAhead()
+	a.logAddrs.DisableReadAhead()
+	a.logTopics.DisableReadAhead()
+	a.tracesFrom.DisableReadAhead()
+	a.tracesTo.DisableReadAhead()
+}
+func (a *Aggregator22) EnableReadAhead() *Aggregator22 {
+	a.accounts.EnableReadAhead()
+	a.storage.EnableReadAhead()
+	a.code.EnableReadAhead()
+	a.logAddrs.EnableReadAhead()
+	a.logTopics.EnableReadAhead()
+	a.tracesFrom.EnableReadAhead()
+	a.tracesTo.EnableReadAhead()
+	return a
+}
+func (a *Aggregator22) EnableMadvWillNeed() *Aggregator22 {
+	a.accounts.EnableMadvWillNeed()
+	a.storage.EnableMadvWillNeed()
+	a.code.EnableMadvWillNeed()
+	a.logAddrs.EnableMadvWillNeed()
+	a.logTopics.EnableMadvWillNeed()
+	a.tracesFrom.EnableMadvWillNeed()
+	a.tracesTo.EnableMadvWillNeed()
+	return a
+}
+func (a *Aggregator22) EnableMadvNormal() *Aggregator22 {
+	a.accounts.EnableMadvNormalReadAhead()
+	a.storage.EnableMadvNormalReadAhead()
+	a.code.EnableMadvNormalReadAhead()
+	a.logAddrs.EnableMadvNormalReadAhead()
+	a.logTopics.EnableMadvNormalReadAhead()
+	a.tracesFrom.EnableMadvNormalReadAhead()
+	a.tracesTo.EnableMadvNormalReadAhead()
+	return a
 }
 
 func (ac *Aggregator22Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {

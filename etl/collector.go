@@ -101,7 +101,7 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
 			c.allFlushed = true
 		} else {
 			doFsync := !c.autoClean /* is critical collector */
-			provider, err = FlushToDisk(sortableBuffer, tmpdir, doFsync, c.logLvl)
+			provider, err = FlushToDisk(logPrefix, sortableBuffer, tmpdir, doFsync, c.logLvl)
 		}
 		if err != nil {
 			return err

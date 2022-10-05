@@ -40,7 +40,7 @@ type fileDataProvider struct {
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDisk(b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
+func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
@@ -69,8 +69,7 @@ func FlushToDisk(b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvid
 		if lvl >= log.LvlInfo {
 			common.ReadMemStats(&m)
 		}
-		log.Log(lvl,
-			"Flushed buffer file",
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix),
 			"name", bufferFile.Name(),
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	}()
