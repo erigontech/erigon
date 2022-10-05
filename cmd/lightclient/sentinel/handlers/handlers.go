@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 
 	"github.com/ledgerwatch/log/v3"
@@ -24,21 +25,23 @@ import (
 )
 
 type ConsensusHandlers struct {
-	handlers map[protocol.ID]network.StreamHandler
-	host     host.Host
-	peers    *peers.Peers
+	handlers   map[protocol.ID]network.StreamHandler
+	host       host.Host
+	peers      *peers.Peers
+	metadataV1 *p2p.MetadataV1
 }
 
-func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers {
+func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *p2p.MetadataV1) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		peers: peers,
-		host:  host,
+		peers:      peers,
+		host:       host,
+		metadataV1: metadataV1,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
 		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
 		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
 		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
+		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataHandlerV1),
 		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}

@@ -17,7 +17,7 @@ import (
 
 func (s *Sentinel) SendPingReqV1() (proto.Packet, error) {
 	requestPacket := &p2p.Ping{
-		Id: uint64(1),
+		Id: s.metadataV1.SeqNumber,
 	}
 	responsePacket := &p2p.Ping{}
 	return sendRequest(s, requestPacket, responsePacket, handlers.PingProtocolV1)

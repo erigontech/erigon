@@ -30,8 +30,16 @@ func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
 	return nil
 }
 
-// TODO: respond with proper metadata
-func metadataHandler(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
+func (c *ConsensusHandlers) metadataHandlerV1(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
+	_, err := ctx.Codec.WritePacket(c.metadataV1)
+	if err != nil {
+		return err
+	}
+
+	if err := ctx.Codec.CloseWriter(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
