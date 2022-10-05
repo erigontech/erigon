@@ -9,7 +9,7 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/cmd/devnet/helpers"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
@@ -80,7 +80,6 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 func runNode(ctx *cli.Context) {
 	logger := log.New()
 
-	//handler, err := log.FileHandler(path.Join(models.DataDirParam+fmt.Sprintf("%d", nodeNumber), models.ErigonLogFilePrefix+fmt.Sprintf("%d", nodeNumber)), log.LogfmtFormat(), 1<<27) // 128Mb
 	handler, err := log.FileHandler(models.ErigonLogFilePrefix+fmt.Sprintf("%d", nodeNumber), log.LogfmtFormat(), 1<<27) // 128Mb
 	if err != nil {
 		log.Error("Issue setting up log file handler", "err", err)
@@ -138,7 +137,7 @@ func getEnode() (string, error) {
 		return "", err
 	}
 
-	enode, err := helpers.UniqueIDFromEnode(nodeInfo.Enode)
+	enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
 	if err != nil {
 		return "", err
 	}

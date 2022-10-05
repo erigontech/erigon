@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/helpers"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 )
 
@@ -12,9 +12,9 @@ func main() {
 	var wg sync.WaitGroup
 
 	// remove the old logs from previous runs
-	helpers.DeleteLogs()
+	devnetutils.DeleteLogs()
 
-	defer helpers.ClearDevDB()
+	defer devnetutils.ClearDevDB()
 
 	// start the first erigon node in a go routine
 	node.Start(&wg)
