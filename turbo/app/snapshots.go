@@ -212,10 +212,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	if rebuild {
-		cfg := ethconfig.NewSnapCfg(true, true, false)
-		if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
-			log.Error("Error", "err", err)
-		}
+		panic("not implemented")
+	}
+	cfg := ethconfig.NewSnapCfg(true, true, false)
+	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
+		log.Error("Error", "err", err)
 	}
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
