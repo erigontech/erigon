@@ -46,15 +46,12 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -92,6 +89,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -452,6 +454,28 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, assembleBlockPOS, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
+
+	if config.CL {
+		// Chains supported are Sepolia, Mainnet and Goerli
+		if config.NetworkID == 1 || config.NetworkID == 5 || config.NetworkID == 11155111 {
+			lightclientSrv := lightclient.NewLightclientServerInternal(ethBackendRPC)
+			discoveryCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByEth1ChainId(config.NetworkID)
+			if err != nil {
+				return nil, err
+			}
+			go sentinel.RunSentinelServiceInternally(lightclientSrv, &sentinel.SentinelConfig{
+				IpAddr:         "127.0.0.1",
+				Port:           4000,
+				TCPPort:        4001,
+				DiscoverConfig: *discoveryCfg,
+				GenesisConfig:  genesisCfg,
+				NetworkConfig:  networkCfg,
+				BeaconConfig:   beaconCfg,
+			})
+		} else {
+			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
+		}
+	}
 
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials

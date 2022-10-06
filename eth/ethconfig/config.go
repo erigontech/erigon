@@ -232,6 +232,8 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
+	// ConsenSUS layer
+	CL bool
 
 	// FORK_NEXT_VALUE (see EIP-3675) block override
 	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
