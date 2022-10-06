@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -77,7 +77,6 @@ var LightClientOptimisticUpdateSsz = GossipTopic{
 
 type GossipManager struct {
 	ch            chan *proto.GossipContext
-	handler       func(*proto.GossipContext) error
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
@@ -171,24 +170,9 @@ func (s *Sentinel) LogTopicPeers() {
 }
 
 func (s *Sentinel) getTopic(topic GossipTopic) string {
-	o, err := s.getCurrentForkChoice()
+	o, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
 	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
-}
-
-// TODO: this should check the current block i believe?
-func (s *Sentinel) getCurrentForkChoice() (o [4]byte, err error) {
-	bt := (*[4]byte)(s.cfg.BeaconConfig.BellatrixForkVersion[:4])
-	fd := &p2p.ForkData{
-		CurrentVersion:        *bt,
-		GenesisValidatorsRoot: p2p.Root(s.cfg.GenesisConfig.GenesisValidatorRoot),
-	}
-	root, err := fd.HashTreeRoot()
-	if err != nil {
-		return [4]byte{}, err
-	}
-	copy(o[:], root[:4])
-	return
 }

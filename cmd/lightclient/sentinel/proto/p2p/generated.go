@@ -20,22 +20,6 @@ type Signature [96]byte
 
 type Slot uint64
 
-type BeaconBlockHeader struct {
-	Slot Slot `json:"slot" `
-
-	ProposerIndex uint64 `json:"proposer_index" `
-
-	ParentRoot Root `ssz-size:"32" json:"parent_root" `
-
-	StateRoot Root `json:"state_root" ssz-size:"32" `
-
-	BodyRoot Root `json:"body_root" ssz-size:"32" `
-}
-
-func (typ *BeaconBlockHeader) Clone() proto.Packet {
-	return &BeaconBlockHeader{}
-}
-
 type Checkpoint struct {
 	Epoch uint64 `json:"epoch" `
 
@@ -61,7 +45,7 @@ func (typ *ENRForkID) Clone() proto.Packet {
 type ForkData struct {
 	CurrentVersion [4]byte `json:"current_version" ssz-size:"4" `
 
-	GenesisValidatorsRoot Root `json:"genesis_validators_root" ssz-size:"32" `
+	GenesisValidatorsRoot Root `ssz-size:"32" json:"genesis_validators_root" `
 }
 
 func (typ *ForkData) Clone() proto.Packet {
@@ -76,30 +60,10 @@ func (typ *Goodbye) Clone() proto.Packet {
 	return &Goodbye{}
 }
 
-type MetaDataV1 struct {
-	SeqNumber uint64 `json:"seq_number,omitempty" `
-
-	Attnets Bitvector64 `json:"attnets,omitempty" ssz-size:"8" `
-
-	Syncnets Bitvector64 `json:"syncnets,omitempty" ssz-size:"1" `
-}
-
-func (typ *MetaDataV1) Clone() proto.Packet {
-	return &MetaDataV1{}
-}
-
-type MetadataV0 struct {
-	SeqNumber uint64 `json:"seq_number,omitempty" `
-
-	Attnets Bitvector64 `ssz-size:"8" json:"attnets,omitempty" `
-}
-
-func (typ *MetadataV0) Clone() proto.Packet {
-	return &MetadataV0{}
-}
-
 type Ping struct {
 	Id uint64 `json:"id" `
+
+	Syncnets Bitvector64 `json:"syncnets,omitempty" ssz-size:"1" `
 }
 
 func (typ *Ping) Clone() proto.Packet {
@@ -107,7 +71,9 @@ func (typ *Ping) Clone() proto.Packet {
 }
 
 type SingleRoot struct {
-	Root Root `json:"root" ssz-size:"32" `
+	Root Root `ssz-size:"32" json:"root" `
+
+	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
 
 func (typ *SingleRoot) Clone() proto.Packet {

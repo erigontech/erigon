@@ -33,6 +33,18 @@ func DecompressSnappy(data []byte) ([]byte, error) {
 	return decodedData, nil
 }
 
+func CompressSnappy(data []byte) ([]byte, error) {
+	// Decode the snappy
+	lenDecoded, err := snappy.DecodedLen(data)
+	if err != nil {
+		return nil, err
+	}
+	decodedData := make([]byte, lenDecoded)
+
+	snappy.Decode(decodedData, data)
+	return decodedData, nil
+}
+
 func Uint64ToLE(i uint64) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, i)
