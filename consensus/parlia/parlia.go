@@ -498,6 +498,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	var (
 		headers []*types.Header
 		snap    *Snapshot
+		doLog   bool
 	)
 
 	if s, ok := p.recentSnaps.Get(hash); !ok {
@@ -505,6 +506,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	} else {
 		p.snapLock.Lock()
 		defer p.snapLock.Unlock()
+		doLog = true
 	}
 
 	for snap == nil {
@@ -552,9 +554,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 			parents = parents[:len(parents)-1]
 		} else {
-			if number%100_000 == 0 {
+			if doLog && number%100_000 == 0 {
 				// No explicit parents (or no more left), reach out to the database
-				log.Info("[parlia] snapshots restore", "block", number)
+				log.Info("[parlia] snapshots build, gather headers", "block", number)
 			}
 			header = chain.GetHeader(hash, number)
 			if header == nil {
@@ -574,7 +576,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID)
+	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID, doLog)
 	if err != nil {
 		return nil, err
 	}
