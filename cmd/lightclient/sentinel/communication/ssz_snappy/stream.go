@@ -3,6 +3,7 @@ package ssz_snappy
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -12,7 +13,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -25,7 +26,7 @@ type StreamCodec struct {
 
 func NewStreamCodec(
 	s network.Stream,
-) proto.StreamCodec {
+) communication.StreamCodec {
 	return &StreamCodec{
 		s:  s,
 		sr: snappy.NewReader(s),
@@ -55,7 +56,7 @@ func (d *StreamCodec) CloseReader() error {
 
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
-func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
+func (d *StreamCodec) WritePacket(pkt communication.Packet) (n int, err error) {
 	// if its a metadata request we dont write anything
 	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
 		return 0, nil
@@ -63,7 +64,7 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 
 	p, sw, err := encodePacket(pkt, d.s)
 	if err != nil {
-		return 0, fmt.Errorf("Failed to write packet err=%s", err)
+		return 0, fmt.Errorf("failed to write packet err=%s", err)
 	}
 
 	n, err = sw.Write(p)
@@ -99,20 +100,20 @@ func (d *StreamCodec) ReadByte() (b byte, err error) {
 }
 
 // decode into packet p, then return the packet context
-func (d *StreamCodec) Decode(p proto.Packet) (ctx *proto.StreamContext, err error) {
+func (d *StreamCodec) Decode(p communication.Packet) (ctx *communication.StreamContext, err error) {
 	ctx, err = d.readPacket(p)
 	return
 }
 
-func (d *StreamCodec) readPacket(p proto.Packet) (ctx *proto.StreamContext, err error) {
-	c := &proto.StreamContext{
+func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.StreamContext, err error) {
+	c := &communication.StreamContext{
 		Packet:   p,
 		Stream:   d.s,
 		Codec:    d,
 		Protocol: d.s.Protocol(),
 	}
 	if val, ok := p.(ssz.Unmarshaler); ok {
-		ln, _, err := proto.ReadUvarint(d.s)
+		ln, err := readUvarint(d.s)
 		if err != nil {
 			return c, err
 		}
@@ -129,7 +130,7 @@ func (d *StreamCodec) readPacket(p proto.Packet) (ctx *proto.StreamContext, err 
 	return c, nil
 }
 
-func encodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writer, error) {
+func encodePacket(pkt communication.Packet, stream network.Stream) ([]byte, *snappy.Writer, error) {
 	if val, ok := pkt.(ssz.Marshaler); ok {
 		wr := bufio.NewWriter(stream)
 		sw := snappy.NewWriter(wr)
@@ -155,4 +156,26 @@ func encodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writ
 	}
 
 	return nil, nil, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
+}
+
+func readUvarint(r io.Reader) (uint64, error) {
+	var x uint64
+	var s uint
+	bs := [1]byte{}
+	for i := 0; i < 10; i++ {
+		_, err := r.Read(bs[:])
+		if err != nil {
+			return x, err
+		}
+		b := bs[0]
+		if b < 0x80 {
+			if i == 10-1 && b > 1 {
+				return x, errors.New("readUvarint: overflow")
+			}
+			return x | uint64(b)<<s, nil
+		}
+		x |= uint64(b&0x7f) << s
+		s += 7
+	}
+	return x, errors.New("readUvarint: overflow")
 }

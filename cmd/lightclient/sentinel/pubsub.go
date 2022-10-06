@@ -10,8 +10,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -51,8 +51,8 @@ const (
 
 type GossipTopic struct {
 	Name     TopicName
-	Codec    func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
-	Typ      proto.Packet
+	Codec    func(*pubsub.Subscription, *pubsub.Topic) communication.GossipCodec
+	Typ      communication.Packet
 	CodecStr string
 }
 
@@ -76,7 +76,7 @@ var LightClientOptimisticUpdateSsz = GossipTopic{
 }
 
 type GossipManager struct {
-	ch            chan *proto.GossipContext
+	ch            chan *communication.GossipContext
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
@@ -86,13 +86,13 @@ func NewGossipManager(
 	ctx context.Context,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *proto.GossipContext, 1),
+		ch:            make(chan *communication.GossipContext, 1),
 		subscriptions: map[string]*GossipSubscription{},
 	}
 	return g
 }
 
-func (s *GossipManager) Recv() <-chan *proto.GossipContext {
+func (s *GossipManager) Recv() <-chan *communication.GossipContext {
 	return s.ch
 }
 

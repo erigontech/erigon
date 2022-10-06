@@ -3,7 +3,7 @@ package p2p
 //go:generate go run github.com/ferranbt/fastssz/sszgen -path generated.go -exclude-objs Bitvector4,Bitvector64,Bytea,Epoch,Root,Signature,Slot,Ignore
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 )
 
 type Bitvector4 uint8
@@ -26,7 +26,7 @@ type Checkpoint struct {
 	Root Root `json:"root" ssz-size:"32" `
 }
 
-func (typ *Checkpoint) Clone() proto.Packet {
+func (typ *Checkpoint) Clone() communication.Packet {
 	return &Checkpoint{}
 }
 
@@ -38,7 +38,7 @@ type ENRForkID struct {
 	NextForkEpoch Epoch `json:"next_fork_epoch,omitempty" `
 }
 
-func (typ *ENRForkID) Clone() proto.Packet {
+func (typ *ENRForkID) Clone() communication.Packet {
 	return &ENRForkID{}
 }
 
@@ -48,7 +48,7 @@ type ForkData struct {
 	GenesisValidatorsRoot Root `ssz-size:"32" json:"genesis_validators_root" `
 }
 
-func (typ *ForkData) Clone() proto.Packet {
+func (typ *ForkData) Clone() communication.Packet {
 	return &ForkData{}
 }
 
@@ -56,7 +56,7 @@ type Goodbye struct {
 	Reason uint64 `json:"reason" `
 }
 
-func (typ *Goodbye) Clone() proto.Packet {
+func (typ *Goodbye) Clone() communication.Packet {
 	return &Goodbye{}
 }
 
@@ -66,7 +66,7 @@ type Ping struct {
 	Syncnets Bitvector64 `json:"syncnets,omitempty" ssz-size:"1" `
 }
 
-func (typ *Ping) Clone() proto.Packet {
+func (typ *Ping) Clone() communication.Packet {
 	return &Ping{}
 }
 
@@ -76,7 +76,7 @@ type SingleRoot struct {
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
 
-func (typ *SingleRoot) Clone() proto.Packet {
+func (typ *SingleRoot) Clone() communication.Packet {
 	return &SingleRoot{}
 }
 
@@ -92,6 +92,6 @@ type Status struct {
 	HeadSlot Slot `json:"head_slot,omitempty" `
 }
 
-func (typ *Status) Clone() proto.Packet {
+func (typ *Status) Clone() communication.Packet {
 	return &Status{}
 }

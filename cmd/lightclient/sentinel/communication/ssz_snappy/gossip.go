@@ -2,10 +2,9 @@ package ssz_snappy
 
 import (
 	"context"
-	"sync"
 
 	ssz "github.com/ferranbt/fastssz"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -13,13 +12,12 @@ import (
 type GossipCodec struct {
 	sub *pubsub.Subscription
 	top *pubsub.Topic
-	mu  sync.Mutex
 }
 
 func NewGossipCodec(
 	sub *pubsub.Subscription,
 	top *pubsub.Topic,
-) proto.GossipCodec {
+) communication.GossipCodec {
 	return &GossipCodec{
 		sub: sub,
 		top: top,
@@ -27,12 +25,12 @@ func NewGossipCodec(
 }
 
 // decode into packet p, then return the packet context
-func (d *GossipCodec) Decode(ctx context.Context, p proto.Packet) (sctx *proto.GossipContext, err error) {
+func (d *GossipCodec) Decode(ctx context.Context, p communication.Packet) (sctx *communication.GossipContext, err error) {
 	sctx, err = d.readPacket(ctx, p)
 	return
 }
 
-func (d *GossipCodec) WritePacket(ctx context.Context, p proto.Packet) error {
+func (d *GossipCodec) WritePacket(ctx context.Context, p communication.Packet) error {
 	if val, ok := p.(ssz.Marshaler); ok {
 		ans, err := utils.EncodeSSZSnappy(val)
 		if err != nil {
@@ -43,8 +41,8 @@ func (d *GossipCodec) WritePacket(ctx context.Context, p proto.Packet) error {
 	}
 	return nil
 }
-func (d *GossipCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.GossipContext, error) {
-	c := &proto.GossipContext{
+func (d *GossipCodec) readPacket(ctx context.Context, p communication.Packet) (*communication.GossipContext, error) {
+	c := &communication.GossipContext{
 		Packet: p,
 		Codec:  d,
 	}
