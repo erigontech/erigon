@@ -1,23 +1,23 @@
 package lightrpc
 
-import "github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+import "github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 
-func (*SignedBeaconBlockBellatrix) Clone() proto.Packet {
+func (*SignedBeaconBlockBellatrix) Clone() communication.Packet {
 	return &SignedBeaconBlockBellatrix{}
 }
 
-func (*LightClientFinalityUpdate) Clone() proto.Packet {
+func (*LightClientFinalityUpdate) Clone() communication.Packet {
 	return &LightClientFinalityUpdate{}
 }
 
-func (*LightClientOptimisticUpdate) Clone() proto.Packet {
+func (*LightClientOptimisticUpdate) Clone() communication.Packet {
 	return &LightClientOptimisticUpdate{}
 }
 
-func (*MetadataV1) Clone() proto.Packet {
+func (*MetadataV1) Clone() communication.Packet {
 	return &MetadataV1{}
 }
 
-func (*MetadataV2) Clone() proto.Packet {
+func (*MetadataV2) Clone() communication.Packet {
 	return &MetadataV2{}
 }

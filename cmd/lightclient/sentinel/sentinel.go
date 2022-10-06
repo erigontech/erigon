@@ -21,9 +21,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -178,7 +178,7 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) RecvGossip() <-chan *proto.GossipContext {
+func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
 	return s.subManager.Recv()
 }
 

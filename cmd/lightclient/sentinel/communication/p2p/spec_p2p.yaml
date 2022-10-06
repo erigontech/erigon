@@ -48,25 +48,6 @@ structs:
       tags:
         json: root
         ssz-size: 32
-  BeaconBlockHeader:
-    - name: Slot
-      type: Slot
-      tags:
-        json: slot
-    - name: ProposerIndex
-      type: uint64
-      tags:
-        json: proposer_index
-    - name: ParentRoot
-      type: Root
-      tags:
-        json: parent_root
-        ssz-size: 32
-    - name: StateRoot
-      type: Root
-      tags:
-        json: state_root
-        ssz-size: 32
     - name: BodyRoot
       type: Root
       tags:
@@ -92,26 +73,6 @@ structs:
       type: uint64
       tags:
         json: id
-  MetadataV0:
-    - name: SeqNumber
-      type: uint64
-      tags:
-        json: 'seq_number,omitempty'
-    - name: Attnets
-      type: Bitvector64
-      tags:
-        json: 'attnets,omitempty'
-        ssz-size: 8
-  MetaDataV1:
-    - name: SeqNumber
-      type: uint64
-      tags:
-        json: 'seq_number,omitempty'
-    - name: Attnets
-      type: Bitvector64
-      tags:
-        json: 'attnets,omitempty'
-        ssz-size: 8
     - name: Syncnets
       type: Bitvector64
       tags:

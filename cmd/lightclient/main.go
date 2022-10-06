@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -100,7 +100,7 @@ func main() {
 	}
 }
 
-func handleGossipPacket(pkt *proto.GossipContext) error {
+func handleGossipPacket(pkt *communication.GossipContext) error {
 	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
 	fmt.Println(reflect.TypeOf(pkt.Packet))
 	switch u := pkt.Packet.(type) {

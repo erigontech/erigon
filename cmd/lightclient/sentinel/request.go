@@ -7,16 +7,16 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-func (s *Sentinel) SendPingReqV1() (proto.Packet, error) {
+func (s *Sentinel) SendPingReqV1() (communication.Packet, error) {
 	requestPacket := &p2p.Ping{
 		Id: uint64(1),
 	}
@@ -24,7 +24,7 @@ func (s *Sentinel) SendPingReqV1() (proto.Packet, error) {
 	return sendRequest(s, requestPacket, responsePacket, handlers.PingProtocolV1)
 }
 
-func (s *Sentinel) SendMetadataReqV1() (proto.Packet, error) {
+func (s *Sentinel) SendMetadataReqV1() (communication.Packet, error) {
 	requestPacket := &lightrpc.MetadataV1{}
 	responsePacket := &lightrpc.MetadataV1{}
 
@@ -33,7 +33,7 @@ func (s *Sentinel) SendMetadataReqV1() (proto.Packet, error) {
 
 // TODO: add the rest of the request topics
 
-func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.Packet, topic string) (proto.Packet, error) {
+func sendRequest(s *Sentinel, requestPacket communication.Packet, responsePacket communication.Packet, topic string) (communication.Packet, error) {
 	_, peerInfo, err := connectToRandomPeer(s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to a random peer err=%s", err)
@@ -84,7 +84,7 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 	return responsePacket, nil
 }
 
-func writeRequest(s *Sentinel, requestPacket proto.Packet, peerId peer.ID, topic string) (proto.StreamCodec, error) {
+func writeRequest(s *Sentinel, requestPacket communication.Packet, peerId peer.ID, topic string) (communication.StreamCodec, error) {
 	stream, err := s.host.NewStream(s.ctx, peerId, protocol.ID(topic))
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin stream, err=%s", err)
@@ -103,14 +103,14 @@ func writeRequest(s *Sentinel, requestPacket proto.Packet, peerId peer.ID, topic
 	return sc, nil
 }
 
-func decodeResponse(sc proto.StreamCodec, responsePacket proto.Packet, peerId peer.ID) (proto.Packet, error) {
+func decodeResponse(sc communication.StreamCodec, responsePacket communication.Packet, peerId peer.ID) (communication.Packet, error) {
 	code, err := sc.ReadByte()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
 	}
 
 	if code != 0 {
-		errPacket := &proto.ErrorMessage{}
+		errPacket := &communication.ErrorMessage{}
 		protoCtx, err := sc.Decode(errPacket)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode error packet got=%s, err=%s", string(protoCtx.Raw), err)
