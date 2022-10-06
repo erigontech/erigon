@@ -509,7 +509,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
 	fillWorkers := make([]*exec3.FillWorker, workerCount)
-	var doneCount uint64
+	doneCount := atomic2.NewUint64(0)
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
 		if i == workerCount-1 {
@@ -520,11 +520,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			bigCurrent.FillBytes(toKey)
 		}
 		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec3.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	doneCount = 0
+	doneCount.Store(0)
 	accountCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -533,7 +533,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
 	t := time.Now()
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -569,7 +569,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	accountCollectorX.Close()
 	accountCollectorX = nil
-	doneCount = 0
+	doneCount.Store(0)
 	storageCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -578,7 +578,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
 	t = time.Now()
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -614,7 +614,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	storageCollectorX.Close()
 	storageCollectorX = nil
-	doneCount = 0
+	doneCount.Store(0)
 	codeCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -622,7 +622,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		codeCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -858,12 +858,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		plainContractCollectors[i] = etl.NewCollector(fmt.Sprintf("plainContract %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer plainContractCollectors[i].Close()
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -878,12 +878,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillStorage(plainStateCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -898,12 +898,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillCode(codeCollectors[i], plainContractCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)

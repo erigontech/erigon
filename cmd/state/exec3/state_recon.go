@@ -24,11 +24,12 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	atomic2 "go.uber.org/atomic"
 )
 
 type FillWorker struct {
 	txNum          uint64
-	doneCount      *uint64
+	doneCount      *atomic2.Uint64
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
@@ -37,7 +38,7 @@ type FillWorker struct {
 	progress       uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic2.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
@@ -59,7 +60,7 @@ func (fw *FillWorker) Progress() uint64 {
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -110,7 +111,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -134,7 +135,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -170,7 +171,7 @@ func (fw *FillWorker) ResetProgress() {
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -188,7 +189,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -206,7 +207,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
