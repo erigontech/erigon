@@ -10,17 +10,12 @@ import (
 // These below are the handlers for heartbeat functions
 
 func (c *ConsensusHandlers) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) error {
-	// we disconnect the peer no matter if we answer back or not
-	defer c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
+	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
 	}
-
-	if err := ctx.Codec.CloseWriter(); err != nil {
-		return err
-	}
-
+	c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	return nil
 }
 
@@ -32,11 +27,6 @@ func pingHandler(ctx *proto.StreamContext, dat *p2p.Ping) error {
 	if err != nil {
 		return err
 	}
-
-	if err := ctx.Codec.CloseWriter(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -61,10 +51,5 @@ func statusHandler(ctx *proto.StreamContext, dat *p2p.Status) error {
 		"head slot", dat.HeadSlot,
 		"fork digest", utils.BytesToHex(dat.ForkDigest),
 	)
-
-	if err := ctx.Codec.CloseWriter(); err != nil {
-		return err
-	}
-
 	return nil
 }
