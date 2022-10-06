@@ -8,8 +8,8 @@ import (
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -54,7 +54,7 @@ func (d *StreamCodec) CloseReader() error {
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 	// if its a metadata request we dont write anything
-	if reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&p2p.MetadataV2{}) {
+	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
 		return 0, nil
 	}
 

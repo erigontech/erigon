@@ -28,17 +28,15 @@ func (c *StreamContext) String() string {
 	return fmt.Sprintf("peer %s | packet %s | len %d", c.Stream.ID(), c.Protocol, c.Packet)
 }
 
-type SubContext struct {
+type GossipContext struct {
 	// the packet
 	Packet Packet
 	// the topic of the message
-	Topic string
+	Topic *pubsub.Topic
 	// the actual message
 	Msg *pubsub.Message
-
 	// the codec used to decode the message
-	Codec SubCodec
-
+	Codec GossipCodec
 	// the decompressed message in the native encoding of msg
 	Raw []byte
 }
@@ -57,12 +55,14 @@ type StreamCodec interface {
 	ReadByte() (b byte, err error)
 }
 
-// SubCodec describes a wire format for pubsub messages
-type SubCodec interface {
-	Decode(context.Context, Packet) (*SubContext, error)
+// GossipCodec describes a wire format for pubsub messages
+// it is linked to a single topiC
+type GossipCodec interface {
+	WritePacket(ctx context.Context, pck Packet) (err error)
+	Decode(context.Context, Packet) (*GossipContext, error)
 }
 
-func (c *SubContext) String() string {
+func (c *GossipContext) String() string {
 	return fmt.Sprintf("peer %s | topic %s | len %d", c.Msg.ReceivedFrom, c.Topic, c.Packet)
 }
 

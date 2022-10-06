@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
@@ -24,8 +25,8 @@ func (s *Sentinel) SendPingReqV1() (proto.Packet, error) {
 }
 
 func (s *Sentinel) SendMetadataReqV1() (proto.Packet, error) {
-	requestPacket := &p2p.MetadataV1{}
-	responsePacket := &p2p.MetadataV1{}
+	requestPacket := &lightrpc.MetadataV1{}
+	responsePacket := &lightrpc.MetadataV1{}
 
 	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
 }
@@ -53,7 +54,7 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 			log.Warn("[Req] sentinel has been shut down")
 			return nil, nil
 		case <-reqRetryTimer.C:
-			log.Warn("[Req] timeout", "topic", topic, "peer", peerId)
+			log.Debug("[Req] timeout", "topic", topic, "peer", peerId)
 			return nil, err
 		case <-retryTicker.C:
 			sc, err = writeRequest(s, requestPacket, peerId, topic)
@@ -61,7 +62,7 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 	}
 
 	defer sc.Close()
-	log.Info("[Req] sent request", "topic", topic, "peer", peerId)
+	log.Debug("[Req] sent request", "topic", topic, "peer", peerId)
 
 	respRetryTimer := time.NewTimer(clparams.RespTimeout)
 	defer respRetryTimer.Stop()
@@ -73,7 +74,7 @@ func sendRequest(s *Sentinel, requestPacket proto.Packet, responsePacket proto.P
 			log.Warn("[Resp] sentinel has been shutdown")
 			return nil, nil
 		case <-respRetryTimer.C:
-			log.Warn("[Resp] timeout", "topic", topic, "peer", peerId)
+			log.Debug("[Resp] timeout", "topic", topic, "peer", peerId)
 			return nil, err
 		case <-retryTicker.C:
 			responsePacket, err = decodeResponse(sc, responsePacket, peerId)
@@ -114,7 +115,7 @@ func decodeResponse(sc proto.StreamCodec, responsePacket proto.Packet, peerId pe
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode error packet got=%s, err=%s", string(protoCtx.Raw), err)
 		}
-		log.Info("[Resp] got error packet", "error-message", string(errPacket.Message), "peer", peerId)
+		log.Debug("[Resp] got error packet", "error-message", string(errPacket.Message), "peer", peerId)
 		return errPacket, nil
 	}
 

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var (
@@ -65,7 +66,7 @@ func createLog() *remote.SubscribeLogsReply {
 }
 
 func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
-	events := NewEvents()
+	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
 	srv := &testServer{
@@ -103,7 +104,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 }
 
 func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *testing.T) {
-	events := NewEvents()
+	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
 	srv := &testServer{
@@ -155,7 +156,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 }
 
 func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
-	events := NewEvents()
+	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
 	srv := &testServer{
@@ -200,7 +201,7 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 }
 
 func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
-	events := NewEvents()
+	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
 	srv := &testServer{

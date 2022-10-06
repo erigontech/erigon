@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -110,7 +111,7 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withBatchSize(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
+	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {

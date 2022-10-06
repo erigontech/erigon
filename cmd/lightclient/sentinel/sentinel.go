@@ -20,8 +20,10 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -44,7 +46,7 @@ type Sentinel struct {
 
 	pubsub *pubsub.PubSub
 
-	subManager subscriptionManager
+	subManager *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -145,11 +147,13 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
+func New(
+	ctx context.Context,
+	cfg *SentinelConfig,
+) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:        ctx,
-		cfg:        cfg,
-		subManager: newSubscriptionManager(),
+		ctx: ctx,
+		cfg: cfg,
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -174,11 +178,16 @@ func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	return s, nil
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) RecvGossip() <-chan *proto.GossipContext {
+	return s.subManager.Recv()
+}
+
+func (s *Sentinel) Start(
+// potentially we can put the req/resp handler here as well?
+) error {
 	if s.started {
 		log.Warn("Sentinel already running")
 	}
-
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
@@ -188,14 +197,7 @@ func (s *Sentinel) Start() error {
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
 	go s.listenForPeers()
-
-	//TODO: request and compute
-	prefix := "/eth2/4a26c58b"
-
-	if err := s.startGossip(prefix); err != nil {
-		return fmt.Errorf("failed to start gossip err=%w", err)
-	}
-
+	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 
@@ -209,4 +211,92 @@ func (s *Sentinel) HasTooManyPeers() bool {
 
 func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
+}
+
+func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) {
+	ctx := context.Background()
+	sent, err := New(context.Background(), cfg)
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
+	if err := sent.Start(); err != nil {
+		log.Error("failed to start sentinel", "err", err)
+		return
+	}
+	gossip_topics := []GossipTopic{
+		BeaconBlockSsz,
+		LightClientFinalityUpdateSsz,
+		LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+	log.Info("Sentinel started", "enr", sent.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt := <-sent.RecvGossip():
+			switch u := pkt.Packet.(type) {
+			case *lightrpc.SignedBeaconBlockBellatrix:
+				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+}
+
+func RunSentinelServiceInternally(client lightrpc.LightclientServer, cfg *SentinelConfig) {
+	ctx := context.Background()
+	sent, err := New(context.Background(), cfg)
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
+	if err := sent.Start(); err != nil {
+		log.Error("failed to start sentinel", "err", err)
+		return
+	}
+	gossip_topics := []GossipTopic{
+		BeaconBlockSsz,
+		LightClientFinalityUpdateSsz,
+		LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+	log.Info("Sentinel started", "enr", sent.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt := <-sent.RecvGossip():
+			switch u := pkt.Packet.(type) {
+			case *lightrpc.SignedBeaconBlockBellatrix:
+				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
 }

@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221004095151-0d6bc2eca418
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221006052028-22049904649b
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20220913092204-de54ee30c7b9
 	github.com/ledgerwatch/log/v3 v3.4.2
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -53,6 +53,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.8.1
 	github.com/multiformats/go-multiaddr v0.7.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
+	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pion/stun v0.3.5
@@ -72,7 +73,7 @@ require (
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
-	golang.org/x/exp v0.0.0-20220916125017-b168a2c6b86b
+	golang.org/x/exp v0.0.0-20220921164117-439092de6870
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 	golang.org/x/sys v0.0.0-20220919091848-fb04ddd9f9c8
 	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
@@ -144,7 +145,6 @@ require (
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
