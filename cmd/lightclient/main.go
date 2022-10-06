@@ -35,19 +35,14 @@ var (
 
 func main() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	discCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	if err != nil {
-		log.Error("error", "err", err)
-		return
-	}
+	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
-		IpAddr:         defaultIpAddr,
-		Port:           defaultPort,
-		TCPPort:        defaultTcpPort,
-		DiscoverConfig: *discCfg,
-		GenesisConfig:  genesisCfg,
-		NetworkConfig:  networkCfg,
-		BeaconConfig:   beaconCfg,
+		IpAddr:        defaultIpAddr,
+		Port:          defaultPort,
+		TCPPort:       defaultTcpPort,
+		GenesisConfig: genesisCfg,
+		NetworkConfig: networkCfg,
+		BeaconConfig:  beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)

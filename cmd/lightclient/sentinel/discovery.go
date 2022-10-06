@@ -92,15 +92,15 @@ func (s *Sentinel) listenForPeers() {
 }
 
 func (s *Sentinel) connectToBootnodes() error {
-	for i := range s.cfg.DiscoverConfig.Bootnodes {
-		if err := s.cfg.DiscoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
+	for i := range s.discoverConfig.Bootnodes {
+		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
 				log.Error("Could not retrieve tcp port")
 			}
 			continue
 		}
 	}
-	multiAddresses := convertToMultiAddr(s.cfg.DiscoverConfig.Bootnodes)
+	multiAddresses := convertToMultiAddr(s.discoverConfig.Bootnodes)
 	s.connectWithAllPeers(multiAddresses)
 	return nil
 }
