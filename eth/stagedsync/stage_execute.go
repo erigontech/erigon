@@ -92,7 +92,7 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 
-	exec22 bool,
+	historyV3 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
@@ -115,7 +115,7 @@ func StageExecuteBlocksCfg(
 		blockReader:   blockReader,
 		hd:            hd,
 		genesis:       genesis,
-		historyV3:     exec22,
+		historyV3:     historyV3,
 		workersCount:  workersCount,
 		agg:           agg,
 	}
@@ -247,15 +247,15 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()-1))
 
-	allSnapshots := cfg.blockReader.(WithSnapshots).Snapshots()
-	if initialCycle {
+	if initialCycle && s.BlockNumber == 0 {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
 		if err != nil {
 			return err
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
-			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+			log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "from", s.BlockNumber, "to", reconstituteToBlock)
+			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 		}
@@ -279,7 +279,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	rs := state.NewState22()
 	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
-		cfg.blockReader, allSnapshots, log.New(), cfg.agg, cfg.engine,
+		cfg.blockReader, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis); err != nil {
 		return err

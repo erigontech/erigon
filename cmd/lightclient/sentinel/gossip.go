@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -17,10 +17,10 @@ import (
 type GossipSubscription struct {
 	gossip_topic GossipTopic
 	host         peer.ID
-	ch           chan *proto.GossipContext
+	ch           chan *communication.GossipContext
 	ctx          context.Context
 
-	p     proto.GossipCodec
+	p     communication.GossipCodec
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
 

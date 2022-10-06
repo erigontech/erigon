@@ -80,7 +80,7 @@ func (p *Peers) Penalize(pid peer.ID) {
 func (p *Peers) banBadPeer(pid peer.ID) {
 	p.DisconnectPeer(pid)
 	p.badPeers.Add(pid, []byte{0})
-	log.Warn("[Peers] bad peers has been banned", "peer-id", pid)
+	log.Debug("[Peers] bad peers has been banned", "peer-id", pid)
 }
 
 func (p *Peers) DisconnectPeer(pid peer.ID) {

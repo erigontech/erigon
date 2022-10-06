@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -50,33 +51,32 @@ const (
 
 type GossipTopic struct {
 	Name     TopicName
-	Codec    func(*pubsub.Subscription, *pubsub.Topic) proto.GossipCodec
-	Typ      proto.Packet
+	Codec    func(*pubsub.Subscription, *pubsub.Topic) communication.GossipCodec
+	Typ      communication.Packet
 	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
-	Typ:      &p2p.SignedBeaconBlockBellatrix{},
+	Typ:      &lightrpc.SignedBeaconBlockBellatrix{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientFinalityUpdateSsz = GossipTopic{
 	Name:     LightClientFinalityUpdateTopic,
-	Typ:      &p2p.LightClientFinalityUpdate{},
+	Typ:      &lightrpc.LightClientFinalityUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientOptimisticUpdateSsz = GossipTopic{
 	Name:     LightClientOptimisticUpdateTopic,
-	Typ:      &p2p.LightClientOptimisticUpdate{},
+	Typ:      &lightrpc.LightClientOptimisticUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 
 type GossipManager struct {
-	ch            chan *proto.GossipContext
-	handler       func(*proto.GossipContext) error
+	ch            chan *communication.GossipContext
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
@@ -86,13 +86,13 @@ func NewGossipManager(
 	ctx context.Context,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *proto.GossipContext, 1),
+		ch:            make(chan *communication.GossipContext, 1),
 		subscriptions: map[string]*GossipSubscription{},
 	}
 	return g
 }
 
-func (s *GossipManager) Recv() <-chan *proto.GossipContext {
+func (s *GossipManager) Recv() <-chan *communication.GossipContext {
 	return s.ch
 }
 
@@ -170,24 +170,9 @@ func (s *Sentinel) LogTopicPeers() {
 }
 
 func (s *Sentinel) getTopic(topic GossipTopic) string {
-	o, err := s.getCurrentForkChoice()
+	o, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
 	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
-}
-
-// TODO: this should check the current block i believe?
-func (s *Sentinel) getCurrentForkChoice() (o [4]byte, err error) {
-	bt := (*[4]byte)(s.cfg.BeaconConfig.BellatrixForkVersion[:4])
-	fd := &p2p.ForkData{
-		CurrentVersion:        *bt,
-		GenesisValidatorsRoot: p2p.Root(s.cfg.GenesisConfig.GenesisValidatorRoot),
-	}
-	root, err := fd.HashTreeRoot()
-	if err != nil {
-		return [4]byte{}, err
-	}
-	copy(o[:], root[:4])
-	return
 }

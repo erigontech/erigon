@@ -16,12 +16,14 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -43,9 +45,9 @@ func main() {
 		Port:           defaultPort,
 		TCPPort:        defaultTcpPort,
 		DiscoverConfig: *discCfg,
-		GenesisConfig:  &genesisCfg,
-		NetworkConfig:  &networkCfg,
-		BeaconConfig:   &beaconCfg,
+		GenesisConfig:  genesisCfg,
+		NetworkConfig:  networkCfg,
+		BeaconConfig:   beaconCfg,
 	})
 	if err != nil {
 		log.Error("error", "err", err)
@@ -76,7 +78,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(1 * time.Second)
+	sendReqInterval := time.NewTicker(100 * time.Millisecond)
 
 	for {
 		select {
@@ -86,35 +88,38 @@ func main() {
 		case pkt := <-sent.RecvGossip():
 			handleGossipPacket(pkt)
 		case <-sendReqInterval.C:
-			if _, err := sent.SendPingReqV1(); err != nil {
-				log.Warn("failed to send ping request", "err", err)
-			}
-			if _, err := sent.SendMetadataReqV1(); err != nil {
-				log.Warn("failed to send metadata request", "err", err)
-			}
+			go func() {
+				if _, err := sent.SendPingReqV1(); err != nil {
+					log.Debug("failed to send ping request", "err", err)
+				}
+				if _, err := sent.SendMetadataReqV1(); err != nil {
+					log.Debug("failed to send metadata request", "err", err)
+				}
+			}()
 		}
 	}
 }
 
-func handleGossipPacket(pkt *proto.GossipContext) error {
+func handleGossipPacket(pkt *communication.GossipContext) error {
 	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
+	fmt.Println(reflect.TypeOf(pkt.Packet))
 	switch u := pkt.Packet.(type) {
-	case *p2p.SignedBeaconBlockBellatrix:
+	case *lightrpc.SignedBeaconBlockBellatrix:
 		log.Info("[Gossip] beacon_block",
 			"Slot", u.Block.Slot,
-			"Signature", hex.EncodeToString(u.Signature[:]),
-			"graffiti", string(u.Block.Body.Graffiti[:]),
-			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
-			"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
-			"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+			"Signature", hex.EncodeToString(u.Signature),
+			"graffiti", string(u.Block.Body.Graffiti),
+			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash),
+			"stateRoot", hex.EncodeToString(u.Block.StateRoot),
+			"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
 			"proposerIdx", u.Block.ProposerIndex,
 		)
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
-	case *p2p.LightClientFinalityUpdate:
-	case *p2p.LightClientOptimisticUpdate:
+	case *lightrpc.LightClientFinalityUpdate:
+	case *lightrpc.LightClientOptimisticUpdate:
 	default:
 	}
 	return nil
