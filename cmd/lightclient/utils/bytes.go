@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 
+	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 )
 
@@ -61,4 +62,28 @@ func BytesSliceToBytes32Slice(b [][]byte) (ret [][32]byte) {
 		ret = append(ret, BytesToBytes32(str))
 	}
 	return
+}
+
+func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
+	enc := make([]byte, data.SizeSSZ())
+	enc, err := data.MarshalSSZTo(enc[:0])
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(make([]byte, data.SizeSSZ()), enc), nil
+}
+
+func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
+
+	dec, err := snappy.Decode(nil, src)
+	if err != nil {
+		return err
+	}
+
+	err = dst.UnmarshalSSZ(dec)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

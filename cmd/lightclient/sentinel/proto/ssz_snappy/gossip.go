@@ -2,12 +2,11 @@ package ssz_snappy
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	ssz "github.com/ferranbt/fastssz"
-	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -35,15 +34,11 @@ func (d *GossipCodec) Decode(ctx context.Context, p proto.Packet) (sctx *proto.G
 
 func (d *GossipCodec) WritePacket(ctx context.Context, p proto.Packet) error {
 	if val, ok := p.(ssz.Marshaler); ok {
-		bts := bp.Get(val.SizeSSZ())
-		defer bp.Put(bts)
-		enc, err := val.MarshalSSZTo(bts[:0])
+		ans, err := utils.EncodeSSZSnappy(val)
 		if err != nil {
 			return err
 		}
-		cmp := bp.Get(val.SizeSSZ())
-		defer bp.Put(cmp)
-		ans := snappy.Encode(cmp, enc)
+
 		return d.top.Publish(ctx, ans)
 	}
 	return nil
@@ -56,21 +51,18 @@ func (d *GossipCodec) readPacket(ctx context.Context, p proto.Packet) (*proto.Go
 	// read the next message
 	msg, err := d.sub.Next(ctx)
 	if err != nil {
-		return c, err
+		return nil, err
 	}
 	c.Topic = d.top
 	c.Msg = msg
-	if p != nil {
+	if p == nil {
+		return c, nil
+	}
+
+	if val, ok := p.(ssz.Unmarshaler); ok {
 		//TODO: we can use a bufpool here and improve performance? we can possibly pick up used packet write buffers. (or get them from other running components)
-		c.Raw, err = snappy.Decode(nil, msg.Data)
-		if err != nil {
-			return c, fmt.Errorf("readPacket: %w", err)
-		}
-		if val, ok := p.(ssz.Unmarshaler); ok {
-			err = val.UnmarshalSSZ(c.Raw)
-			if err != nil {
-				return c, fmt.Errorf("unmarshalPacket: %w", err)
-			}
+		if err := utils.DecodeSSZSnappy(val, msg.Data); err != nil {
+			return nil, err
 		}
 	}
 	return c, nil
