@@ -1,6 +1,8 @@
 package ssz_snappy
 
 import (
+	"bufio"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"reflect"
@@ -8,6 +10,7 @@ import (
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -58,7 +61,7 @@ func (d *StreamCodec) WritePacket(pkt proto.Packet) (n int, err error) {
 		return 0, nil
 	}
 
-	p, sw, err := EncodePacket(pkt, d.s)
+	p, sw, err := encodePacket(pkt, d.s)
 	if err != nil {
 		return 0, fmt.Errorf("Failed to write packet err=%s", err)
 	}
@@ -124,4 +127,32 @@ func (d *StreamCodec) readPacket(p proto.Packet) (ctx *proto.StreamContext, err 
 		}
 	}
 	return c, nil
+}
+
+func encodePacket(pkt proto.Packet, stream network.Stream) ([]byte, *snappy.Writer, error) {
+	if val, ok := pkt.(ssz.Marshaler); ok {
+		wr := bufio.NewWriter(stream)
+		sw := snappy.NewWriter(wr)
+		p := make([]byte, 10)
+
+		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
+
+		enc, err := val.MarshalSSZ()
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal ssz: %w", err)
+		}
+
+		if len(enc) > int(clparams.MaxChunkSize) {
+			return nil, nil, fmt.Errorf("chunk size too big")
+		}
+
+		_, err = wr.Write(p[:vin])
+		if err != nil {
+			return nil, nil, fmt.Errorf("write varint: %w", err)
+		}
+
+		return enc, sw, nil
+	}
+
+	return nil, nil, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
 }
