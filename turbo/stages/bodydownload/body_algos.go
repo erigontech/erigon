@@ -3,7 +3,6 @@ package bodydownload
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math/big"
 
@@ -70,111 +69,109 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator, logPrefix string) (*BodyRequest, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]common.Hash, 0, BlockBufferSize)
-	timedOutPeers := false
 
-	// go right back to the start of the earliest request that it still outstanding here so that we can
-	// check for timeouts, as requests are delivered from peers bd.requestedLow will be incremented so this loop will move forwards over time.
-	// If a request has timed out we nil out the request and add it back in to the next request going to a peer.
-	// not all requests will have contiguous block numbers because of this
-	for bNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bNum <= bd.maxProgress; bNum++ {
-		// Check if we reached highest allowed request block number, and turn back
-		if bNum >= bd.requestedLow+bd.outstandingLimit || bNum >= bd.maxProgress {
+	if blockNum < bd.requestedLow {
+		blockNum = bd.requestedLow
+	}
+
+	for ; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
+		// Check if we reached the highest allowed request block number, and turn back
+		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
+			blockNum = 0
 			break // Avoid tight loop
 		}
-		if bd.delivered.Contains(bNum) {
+		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
 		}
 
-		// check if we already have a request and check if it has timed out
-		req := bd.requests[bNum]
+		req := bd.requests[blockNum]
 		if req != nil {
 			if currentTime < req.waitUntil {
 				continue
 			}
-			timedOutPeers = true
 			bd.peerMap[req.peerID]++
-			bd.requests[bNum] = nil
+			bd.requests[blockNum] = nil
 		}
 
 		// check in the bucket if that has been received either in this run or a previous one.
 		// if we already have the body we can continue on to populate header info and then skip
 		// the body request altogether
 		var err error
-		key := dbutils.EncodeBlockNumber(bNum)
+		key := dbutils.EncodeBlockNumber(blockNum)
 		var bodyInBucket bool
 		if !bd.UsingExternalTx {
 			bodyInBucket, err = tx.Has("BodiesStage", key)
 			if err != nil {
-				return nil, err
+				return nil, blockNum, err
 			}
 		} else {
-			_, bodyInBucket = bd.bodyCache[bNum]
+			_, bodyInBucket = bd.bodyCache[blockNum]
 		}
 
 		if bodyInBucket {
-			bd.delivered.Add(bNum)
+			bd.delivered.Add(blockNum)
 			continue
 		}
 
 		var hash common.Hash
 		var header *types.Header
 		request := true
-		if bd.deliveriesH[bNum] != nil {
+		if bd.deliveriesH[blockNum] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
-			header = bd.deliveriesH[bNum]
+			header = bd.deliveriesH[blockNum]
 			if header == nil {
-				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, blockNum, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
 
 			// check here if we have the block prefetched as this could have come in as part of a data race
 			// we want to avoid an infinite loop if the header was populated in deliveriesH before the block
 			// was added to the prefetched cache
-			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, bNum, blockPropagator); hasPrefetched {
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			}
 		} else {
-			hash, err = rawdb.ReadCanonicalHash(tx, bNum)
+			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
-				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, blockNum, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 
-			header, err = blockReader.Header(context.Background(), tx, hash, bNum)
+			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 			if err != nil {
-				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, bNum, dbg.Stack())
+				return nil, blockNum, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			if header == nil {
-				return nil, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", bNum, hash, dbg.Stack())
+				return nil, blockNum, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
-			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, bNum, blockPropagator); hasPrefetched {
+			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			} else {
-				bd.deliveriesH[bNum] = header
+				bd.deliveriesH[blockNum] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
-					block := rawdb.ReadBlock(tx, hash, bNum)
+					block := rawdb.ReadBlock(tx, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash
 						copy(doubleHash[:], header.UncleHash.Bytes())
 						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = bNum
+						bd.requestedMap[doubleHash] = blockNum
 					} else {
-						err = bd.addBodyToBucket(tx, bNum, block.RawBody())
+						err = bd.addBodyToBucket(tx, blockNum, block.RawBody())
 						if err != nil {
 							log.Error("Failed to add block body to bucket", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 						}
 						request = false
 					}
 				} else {
-					err = bd.addBodyToBucket(tx, bNum, &types.RawBody{})
+					err = bd.addBodyToBucket(tx, blockNum, &types.RawBody{})
 					if err != nil {
-						log.Error("Failed to add block body to bucket", "err", err, "number", bNum, "hash", hash)
+						log.Error("Failed to add block body to bucket", "err", err, "number", blockNum, "hash", hash)
 					}
 					request = false
 				}
@@ -182,11 +179,11 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 
 		if request {
-			blockNums = append(blockNums, bNum)
+			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
 			// Both uncleHash and txHash are empty (or block is prefetched), no need to request
-			bd.delivered.Add(bNum)
+			bd.delivered.Add(blockNum)
 		}
 	}
 	if len(blockNums) > 0 {
@@ -196,15 +193,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 	}
 
-	if timedOutPeers {
-		stats := bd.GetAndResetPeerStats()
-		for k, v := range stats {
-			printablePeerID := hex.EncodeToString(k[:])[:20]
-			log.Info(fmt.Sprintf("[%s] Peer timed out", logPrefix), "peer", printablePeerID, "count", v)
-		}
-	}
-
-	return bodyReq, nil
+	return bodyReq, blockNum, nil
 }
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
@@ -393,15 +382,6 @@ func (bd *BodyDownload) PrintPeerMap() {
 	}
 	fmt.Printf("---------------------------\n")
 	bd.peerMap = make(map[[64]byte]int)
-}
-
-func (bd *BodyDownload) GetAndResetPeerStats() map[[64]byte]int {
-	peers := make(map[[64]byte]int)
-	for k, v := range bd.peerMap {
-		peers[k] = v
-	}
-	bd.peerMap = make(map[[64]byte]int)
-	return peers
 }
 
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
