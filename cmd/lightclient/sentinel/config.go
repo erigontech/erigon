@@ -19,7 +19,6 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -31,13 +30,12 @@ import (
 )
 
 type SentinelConfig struct {
-	DiscoverConfig discover.Config
-	NetworkConfig  *clparams.NetworkConfig
-	GenesisConfig  *clparams.GenesisConfig
-	BeaconConfig   *clparams.BeaconChainConfig
-	IpAddr         string
-	Port           int
-	TCPPort        uint
+	NetworkConfig *clparams.NetworkConfig
+	GenesisConfig *clparams.GenesisConfig
+	BeaconConfig  *clparams.BeaconChainConfig
+	IpAddr        string
+	Port          int
+	TCPPort       uint
 	// Optional
 	LocalIP       string
 	EnableUPnP    bool
@@ -78,7 +76,7 @@ func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) 
 }
 
 func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
-	var priKey = cfg.DiscoverConfig.PrivateKey
+	var priKey = s.discoverConfig.PrivateKey
 
 	listen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
 	if err != nil {

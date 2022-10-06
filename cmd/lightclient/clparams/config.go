@@ -14,34 +14,27 @@
 package clparams
 
 import (
-	"fmt"
 	"math"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 type NetworkType int
 
 const (
 	MainnetNetwork NetworkType = 0
-	GoerliNetwork  NetworkType = 1
-	SepoliaNetwork NetworkType = 2
+	GoerliNetwork  NetworkType = 5
+	SepoliaNetwork NetworkType = 11155111
 )
 
 const (
-	MaxDialTimeout                   = 10 * time.Second
-	VersionLength      int           = 4
-	MainnetEth1ChainID uint64        = 1
-	SepoliaEth1ChainId uint64        = 11155111
-	GoerliEth1ChainId  uint64        = 5
-	MaxChunkSize       uint64        = 1 << 20 // 1 MiB
-	ReqTimeout         time.Duration = 5 * time.Second
-	RespTimeout        time.Duration = 10 * time.Second
+	MaxDialTimeout               = 10 * time.Second
+	VersionLength  int           = 4
+	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
+	ReqTimeout     time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 10 * time.Second
 )
 
 var (
@@ -103,7 +96,7 @@ type NetworkConfig struct {
 	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
-	bootNodes               []string
+	BootNodes               []string
 }
 
 type GenesisConfig struct {
@@ -129,7 +122,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         11184524,
-		bootNodes:                       MainnetBootstrapNodes,
+		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	SepoliaNetwork: {
@@ -149,7 +142,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         1273020,
-		bootNodes:                       SepoliaBootstrapNodes,
+		BootNodes:                       SepoliaBootstrapNodes,
 	},
 
 	GoerliNetwork: {
@@ -169,7 +162,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         4367322,
-		bootNodes:                       GoerliBootstrapNodes,
+		BootNodes:                       GoerliBootstrapNodes,
 	},
 }
 
@@ -615,8 +608,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ConfigName = "sepolia"
 	cfg.GenesisForkVersion = []byte{0x90, 0x00, 0x00, 0x69}
 	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = SepoliaEth1ChainId
-	cfg.DepositNetworkID = SepoliaEth1ChainId
+	cfg.DepositChainID = uint64(SepoliaNetwork)
+	cfg.DepositNetworkID = uint64(SepoliaNetwork)
 	cfg.AltairForkEpoch = 50
 	cfg.AltairForkVersion = []byte{0x90, 0x00, 0x00, 0x70}
 	cfg.BellatrixForkEpoch = 100
@@ -634,8 +627,8 @@ func goerliConfig() BeaconChainConfig {
 	cfg.ConfigName = "prater"
 	cfg.GenesisForkVersion = []byte{0x00, 0x00, 0x10, 0x20}
 	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = GoerliEth1ChainId
-	cfg.DepositNetworkID = GoerliEth1ChainId
+	cfg.DepositChainID = uint64(GoerliNetwork)
+	cfg.DepositNetworkID = uint64(GoerliNetwork)
 	cfg.AltairForkEpoch = 36660
 	cfg.AltairForkVersion = []byte{0x1, 0x0, 0x10, 0x20}
 	cfg.CapellaForkVersion = []byte{0x3, 0x0, 0x10, 0x20}
@@ -655,40 +648,9 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	GoerliNetwork:  goerliConfig(),
 }
 
-func GetConfigsByNetwork(net NetworkType) (*discover.Config, *GenesisConfig, *NetworkConfig, *BeaconChainConfig, error) {
+func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
-	bootnodes := networkConfig.bootNodes
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		return nil, &GenesisConfig{}, &NetworkConfig{}, &BeaconChainConfig{}, err
-	}
-	enodes := []*enode.Node{}
-	for _, addr := range bootnodes {
-		enode, err := enode.Parse(enode.ValidSchemes, addr)
-		if err != nil {
-			return nil, &GenesisConfig{}, &NetworkConfig{}, &BeaconChainConfig{}, err
-		}
-		enodes = append(enodes, enode)
-	}
 	genesisConfig := GenesisConfigs[net]
 	beaconConfig := BeaconConfigs[net]
-	return &discover.Config{
-		PrivateKey: privateKey,
-		Bootnodes:  enodes,
-	}, &genesisConfig, &networkConfig, &beaconConfig, nil
-}
-
-func GetConfigsByEth1ChainId(id uint64) (*discover.Config, *GenesisConfig, *NetworkConfig, *BeaconChainConfig, error) {
-	var net NetworkType
-	switch id {
-	case MainnetEth1ChainID:
-		net = MainnetNetwork
-	case SepoliaEth1ChainId:
-		net = SepoliaNetwork
-	case GoerliEth1ChainId:
-		net = GoerliNetwork
-	default:
-		return nil, nil, nil, nil, fmt.Errorf("chain id not supported")
-	}
-	return GetConfigsByNetwork(net)
+	return &genesisConfig, &networkConfig, &beaconConfig
 }

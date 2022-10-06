@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -44,9 +45,9 @@ type Sentinel struct {
 	cfg      *SentinelConfig
 	peers    *peers.Peers
 
-	pubsub *pubsub.PubSub
-
-	subManager *GossipManager
+	discoverConfig discover.Config
+	pubsub         *pubsub.PubSub
+	subManager     *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -79,7 +80,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	var (
 		ipAddr  = s.cfg.IpAddr
 		port    = s.cfg.Port
-		discCfg = s.cfg.DiscoverConfig
+		discCfg = s.discoverConfig
 	)
 
 	ip := net.ParseIP(ipAddr)
@@ -154,6 +155,24 @@ func New(
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
+	}
+
+	// Setup discovery
+	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
+	for i, bootnode := range cfg.NetworkConfig.BootNodes {
+		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
+		if err != nil {
+			return nil, err
+		}
+		enodes[i] = newNode
+	}
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	s.discoverConfig = discover.Config{
+		PrivateKey: privateKey,
+		Bootnodes:  enodes,
 	}
 
 	opts, err := buildOptions(cfg, s)
