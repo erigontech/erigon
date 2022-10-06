@@ -11,11 +11,11 @@ import (
 
 func (c *ConsensusHandlers) goodbyeHandler(ctx *proto.StreamContext, dat *p2p.Goodbye) error {
 	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	defer c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
 	}
-	c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	return nil
 }
 
