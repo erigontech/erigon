@@ -20,7 +20,11 @@
   },
   "blockRewardContractAddress": "0x867305d19606aadba405ce534e303d0e225f9556",
   "blockRewardContractTransition": 1310,
+  "blockRewardContractTransitions": {
+    "9186425": "0x481c034c6d9441db23ea48de68bcae812c5d39ba"
+  },
   "randomnessContractAddress": {
     "9186425": "0x5870b0527DeDB1cFBD9534343Feda1a41Ce47766"
-  }
+  },
+  "posdaoTransition": 9186425
 }
