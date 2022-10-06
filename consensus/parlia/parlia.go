@@ -545,6 +545,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			parents = parents[:len(parents)-1]
 		} else {
 			// No explicit parents (or no more left), reach out to the database
+			log.Info("parlia", "get header2", number)
 			header = chain.GetHeader(hash, number)
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
