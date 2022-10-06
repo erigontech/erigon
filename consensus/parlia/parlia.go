@@ -507,37 +507,15 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			break
 		}
 
-		p.snapLock.Lock()
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
-				//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
-				snap = s
-				if !verify || snap != nil {
-					break
-				}
-			}
+		var err error
+		var ok bool
+		snap, ok, err = p.snapCreate(chain, number, hash, verify)
+		if err != nil {
+			return nil, err
 		}
-		if (verify && number%p.config.Epoch == 0) || number == 0 {
-			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
-				log.Info("parlia", "get header", number)
-				// Headers included into the snapshots have to be trusted as checkpoints
-				checkpoint := chain.GetHeader(hash, number)
-				if checkpoint != nil {
-					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
-					// get validators from headers
-					validators, err := ParseValidators(validatorBytes)
-					if err != nil {
-						return nil, err
-					}
-					// new snapshot
-					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-					break
-				}
-			}
+		if ok {
+			break
 		}
-		p.snapLock.Unlock()
-
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
 		if len(parents) > 0 {
@@ -582,6 +560,41 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		//log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 	return snap, err
+}
+
+func (p *Parlia) snapCreate(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, verify bool) (snap *Snapshot, ok bool, err error) {
+	p.snapLock.Lock()
+	defer p.snapLock.Unlock()
+
+	// If an on-disk checkpoint snapshot can be found, use that
+	if number%checkpointInterval == 0 {
+		if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
+			//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
+			snap = s
+			if !verify || snap != nil {
+				return snap, true, nil
+			}
+		}
+	}
+	if (verify && number%p.config.Epoch == 0) || number == 0 {
+		if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
+			log.Info("parlia", "get header", number)
+			// Headers included into the snapshots have to be trusted as checkpoints
+			checkpoint := chain.GetHeader(hash, number)
+			if checkpoint != nil {
+				validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
+				// get validators from headers
+				validators, err := ParseValidators(validatorBytes)
+				if err != nil {
+					return snap, false, err
+				}
+				// new snapshot
+				snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+				return snap, true, nil
+			}
+		}
+	}
+	return nil, false, nil
 }
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
