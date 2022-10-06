@@ -500,7 +500,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		snap    *Snapshot
 	)
 
-	if _, ok := p.recentSnaps.Get(hash); !ok {
+	if s, ok := p.recentSnaps.Get(hash); !ok {
+		snap = s.(*Snapshot)
+	} else {
 		p.snapLock.Lock()
 		defer p.snapLock.Unlock()
 	}
