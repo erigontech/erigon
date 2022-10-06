@@ -237,7 +237,10 @@ func (cr ChainReader) Config() *params.ChainConfig  { return cr.config }
 func (cr ChainReader) CurrentHeader() *types.Header { panic("") }
 func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		h, err := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		if err != nil {
+			log.Warn("chainReader", "err", err)
+		}
 		return h
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
