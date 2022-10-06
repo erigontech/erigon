@@ -474,7 +474,7 @@ func (sf SelectedStaticFiles) Close() {
 				if item.decompressor != nil {
 					item.decompressor.Close()
 				}
-				if item.decompressor != nil {
+				if item.index != nil {
 					item.index.Close()
 				}
 			}

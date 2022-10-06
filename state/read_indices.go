@@ -244,7 +244,7 @@ func (sf RSelectedStaticFiles) Close() {
 				if item.decompressor != nil {
 					item.decompressor.Close()
 				}
-				if item.decompressor != nil {
+				if item.index != nil {
 					item.index.Close()
 				}
 			}
@@ -278,7 +278,7 @@ func (mf RMergedFiles) Close() {
 			if item.decompressor != nil {
 				item.decompressor.Close()
 			}
-			if item.decompressor != nil {
+			if item.index != nil {
 				item.index.Close()
 			}
 		}
