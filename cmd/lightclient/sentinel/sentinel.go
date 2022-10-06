@@ -158,13 +158,13 @@ func New(
 	}
 
 	// Setup discovery
-	var enodes []*enode.Node
-	for _, bootnode := range cfg.NetworkConfig.BootNodes {
+	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
+	for i, bootnode := range cfg.NetworkConfig.BootNodes {
 		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
 		if err != nil {
 			return nil, err
 		}
-		enodes = append(enodes, newNode)
+		enodes[i] = newNode
 	}
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {

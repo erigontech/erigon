@@ -13,7 +13,6 @@ import (
 // this allows us to write encoding non specific type safe handler without performance overhead
 func curryStreamHandler[T communication.Packet](newcodec func(network.Stream) communication.StreamCodec, fn func(ctx *communication.StreamContext, v T) error) func(network.Stream) {
 	return func(s network.Stream) {
-		defer s.Close()
 		sd := newcodec(s)
 		var t T
 		val := t.Clone().(T)
