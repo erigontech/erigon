@@ -56,6 +56,10 @@ func FuzzSingleEliasFano(f *testing.F) {
 			}
 		}
 
+		it := ef.Iterator()
+		for it.HasNext() {
+			it.Next()
+		}
 		buf := bytes.NewBuffer(nil)
 		ef.Write(buf)
 		if ef.Max() != Max(buf.Bytes()) {
