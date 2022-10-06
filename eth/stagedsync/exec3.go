@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	atomic2 "go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -99,10 +100,12 @@ func Exec3(ctx context.Context,
 	}
 
 	var block, stageProgress uint64
-	var outputTxNum, inputTxNum, maxTxNum uint64
-	var count, repeatCount, triggerCount uint64
-	var resultsSize int64
-	var inputBlockNum, outputBlockNum uint64
+	var outputTxNum, maxTxNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var inputTxNum uint64
+	var inputBlockNum, outputBlockNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var count uint64
+	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var resultsSize = atomic2.NewInt64(0)
 	var lock sync.RWMutex
 	var rws state.TxTaskQueue
 	var rwsLock sync.Mutex
@@ -124,31 +127,35 @@ func Exec3(ctx context.Context,
 	if !parallel {
 		reconWorkers[0].ResetTx(applyTx)
 		agg.SetTx(applyTx)
-		maxTxNum, err = rawdb.TxNums.Max(applyTx, maxBlockNum)
+		_maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
 		}
+		maxTxNum.Store(_maxTxNum)
 		if block > 0 {
-			outputTxNum, err = rawdb.TxNums.Max(applyTx, execStage.BlockNumber)
+			_outputTxNum, err := rawdb.TxNums.Max(applyTx, execStage.BlockNumber)
 			if err != nil {
 				return err
 			}
-			outputTxNum++
-			inputTxNum = outputTxNum
+			outputTxNum.Store(_outputTxNum)
+			outputTxNum.Add(1)
+			inputTxNum = outputTxNum.Load()
 		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
-			maxTxNum, err = rawdb.TxNums.Max(tx, maxBlockNum)
+			_maxTxNum, err := rawdb.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
 			}
+			maxTxNum.Store(_maxTxNum)
 			if block > 0 {
-				outputTxNum, err = rawdb.TxNums.Max(tx, execStage.BlockNumber)
+				_outputTxNum, err := rawdb.TxNums.Max(tx, execStage.BlockNumber)
 				if err != nil {
 					return err
 				}
-				outputTxNum++
-				inputTxNum = outputTxNum
+				outputTxNum.Store(_outputTxNum)
+				outputTxNum.Add(1)
+				inputTxNum = outputTxNum.Load()
 			}
 			return nil
 		}); err != nil {
@@ -174,20 +181,20 @@ func Exec3(ctx context.Context,
 			defer tx.Rollback()
 			agg.SetTx(tx)
 			defer rs.Finish()
-			for atomic.LoadUint64(&outputTxNum) < atomic.LoadUint64(&maxTxNum) {
+			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
 					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					func() {
 						rwsLock.Lock()
 						defer rwsLock.Unlock()
-						atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
+					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -202,13 +209,13 @@ func Exec3(ctx context.Context,
 								for !drained {
 									select {
 									case txTask := <-resultCh:
-										atomic.AddInt64(&resultsSize, txTask.ResultsSize)
+										resultsSize.Add(txTask.ResultsSize)
 										heap.Push(&rws, txTask)
 									default:
 										drained = true
 									}
 								}
-								processResultQueue(&rws, &outputTxNum, rs, agg, tx, &triggerCount, &outputBlockNum, &repeatCount, &resultsSize)
+								processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 								if rws.Len() == 0 {
 									break
 								}
@@ -230,7 +237,7 @@ func Exec3(ctx context.Context,
 							// Drain results queue as well
 							for rws.Len() > 0 {
 								txTask := heap.Pop(&rws).(*state.TxTask)
-								atomic.AddInt64(&resultsSize, -txTask.ResultsSize)
+								resultsSize.Add(-txTask.ResultsSize)
 								rs.AddWork(txTask)
 								syncMetrics[stages.Execution].Set(txTask.BlockNum)
 							}
@@ -238,7 +245,7 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							tx.CollectMetrics()
-							if err = execStage.Update(tx, outputBlockNum); err != nil {
+							if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
@@ -271,7 +278,7 @@ func Exec3(ctx context.Context,
 	var blockNum uint64
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		atomic.StoreUint64(&inputBlockNum, blockNum)
+		inputBlockNum.Store(blockNum)
 		rules := chainConfig.Rules(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
@@ -281,7 +288,7 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || atomic.LoadInt64(&resultsSize) >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
 			}()
@@ -325,8 +332,8 @@ loop:
 					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
-					outputTxNum++
-					outputBlockNum = txTask.BlockNum
+					outputTxNum.Add(1)
+					outputBlockNum.Store(txTask.BlockNum)
 					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				} else {
 					return fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
@@ -365,10 +372,10 @@ loop:
 		// Check for interrupts
 		select {
 		case <-logEvery.C:
-			progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum, outputBlockNum, repeatCount, uint64(atomic.LoadInt64(&resultsSize)), resultCh)
+			progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
-			atomic.StoreUint64(&maxTxNum, inputTxNum)
+			maxTxNum.Store(inputTxNum)
 			break loop
 		default:
 		}
@@ -421,22 +428,22 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *state.TxTaskQueue, outputTxNum *uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount *uint64, outputBlockNum *uint64, repeatCount *uint64, resultsSize *int64) {
-	for rws.Len() > 0 && (*rws)[0].TxNum == *outputTxNum {
+func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
+	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64) {
+	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask := heap.Pop(rws).(*state.TxTask)
-		atomic.AddInt64(resultsSize, -txTask.ResultsSize)
+		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
 			if err := rs.Apply(applyTx, txTask, agg); err != nil {
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
-			*triggerCount += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
-			atomic.AddUint64(outputTxNum, 1)
-			atomic.StoreUint64(outputBlockNum, txTask.BlockNum)
+			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+			outputTxNum.Add(1)
+			outputBlockNum.Store(txTask.BlockNum)
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
-			*repeatCount++
+			repeatCount.Add(1)
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}
@@ -503,7 +510,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
 	fillWorkers := make([]*exec3.FillWorker, workerCount)
-	var doneCount uint64
+	doneCount := atomic2.NewUint64(0)
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
 		if i == workerCount-1 {
@@ -514,11 +521,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			bigCurrent.FillBytes(toKey)
 		}
 		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec3.NewFillWorker(txNum, &doneCount, agg, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	doneCount = 0
+	doneCount.Store(0)
 	accountCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -527,7 +534,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
 	t := time.Now()
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -563,7 +570,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	accountCollectorX.Close()
 	accountCollectorX = nil
-	doneCount = 0
+	doneCount.Store(0)
 	storageCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -572,7 +579,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
 	t = time.Now()
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -608,7 +615,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	storageCollectorX.Close()
 	storageCollectorX = nil
-	doneCount = 0
+	doneCount.Store(0)
 	codeCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
@@ -616,7 +623,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		codeCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -852,12 +859,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		plainContractCollectors[i] = etl.NewCollector(fmt.Sprintf("plainContract %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer plainContractCollectors[i].Close()
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -872,12 +879,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillStorage(plainStateCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)
@@ -892,12 +899,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
-	doneCount = 0
+	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillCode(codeCollectors[i], plainContractCollectors[i])
 	}
-	for atomic.LoadUint64(&doneCount) < uint64(workerCount) {
+	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
 		common.ReadMemStats(&m)

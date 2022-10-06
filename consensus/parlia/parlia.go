@@ -231,7 +231,9 @@ type Parlia struct {
 	val    common.Address // Ethereum address of the signing key
 	signFn SignFn         // Signer function to authorize hashes with
 
-	lock sync.RWMutex // Protects the signer fields
+	signerLock sync.RWMutex // Protects the signer fields
+
+	snapLock sync.RWMutex // Protects snapshots creation
 
 	validatorSetABI abi.ABI
 	slashABI        abi.ABI
@@ -496,7 +498,16 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	var (
 		headers []*types.Header
 		snap    *Snapshot
+		doLog   bool
 	)
+
+	if s, ok := p.recentSnaps.Get(hash); ok {
+		snap = s.(*Snapshot)
+	} else {
+		p.snapLock.Lock()
+		defer p.snapLock.Unlock()
+		doLog = true
+	}
 
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
@@ -543,7 +554,10 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 			parents = parents[:len(parents)-1]
 		} else {
-			// No explicit parents (or no more left), reach out to the database
+			if doLog && number%100_000 == 0 {
+				// No explicit parents (or no more left), reach out to the database
+				log.Info("[parlia] snapshots build, gather headers", "block", number)
+			}
 			header = chain.GetHeader(hash, number)
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
@@ -562,7 +576,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID)
+	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID, doLog)
 	if err != nil {
 		return nil, err
 	}
@@ -782,8 +796,8 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
 func (p *Parlia) Authorize(val common.Address, signFn SignFn) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.signerLock.Lock()
+	defer p.signerLock.Unlock()
 
 	p.val = val
 	p.signFn = signFn
@@ -808,9 +822,9 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return nil
 	}
 	// Don't hold the val fields for the entire sealing procedure
-	p.lock.RLock()
+	p.signerLock.RLock()
 	val, signFn := p.val, p.signFn
-	p.lock.RUnlock()
+	p.signerLock.RUnlock()
 
 	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
