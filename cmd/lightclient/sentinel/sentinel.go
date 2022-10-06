@@ -38,12 +38,13 @@ import (
 )
 
 type Sentinel struct {
-	started  bool
-	listener *discover.UDPv5 // this is us in the network.
-	ctx      context.Context
-	host     host.Host
-	cfg      *SentinelConfig
-	peers    *peers.Peers
+	started    bool
+	listener   *discover.UDPv5 // this is us in the network.
+	ctx        context.Context
+	host       host.Host
+	cfg        *SentinelConfig
+	peers      *peers.Peers
+	metadataV1 *lightrpc.MetadataV1
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -119,8 +120,13 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
+	s.metadataV1 = &lightrpc.MetadataV1{
+		SeqNumber: localNode.Seq(),
+		Attnets:   0,
+	}
+
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.host, s.peers).Start()
+	handlers.NewConsensusHandlers(s.host, s.peers, s.metadataV1).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -212,6 +218,7 @@ func (s *Sentinel) Start(
 	if err != nil {
 		return fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
+
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}

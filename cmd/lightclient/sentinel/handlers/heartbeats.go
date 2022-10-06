@@ -11,11 +11,11 @@ import (
 
 func (c *ConsensusHandlers) goodbyeHandler(ctx *communication.StreamContext, dat *p2p.Goodbye) error {
 	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
+	defer c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	_, err := ctx.Codec.WritePacket(dat)
 	if err != nil {
 		return err
 	}
-	c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
 	return nil
 }
 
@@ -30,8 +30,16 @@ func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 	return nil
 }
 
-// TODO: respond with proper metadata
-func metadataHandler(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
+func (c *ConsensusHandlers) metadataHandlerV1(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
+	_, err := ctx.Codec.WritePacket(c.metadataV1)
+	if err != nil {
+		return err
+	}
+
+	if err := ctx.Codec.CloseWriter(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
