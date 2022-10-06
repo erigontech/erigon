@@ -24,8 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -45,7 +43,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV1 *p2p.MetadataV1
+	metadataV1 *lightrpc.MetadataV1
 
 	pubsub *pubsub.PubSub
 
@@ -121,7 +119,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	s.metadataV1 = &p2p.MetadataV1{
+	s.metadataV1 = &lightrpc.MetadataV1{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
 	}

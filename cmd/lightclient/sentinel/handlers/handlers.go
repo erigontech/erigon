@@ -14,11 +14,9 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
-
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -30,10 +28,10 @@ type ConsensusHandlers struct {
 	handlers   map[protocol.ID]network.StreamHandler
 	host       host.Host
 	peers      *peers.Peers
-	metadataV1 *p2p.MetadataV1
+	metadataV1 *lightrpc.MetadataV1
 }
 
-func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *p2p.MetadataV1) *ConsensusHandlers {
+func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *lightrpc.MetadataV1) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:      peers,
 		host:       host,

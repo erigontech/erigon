@@ -30,8 +30,7 @@ func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 	return nil
 }
 
-
-func (c *ConsensusHandlers) metadataHandlerV1(ctx *proto.StreamContext, dat *proto.EmptyPacket) error {
+func (c *ConsensusHandlers) metadataHandlerV1(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
 	_, err := ctx.Codec.WritePacket(c.metadataV1)
 	if err != nil {
 		return err
