@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -63,7 +64,7 @@ type ValidatorSet interface {
 	// The caller provided here may not generate proofs.
 	//
 	// `first` is true if this is the first block in the set.
-	onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error
+	onEpochBegin(firstInEpoch bool, header *types.Header, ibs *state.IntraBlockState, caller consensus.SystemCall) error
 
 	// Called on the close of every block.
 	onCloseBlock(_header *types.Header, _address common.Address) error
@@ -285,9 +286,9 @@ func (s *Multi) genesisEpochData(header *types.Header, call consensus.SystemCall
 	return set.genesisEpochData(header, call)
 }
 
-func (s *Multi) onEpochBegin(_ bool, header *types.Header, caller consensus.SystemCall) error {
+func (s *Multi) onEpochBegin(_ bool, header *types.Header, ibs *state.IntraBlockState, caller consensus.SystemCall) error {
 	setTransition, set := s.correctSetByNumber(header.Number.Uint64())
-	return set.onEpochBegin(setTransition == header.Number.Uint64(), header, caller)
+	return set.onEpochBegin(setTransition == header.Number.Uint64(), header, ibs, caller)
 }
 func (s *Multi) signalEpochEnd(_ bool, header *types.Header, r types.Receipts) ([]byte, error) {
 	num := header.Number.Uint64()
@@ -303,7 +304,7 @@ type SimpleList struct {
 func (s *SimpleList) epochSet(firstInEpoch bool, num uint64, proof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
 	return *s, common.Hash{}, nil
 }
-func (s *SimpleList) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
+func (s *SimpleList) onEpochBegin(firstInEpoch bool, header *types.Header, ibs *state.IntraBlockState, caller consensus.SystemCall) error {
 	return nil
 }
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
@@ -649,7 +650,16 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 	return proveInitial(s, s.contractAddress, header, call)
 }
 
-func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
+// See EnsureSystemAccount in src/Nethermind/Nethermind.Abi.Contracts/Contract.cs
+func ensureSystemAccount(ibs *state.IntraBlockState) {
+	if !ibs.Exist(state.SystemAddress) {
+		ibs.CreateAccount(state.SystemAddress, false)
+	}
+}
+
+func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, ibs *state.IntraBlockState, caller consensus.SystemCall) error {
+	ensureSystemAccount(ibs)
+
 	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
 	_, err := caller(s.contractAddress, data)
 	if err != nil {
@@ -876,8 +886,8 @@ func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, ca
 func (s *ValidatorContract) countWithCaller(parentHash common.Hash, caller consensus.Call) (uint64, error) {
 	return s.validators.countWithCaller(parentHash, caller)
 }
-func (s *ValidatorContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	return s.validators.onEpochBegin(firstInEpoch, header, caller)
+func (s *ValidatorContract) onEpochBegin(firstInEpoch bool, header *types.Header, ibs *state.IntraBlockState, caller consensus.SystemCall) error {
+	return s.validators.onEpochBegin(firstInEpoch, header, ibs, caller)
 }
 func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
 	return s.validators.onCloseBlock(header, address)

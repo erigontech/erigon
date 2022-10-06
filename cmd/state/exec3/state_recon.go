@@ -338,7 +338,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Block.Header(), txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Block.Header(), txTask.Block.Transactions(), txTask.Block.Uncles(), ibs, syscall)
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Block.Header()); err != nil {

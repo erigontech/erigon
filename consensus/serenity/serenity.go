@@ -206,7 +206,8 @@ func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, paren
 	return nil
 }
 
-func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, ibs *state.IntraBlockState, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, e, header, txs, uncles, ibs, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {

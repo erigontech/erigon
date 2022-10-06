@@ -792,7 +792,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
-func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, ibs *state.IntraBlockState, syscall consensus.SystemCall) {
 	//TODO: hardcoded boolean!!!
 	// 	let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
@@ -821,7 +821,7 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 	if !isEpochBegin {
 		return
 	}
-	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
+	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, ibs, syscall)
 	if err != nil {
 		log.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
@@ -855,7 +855,7 @@ func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state 
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("insert_pending_trancition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
+			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, nil, err
