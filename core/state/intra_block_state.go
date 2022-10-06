@@ -660,7 +660,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 }
 
 func updateAccount(EIP161Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	emptyRemoval := EIP161Enabled && stateObject.empty()
+	emptyRemoval := EIP161Enabled && stateObject.empty() && addr != SystemAddress
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
