@@ -377,7 +377,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	homestead := st.evm.ChainRules().IsHomestead
 	istanbul := st.evm.ChainRules().IsIstanbul
 	london := st.evm.ChainRules().IsLondon
+	nano := st.evm.ChainRules().IsNano
 	contractCreation := msg.To() == nil
+
+	if nano {
+		for _, blackListAddr := range types.NanoBlackList {
+			if blackListAddr == sender.Address() {
+				return nil, fmt.Errorf("block blacklist account")
+			}
+			if msg.To() != nil && *msg.To() == blackListAddr {
+				return nil, fmt.Errorf("block blacklist account")
+			}
+		}
+	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, homestead, istanbul)
