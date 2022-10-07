@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"path"
+
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -60,5 +62,5 @@ func withChain(cmd *cobra.Command) {
 }
 
 func withLogPath(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&logdir, "log-dir", "/var/lib/erigon", "path to write user and error logs to")
+	cmd.Flags().StringVar(&logdir, "log-dir", path.Join(paths.DefaultDataDir(), "logs"), "path to write user and error logs to")
 }

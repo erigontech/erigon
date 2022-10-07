@@ -16,16 +16,18 @@ import (
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -229,7 +231,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	if useSnapshots {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenWithDB(db); err != nil {
+		if err := allSnapshots.ReopenFolder(); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
