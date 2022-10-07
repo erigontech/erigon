@@ -147,6 +147,7 @@ func BodiesForward(
 		}
 	}
 
+	var blockNum uint64
 	loopBody := func() (bool, error) {
 		// innerTx is used for the temporary stage bucket to hold on to bodies as they're downloaded
 		// offering restart capability for the stage bodies process
@@ -165,7 +166,7 @@ func BodiesForward(
 		// this will check for timed out old requests and attempt to send them again
 		start := time.Now()
 		currentTime := uint64(time.Now().Unix())
-		req, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, currentTime, cfg.blockPropagator, logPrefix)
+		req, blockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 		if err != nil {
 			return false, fmt.Errorf("request more bodies: %w", err)
 		}
@@ -194,7 +195,7 @@ func BodiesForward(
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, currentTime, cfg.blockPropagator, logPrefix)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
@@ -370,7 +371,7 @@ func BodiesForward(
 	return nil
 }
 
-func logDownloadingBodies(logPrefix string, committed, requested uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
+func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
@@ -385,7 +386,7 @@ func logDownloadingBodies(logPrefix string, committed, requested uint64, totalDe
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
-		"open_requests", requested,
+		"remaining", remaining,
 		"delivered", totalDelivered,
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),

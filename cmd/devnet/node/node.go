@@ -9,9 +9,9 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -28,7 +28,7 @@ func Start(wg *sync.WaitGroup) {
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs(), &nodeNumber)
+	go StartNode(wg, miningNodeArgs())
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
@@ -37,19 +37,19 @@ func Start(wg *sync.WaitGroup) {
 	enode, err := getEnode()
 	if err != nil {
 		// TODO: Log the error, it means node did not start well
-		fmt.Printf("Error happened: %s\n", err)
+		fmt.Printf("error starting the node: %s\n", err)
 	}
 
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
-	//start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(2, enode), &nodeNumber)
+	// start the second node, connect it to the mining node with the enode
+	go StartNode(wg, nonMiningNodeArgs(2, enode))
 }
 
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string, nodeNumber *int) {
-	fmt.Printf("Arguments for node %d are: %v\n", *nodeNumber, args)
+func StartNode(wg *sync.WaitGroup, args []string) {
+	fmt.Printf("Arguments for node %d are: %v\n", nodeNumber, args)
 
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
@@ -65,7 +65,7 @@ func StartNode(wg *sync.WaitGroup, args []string, nodeNumber *int) {
 	}()
 
 	app := erigonapp.MakeApp(runNode, erigoncli.DefaultFlags)
-	*nodeNumber++ // increment the number of nodes on the network
+	nodeNumber++ // increment the number of nodes on the network
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -79,6 +79,15 @@ func StartNode(wg *sync.WaitGroup, args []string, nodeNumber *int) {
 // runNode configures, creates and serves an erigon node
 func runNode(ctx *cli.Context) {
 	logger := log.New()
+
+	handler, err := log.FileHandler(models.ErigonLogFilePrefix+fmt.Sprintf("%d", nodeNumber), log.LogfmtFormat(), 1<<27) // 128Mb
+	if err != nil {
+		log.Error("Issue setting up log file handler", "err", err)
+		return
+	}
+
+	logger.SetHandler(handler)
+	log.SetRootHandler(handler)
 
 	// Initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
@@ -100,7 +109,7 @@ func runNode(ctx *cli.Context) {
 
 // miningNodeArgs returns custom args for starting a mining node
 func miningNodeArgs() []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, "./dev")
+	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
 	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
@@ -112,7 +121,7 @@ func miningNodeArgs() []string {
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
 func nonMiningNodeArgs(nodeNumber int, enode string) []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, "./dev"+fmt.Sprintf("%d", nodeNumber))
+	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
@@ -128,7 +137,7 @@ func getEnode() (string, error) {
 		return "", err
 	}
 
-	enode, err := utils.UniqueIDFromEnode(nodeInfo.Enode)
+	enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
 	if err != nil {
 		return "", err
 	}
