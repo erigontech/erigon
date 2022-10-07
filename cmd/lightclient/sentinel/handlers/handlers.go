@@ -31,6 +31,8 @@ type ConsensusHandlers struct {
 	metadataV1 *lightrpc.MetadataV1
 }
 
+const SuccessfullResponsePrefix = 0x00
+
 func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *lightrpc.MetadataV1) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:      peers,

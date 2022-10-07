@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"sync"
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -20,8 +18,6 @@ import (
 type StreamCodec struct {
 	s  network.Stream
 	sr *snappy.Reader
-
-	mu sync.Mutex
 }
 
 func NewStreamCodec(
@@ -56,27 +52,29 @@ func (d *StreamCodec) CloseReader() error {
 
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
-func (d *StreamCodec) WritePacket(pkt communication.Packet) (n int, err error) {
+func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (n int, err error) {
 	// if its a metadata request we dont write anything
 	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
 		return 0, nil
 	}
-
-	p, sw, err := encodePacket(pkt, d.s)
-	if err != nil {
-		return 0, fmt.Errorf("failed to write packet err=%s", err)
+	val, ok := pkt.(ssz.Marshaler)
+	if !ok {
+		return 0, nil
 	}
-
-	n, err = sw.Write(p)
+	lengthBuf := make([]byte, 10)
+	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
+	wr := bufio.NewWriterSize(d.s, 10+val.SizeSSZ())
+	defer wr.Flush()
+	wr.Write(prefix) // write prefix first (done for responses)
+	wr.Write(lengthBuf[:vin])
+	sw := snappy.NewBufferedWriter(wr)
+	defer sw.Flush()
+	xs := make([]byte, 0, val.SizeSSZ())
+	enc, err := val.MarshalSSZTo(xs)
 	if err != nil {
 		return 0, err
 	}
-
-	if err := sw.Flush(); err != nil {
-		return 0, err
-	}
-
-	return n, nil
+	return sw.Write(enc)
 }
 
 // write raw bytes to stream
@@ -128,34 +126,6 @@ func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.Str
 		}
 	}
 	return c, nil
-}
-
-func encodePacket(pkt communication.Packet, stream network.Stream) ([]byte, *snappy.Writer, error) {
-	if val, ok := pkt.(ssz.Marshaler); ok {
-		wr := bufio.NewWriter(stream)
-		sw := snappy.NewWriter(wr)
-		p := make([]byte, 10)
-
-		vin := binary.PutVarint(p, int64(val.SizeSSZ()))
-
-		enc, err := val.MarshalSSZ()
-		if err != nil {
-			return nil, nil, fmt.Errorf("marshal ssz: %w", err)
-		}
-
-		if len(enc) > int(clparams.MaxChunkSize) {
-			return nil, nil, fmt.Errorf("chunk size too big")
-		}
-
-		_, err = wr.Write(p[:vin])
-		if err != nil {
-			return nil, nil, fmt.Errorf("write varint: %w", err)
-		}
-
-		return enc, sw, nil
-	}
-
-	return nil, nil, fmt.Errorf("packet %s does not implement ssz.Marshaler", reflect.TypeOf(pkt))
 }
 
 func readUvarint(r io.Reader) (uint64, error) {

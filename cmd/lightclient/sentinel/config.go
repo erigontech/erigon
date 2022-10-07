@@ -96,7 +96,6 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		privKeyOption(priKey),
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/lightclient"),
-		libp2p.ConnectionGater(s),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,

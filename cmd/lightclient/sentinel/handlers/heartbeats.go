@@ -12,7 +12,7 @@ import (
 func (c *ConsensusHandlers) goodbyeHandler(ctx *communication.StreamContext, dat *p2p.Goodbye) error {
 	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
 	defer c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
-	_, err := ctx.Codec.WritePacket(dat)
+	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
 	if err != nil {
 		return err
 	}
@@ -23,7 +23,7 @@ func (c *ConsensusHandlers) goodbyeHandler(ctx *communication.StreamContext, dat
 // ping handler
 func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 	// since packets are just structs, they can be resent with no issue
-	_, err := ctx.Codec.WritePacket(dat)
+	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
 	if err != nil {
 		return err
 	}
