@@ -89,7 +89,7 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	}
 
 	// return early if the http module has issue fetching the url
-	resp, err := http.Get(models.ErigonUrl)
+	resp, err := http.Get(models.ErigonUrl) //nolint
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
