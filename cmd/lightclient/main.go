@@ -71,7 +71,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(100 * time.Millisecond)
+	sendReqInterval := time.NewTicker(20 * time.Millisecond)
 
 	for {
 		select {
@@ -97,6 +97,15 @@ func handleGossipPacket(pkt *communication.GossipContext) error {
 	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
 	switch u := pkt.Packet.(type) {
 	case *lightrpc.SignedBeaconBlockBellatrix:
+		/*log.Info("[Gossip] beacon_block",
+			"Slot", u.Block.Slot,
+			"Signature", hex.EncodeToString(u.Signature),
+			"graffiti", string(u.Block.Body.Graffiti),
+			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash),
+			"stateRoot", hex.EncodeToString(u.Block.StateRoot),
+			"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
+			"proposerIdx", u.Block.ProposerIndex,
+		)*/
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)

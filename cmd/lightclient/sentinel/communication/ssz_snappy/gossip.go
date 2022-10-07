@@ -17,7 +17,7 @@ type GossipCodec struct {
 func NewGossipCodec(
 	sub *pubsub.Subscription,
 	top *pubsub.Topic,
-) *GossipCodec {
+) communication.GossipCodec {
 	return &GossipCodec{
 		sub: sub,
 		top: top,

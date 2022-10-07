@@ -60,7 +60,7 @@ func TestMetadataPacketStream(t *testing.T) {
 
 // See https://github.com/libp2p/go-libp2p-pubsub/issues/426
 func TestGossipCodecTest(t *testing.T) {
-	codec := NewGossipCodec(nil, nil)
+	codec := NewGossipCodec(nil, nil).(*GossipCodec)
 	val := &p2p.Goodbye{
 		Reason: 89,
 	}
