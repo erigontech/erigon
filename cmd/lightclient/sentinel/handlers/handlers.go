@@ -41,9 +41,10 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *lightr
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
 		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
 		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
-		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataHandlerV1),
+		protocol.ID(MetadataProtocolV1):           curryStreamHandler(ssz_snappy.NewStreamCodec, nilHandler),
+		protocol.ID(MetadataProtocolV2):           curryStreamHandler(ssz_snappy.NewStreamCodec, nilHandler),
 		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}

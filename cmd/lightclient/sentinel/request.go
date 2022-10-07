@@ -28,7 +28,7 @@ func (s *Sentinel) SendMetadataReqV1() (communication.Packet, error) {
 	requestPacket := &lightrpc.MetadataV1{}
 	responsePacket := &lightrpc.MetadataV1{}
 
-	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
+	return sendRequest(s, requestPacket, responsePacket, handlers.MetadataProtocolV1)
 }
 
 // TODO: add the rest of the request topics

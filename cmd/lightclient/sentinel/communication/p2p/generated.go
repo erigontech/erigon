@@ -52,14 +52,6 @@ func (typ *ForkData) Clone() communication.Packet {
 	return &ForkData{}
 }
 
-type Goodbye struct {
-	Reason uint64 `json:"reason" `
-}
-
-func (typ *Goodbye) Clone() communication.Packet {
-	return &Goodbye{}
-}
-
 type Ping struct {
 	Id uint64 `json:"id" `
 }
@@ -69,7 +61,7 @@ func (typ *Ping) Clone() communication.Packet {
 }
 
 type SingleRoot struct {
-	Root Root `json:"root" ssz-size:"32" `
+	Root Root `ssz-size:"32" json:"root" `
 
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }
