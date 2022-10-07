@@ -31,12 +31,8 @@ func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 }
 
 func (c *ConsensusHandlers) metadataHandlerV1(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
-	_, err := ctx.Codec.WritePacket(c.metadataV1)
+	_, err := ctx.Codec.WritePacket(c.metadataV1, SuccessfullResponsePrefix)
 	if err != nil {
-		return err
-	}
-
-	if err := ctx.Codec.CloseWriter(); err != nil {
 		return err
 	}
 
@@ -51,5 +47,9 @@ func statusHandler(ctx *communication.StreamContext, dat *p2p.Status) error {
 		"head slot", dat.HeadSlot,
 		"fork digest", utils.BytesToHex(dat.ForkDigest),
 	)
+	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
+	if err != nil {
+		return err
+	}
 	return nil
 }
