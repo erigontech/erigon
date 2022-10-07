@@ -20,8 +20,8 @@ var (
 	PingProtocolV1    = ProtocolPrefix + PingTopic + Schema1 + EncodingProtocol
 	GoodbyeProtocolV1 = ProtocolPrefix + GoodbyeTopic + Schema1 + EncodingProtocol
 
-	MedataProtocolV1 = ProtocolPrefix + MetadataTopic + Schema1 + EncodingProtocol
-	MedataProtocolV2 = ProtocolPrefix + MetadataTopic + Schema2 + EncodingProtocol
+	MetadataProtocolV1 = ProtocolPrefix + MetadataTopic + Schema1 + EncodingProtocol
+	MetadataProtocolV2 = ProtocolPrefix + MetadataTopic + Schema2 + EncodingProtocol
 
 	StatusProtocolV1 = ProtocolPrefix + StatusTopic + Schema1 + EncodingProtocol
 

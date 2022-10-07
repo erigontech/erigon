@@ -63,11 +63,6 @@ structs:
       tags:
         json: root
         ssz-size: 32
-  Goodbye:
-    - name: Reason
-      type: uint64
-      tags:
-        json: reason
   Ping:
     - name: Id
       type: uint64

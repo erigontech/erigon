@@ -26,13 +26,13 @@ func TestMetadataPacketStream(t *testing.T) {
 	require.NoError(t, err)
 	defer h2.Close()
 
-	packet := &p2p.Goodbye{
-		Reason: 2,
+	packet := &p2p.Ping{
+		Id: 2,
 	}
 
 	doneCh := make(chan struct{})
 	h2.SetStreamHandler(protocol.TestingID, func(stream network.Stream) {
-		p := &p2p.Goodbye{}
+		p := &p2p.Ping{}
 		codecA := NewStreamCodec(stream)
 		_, err := codecA.Decode(p)
 		require.NoError(t, err)
@@ -61,13 +61,13 @@ func TestMetadataPacketStream(t *testing.T) {
 // See https://github.com/libp2p/go-libp2p-pubsub/issues/426
 func TestGossipCodecTest(t *testing.T) {
 	codec := NewGossipCodec(nil, nil).(*GossipCodec)
-	val := &p2p.Goodbye{
-		Reason: 89,
+	val := &p2p.Ping{
+		Id: 89,
 	}
 	ans, err := utils.EncodeSSZSnappy(val)
 	require.NoError(t, err)
 
-	decoded := &p2p.Goodbye{}
+	decoded := &p2p.Ping{}
 	require.NoError(t, codec.decodeData(decoded, ans))
 	assert.Equal(t, decoded, val)
 }

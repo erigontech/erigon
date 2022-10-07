@@ -7,18 +7,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// These below are the handlers for heartbeat functions
-
-func (c *ConsensusHandlers) goodbyeHandler(ctx *communication.StreamContext, dat *p2p.Goodbye) error {
-	//log.Info("[Lightclient] Received", "goodbye", dat.Reason)
-	defer c.peers.DisconnectPeer(ctx.Stream.Conn().RemotePeer())
-	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // type safe handlers which all have access to the original stream & decompressed data
 // ping handler
 func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
@@ -30,12 +18,8 @@ func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 	return nil
 }
 
-func (c *ConsensusHandlers) metadataHandlerV1(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
-	_, err := ctx.Codec.WritePacket(c.metadataV1, SuccessfullResponsePrefix)
-	if err != nil {
-		return err
-	}
-
+// does nothing
+func nilHandler(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
 	return nil
 }
 

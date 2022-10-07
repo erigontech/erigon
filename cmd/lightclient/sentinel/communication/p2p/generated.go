@@ -52,14 +52,6 @@ func (typ *ForkData) Clone() communication.Packet {
 	return &ForkData{}
 }
 
-type Goodbye struct {
-	Reason uint64 `json:"reason" `
-}
-
-func (typ *Goodbye) Clone() communication.Packet {
-	return &Goodbye{}
-}
-
 type Ping struct {
 	Id uint64 `json:"id" `
 }
