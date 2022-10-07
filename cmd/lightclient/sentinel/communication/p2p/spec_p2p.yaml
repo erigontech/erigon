@@ -73,11 +73,6 @@ structs:
       type: uint64
       tags:
         json: id
-    - name: Syncnets
-      type: Bitvector64
-      tags:
-        json: 'syncnets,omitempty'
-        ssz-size: 1
   ENRForkID:
     - name: CurrentForkDigest
       type: Bytea
