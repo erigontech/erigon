@@ -120,6 +120,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
+	// TODO: Set up proper attestation number
 	s.metadataV1 = &lightrpc.MetadataV1{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,

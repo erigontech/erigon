@@ -39,6 +39,7 @@ func (c *ConsensusHandlers) metadataHandlerV1(ctx *communication.StreamContext, 
 	return nil
 }
 
+// TODO: Actually respond with proper status
 func statusHandler(ctx *communication.StreamContext, dat *p2p.Status) error {
 	log.Debug("[ReqResp] Status",
 		"epoch", dat.FinalizedEpoch,
