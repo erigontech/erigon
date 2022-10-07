@@ -72,7 +72,7 @@ const tmpl = `package p2p
 //go:generate go run github.com/ferranbt/fastssz/sszgen -path generated.go -exclude-objs {{range $key, $val := .Aliases}}{{$key}},{{end}}Ignore
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 )
 
 {{range $key, $val := .Aliases}}
@@ -89,7 +89,7 @@ type {{$key}} struct {
 
 }
 
-func (typ *{{$key}}) Clone() proto.Packet {
+func (typ *{{$key}}) Clone() communication.Packet {
   return &{{$key}}{}
 }
 {{end}}
