@@ -3,6 +3,7 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common"
 	"io"
 	"net/http"
 	"strings"
@@ -69,6 +70,58 @@ func (req *RequestGenerator) Erigon(method, body string, response interface{}) r
 func (req *RequestGenerator) getAdminNodeInfo() string {
 	const template = `{"jsonrpc":"2.0","method":"admin_nodeInfo","id":%d}`
 	return fmt.Sprintf(template, req.reqID)
+}
+
+func (req *RequestGenerator) getBalance(address common.Address, blockNum string) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, address, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) txpoolContent() string {
+	const template = `{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":%d}`
+	return fmt.Sprintf(template, req.reqID)
+}
+
+func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
+	start := time.Now()
+	res := rpctest.CallResult{
+		RequestID: req.reqID,
+	}
+
+	// return early if the http module has issue fetching the url
+	resp, err := http.Get(models.ErigonUrl)
+	if err != nil {
+		res.Took = time.Since(start)
+		res.Err = err
+		return res
+	}
+
+	// close the response body after reading its content at the end of the function
+	defer func(body io.ReadCloser) {
+		closeErr := body.Close()
+		if closeErr != nil {
+			log.Warn("failed to close readCloser", "err", closeErr)
+		}
+	}(resp.Body)
+
+	// return a bad request if the status code is not 200
+	if resp.StatusCode != 200 {
+		res.Took = time.Since(start)
+		res.Err = models.ErrBadRequest
+		return res
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		res.Took = time.Since(start)
+		res.Err = err
+		return res
+	}
+
+	res.Response = body
+	res.Took = time.Since(start)
+	res.Err = err
+	return res
 }
 
 func initialiseRequestGenerator(reqId int) *RequestGenerator {
