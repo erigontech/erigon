@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
@@ -86,6 +87,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
+		_ = logging.GetLoggerCmd("sentry", cmd)
 		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(protocol), healthCheck)
 	},
 }
