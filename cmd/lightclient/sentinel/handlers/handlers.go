@@ -29,6 +29,8 @@ type ConsensusHandlers struct {
 	peers    *peers.Peers
 }
 
+const SuccessfullResponsePrefix byte = 0x00
+
 func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers: peers,

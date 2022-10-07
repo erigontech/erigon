@@ -15,15 +15,13 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -96,25 +94,24 @@ func main() {
 }
 
 func handleGossipPacket(pkt *communication.GossipContext) error {
-	log.Info("[Gossip] Received Packet", "topic", pkt.Topic)
-	fmt.Println(reflect.TypeOf(pkt.Packet))
+	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
 	switch u := pkt.Packet.(type) {
 	case *lightrpc.SignedBeaconBlockBellatrix:
-		log.Info("[Gossip] beacon_block",
-			"Slot", u.Block.Slot,
-			"Signature", hex.EncodeToString(u.Signature),
-			"graffiti", string(u.Block.Body.Graffiti),
-			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash),
-			"stateRoot", hex.EncodeToString(u.Block.StateRoot),
-			"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
-			"proposerIdx", u.Block.ProposerIndex,
-		)
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
 	case *lightrpc.LightClientFinalityUpdate:
+		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		if err != nil {
+			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		}
 	case *lightrpc.LightClientOptimisticUpdate:
+		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		if err != nil {
+			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		}
+		log.Info("Got Optimistic Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature))
 	default:
 	}
 	return nil

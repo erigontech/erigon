@@ -70,11 +70,11 @@ func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return snappy.Encode(make([]byte, data.SizeSSZ()), enc), nil
+
+	return snappy.Encode(nil, enc), nil
 }
 
 func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
-
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err

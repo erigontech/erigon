@@ -225,7 +225,8 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return s.GetPeersCount() >= peers.DefaultMaxPeers
+	//return s.GetPeersCount() >= peers.DefaultMaxPeers
+	return false
 }
 
 func (s *Sentinel) GetPeersCount() int {

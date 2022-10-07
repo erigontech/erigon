@@ -17,7 +17,7 @@ type GossipCodec struct {
 func NewGossipCodec(
 	sub *pubsub.Subscription,
 	top *pubsub.Topic,
-) communication.GossipCodec {
+) *GossipCodec {
 	return &GossipCodec{
 		sub: sub,
 		top: top,
@@ -26,7 +26,11 @@ func NewGossipCodec(
 
 // decode into packet p, then return the packet context
 func (d *GossipCodec) Decode(ctx context.Context, p communication.Packet) (sctx *communication.GossipContext, err error) {
-	sctx, err = d.readPacket(ctx, p)
+	msg, err := d.sub.Next(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sctx, err = d.readPacket(msg, p)
 	return
 }
 
@@ -41,15 +45,12 @@ func (d *GossipCodec) WritePacket(ctx context.Context, p communication.Packet) e
 	}
 	return nil
 }
-func (d *GossipCodec) readPacket(ctx context.Context, p communication.Packet) (*communication.GossipContext, error) {
+
+func (d *GossipCodec) readPacket(msg *pubsub.Message, p communication.Packet) (*communication.GossipContext, error) {
+	// read the next message
 	c := &communication.GossipContext{
 		Packet: p,
 		Codec:  d,
-	}
-	// read the next message
-	msg, err := d.sub.Next(ctx)
-	if err != nil {
-		return nil, err
 	}
 	c.Topic = d.top
 	c.Msg = msg
@@ -57,11 +58,14 @@ func (d *GossipCodec) readPacket(ctx context.Context, p communication.Packet) (*
 		return c, nil
 	}
 
-	if val, ok := p.(ssz.Unmarshaler); ok {
-		//TODO: we can use a bufpool here and improve performance? we can possibly pick up used packet write buffers. (or get them from other running components)
-		if err := utils.DecodeSSZSnappy(val, msg.Data); err != nil {
-			return nil, err
-		}
+	return c, d.decodeData(p, msg.Data)
+}
+
+func (d *GossipCodec) decodeData(p communication.Packet, data []byte) error {
+	var val ssz.Unmarshaler
+	var ok bool
+	if val, ok = p.(ssz.Unmarshaler); !ok {
+		return nil
 	}
-	return c, nil
+	return utils.DecodeSSZSnappy(val, data)
 }
