@@ -61,7 +61,7 @@ func (typ *Ping) Clone() communication.Packet {
 }
 
 type SingleRoot struct {
-	Root Root `ssz-size:"32" json:"root" `
+	Root Root `json:"root" ssz-size:"32" `
 
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }

@@ -763,7 +763,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var txKey [8]byte
 	for bn := uint64(0); bn <= blockNum; bn++ {
 		rules := chainConfig.Rules(bn)
-		b, err = blockWithSenders(chainDb, nil, blockReader, blockNum)
+		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
 			return err
 		}
