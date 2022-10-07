@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1145,7 +1146,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("reopen: %w", err)
 	}
 	snapshots.LogStat()
-	if notifier != nil { // notify about new snapshots of any size
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -1161,7 +1162,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("reopen: %w", err)
 	}
 	snapshots.LogStat()
-	if notifier != nil { // notify about new snapshots of any size
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
 

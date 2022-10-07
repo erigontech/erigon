@@ -459,18 +459,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		// Chains supported are Sepolia, Mainnet and Goerli
 		if config.NetworkID == 1 || config.NetworkID == 5 || config.NetworkID == 11155111 {
 			lightclientSrv := lightclient.NewLightclientServerInternal(ethBackendRPC)
-			discoveryCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByEth1ChainId(config.NetworkID)
+			genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 			if err != nil {
 				return nil, err
 			}
 			go sentinel.RunSentinelServiceInternally(lightclientSrv, &sentinel.SentinelConfig{
-				IpAddr:         "127.0.0.1",
-				Port:           4000,
-				TCPPort:        4001,
-				DiscoverConfig: *discoveryCfg,
-				GenesisConfig:  genesisCfg,
-				NetworkConfig:  networkCfg,
-				BeaconConfig:   beaconCfg,
+				IpAddr:        "127.0.0.1",
+				Port:          4000,
+				TCPPort:       4001,
+				GenesisConfig: genesisCfg,
+				NetworkConfig: networkCfg,
+				BeaconConfig:  beaconCfg,
 			})
 		} else {
 			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")

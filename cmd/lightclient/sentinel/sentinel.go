@@ -21,9 +21,10 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -37,16 +38,17 @@ import (
 )
 
 type Sentinel struct {
-	started  bool
-	listener *discover.UDPv5 // this is us in the network.
-	ctx      context.Context
-	host     host.Host
-	cfg      *SentinelConfig
-	peers    *peers.Peers
+	started    bool
+	listener   *discover.UDPv5 // this is us in the network.
+	ctx        context.Context
+	host       host.Host
+	cfg        *SentinelConfig
+	peers      *peers.Peers
+	metadataV1 *lightrpc.MetadataV1
 
-	pubsub *pubsub.PubSub
-
-	subManager *GossipManager
+	discoverConfig discover.Config
+	pubsub         *pubsub.PubSub
+	subManager     *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -79,7 +81,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	var (
 		ipAddr  = s.cfg.IpAddr
 		port    = s.cfg.Port
-		discCfg = s.cfg.DiscoverConfig
+		discCfg = s.discoverConfig
 	)
 
 	ip := net.ParseIP(ipAddr)
@@ -118,8 +120,13 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
+	s.metadataV1 = &lightrpc.MetadataV1{
+		SeqNumber: localNode.Seq(),
+		Attnets:   0,
+	}
+
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.host, s.peers).Start()
+	handlers.NewConsensusHandlers(s.host, s.peers, s.metadataV1).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -156,6 +163,24 @@ func New(
 		cfg: cfg,
 	}
 
+	// Setup discovery
+	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
+	for i, bootnode := range cfg.NetworkConfig.BootNodes {
+		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
+		if err != nil {
+			return nil, err
+		}
+		enodes[i] = newNode
+	}
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	s.discoverConfig = discover.Config{
+		PrivateKey: privateKey,
+		Bootnodes:  enodes,
+	}
+
 	opts, err := buildOptions(cfg, s)
 	if err != nil {
 		return nil, err
@@ -178,7 +203,7 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) RecvGossip() <-chan *proto.GossipContext {
+func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
 	return s.subManager.Recv()
 }
 
@@ -193,6 +218,7 @@ func (s *Sentinel) Start(
 	if err != nil {
 		return fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
+
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}

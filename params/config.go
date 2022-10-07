@@ -259,6 +259,7 @@ type ChainConfig struct {
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
+	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
@@ -398,7 +399,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -406,6 +407,7 @@ func (c *ChainConfig) String() string {
 			c.BrunoBlock,
 			c.EulerBlock,
 			c.GibbsBlock,
+			c.NanoBlock,
 			engine,
 		)
 	}
@@ -548,6 +550,15 @@ func (c *ChainConfig) IsGibbs(num *big.Int) bool {
 
 func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
 	return configNumEqual(c.GibbsBlock, num)
+}
+
+// IsNano returns whether num is either equal to the euler fork block or greater.
+func (c *ChainConfig) IsNano(num uint64) bool {
+	return isForked(c.NanoBlock, num)
+}
+
+func (c *ChainConfig) IsOnNano(num *big.Int) bool {
+	return configNumEqual(c.NanoBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -748,6 +759,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.GibbsBlock, newcfg.GibbsBlock, head) {
 		return newCompatError("Gibbs fork block", c.GibbsBlock, newcfg.GibbsBlock)
 	}
+	if isForkIncompatible(c.NanoBlock, newcfg.NanoBlock, head) {
+		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
+	}
 	return nil
 }
 
@@ -816,7 +830,8 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
-	IsParlia, IsStarknet                                    bool
+	IsParlia, IsStarknet, IsAura                            bool
+	IsNano                                                  bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -838,7 +853,9 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsLondon:           c.IsLondon(num),
 		IsShanghai:         c.IsShanghai(num),
 		IsCancun:           c.IsCancun(num),
+		IsNano:             c.IsNano(num),
 		IsParlia:           c.Parlia != nil,
+		IsAura:             c.Aura != nil,
 	}
 }
 

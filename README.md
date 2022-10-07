@@ -43,7 +43,7 @@ NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 **Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
-<code>🔬 Alpha/Beta versions difference: [here](https://erigon.substack.com/p/erigon-2-three-upgrades?s=r)</code>
+<code>🔬 Alpha/Beta Designation has been discontinued. For release version numbering, please see [this blog post](https://erigon.substack.com/p/post-merge-release-of-erigon-dropping)</code>
 
 System Requirements
 ===================
@@ -71,12 +71,11 @@ Usage
 
 ### Getting Started
 
-For building the latest alpha release (this will be suitable for most users just wanting to run a node):
+For building the latest stable release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone https://github.com/ledgerwatch/erigon.git
+git clone --branch stable --single-branch https://github.com/ledgerwatch/erigon.git
 cd erigon
-git checkout alpha
 make erigon
 ./build/bin/erigon
 ```

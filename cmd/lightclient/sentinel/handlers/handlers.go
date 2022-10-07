@@ -14,8 +14,9 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -24,21 +25,23 @@ import (
 )
 
 type ConsensusHandlers struct {
-	handlers map[protocol.ID]network.StreamHandler
-	host     host.Host
-	peers    *peers.Peers
+	handlers   map[protocol.ID]network.StreamHandler
+	host       host.Host
+	peers      *peers.Peers
+	metadataV1 *lightrpc.MetadataV1
 }
 
-func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers {
+func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadataV1 *lightrpc.MetadataV1) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		peers: peers,
-		host:  host,
+		peers:      peers,
+		host:       host,
+		metadataV1: metadataV1,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
 		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
 		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
 		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
+		protocol.ID(MedataProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataHandlerV1),
 		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
@@ -46,12 +49,10 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers
 }
 
 func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
-	defer stream.Close()
 	log.Info("Got block by range handler call")
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
-	defer stream.Close()
 	log.Info("Got beacon block by root handler call")
 }
 
