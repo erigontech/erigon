@@ -26,8 +26,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -64,10 +66,11 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
+	chainConfig *params.ChainConfig,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
-	notifications *stagedsync.Notifications,
+	notifications *shards.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
@@ -87,7 +90,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, height, notifications, initialCycle, updateHead, nil)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -122,10 +125,11 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
+	chainConfig *params.ChainConfig,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
-	notifications *stagedsync.Notifications,
+	notifications *shards.Notifications,
 	initialCycle bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
@@ -226,10 +230,11 @@ func StageLoopStep(
 		if notifications.Accumulator != nil {
 			header := rawdb.ReadCurrentHeader(rotx)
 			if header != nil {
-				pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
+				pendingBaseFee := misc.CalcBaseFee(chainConfig, header)
 				if header.Number.Uint64() == 0 {
 					notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
 				}
+
 				notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
 				if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, rotx); err != nil {
@@ -280,7 +285,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 			return err
 		}
 	}
-	// Once we unwond we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
 	for i := range headersChain {
 		currentHeader := headersChain[i]
 		currentBody := bodiesChain[i]
@@ -372,7 +377,7 @@ func NewStagedSync(ctx context.Context,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
 	controlServer *sentry.MultiClient,
-	notifications *stagedsync.Notifications,
+	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	agg *state.Aggregator22,
@@ -398,7 +403,7 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
-			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs.Tmp, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
+			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
@@ -450,7 +455,7 @@ func NewStagedSync(ctx context.Context,
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *stagedsync.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.Aggregator22) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.Aggregator22) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)

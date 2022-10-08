@@ -133,3 +133,28 @@ func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
 	return result, nil
 }
+
+// tmHeaderValidate implemented as a native contract.
+type tmHeaderValidateNano struct{}
+
+func (c *tmHeaderValidateNano) RequiredGas(input []byte) uint64 {
+	return params.TendermintHeaderValidateGas
+}
+
+func (c *tmHeaderValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------
+type iavlMerkleProofValidateNano struct{}
+
+func (c *iavlMerkleProofValidateNano) RequiredGas(input []byte) uint64 {
+	return params.IAVLMerkleProofValidateGas
+}
+
+// input:
+// | payload length | payload    |
+// | 32 bytes       |            |
+func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}

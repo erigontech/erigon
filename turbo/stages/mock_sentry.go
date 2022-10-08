@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
@@ -80,7 +79,7 @@ type MockSentry struct {
 	ReceiveWg      sync.WaitGroup
 	Address        common.Address
 
-	Notifications *stagedsync.Notifications
+	Notifications *shards.Notifications
 
 	// TxPool
 	TxPoolFetch      *txpool.Fetch
@@ -219,9 +218,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		gspec:       gspec,
 		ChainConfig: gspec.Config,
 		Key:         key,
-		Notifications: &stagedsync.Notifications{
-			Events:               privateapi.NewEvents(),
-			Accumulator:          shards.NewAccumulator(gspec.Config),
+		Notifications: &shards.Notifications{
+			Events:               shards.NewEvents(),
+			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
@@ -346,7 +345,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs.Tmp, allSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
+			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, allSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,
@@ -560,7 +559,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -581,7 +580,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
 	if err != nil {
 		return err
 	}
@@ -594,7 +593,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
 	if err != nil {
 		return err
 	}

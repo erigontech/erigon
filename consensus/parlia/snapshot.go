@@ -27,6 +27,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 
 	lru "github.com/hashicorp/golang-lru"
 
@@ -160,7 +161,7 @@ func (s *Snapshot) isMajorityFork(forkHash string) bool {
 	return ally > len(s.RecentForkHashes)/2
 }
 
-func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderReader, parents []*types.Header, chainId *big.Int) (*Snapshot, error) {
+func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderReader, parents []*types.Header, chainId *big.Int, doLog bool) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -185,6 +186,9 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 
 	for _, header := range headers {
 		number := header.Number.Uint64()
+		if doLog && number%100_000 == 0 {
+			log.Info("[parlia] snapshots build, recover from headers", "block", number)
+		}
 		// Delete the oldest validator from the recent list to allow it signing again
 		if limit := uint64(len(snap.Validators)/2 + 1); number >= limit {
 			delete(snap.Recents, number-limit)

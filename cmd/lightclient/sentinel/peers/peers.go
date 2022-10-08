@@ -23,16 +23,16 @@ import (
 )
 
 const (
-	maxBadPeers     = 10_000
-	DefaultMaxPeers = 33
+	maxBadPeers     = 1000 // Always cap memory consumption at 1 MB
+	DefaultMaxPeers = 200
 	MaxBadResponses = 10
 )
 
 type Peers struct {
-	badPeers     *lru.Cache
-	badResponses map[peer.ID]int
-	host         host.Host
-	mu           sync.Mutex
+	badPeers  *lru.Cache // Keep track of bad peers
+	penalties *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	host      host.Host
+	mu        sync.Mutex
 }
 
 func New(host host.Host) *Peers {
@@ -40,10 +40,15 @@ func New(host host.Host) *Peers {
 	if err != nil {
 		panic(err)
 	}
+
+	penalties, err := lru.New(maxBadPeers)
+	if err != nil {
+		panic(err)
+	}
 	return &Peers{
-		badPeers:     badPeers,
-		badResponses: make(map[peer.ID]int),
-		host:         host,
+		badPeers:  badPeers,
+		penalties: penalties,
+		host:      host,
 	}
 }
 
@@ -56,22 +61,26 @@ func (p *Peers) IsBadPeer(pid peer.ID) bool {
 func (p *Peers) Penalize(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, has := p.badResponses[pid]; !has {
-		p.badResponses[pid] = 1
-	}
 
-	p.badResponses[pid]++
+	penaltyInterface, has := p.penalties.Get(pid)
+	if !has {
+		p.penalties.Add(pid, 1)
+		return
+	}
+	penalties := penaltyInterface.(int) + 1
+
+	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
-	if p.badResponses[pid] > MaxBadResponses {
+	if penalties > MaxBadResponses {
 		p.banBadPeer(pid)
-		delete(p.badResponses, pid)
+		p.penalties.Remove(pid)
 	}
 }
 
 func (p *Peers) banBadPeer(pid peer.ID) {
 	p.DisconnectPeer(pid)
 	p.badPeers.Add(pid, []byte{0})
-	log.Warn("[Peers] bad peers has been banned", "peer-id", pid)
+	log.Debug("[Peers] bad peers has been banned", "peer-id", pid)
 }
 
 func (p *Peers) DisconnectPeer(pid peer.ID) {

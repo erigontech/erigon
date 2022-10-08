@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -354,7 +356,7 @@ func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Lo
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	common2.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat",
+	log.Info("[Snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -365,6 +367,79 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
+}
+
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (s *RoSnapshots) DisableReadAhead() {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.DisableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.DisableReadAhead()
+	}
+}
+func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableReadAhead()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableReadAhead()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableWillNeed()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableWillNeed()
+	}
+	return s
+}
+func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
+	for _, sn := range s.Headers.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.seg.EnableMadvNormal()
+	}
+	for _, sn := range s.Txs.segments {
+		sn.Seg.EnableMadvNormal()
+	}
+	return s
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
@@ -746,6 +821,8 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 }
 
 func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir string, p *background.Progress, lvl log.Lvl) error {
+	_, fName := filepath.Split(sn.Path)
+	log.Debug("[snapshots] build idx", "file", fName)
 	switch sn.T {
 	case snap.Headers:
 		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
@@ -764,7 +841,8 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dir string, chainID uint256.Int, tmpDir string, workers int) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
+	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -939,8 +1017,6 @@ func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 
 type BlockRetire struct {
 	working atomic.Bool
-	wg      *sync.WaitGroup
-	result  *BlockRetireResult
 
 	workers   int
 	tmpDir    string
@@ -949,24 +1025,16 @@ type BlockRetire struct {
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
-}
 
-type BlockRetireResult struct {
-	BlockFrom, BlockTo uint64
-	Err                error
+	BackgroundResult *BackgroundResult
 }
 
 func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, BackgroundResult: &BackgroundResult{}}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
-func (br *BlockRetire) Wait()                   { br.wg.Wait() }
-func (br *BlockRetire) Result() *BlockRetireResult {
-	r := br.result
-	br.result = nil
-	return r
-}
+
 func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
 		return
@@ -1041,16 +1109,14 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		// go-routine is still working
 		return
 	}
-	if br.result != nil {
+	if br.BackgroundResult.Has() {
 		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
 		return
 	}
 
-	br.wg.Add(1)
+	br.working.Store(true)
 	go func() {
-		br.working.Store(true)
 		defer br.working.Store(false)
-		defer br.wg.Done()
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.Snapshots())
 		if !ok {
@@ -1058,10 +1124,10 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		}
 
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
-		br.result = &BlockRetireResult{
-			BlockFrom: blockFrom,
-			BlockTo:   blockTo,
-			Err:       err,
+		if err != nil {
+			br.BackgroundResult.Set(fmt.Errorf("retire blocks error: %w, fromBlock=%d, toBlock=%d", err, blockFrom, blockTo))
+		} else {
+			br.BackgroundResult.Set(nil)
 		}
 	}()
 }
@@ -1080,7 +1146,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("reopen: %w", err)
 	}
 	snapshots.LogStat()
-	if notifier != nil { // notify about new snapshots of any size
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -1088,7 +1154,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true)
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
 	if err != nil {
 		return err
 	}
@@ -1096,7 +1162,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("reopen: %w", err)
 	}
 	snapshots.LogStat()
-	if notifier != nil { // notify about new snapshots of any size
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
 
@@ -1557,7 +1623,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 	if uint64(d.Count()) != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
 	}
 	p.Name.Store(segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
@@ -1657,7 +1723,7 @@ RETRY:
 	}
 
 	if i != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d", expectedCount, i))
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, i)
 	}
 
 	if err := txnHashIdx.Build(); err != nil {
@@ -2101,37 +2167,17 @@ func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, f func(blockNum uint64
 	return nil
 }
 
-func AssertCount(snapDir string) {
-	segments, _, err := Segments(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	for _, s := range segments {
-		if s.T != snap.Transactions {
-			continue
-		}
-		blockFrom, blockTo := s.From, s.To
-		_, expectedCount, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
-		if err != nil {
-			panic(err)
-		}
-		bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
-		bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
-		if err != nil {
-			panic(err)
-		}
-		defer bodiesSegment.Close()
+// BackgroundResult - used only indicate that some work is done
+// no much reason to pass exact results by this object, just get latest state when need
+type BackgroundResult struct {
+	has bool
+	err error
+}
 
-		segFileName := snap.SegmentFileName(blockFrom, blockTo, snap.Transactions)
-		segmentFilePath := filepath.Join(snapDir, segFileName)
-		d, err := compress.NewDecompressor(segmentFilePath)
-		if err != nil {
-			panic(err)
-		}
-		defer d.Close()
-		if uint64(d.Count()) != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d", expectedCount, d.Count()))
-		}
-	}
-
+func (br *BackgroundResult) Has() bool     { return br.has }
+func (br *BackgroundResult) Set(err error) { br.has, br.err = true, err }
+func (br *BackgroundResult) GetAndReset() (bool, error) {
+	has, err := br.has, br.err
+	br.has, br.err = false, nil
+	return has, err
 }

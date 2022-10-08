@@ -24,11 +24,12 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	atomic2 "go.uber.org/atomic"
 )
 
 type FillWorker struct {
 	txNum          uint64
-	doneCount      *uint64
+	doneCount      *atomic2.Uint64
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
@@ -37,7 +38,7 @@ type FillWorker struct {
 	progress       uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic2.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
@@ -59,7 +60,7 @@ func (fw *FillWorker) Progress() uint64 {
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -110,7 +111,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -134,7 +135,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -170,7 +171,7 @@ func (fw *FillWorker) ResetProgress() {
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -188,7 +189,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -206,7 +207,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 	defer func() {
-		atomic.AddUint64(fw.doneCount, 1)
+		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	atomic.StoreUint64(&fw.total, it.Total())
@@ -302,7 +303,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	noop := state2.NewNoopWriter()
-	rules := rw.chainConfig.Rules(txTask.BlockNum)
+	rules := txTask.Rules
 	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
@@ -324,24 +325,24 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Block.Header(), ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
+			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Block.Number(), ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Block.Header(), txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
 		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Block.Header()); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
@@ -350,19 +351,16 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
-		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
-		blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */)
+		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
+		blockContext := core.NewEVMBlockContext(txTask.Block.Header(), getHashFn, rw.engine, nil /* author */)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, rules)
-		if err != nil {
-			panic(err)
-		}
+		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply tx %d [%x] failed: %w", txTask.TxIndex, txHash, err))
+			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txHash, err))
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)

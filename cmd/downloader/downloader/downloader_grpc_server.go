@@ -127,10 +127,10 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 		return false, nil
 	}
 	infoHash := Proto2InfoHash(hash)
-	log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
+	//log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
 
 	if _, ok := torrentClient.Torrent(infoHash); ok {
-		log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
+		//log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
 		return true, nil
 	}
 
@@ -151,6 +151,6 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 			return
 		}
 	}(magnet.String())
-	log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
+	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return false, nil
 }

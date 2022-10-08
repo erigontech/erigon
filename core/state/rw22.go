@@ -31,13 +31,13 @@ type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
 	Rules              *params.Rules
-	Header             *types.Header
 	Block              *types.Block
 	BlockHash          common.Hash
 	Sender             *common.Address
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
+	TxAsMessage        types.Message
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList

@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -40,6 +41,12 @@ func TestBlockchain(t *testing.T) {
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
+	if ethconfig.EnableHistoryV3InTest {
+		// HistoryV3: doesn't produce receipts on execution by design
+		bt.skipLoad(`^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
+		bt.skipLoad(`^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
+		bt.skipLoad(`^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
+	}
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root

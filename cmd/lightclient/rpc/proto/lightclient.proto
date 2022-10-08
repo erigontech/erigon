@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package lightrpc;
+
+import "beacon_block.proto";
+
+message NotificationStatus { uint64 Status = 1; }
+
+service Lightclient {
+    rpc NotifyBeaconBlock(SignedBeaconBlockBellatrix) returns (NotificationStatus);
+}

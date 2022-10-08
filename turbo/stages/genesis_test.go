@@ -71,6 +71,17 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	if block.Hash() != params.FermionGenesisHash {
 		t.Errorf("wrong fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
 	}
+
+	block, _, err = core.DefaultGnosisGenesisBlock().ToBlock()
+	if err != nil {
+		t.Errorf("error: %v", err)
+	}
+	if block.Root() != params.GnosisGenesisStateRoot {
+		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
+	}
+	if block.Hash() != params.GnosisGenesisHash {
+		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
+	}
 }
 
 func TestSokolHeaderRLP(t *testing.T) {

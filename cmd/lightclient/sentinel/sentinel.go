@@ -18,11 +18,13 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -35,20 +37,17 @@ import (
 )
 
 type Sentinel struct {
-	started  bool
-	listener *discover.UDPv5 // this is us in the network.
-	ctx      context.Context
-	host     host.Host
-	cfg      *SentinelConfig
-	peers    *peers.Peers
+	started    bool
+	listener   *discover.UDPv5 // this is us in the network.
+	ctx        context.Context
+	host       host.Host
+	cfg        *SentinelConfig
+	peers      *peers.Peers
+	metadataV1 *lightrpc.MetadataV1
 
-	state                *lightclient.LightState
-	pubsub               *pubsub.PubSub
-	subscribedTopics     map[string]*pubsub.Topic
-	runningSubscriptions map[string]*pubsub.Subscription
-
-	subscribedTopicLock      sync.Mutex
-	runningSubscriptionsLock sync.Mutex
+	discoverConfig discover.Config
+	pubsub         *pubsub.PubSub
+	subManager     *GossipManager
 }
 
 func (s *Sentinel) createLocalNode(
@@ -81,7 +80,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	var (
 		ipAddr  = s.cfg.IpAddr
 		port    = s.cfg.Port
-		discCfg = s.cfg.DiscoverConfig
+		discCfg = s.discoverConfig
 	)
 
 	ip := net.ParseIP(ipAddr)
@@ -119,7 +118,15 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.setupHandlers()
+
+	// TODO: Set up proper attestation number
+	s.metadataV1 = &lightrpc.MetadataV1{
+		SeqNumber: localNode.Seq(),
+		Attnets:   0,
+	}
+
+	// Start stream handlers
+	handlers.NewConsensusHandlers(s.host, s.peers, s.metadataV1).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -130,27 +137,46 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
+	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithMessageIdFn(fork.MsgID),
 		pubsub.WithNoAuthor(),
 		pubsub.WithSubscriptionFilter(nil),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(pubsub.DefaultGossipSubParams()),
+		pubsub.WithGossipSubParams(gsp),
 	}
 	return psOpts
 }
 
 // This is just one of the examples from the libp2p repository.
-func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
+func New(
+	ctx context.Context,
+	cfg *SentinelConfig,
+) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:                      ctx,
-		cfg:                      cfg,
-		subscribedTopics:         make(map[string]*pubsub.Topic),
-		runningSubscriptions:     make(map[string]*pubsub.Subscription),
-		subscribedTopicLock:      sync.Mutex{},
-		runningSubscriptionsLock: sync.Mutex{},
+		ctx: ctx,
+		cfg: cfg,
+	}
+
+	// Setup discovery
+	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
+	for i, bootnode := range cfg.NetworkConfig.BootNodes {
+		newNode, err := enode.Parse(enode.ValidSchemes, bootnode)
+		if err != nil {
+			return nil, err
+		}
+		enodes[i] = newNode
+	}
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	s.discoverConfig = discover.Config{
+		PrivateKey: privateKey,
+		Bootnodes:  enodes,
 	}
 
 	opts, err := buildOptions(cfg, s)
@@ -166,38 +192,36 @@ func New(ctx context.Context, cfg *SentinelConfig) (*Sentinel, error) {
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
-	//TODO: populate with data from config
-	s.state = lightclient.NewLightState(ctx, &p2p.LightClientBootstrap{}, [32]byte{})
 
-	gossipSubscription, err := pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
+	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
-		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%s", err)
+		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
 	}
 
-	s.pubsub = gossipSubscription
 	return s, nil
 }
 
-func (s *Sentinel) Start() error {
+func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
+	return s.subManager.Recv()
+}
+
+func (s *Sentinel) Start(
+// potentially we can put the req/resp handler here as well?
+) error {
 	if s.started {
 		log.Warn("Sentinel already running")
 	}
-
 	var err error
 	s.listener, err = s.createListener()
 	if err != nil {
-		return fmt.Errorf("failed creating sentinel listener err=%s", err)
+		return fmt.Errorf("failed creating sentinel listener err=%w", err)
 	}
+
 	if err := s.connectToBootnodes(); err != nil {
-		return fmt.Errorf("failed to connect to bootnodes err=%s", err)
+		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
-
 	go s.listenForPeers()
-
-	if err := s.BeginSubscription("/eth2/4a26c58b/beacon_block/ssz_snappy"); err != nil {
-		return err
-	}
-
+	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 
@@ -211,4 +235,92 @@ func (s *Sentinel) HasTooManyPeers() bool {
 
 func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
+}
+
+func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) {
+	ctx := context.Background()
+	sent, err := New(context.Background(), cfg)
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
+	if err := sent.Start(); err != nil {
+		log.Error("failed to start sentinel", "err", err)
+		return
+	}
+	gossip_topics := []GossipTopic{
+		BeaconBlockSsz,
+		LightClientFinalityUpdateSsz,
+		LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+	log.Info("Sentinel started", "enr", sent.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt := <-sent.RecvGossip():
+			switch u := pkt.Packet.(type) {
+			case *lightrpc.SignedBeaconBlockBellatrix:
+				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+}
+
+func RunSentinelServiceInternally(client lightrpc.LightclientServer, cfg *SentinelConfig) {
+	ctx := context.Background()
+	sent, err := New(context.Background(), cfg)
+	if err != nil {
+		log.Error("error", "err", err)
+		return
+	}
+	if err := sent.Start(); err != nil {
+		log.Error("failed to start sentinel", "err", err)
+		return
+	}
+	gossip_topics := []GossipTopic{
+		BeaconBlockSsz,
+		LightClientFinalityUpdateSsz,
+		LightClientOptimisticUpdateSsz,
+	}
+	for _, v := range gossip_topics {
+		// now lets separately connect to the gossip topics. this joins the room
+		subscriber, err := sent.SubscribeGossip(v)
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		err = subscriber.Listen()
+		if err != nil {
+			log.Error("failed to start sentinel", "err", err)
+		}
+	}
+	log.Info("Sentinel started", "enr", sent.String())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt := <-sent.RecvGossip():
+			switch u := pkt.Packet.(type) {
+			case *lightrpc.SignedBeaconBlockBellatrix:
+				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
 }

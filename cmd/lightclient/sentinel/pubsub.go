@@ -1,9 +1,17 @@
 package sentinel
 
 import (
+	"context"
 	"fmt"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -33,93 +41,138 @@ const (
 const gossipTopicPrefix = "/eth2/"
 const blockSubnetTopicFormat = "/eth2/%x/beacon_block"
 
-// begings the topic subscription
-func (s *Sentinel) BeginSubscription(topic string, opt ...pubsub.SubOpt) error {
-	s.runningSubscriptionsLock.Lock()
-	defer s.runningSubscriptionsLock.Unlock()
+type TopicName string
 
-	topicHandle, err := s.AddToTopic(topic)
-	if err != nil {
-		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
-	}
-	if topicHandle == nil {
-		return fmt.Errorf("failed to get topic handle while subscribing")
-	}
+const (
+	BeaconBlockTopic                 TopicName = "beacon_block"
+	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
+	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
+)
 
-	subscription, err := topicHandle.Subscribe()
-	if err != nil {
-		return fmt.Errorf("failed to begin topic %s subscription, err=%s", topic, err)
-	}
+type GossipTopic struct {
+	Name     TopicName
+	Codec    func(*pubsub.Subscription, *pubsub.Topic) communication.GossipCodec
+	Typ      communication.Packet
+	CodecStr string
+}
 
-	if _, ok := s.runningSubscriptions[subscription.Topic()]; !ok {
-		s.runningSubscriptions[subscription.Topic()] = subscription
-		log.Info("[Gossip] began subscription", "topic", subscription.Topic())
-		go s.beginTopicListening(subscription)
-	}
+var BeaconBlockSsz = GossipTopic{
+	Name:     BeaconBlockTopic,
+	Typ:      &lightrpc.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var LightClientFinalityUpdateSsz = GossipTopic{
+	Name:     LightClientFinalityUpdateTopic,
+	Typ:      &lightrpc.LightClientFinalityUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var LightClientOptimisticUpdateSsz = GossipTopic{
+	Name:     LightClientOptimisticUpdateTopic,
+	Typ:      &lightrpc.LightClientOptimisticUpdate{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
 
+type GossipManager struct {
+	ch            chan *communication.GossipContext
+	subscriptions map[string]*GossipSubscription
+	mu            sync.RWMutex
+}
+
+// construct a new gossip manager that will handle packets with the given handlerfunc
+func NewGossipManager(
+	ctx context.Context,
+) *GossipManager {
+	g := &GossipManager{
+		ch:            make(chan *communication.GossipContext, 1),
+		subscriptions: map[string]*GossipSubscription{},
+	}
+	return g
+}
+
+func (s *GossipManager) Recv() <-chan *communication.GossipContext {
+	return s.ch
+}
+
+// closes a specific topic
+func (s *GossipManager) CloseTopic(topic string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		val.Close()
+		delete(s.subscriptions, topic)
+	}
+}
+
+// get a specific topic
+func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val, true
+	}
+	return nil, false
+}
+
+// starts listening to a specific topic (forwarding its messages to the gossip manager channel)
+func (s *GossipManager) ListenTopic(topic string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.subscriptions[topic]; ok {
+		return val.Listen()
+	}
 	return nil
 }
 
-// Add the topics to the sentinel
-func (s *Sentinel) AddToTopic(topic string, opts ...pubsub.TopicOpt) (topicHandle *pubsub.Topic, err error) {
-	s.subscribedTopicLock.Lock()
-	defer s.subscribedTopicLock.Unlock()
-
-	// Join topics if we have alredy not joined them
-	if _, ok := s.subscribedTopics[topic]; !ok {
-		topicHandle, err = s.pubsub.Join(topic, opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to join topic %s, error=%s", topic, err)
-		}
-
-		s.subscribedTopics[topic] = topicHandle
-		log.Info("[Gossip] joined", "topic", topic)
-	} else {
-		topicHandle = s.subscribedTopics[topic]
+// closes the gossip manager
+func (s *GossipManager) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, val := range s.subscriptions {
+		val.Close()
 	}
-
-	return topicHandle, nil
+	close(s.ch)
+}
+func (s *GossipManager) String() string {
+	sb := new(strings.Builder)
+	s.mu.RLock()
+	for _, v := range s.subscriptions {
+		sb.Write([]byte(v.topic.String()))
+		sb.WriteString("=")
+		sb.WriteString(strconv.Itoa(len(v.topic.ListPeers())))
+		sb.WriteString(" ")
+	}
+	s.mu.RUnlock()
+	return sb.String()
+}
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+	sub = &GossipSubscription{
+		gossip_topic: topic,
+		ch:           s.subManager.ch,
+		host:         s.host.ID(),
+		ctx:          s.ctx,
+	}
+	path := s.getTopic(topic)
+	sub.topic, err = s.pubsub.Join(path, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
+	}
+	s.subManager.mu.Lock()
+	s.subManager.subscriptions[path] = sub
+	s.subManager.mu.Unlock()
+	return sub, nil
 }
 
-// unsubscribes from topics
-func (s *Sentinel) UnsubscribeToTopic(topic string) error {
-	s.subscribedTopicLock.Lock()
-	defer s.subscribedTopicLock.Unlock()
-
-	s.runningSubscriptionsLock.Lock()
-	defer s.runningSubscriptionsLock.Unlock()
-
-	// unsubscribe from topic of we are subscribe to it
-	if topicHandler, ok := s.subscribedTopics[topic]; ok {
-		if err := topicHandler.Close(); err != nil {
-			return fmt.Errorf("failed to unsubscribe from topic %s, error=%s", topic, err)
-		}
-		delete(s.runningSubscriptions, topic)
-		delete(s.subscribedTopics, topic)
-	}
-
-	return nil
+func (s *Sentinel) LogTopicPeers() {
+	log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
 }
 
-func (s *Sentinel) beginTopicListening(subscription *pubsub.Subscription) {
-	log.Info("[Gossip] began listening to subscription", "topic", subscription.Topic())
-	for _, ok := s.runningSubscriptions[subscription.Topic()]; ok; _, ok = s.runningSubscriptions[subscription.Topic()] {
-		select {
-		case <-s.ctx.Done():
-			break
-		default:
-		}
-		msg, err := subscription.Next(s.ctx)
-		if err != nil {
-			log.Warn("Failed to read message", "topic", subscription.Topic(), "err", err)
-		}
-
-		// we skip messages from ourself
-		if msg.ReceivedFrom == s.host.ID() {
-			continue
-		}
-
-		log.Info("[Gossip] received message", "topic", subscription.Topic(), "message", msg)
-
+func (s *Sentinel) getTopic(topic GossipTopic) string {
+	o, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
+	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
 }

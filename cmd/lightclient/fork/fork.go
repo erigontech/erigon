@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -99,4 +99,21 @@ func ComputeForkId(
 		NextForkEpoch:     p2p.Epoch(nextForkEpoch),
 	}
 	return enrForkID.MarshalSSZ()
+}
+
+func getLastForkEpoch(
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
+) uint64 {
+	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
+	// Retrieve current fork version.
+	currentForkEpoch := beaconConfig.GenesisEpoch
+	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
+		if currentEpoch >= fork.epoch {
+			currentForkEpoch = fork.epoch
+			continue
+		}
+		break
+	}
+	return currentForkEpoch
 }
