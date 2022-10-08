@@ -131,8 +131,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	//h, err := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
-	agg, err3 := libstate.NewAggregator(aggPath, 150000)
+	agg, err3 := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -169,7 +168,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 
-		blockRootHash, err := agg.ComputeCommitment(true, false)
+		blockRootHash, err := agg.ComputeCommitment(false, false)
 		if err != nil {
 			return err
 		}
@@ -462,7 +461,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
 	if commitments && txNum >= startTxNum && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
-		rootHash, err := ww.w.ComputeCommitment(true, trace)
+		rootHash, err := ww.w.ComputeCommitment(false, trace)
 		if err != nil {
 			return 0, nil, err
 		}

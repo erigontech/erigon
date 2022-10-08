@@ -2,7 +2,7 @@ module github.com/ledgerwatch/erigon
 
 go 1.18
 
-replace github.com/ledgerwatch/erigon-lib => ../erigon-lib
+// replace github.com/ledgerwatch/erigon-lib => ../erigon-lib
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
@@ -50,7 +50,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221007112402-f51fe73d1a0b
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221008104814-e44f9e1f409b
 	github.com/libp2p/go-libp2p v0.23.2
 	github.com/libp2p/go-libp2p-core v0.20.1
 	github.com/libp2p/go-libp2p-pubsub v0.8.1
