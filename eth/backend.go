@@ -463,7 +463,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			if err != nil {
 				return nil, err
 			}
-			go sentinel.RunSentinelServiceInternally(lightclientSrv, &sentinel.SentinelConfig{
+			go sentinel.RunSentinelService(lightclientSrv, &sentinel.SentinelConfig{
 				IpAddr:        "127.0.0.1",
 				Port:          4000,
 				TCPPort:       4001,

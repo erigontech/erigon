@@ -237,7 +237,7 @@ func (s *Sentinel) GetPeersCount() int {
 	return len(s.host.Network().Peers())
 }
 
-func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) {
+func RunSentinelService(client lightrpc.LightclientServer, cfg *SentinelConfig) {
 	ctx := context.Background()
 	sent, err := New(context.Background(), cfg)
 	if err != nil {
@@ -273,52 +273,8 @@ func RunSentinelService(client lightrpc.LightclientClient, cfg *SentinelConfig) 
 		case pkt := <-sent.RecvGossip():
 			switch u := pkt.Packet.(type) {
 			case *lightrpc.SignedBeaconBlockBellatrix:
-				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
-					panic(err)
-				}
-			}
-		}
-	}
-}
-
-func RunSentinelServiceInternally(client lightrpc.LightclientServer, cfg *SentinelConfig) {
-	ctx := context.Background()
-	sent, err := New(context.Background(), cfg)
-	if err != nil {
-		log.Error("error", "err", err)
-		return
-	}
-	if err := sent.Start(); err != nil {
-		log.Error("failed to start sentinel", "err", err)
-		return
-	}
-	gossip_topics := []GossipTopic{
-		BeaconBlockSsz,
-		LightClientFinalityUpdateSsz,
-		LightClientOptimisticUpdateSsz,
-	}
-	for _, v := range gossip_topics {
-		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-	}
-	log.Info("Sentinel started", "enr", sent.String())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt := <-sent.RecvGossip():
-			switch u := pkt.Packet.(type) {
-			case *lightrpc.SignedBeaconBlockBellatrix:
-				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil {
-					panic(err)
+				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil && err != context.Canceled {
+					log.Warn("Could not notify about new beacon block", "err", err)
 				}
 			}
 		}

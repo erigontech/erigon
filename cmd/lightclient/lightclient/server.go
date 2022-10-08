@@ -103,6 +103,9 @@ func (l *LightClientServer) NotifyBeaconBlock(ctx context.Context, beaconBlock *
 			},
 		})
 	}
+	if err != nil {
+		return nil, err
+	}
 
 	return &lightrpc.NotificationStatus{
 		Status: 0,
