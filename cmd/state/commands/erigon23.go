@@ -150,7 +150,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
 
 	agg.SetTx(rwTx)
-	latestTx, err := agg.SeekCommitment(startTxNum)
+	latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
