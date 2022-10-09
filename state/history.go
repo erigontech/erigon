@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -788,6 +789,41 @@ func (h *History) MakeContext() *HistoryContext {
 }
 func (hc *HistoryContext) SetTx(tx kv.Tx) { hc.tx = tx }
 
+func (hc *HistoryContext) IterateAll() {
+	wg := sync.WaitGroup{}
+	hc.indexFiles.Ascend(func(item ctxItem) bool {
+		//fmt.Printf("ef item %d-%d, key %x\n", item.startTxNum, item.endTxNum, key)
+		if item.reader.Empty() {
+			return true
+		}
+		wg.Add(1)
+		go func(item ctxItem) {
+			defer wg.Done()
+			defer func() {
+				rec := recover()
+				if rec != nil {
+					a := fmt.Errorf("%v, at %d-%d, %s", rec, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep, hc.h.filenameBase)
+					panic(a)
+				}
+			}()
+
+			g := item.getter
+			g.Reset(0)
+			for g.HasNext() {
+				k, _ := g.NextUncompressed()
+				_ = k
+				eliasVal, _ := g.NextUncompressed()
+				ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+				it := ef.Iterator()
+				for it.HasNext() {
+					it.Next()
+				}
+			}
+		}(item)
+		return true
+	})
+	wg.Wait()
+}
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64
