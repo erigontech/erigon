@@ -40,7 +40,7 @@ func initializeNetwork(t *testing.T, ctx context.Context) (*ConsensusHandlers, h
 	h2pi := h2.Peerstore().PeerInfo(h2.ID())
 	require.NoError(t, h1.Connect(ctx, h2pi))
 
-	return NewConsensusHandlers(h2, &peers.Peers{}, &lightrpc.MetadataV1{}), h1, h2
+	return NewConsensusHandlers(h2, &peers.Peers{}, &lightrpc.MetadataV2{}), h1, h2
 }
 
 func TestPingHandler(t *testing.T) {

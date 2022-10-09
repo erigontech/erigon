@@ -104,9 +104,10 @@ func writeRequest(s *Sentinel, requestPacket communication.Packet, peerId peer.I
 	}
 
 	sc := ssz_snappy.NewStreamCodec(stream)
-
-	if _, err := sc.WritePacket(requestPacket); err != nil {
-		return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+	if _, ok := handlers.NoRequestHandlers[topic]; !ok {
+		if _, err := sc.WritePacket(requestPacket); err != nil {
+			return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+		}
 	}
 
 	if err := sc.CloseWriter(); err != nil {

@@ -19,11 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/network"
 )
@@ -66,10 +64,6 @@ func (d *StreamCodec) CloseReader() error {
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (n int, err error) {
-	// if its a metadata request we dont write anything
-	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
-		return 0, nil
-	}
 	val, ok := pkt.(ssz.Marshaler)
 	if !ok {
 		return 0, nil
