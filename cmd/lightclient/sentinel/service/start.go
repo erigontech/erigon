@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type ServerConfig struct {
@@ -47,9 +48,9 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 	server := NewSentinelServer(ctx, sent)
 	go StartServe(server, srvCfg)
 	// Wait a bit for the serving (TODO: make it better, this is ugly)
-	time.Sleep(1 * time.Second)
+	time.Sleep(5 * time.Second)
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithInsecure())
+	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}

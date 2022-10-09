@@ -1,57 +1,65 @@
 package service
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
 
-type gossipType int
-
-var (
-	// lightclient
-	lightClientOptimisticUpdate gossipType = 0
-	lightClientFinalityUpdate   gossipType = 1
-	// legacy
-	beaconBlock gossipType = 2
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 )
 
 const (
 	maxSubscribers = 100 // only 100 lightclients per sentinel
 )
 
-var gossipTypes = []gossipType{
-	lightClientOptimisticUpdate,
-	lightClientFinalityUpdate,
-	beaconBlock,
+type gossipObject struct {
+	data []byte              // gossip data
+	t    lightrpc.GossipType // determine which gossip message we are notifying of
 }
 
-type gossipNotifier map[gossipType][]chan interface{}
+type gossipNotifier struct {
+	notifiers []chan gossipObject
 
-func newGossipNotifier() gossipNotifier {
-	gossipNotifier := make(gossipNotifier)
-	for _, t := range gossipTypes {
-		gossipNotifier[t] = make([]chan interface{}, 0, maxSubscribers)
-	}
-	return gossipNotifier
+	mu sync.Mutex
 }
 
-func (g gossipNotifier) notify(t gossipType, message interface{}) {
-	for _, ch := range g[t] {
-		ch <- message
+func newGossipNotifier() *gossipNotifier {
+	return &gossipNotifier{
+		notifiers: make([]chan gossipObject, 0, maxSubscribers),
 	}
 }
 
-func (g gossipNotifier) addSubscriber(t gossipType) (chan interface{}, int, error) {
-	if len(g[t]) >= maxSubscribers {
+func (g *gossipNotifier) notify(t lightrpc.GossipType, data []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, ch := range g.notifiers {
+		ch <- gossipObject{
+			data: data,
+			t:    t,
+		}
+	}
+}
+
+func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.notifiers) >= maxSubscribers {
 		return nil, -1, fmt.Errorf("too many subsribers, try again later")
 	}
-	ch := make(chan interface{})
-	g[t] = append(g[t], ch)
-	return ch, len(g[t]) - 1, nil
+	ch := make(chan gossipObject)
+	g.notifiers = append(g.notifiers, ch)
+	return ch, len(g.notifiers) - 1, nil
 }
 
-func (g gossipNotifier) removeSubscriber(t gossipType, id int) error {
-	if len(g[t]) <= id {
+func (g *gossipNotifier) removeSubscriber(id int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if len(g.notifiers) <= id {
 		return fmt.Errorf("invalid id, no subscription exist with this id")
 	}
-	close(g[t][id])
-	g[t] = append(g[t][:id], g[t][id+1:]...)
+	close(g.notifiers[id])
+	g.notifiers = append(g.notifiers[:id], g.notifiers[id+1:]...)
 	return nil
 }

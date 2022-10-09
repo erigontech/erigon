@@ -76,7 +76,7 @@ func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *t
 }
 
 func (l *LightClient) Start(ctx context.Context) {
-	stream, err := l.sentinel.SubscribeBeaconBlock(ctx, &lightrpc.GossipRequest{})
+	stream, err := l.sentinel.SubscribeGossip(ctx, &lightrpc.GossipRequest{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
 		return
@@ -89,10 +89,17 @@ func (l *LightClient) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			block, err := stream.Recv()
+			data, err := stream.Recv()
 			if err != nil {
 				log.Warn("[Lightclient] block could not be ralayed :/", "reason", err)
 				continue
+			}
+			if data.Type != lightrpc.GossipType_BeaconBlockGossipType {
+				continue
+			}
+			block := &lightrpc.SignedBeaconBlockBellatrix{}
+			if err := block.UnmarshalSSZ(data.Data); err != nil {
+				log.Warn("Could not unmarshall gossip", "reason", err)
 			}
 			if err := l.processBeaconBlock(ctx, block); err != nil {
 				log.Warn("[Lightclient] block could not be executed :/", "reason", err)
