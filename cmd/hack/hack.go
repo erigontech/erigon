@@ -23,6 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -37,12 +39,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -171,7 +175,23 @@ func readAccount(chaindata string, account common.Address) error {
 	if err != nil {
 		return err
 	}
-	for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+	defer c.Close()
+	for k, v, e := c.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, account.Bytes()) {
+			break
+		}
+		fmt.Printf("%x => %x\n", k, v)
+	}
+	cc, err := tx.Cursor(kv.PlainContractCode)
+	if err != nil {
+		return err
+	}
+	defer cc.Close()
+	fmt.Printf("code hashes\n")
+	for k, v, e := cc.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
 		if e != nil {
 			return e
 		}
@@ -473,8 +493,53 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 	return nil
 }
 
-func extractBodies(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
+func extractBodies(datadir string) error {
+	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
+		Enabled:    true,
+		KeepBlocks: true,
+		Produce:    false,
+	}, filepath.Join(datadir, "snapshots"))
+	snaps.ReopenFolder()
+	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
+		for _, sn := range sns {
+			var firstBlockNum, firstBaseTxNum, firstAmount uint64
+			var lastBlockNum, lastBaseTxNum, lastAmount uint64
+			var prevBlockNum, prevBaseTxNum, prevAmount uint64
+			first := true
+			sn.Iterate(func(blockNum uint64, baseTxNum uint64, txAmount uint64) error {
+				if first {
+					firstBlockNum = blockNum
+					firstBaseTxNum = baseTxNum
+					firstAmount = txAmount
+					first = false
+				} else {
+					if blockNum != prevBlockNum+1 {
+						fmt.Printf("Discount block Num: %d => %d\n", prevBlockNum, blockNum)
+					}
+					if baseTxNum != prevBaseTxNum+prevAmount {
+						fmt.Printf("Wrong baseTxNum: %d+%d => %d\n", prevBaseTxNum, prevAmount, baseTxNum)
+					}
+				}
+				prevBlockNum = blockNum
+				lastBlockNum = blockNum
+				prevBaseTxNum = baseTxNum
+				lastBaseTxNum = baseTxNum
+				prevAmount = txAmount
+				lastAmount = txAmount
+				return nil
+			})
+			fmt.Printf("Seg: [%d, %d, %d] => [%d, %d, %d]\n", firstBlockNum, firstBaseTxNum, firstAmount, lastBlockNum, lastBaseTxNum, lastAmount)
+		}
+		return nil
+	})
+	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+		fmt.Printf("txTxnID = %d\n", lastTxnID)
+		return nil
+	}); err != nil {
+		return err
+	}
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -486,18 +551,32 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
 	i := 0
-	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
+	var txId uint64
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
+		var hash common.Hash
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
+			return err
+		}
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		if hash != blockHash {
+			fmt.Printf("Non-canonical\n")
+			continue
+		}
 		i++
-		if i == 1 {
+		if txId > 0 {
+			if txId != baseTxId {
+				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+			}
+		}
+		txId = baseTxId + uint64(txAmount) + 2
+		if i == 50 {
 			break
 		}
 	}
@@ -1003,8 +1082,6 @@ func chainConfig(name string) error {
 		chainConfig = params.RinkebyChainConfig
 	case "goerli":
 		chainConfig = params.GoerliChainConfig
-	case "kiln-devnet":
-		chainConfig = params.KilnDevnetChainConfig
 	case "bsc":
 		chainConfig = params.BSCChainConfig
 	case "sokol":
@@ -1165,20 +1242,51 @@ func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	return nil
 }
 
-func iterate(filename string) error {
-	d, err := compress.NewDecompressor(filename)
+func iterate(filename string, prefix string) error {
+	pBytes := common.FromHex(prefix)
+	efFilename := filename + ".ef"
+	viFilename := filename + ".vi"
+	vFilename := filename + ".v"
+	efDecomp, err := compress.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var buf, bufv []byte
+	defer efDecomp.Close()
+	viIndex, err := recsplit.OpenIndex(viFilename)
+	if err != nil {
+		return err
+	}
+	defer viIndex.Close()
+	r := recsplit.NewIndexReader(viIndex)
+	vDecomp, err := compress.NewDecompressor(vFilename)
+	if err != nil {
+		return err
+	}
+	defer vDecomp.Close()
+	gv := vDecomp.MakeGetter()
+	g := efDecomp.MakeGetter()
 	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		bufv, _ = g.Next(bufv[:0])
-		s := fmt.Sprintf("%x", buf)
-		if strings.HasPrefix(s, "000000000000006f6502b7f2bbac8c30a3f67e9a") {
-			fmt.Printf("%s [%x]\n", s, bufv)
+		key, _ := g.NextUncompressed()
+		if bytes.HasPrefix(key, pBytes) {
+			val, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(val)
+			efIt := ef.Iterator()
+			fmt.Printf("[%x] =>", key)
+			for efIt.HasNext() {
+				txNum := efIt.Next()
+				var txKey [8]byte
+				binary.BigEndian.PutUint64(txKey[:], txNum)
+				offset := r.Lookup2(txKey[:], key)
+				gv.Reset(offset)
+				v, _ := gv.Next(nil)
+				fmt.Printf(" %d", txNum)
+				if len(v) == 0 {
+					fmt.Printf("*")
+				}
+			}
+			fmt.Printf("\n")
+		} else {
+			g.SkipUncompressed()
 		}
 	}
 	return nil
@@ -1260,7 +1368,7 @@ func main() {
 		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
-		err = extractBodies(*chaindata, uint64(*block))
+		err = extractBodies(*chaindata)
 
 	case "repairCurrent":
 		repairCurrent()
@@ -1307,7 +1415,7 @@ func main() {
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
-		err = iterate(*chaindata)
+		err = iterate(*chaindata, *account)
 	}
 
 	if err != nil {

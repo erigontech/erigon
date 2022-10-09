@@ -202,6 +202,9 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 		return nil, nil
 	}
 	code, err := s.tx.GetOne(kv.Code, codeHash[:])
+	if s.trace {
+		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+	}
 	if len(code) == 0 {
 		return nil, nil
 	}

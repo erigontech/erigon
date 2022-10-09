@@ -5,19 +5,19 @@ linters:
   disable-all: true
   enable:
     - gofmt
-    - deadcode
     - errcheck
-#    - gosimple # 1.18
+    - gosimple
     - govet
     - ineffassign
-#    - staticcheck # 1.18
+    - staticcheck
 #    - structcheck # 1.18
 #    - unused # 1.18
-    - varcheck
-#    - gocritic
-#    - bodyclose # 1.18
-#    - gosec
+    - gocritic
+    - bodyclose
+    - gosec
 #    - forcetypeassert
+    - prealloc
+    - unconvert
 
 linters-settings:
   gocritic:

@@ -52,7 +52,7 @@ func FullNode4() {
 }
 
 func ShortNode1() {
-	s := NewShortNode([]byte("1"), valueNode([]byte("2")))
+	s := NewShortNode([]byte("1"), valueNode("2"))
 	b, err := rlp.EncodeToBytes(s)
 	if err != nil {
 		panic(err)
@@ -61,7 +61,7 @@ func ShortNode1() {
 }
 
 func ShortNode2() {
-	s := NewShortNode([]byte("1"), valueNode([]byte("123456789012345678901234567890123456789012345678901234567890")))
+	s := NewShortNode([]byte("1"), valueNode("123456789012345678901234567890123456789012345678901234567890"))
 	b, err := rlp.EncodeToBytes(s)
 	if err != nil {
 		panic(err)
@@ -99,17 +99,17 @@ func Hash2() {
 }
 
 func Hash3() {
-	s := NewShortNode([]byte("12"), valueNode([]byte("1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012")))
+	s := NewShortNode([]byte("12"), valueNode("1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012"))
 	hashRoot(s, "Hash3")
 }
 
 func Hash4() {
-	s := NewShortNode([]byte("12345678901234567890123456789012"), valueNode([]byte("12345678901234567890")))
+	s := NewShortNode([]byte("12345678901234567890123456789012"), valueNode("12345678901234567890"))
 	hashRoot(s, "Hash4")
 }
 
 func Hash5() {
-	s := NewShortNode([]byte("1234567890123456789012345678901"), valueNode([]byte("1")))
+	s := NewShortNode([]byte("1234567890123456789012345678901"), valueNode("1"))
 	hashRoot(s, "Hash5")
 }
 

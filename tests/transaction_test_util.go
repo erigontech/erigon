@@ -131,15 +131,15 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			return fmt.Errorf("got error, expected none: %w", err)
 		}
 		if sender == nil {
-			return fmt.Errorf("sender was nil, should be %x", common.Address(testcase.fork.Sender))
+			return fmt.Errorf("sender was nil, should be %x", testcase.fork.Sender)
 		}
-		if *sender != common.Address(testcase.fork.Sender) {
+		if *sender != testcase.fork.Sender {
 			return fmt.Errorf("sender mismatch: got %x, want %x", sender, testcase.fork.Sender)
 		}
 		if txhash == nil {
-			return fmt.Errorf("txhash was nil, should be %x", common.Hash(testcase.fork.Hash))
+			return fmt.Errorf("txhash was nil, should be %x", testcase.fork.Hash)
 		}
-		if *txhash != common.Hash(testcase.fork.Hash) {
+		if *txhash != testcase.fork.Hash {
 			return fmt.Errorf("hash mismatch: got %x, want %x", *txhash, testcase.fork.Hash)
 		}
 		if new(big.Int).SetUint64(intrinsicGas).Cmp((*big.Int)(testcase.fork.IntrinsicGas)) != 0 {

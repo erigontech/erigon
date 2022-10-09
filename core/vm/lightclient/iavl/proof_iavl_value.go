@@ -74,7 +74,7 @@ func (op IAVLValueOp) Run(args [][]byte) ([][]byte, error) {
 	// XXX What is the encoding for keys?
 	// We should decode the key depending on whether it's a string or hex,
 	// maybe based on quotes and 0x prefix?
-	err = op.Proof.VerifyItem([]byte(op.key), value)
+	err = op.Proof.VerifyItem(op.key, value)
 	if err != nil {
 		return nil, cmn.ErrorWrap(err, "verifying value")
 	}

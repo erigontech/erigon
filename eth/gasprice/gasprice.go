@@ -198,7 +198,10 @@ func (t transactionsByGasPrice) Less(i, j int) bool {
 func (t *transactionsByGasPrice) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	l := x.(types.Transaction)
+	l, ok := x.(types.Transaction)
+	if !ok {
+		log.Error("Type assertion failure", "err", "cannot get types.Transaction from interface")
+	}
 	t.txs = append(t.txs, l)
 }
 
@@ -224,10 +227,15 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		return err
 	}
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
-	if block == nil {
+	if err != nil {
 		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
+
+	if block == nil {
+		return nil
+	}
+
 	blockTxs := block.Transactions()
 	plainTxs := make([]types.Transaction, len(blockTxs))
 	copy(plainTxs, blockTxs)

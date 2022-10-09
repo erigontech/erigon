@@ -16,7 +16,7 @@ func backOffTime(snap *Snapshot, val common.Address) uint64 {
 			return 0
 		}
 		s := rand.NewSource(int64(snap.Number))
-		r := rand.New(s)
+		r := rand.New(s) // nolint: gosec
 		n := len(snap.Validators)
 		backOffSteps := make([]uint64, 0, n)
 		for idx := uint64(0); idx < uint64(n); idx++ {

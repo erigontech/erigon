@@ -15,6 +15,6 @@
   "berlinBlock": 9812189,
   "londonBlock": 10499401,
   "terminalTotalDifficulty": 50000000000000000,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "terminalTotalDifficultyPassed": true,
   "ethash": {}
 }

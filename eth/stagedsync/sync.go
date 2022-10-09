@@ -209,7 +209,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	}
 	return nil
 }
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -252,8 +252,13 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind, quiet); err != nil {
 			return err
+		}
+
+		if string(stage.ID) == debug.StopAfterStage() { // stop process for debugging reasons
+			log.Warn("STOP_AFTER_STAGE env flag forced to stop app")
+			return libcommon.ErrStopped
 		}
 
 		s.NextStage()
@@ -271,87 +276,84 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		return err
 	}
 
-	if err := printLogs(db, tx, s.timings); err != nil {
-		return err
-	}
 	s.currentStage = 0
 	return nil
 }
 
-func printLogs(db kv.RoDB, tx kv.RwTx, timings []Timing) error {
+func (s *Sync) PrintTimings() []interface{} {
 	var logCtx []interface{}
 	count := 0
-	for i := range timings {
-		if timings[i].took < 50*time.Millisecond {
+	for i := range s.timings {
+		if s.timings[i].took < 50*time.Millisecond {
 			continue
 		}
 		count++
 		if count == 50 {
 			break
 		}
-		if timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
-		} else if timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
+		if s.timings[i].isUnwind {
+			logCtx = append(logCtx, "Unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+		} else if s.timings[i].isPrune {
+			logCtx = append(logCtx, "Prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else {
-			logCtx = append(logCtx, string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}
 	}
-	if len(logCtx) > 0 {
-		log.Info("Timings (slower than 50ms)", logCtx...)
-	}
+	return logCtx
+}
 
+func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	if tx == nil {
 		return nil
 	}
-
-	if len(logCtx) > 0 { // also don't print this logs if everything is fast
-		buckets := []string{
-			kv.PlainState,
-			kv.AccountChangeSet,
-			kv.StorageChangeSet,
-			kv.EthTx,
-			kv.Log,
-		}
-		bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
-		for _, bucket := range buckets {
-			sz, err1 := tx.BucketSize(bucket)
-			if err1 != nil {
-				return err1
-			}
-			bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
-		}
-
-		sz, err1 := tx.BucketSize("freelist")
+	buckets := []string{
+		kv.PlainState,
+		kv.AccountChangeSet,
+		kv.StorageChangeSet,
+		kv.EthTx,
+		kv.Log,
+	}
+	bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
+	for _, bucket := range buckets {
+		sz, err1 := tx.BucketSize(bucket)
 		if err1 != nil {
-			return err1
+			return bucketSizes
 		}
-		bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
-		amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
-		if db != nil {
-			bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
-		}
-		log.Info("Tables", bucketSizes...)
+		bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
+	}
+
+	sz, err1 := tx.BucketSize("freelist")
+	if err1 != nil {
+		return bucketSizes
+	}
+	bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
+	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
+	if db != nil {
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
 	}
 	tx.CollectMetrics()
-	return nil
+	return bucketSizes
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool, quiet bool) (err error) {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx); err != nil {
-		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, quiet); err != nil {
+		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+		log.Debug("Error while executing stage", "err", wrappedError)
+		return wrappedError
 	}
 
 	took := time.Since(start)
+	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
-		logPrefix := s.LogPrefix()
 		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
+	} else {
+		log.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{stage: stage.ID, took: took})
 	return nil

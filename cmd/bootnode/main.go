@@ -21,9 +21,10 @@ import (
 	"crypto/ecdsa"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"net"
 	"os"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/crypto"

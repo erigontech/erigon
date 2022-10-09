@@ -2,9 +2,6 @@
 package node
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
@@ -93,7 +90,6 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	return nodeConfig
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
-	defer func(t time.Time) { fmt.Printf("node.go:97: %s\n", time.Since(t)) }(time.Now())
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, nodeConfig, ethConfig)
 	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
@@ -111,17 +107,16 @@ func New(
 	logger log.Logger,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
-	node := makeConfigNode(nodeConfig)
-	ethereum, err := RegisterEthService(node, ethConfig, logger)
+	node, err := node.New(nodeConfig)
+	if err != nil {
+		utils.Fatalf("Failed to create Erigon node: %v", err)
+	}
+
+	ethereum, err := eth.New(node, ethConfig, logger)
 	if err != nil {
 		return nil, err
 	}
 	return &ErigonNode{stack: node, backend: ethereum}, nil
-}
-
-// RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
-	return eth.New(stack, cfg, logger)
 }
 
 func NewNodeConfig() *nodecfg.Config {
@@ -135,17 +130,4 @@ func NewNodeConfig() *nodecfg.Config {
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
 	return &nodeConfig
-}
-
-func MakeConfigNodeDefault() *node.Node {
-	return makeConfigNode(NewNodeConfig())
-}
-
-func makeConfigNode(config *nodecfg.Config) *node.Node {
-	stack, err := node.New(config)
-	if err != nil {
-		utils.Fatalf("Failed to create Erigon node: %v", err)
-	}
-
-	return stack
 }

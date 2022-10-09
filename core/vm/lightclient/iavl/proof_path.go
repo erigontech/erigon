@@ -125,9 +125,10 @@ func (pl PathToLeaf) dropRoot() PathToLeaf {
 	if pl.isEmpty() {
 		return pl
 	}
-	return PathToLeaf(pl[:len(pl)-1])
+	return pl[:len(pl)-1]
 }
 
+// TODO: (leonard) unused linter complains these are unused methods
 func (pl PathToLeaf) hasCommonRoot(pl2 PathToLeaf) bool {
 	if pl.isEmpty() || pl2.isEmpty() {
 		return false

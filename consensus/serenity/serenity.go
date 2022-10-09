@@ -81,7 +81,8 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 		return err
 	}
 	if !reached {
-		return s.eth1Engine.VerifyHeader(chain, header, seal)
+		// Not verifying seals if the TTD is passed
+		return s.eth1Engine.VerifyHeader(chain, header, !chain.Config().TerminalTotalDifficultyPassed)
 	}
 	// Short circuit if the parent is not known
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
@@ -206,6 +207,7 @@ func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, paren
 }
 
 func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, e, header, txs, uncles, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {

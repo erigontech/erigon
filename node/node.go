@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -131,8 +132,14 @@ func (n *Node) Start() error {
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
-		n.stopServices(started) //nolint:errcheck
-		n.doClose(nil)
+		stopErr := n.stopServices(started)
+		if stopErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", stopErr)
+		} //nolint:errcheck
+		closeErr := n.doClose(nil)
+		if closeErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", closeErr)
+		}
 	}
 	return err
 }
@@ -238,7 +245,7 @@ func (n *Node) openDataDir() error {
 		return convertFileLockError(err)
 	}
 	if !locked {
-		return fmt.Errorf("%w: %s\n", ErrDataDirUsed, instdir)
+		return fmt.Errorf("%w: %s", ErrDataDirUsed, instdir)
 	}
 	n.dirLock = l
 	return nil
@@ -313,12 +320,19 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+		roTxLimit := int64(32)
+		if config.Http.DBReadConcurrency > 0 {
+			roTxLimit = int64(config.Http.DBReadConcurrency)
+		}
+		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
+		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		return opts.Open()
 	}

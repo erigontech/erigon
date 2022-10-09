@@ -9,4 +9,5 @@ type BlockBuilderParameters struct {
 	Timestamp             uint64
 	PrevRandao            common.Hash
 	SuggestedFeeRecipient common.Address
+	PayloadId             uint64
 }

@@ -20,8 +20,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-// TODO: can we increase this value together with --torrent.upload.rate ?
-const DefaultNetworkChunkSize = DefaultPieceSize
+const DefaultNetworkChunkSize = 1 * 1024 * 1024
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -104,19 +103,17 @@ func New(snapDir string, verbosity lg.Level, dbg bool, natif nat.Interface, down
 		}
 	}
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 	if downloadRate.Bytes() < 500_000_000 {
-		b := int(2 * DefaultPieceSize)
-		if downloadRate.Bytes() > DefaultPieceSize {
+		b := 2 * DefaultNetworkChunkSize
+		if downloadRate.Bytes() > DefaultNetworkChunkSize {
 			b = int(2 * downloadRate.Bytes())
 		}
 		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), b) // default: unlimited
 	}
 
 	// debug
-	if dbg {
-		torrentConfig.Debug = true
-	}
+	//	torrentConfig.Debug = false
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 

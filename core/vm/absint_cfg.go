@@ -131,7 +131,7 @@ func AbsValueDestringify(s string) AbsValue {
 	return AbsValue{}
 }
 
-//////////////////////////////////////////////////
+// ////////////////////////////////////////////////
 type astack struct {
 	values []AbsValue
 	hash   uint64
@@ -295,7 +295,7 @@ func (state *astate) Add(stack *astack) {
 
 //////////////////////////////////////////////////
 
-//-1 block id is invalid jump
+// -1 block id is invalid jump
 type CfgProofState struct {
 	Pc     int
 	Stacks [][]string
@@ -361,15 +361,15 @@ func (proof *CfgProof) ToString() string {
 	return string(proof.Serialize())
 }
 
-//block.{Entry|Exit}.Pc in code, block.{Succs|Preds} in some block.{Entry}.Pc
-//Entry <= Exit
-//No overlap of blocks
-//Must have block starting at 0 with a empty state
-//Succs,Preds consistency
-//No duplicate succs
-//No duplicate preds
-//succs are sorted
-//preds are sorted
+// block.{Entry|Exit}.Pc in code, block.{Succs|Preds} in some block.{Entry}.Pc
+// Entry <= Exit
+// No overlap of blocks
+// Must have block starting at 0 with a empty state
+// Succs,Preds consistency
+// No duplicate succs
+// No duplicate preds
+// succs are sorted
+// preds are sorted
 func (proof *CfgProof) isValid() bool {
 	return true
 }

@@ -1,10 +1,10 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -13,23 +13,18 @@ import (
 
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet starknet.CAIROVMClient, filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
+	filters *rpchelper.Filters, stateCache kvcache.Cache,
+	blockReader services.FullBlockReader, agg *libstate.Aggregator22, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
-	if cfg.TevmEnabled {
-		base.EnableTevmExperiment()
-	}
+	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db, eth)
-	starknetImpl := NewStarknetAPI(base, db, starknet, txPool)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
-	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(db)
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
@@ -92,20 +87,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
-		case "starknet":
-			list = append(list, rpc.API{
-				Namespace: "starknet",
-				Public:    true,
-				Service:   StarknetAPI(starknetImpl),
-				Version:   "1.0",
-			})
-		case "engine":
-			list = append(list, rpc.API{
-				Namespace: "engine",
-				Public:    true,
-				Service:   EngineAPI(engineImpl),
-				Version:   "1.0",
-			})
 		case "bor":
 			list = append(list, rpc.API{
 				Namespace: "bor",
@@ -129,6 +110,30 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 			})
 		}
 	}
+
+	return list
+}
+
+func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
+	agg *libstate.Aggregator22,
+	cfg httpcfg.HttpCfg) (list []rpc.API) {
+	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout)
+
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
+	engineImpl := NewEngineAPI(base, db, eth)
+
+	list = append(list, rpc.API{
+		Namespace: "eth",
+		Public:    true,
+		Service:   EthAPI(ethImpl),
+		Version:   "1.0",
+	}, rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   EngineAPI(engineImpl),
+		Version:   "1.0",
+	})
 
 	return list
 }

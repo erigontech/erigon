@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// Package clique implements the proof-of-authority consensus engine.
+// Package aura implements the proof-of-authority consensus engine.
 package aura
 
 import (
@@ -42,7 +42,7 @@ type ValidatorSetJson struct {
 	List []common.Address `json:"list"`
 	// Address of a contract that indicates the list of authorities.
 	SafeContract *common.Address `json:"safeContract"`
-	// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
+	// Address of a contract that indicates the list of authorities and enables reporting of their misbehaviour using transactions.
 	Contract *common.Address `json:"contract"`
 	// A map of starting blocks for each validator set.
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
@@ -57,8 +57,8 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{
-			contractAddress:  *j.SafeContract,
-			validators:       ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition},
+			contractAddress:  *j.Contract,
+			validators:       ValidatorSafeContract{contractAddress: *j.Contract, posdaoTransition: posdaoTransition},
 			posdaoTransition: posdaoTransition,
 		}
 	}
@@ -73,7 +73,7 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	return nil
 }
 
-//TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
+// TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
 type JsonSpec struct {
 	StepDuration *uint64           `json:"stepDuration"` // Block duration, in seconds.
 	Validators   *ValidatorSetJson `json:"validators"`   // Valid authorities

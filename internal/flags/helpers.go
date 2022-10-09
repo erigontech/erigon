@@ -36,7 +36,7 @@ type FlagGroup struct {
 	Flags []cli.Flag
 }
 
-// byCategory sorts an array of FlagGroup by Name in the order
+// ByCategory sorts an array of FlagGroup by Name in the order
 // defined in AppHelpFlagGroups.
 type ByCategory []FlagGroup
 
@@ -56,17 +56,6 @@ func (a ByCategory) Less(i, j int) bool {
 	}
 
 	return iIdx < jIdx
-}
-
-func FlagCategory(flag cli.Flag, flagGroups []FlagGroup) string {
-	for _, category := range flagGroups {
-		for _, flg := range category.Flags {
-			if flg.GetName() == flag.GetName() {
-				return category.Name
-			}
-		}
-	}
-	return "MISC"
 }
 
 // NewApp creates an app with sane defaults.

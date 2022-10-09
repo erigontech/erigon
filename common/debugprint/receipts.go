@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-//nolint
+// nolint
 func Transactions(ts1, ts2 types.Transactions) {
 	fmt.Printf("==== Transactions ====\n")
 	fmt.Printf("len(Transactions): %d, %d\n", len(ts1), len(ts2))
@@ -26,7 +26,7 @@ func Transactions(ts1, ts2 types.Transactions) {
 	}
 }
 
-//nolint
+// nolint
 func Receipts(rs1, rs2 types.Receipts) {
 	fmt.Printf("==== Receipts ====\n")
 	fmt.Printf("len(Receipts): %d, %d\n", len(rs1), len(rs2))
@@ -75,7 +75,7 @@ func Receipts(rs1, rs2 types.Receipts) {
 	}
 }
 
-//nolint
+// nolint
 func Headers(h1, h2 *types.Header) {
 	fmt.Printf("==== Header ====\n")
 	fmt.Printf("root:        %x, %x\n", h1.Root, h2.Root)

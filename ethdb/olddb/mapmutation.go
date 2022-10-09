@@ -111,9 +111,6 @@ func (m *mapmutation) ReadSequence(bucket string) (res uint64, err error) {
 // Can only be called from the worker thread
 func (m *mapmutation) GetOne(table string, key []byte) ([]byte, error) {
 	if value, ok := m.getMem(table, key); ok {
-		if value == nil {
-			return nil, nil
-		}
 		return value, nil
 	}
 	if m.db != nil {
@@ -285,5 +282,9 @@ func (m *mapmutation) panicOnEmptyDB() {
 }
 
 func (m *mapmutation) SetRwKV(kv kv.RwDB) {
-	m.db.(ethdb.HasRwKV).SetRwKV(kv)
+	hasRwKV, ok := m.db.(ethdb.HasRwKV)
+	if !ok {
+		log.Warn("Failed to convert mapmutation type to HasRwKV interface")
+	}
+	hasRwKV.SetRwKV(kv)
 }

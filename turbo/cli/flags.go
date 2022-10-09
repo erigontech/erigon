@@ -64,26 +64,28 @@ var (
 	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 	t - prune transaction by it's hash index
 	c - prune call traces (used by trace_filter method)
-	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90_000 
-	If item is NOT in the list - means NO pruning for this data.
-	Example: --prune=hrtc`,
+	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90000.
+	Similarly, --prune=t is shortcut for: --prune.t.older=90000 and --prune=c is shortcut for: --prune.c.older=90000.
+	However, --prune=r means to prune receipts before the Beacon Chain genesis (Consensus Layer might need receipts after that).
+	If an item is NOT on the list - means NO pruning for this data.
+	Example: --prune=htc`,
 		Value: "disabled",
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
 		Name:  "prune.h.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'h', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
 	}
 	PruneReceiptFlag = cli.Uint64Flag{
 		Name:  "prune.r.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'r', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain`,
 	}
 	PruneTxIndexFlag = cli.Uint64Flag{
 		Name:  "prune.t.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 't', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 't', then default is 90K)`,
 	}
 	PruneCallTracesFlag = cli.Uint64Flag{
 		Name:  "prune.c.older",
-		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
+		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'c', then default is 90K)`,
 	}
 
 	PruneHistoryBeforeFlag = cli.Uint64Flag{
@@ -169,25 +171,32 @@ var (
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
 	}
 
-	EngineReadTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.read",
+	AuthRpcReadTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.read",
 		Usage: "Maximum duration for reading the entire request, including the body.",
 		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
 	}
-	EngineWriteTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.write",
+	AuthRpcWriteTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.write",
 		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
 		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
 	}
-	EngineIdleTimeoutFlag = cli.DurationFlag{
-		Name:  "engine.timeouts.idle",
-		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If engine.timeouts.idle is zero, the value of engine.timeouts.read is used.",
+	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alives are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
 		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+	}
+
+	EvmCallTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.evmtimeout",
+		Usage: "Maximum amount of time to wait for the answer from EVM call.",
+		Value: rpccfg.DefaultEvmCallTimeout,
 	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(
+		cfg.Genesis.Config.ChainID.Uint64(),
 		ctx.GlobalString(PruneFlag.Name),
 		ctx.GlobalUint64(PruneHistoryFlag.Name),
 		ctx.GlobalUint64(PruneReceiptFlag.Name),
@@ -276,7 +285,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			beforeC = *v
 		}
 
-		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		mode, err := prune.FromCli(cfg.Genesis.Config.ChainID.Uint64(), *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
@@ -315,6 +324,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
+
+	apis := ctx.GlobalString(utils.HTTPApiFlag.Name)
+	log.Info("starting HTTP APIs", "APIs", apis)
+
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
 		Dirs:    cfg.Dirs,
@@ -323,25 +336,27 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TLSCACert:   cfg.TLSCACert,
 		TLSCertfile: cfg.TLSCertFile,
 
-		HttpListenAddress:       ctx.GlobalString(utils.HTTPListenAddrFlag.Name),
-		HttpPort:                ctx.GlobalInt(utils.HTTPPortFlag.Name),
-		EngineHTTPListenAddress: ctx.GlobalString(utils.EngineAddr.Name),
-		EnginePort:              ctx.GlobalInt(utils.EnginePort.Name),
-		JWTSecretPath:           jwtSecretPath,
-		TraceRequests:           ctx.GlobalBool(utils.HTTPTraceFlag.Name),
-		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
-		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
-		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
+		HttpListenAddress:        ctx.GlobalString(utils.HTTPListenAddrFlag.Name),
+		HttpPort:                 ctx.GlobalInt(utils.HTTPPortFlag.Name),
+		AuthRpcHTTPListenAddress: ctx.GlobalString(utils.AuthRpcAddr.Name),
+		AuthRpcPort:              ctx.GlobalInt(utils.AuthRpcPort.Name),
+		JWTSecretPath:            jwtSecretPath,
+		TraceRequests:            ctx.GlobalBool(utils.HTTPTraceFlag.Name),
+		HttpCORSDomain:           strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
+		HttpVirtualHost:          strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
+		AuthRpcVirtualHost:       strings.Split(ctx.GlobalString(utils.AuthRpcVirtualHostsFlag.Name), ","),
+		API:                      strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.GlobalDuration(HTTPWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
 		},
-		EngineTimeouts: rpccfg.HTTPTimeouts{
-			ReadTimeout:  ctx.GlobalDuration(EngineReadTimeoutFlag.Name),
-			WriteTimeout: ctx.GlobalDuration(EngineWriteTimeoutFlag.Name),
+		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
+			ReadTimeout:  ctx.GlobalDuration(AuthRpcReadTimeoutFlag.Name),
+			WriteTimeout: ctx.GlobalDuration(AuthRpcWriteTimeoutFlag.Name),
 			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
 		},
+		EvmCallTimeout: ctx.GlobalDuration(EvmCallTimeoutFlag.Name),
 
 		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
@@ -351,8 +366,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
 		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:   ctx.GlobalBool(utils.RpcTraceCompatFlag.Name),
-		StarknetGRPCAddress:  ctx.GlobalString(utils.StarknetGrpcAddressFlag.Name),
-		TevmEnabled:          ctx.GlobalBool(utils.TevmFlag.Name),
 
 		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
 

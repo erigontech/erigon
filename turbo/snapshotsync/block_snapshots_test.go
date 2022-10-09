@@ -74,7 +74,6 @@ func TestMergeSnapshots(t *testing.T) {
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
-
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s.Ranges())
@@ -127,7 +126,7 @@ func TestCanRetire(t *testing.T) {
 }
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil)
+	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil, nil)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
 	createFile := func(from, to uint64, name snap.Type) { createTestSegmentFile(t, from, to, name, dir) }

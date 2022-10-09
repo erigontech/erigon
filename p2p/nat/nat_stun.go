@@ -2,9 +2,10 @@ package nat
 
 import (
 	"fmt"
-	"github.com/pion/stun"
 	"net"
 	"time"
+
+	"github.com/pion/stun"
 )
 
 const STUNDefaultServerAddr = "stun.l.google.com:19302"

@@ -263,7 +263,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 				if err := b.makeBlockWitness(child, expandKeyHex(hex, byte(i)), limiter, false); err != nil {
 					return err
 				}
-				mask |= (uint32(1) << uint(i))
+				mask |= uint32(1) << uint(i)
 			}
 		}
 		return b.addBranchOp(mask)

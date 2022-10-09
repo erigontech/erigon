@@ -48,7 +48,7 @@ func (c *tmHeaderValidate) RequiredGas(input []byte) uint64 {
 func (c *tmHeaderValidate) Run(input []byte) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("internal error: %v\n", r)
+			err = fmt.Errorf("internal error: %v", r)
 		}
 	}()
 
@@ -106,7 +106,7 @@ func (c *iavlMerkleProofValidate) RequiredGas(input []byte) uint64 {
 func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("internal error: %v\n", r)
+			err = fmt.Errorf("internal error: %v", r)
 		}
 	}()
 
@@ -132,4 +132,29 @@ func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	result = make([]byte, merkleProofValidateResultLength)
 	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
 	return result, nil
+}
+
+// tmHeaderValidate implemented as a native contract.
+type tmHeaderValidateNano struct{}
+
+func (c *tmHeaderValidateNano) RequiredGas(input []byte) uint64 {
+	return params.TendermintHeaderValidateGas
+}
+
+func (c *tmHeaderValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------
+type iavlMerkleProofValidateNano struct{}
+
+func (c *iavlMerkleProofValidateNano) RequiredGas(input []byte) uint64 {
+	return params.IAVLMerkleProofValidateGas
+}
+
+// input:
+// | payload length | payload    |
+// | 32 bytes       |            |
+func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
 }

@@ -1,7 +1,6 @@
 package tool
 
 import (
-	"context"
 	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -26,13 +25,4 @@ func ChainConfig(tx kv.Tx) *params.ChainConfig {
 	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	Check(err)
 	return chainConfig
-}
-
-func ChainConfigFromDB(db kv.RoDB) (cc *params.ChainConfig) {
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc = ChainConfig(tx)
-		return nil
-	})
-	Check(err)
-	return cc
 }

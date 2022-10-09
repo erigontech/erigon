@@ -70,6 +70,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	if dec.BlockNumber != nil {
 		l.BlockNumber = uint64(*dec.BlockNumber)
 	}
+
 	if dec.TxHash == nil {
 		return errors.New("missing required field 'transactionHash' for Log")
 	}

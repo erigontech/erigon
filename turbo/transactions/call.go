@@ -3,13 +3,12 @@ package transactions
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -17,12 +16,9 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
-
-const callTimeout = 5 * time.Minute
 
 func DoCall(
 	ctx context.Context,
@@ -31,10 +27,8 @@ func DoCall(
 	block *types.Block, overrides *ethapi.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
-	filters *rpchelper.Filters,
-	stateCache kvcache.Cache,
-	contractHasTEVM func(hash common.Hash) (bool, error),
-	headerReader services.HeaderReader,
+	stateReader state.StateReader,
+	headerReader services.HeaderReader, callTimeout time.Duration,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
@@ -43,10 +37,6 @@ func DoCall(
 			return state, block.Header(), nil
 		}
 	*/
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, filters, stateCache)
-	if err != nil {
-		return nil, err
-	}
 	state := state.New(stateReader)
 
 	header := block.Header()
@@ -85,7 +75,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM, headerReader)
+	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -109,7 +99,7 @@ func DoCall(
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, contractHasTEVM func(address common.Hash) (bool, error), headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
 	if header.Eip1559 {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -117,18 +107,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
-	return vm.BlockContext{
-			CanTransfer:     core.CanTransfer,
-			Transfer:        core.Transfer,
-			GetHash:         getHashGetter(requireCanonical, tx, headerReader),
-			ContractHasTEVM: contractHasTEVM,
-			Coinbase:        header.Coinbase,
-			BlockNumber:     header.Number.Uint64(),
-			Time:            header.Time,
-			Difficulty:      new(big.Int).Set(header.Difficulty),
-			GasLimit:        header.GasLimit,
-			BaseFee:         &baseFee,
-		},
+	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
 		vm.TxContext{
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),

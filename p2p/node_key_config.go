@@ -3,9 +3,10 @@ package p2p
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ledgerwatch/erigon/crypto"
 	"os"
 	"path"
+
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 type NodeKeyConfig struct {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	"github.com/ledgerwatch/erigon/common"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 )
@@ -12,7 +13,7 @@ import (
 type LogsFilterAggregator struct {
 	aggLogsFilter  LogsFilter                // Aggregation of all current log filters
 	logsFilters    map[LogsSubID]*LogsFilter // Filter for each subscriber, keyed by filterID
-	logsFilterLock sync.Mutex
+	logsFilterLock sync.RWMutex
 	nextFilterId   LogsSubID
 }
 
@@ -81,6 +82,8 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 }
 
 func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
 	a.aggLogsFilter.allAddrs += f.allAddrs
 	for addr, count := range f.addrs {
 		a.aggLogsFilter.addrs[addr] += count
@@ -89,6 +92,23 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 	for topic, count := range f.topics {
 		a.aggLogsFilter.topics[topic] += count
 	}
+}
+
+func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.Hash]int) {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+
+	addresses := make(map[common.Address]int)
+	for k, v := range a.aggLogsFilter.addrs {
+		addresses[k] = v
+	}
+
+	topics := make(map[common.Hash]int)
+	for k, v := range a.aggLogsFilter.topics {
+		topics[k] = v
+	}
+
+	return addresses, topics
 }
 
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {

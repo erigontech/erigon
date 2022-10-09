@@ -31,9 +31,9 @@ var (
 
 // see https://calver.org
 const (
-	VersionMajor       = 2022  // Major version component of the current release
-	VersionMinor       = 99    // Minor version component of the current release
-	VersionMicro       = 99    // Patch version component of the current release
+	VersionMajor       = 2     // Major version component of the current release
+	VersionMinor       = 27    // Minor version component of the current release
+	VersionMicro       = 0     // Patch version component of the current release
 	VersionModifier    = "dev" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
@@ -70,7 +70,8 @@ var VersionWithMeta = func() string {
 
 // ArchiveVersion holds the textual version string used for Geth archives.
 // e.g. "1.8.11-dea1ce05" for stable releases, or
-//      "1.8.13-unstable-21c059b6" for unstable releases
+//
+//	"1.8.13-unstable-21c059b6" for unstable releases
 func ArchiveVersion(gitCommit string) string {
 	vsn := withModifier(Version)
 	if len(gitCommit) >= 8 {

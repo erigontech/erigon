@@ -2,16 +2,18 @@ package parlia
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -219,6 +221,7 @@ type Parlia struct {
 	config      *params.ParliaConfig // Consensus engine configuration parameters for parlia consensus
 	genesisHash common.Hash
 	db          kv.RwDB // Database to store and retrieve snapshot checkpoints
+	chainDb     kv.RwDB
 
 	recentSnaps *lru.ARCCache // Snapshots for recent block to speed up
 	signatures  *lru.ARCCache // Signatures of recent blocks to speed up mining
@@ -228,7 +231,9 @@ type Parlia struct {
 	val    common.Address // Ethereum address of the signing key
 	signFn SignFn         // Signer function to authorize hashes with
 
-	lock sync.RWMutex // Protects the signer fields
+	signerLock sync.RWMutex // Protects the signer fields
+
+	snapLock sync.RWMutex // Protects snapshots creation
 
 	validatorSetABI abi.ABI
 	slashABI        abi.ABI
@@ -244,6 +249,7 @@ func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
 	snapshots *snapshotsync.RoSnapshots,
+	chainDb kv.RwDB,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
@@ -274,6 +280,7 @@ func New(
 		chainConfig:     chainConfig,
 		config:          parliaConfig,
 		db:              db,
+		chainDb:         chainDb,
 		recentSnaps:     recentSnaps,
 		signatures:      signatures,
 		validatorSetABI: vABI,
@@ -491,7 +498,16 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	var (
 		headers []*types.Header
 		snap    *Snapshot
+		doLog   bool
 	)
+
+	if s, ok := p.recentSnaps.Get(hash); ok {
+		snap = s.(*Snapshot)
+	} else {
+		p.snapLock.Lock()
+		defer p.snapLock.Unlock()
+		doLog = true
+	}
 
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
@@ -538,7 +554,10 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 			parents = parents[:len(parents)-1]
 		} else {
-			// No explicit parents (or no more left), reach out to the database
+			if doLog && number%100_000 == 0 {
+				// No explicit parents (or no more left), reach out to the database
+				log.Info("[parlia] snapshots build, gather headers", "block", number)
+			}
 			header = chain.GetHeader(hash, number)
 			if header == nil {
 				return nil, consensus.ErrUnknownAncestor
@@ -557,14 +576,14 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID)
+	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID, doLog)
 	if err != nil {
 		return nil, err
 	}
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	if verify && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
 		if err = snap.store(p.db); err != nil {
 			return nil, err
 		}
@@ -719,8 +738,8 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
-			log.Error("[parlia] init contract failed: %+v", err)
-			os.Exit(1)
+			log.Error("[parlia] init contract failed", "err", err)
+			return nil, nil, fmt.Errorf("init contract failed: %v", err)
 		}
 	}
 	if header.Difficulty.Cmp(diffInTurn) != 0 {
@@ -742,12 +761,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
+				log.Debug("slash successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 			}
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 		return nil, nil, err
 	}
+	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 	if len(systemTxs) > 0 {
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}
@@ -775,8 +796,8 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
 func (p *Parlia) Authorize(val common.Address, signFn SignFn) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.signerLock.Lock()
+	defer p.signerLock.Unlock()
 
 	p.val = val
 	p.signFn = signFn
@@ -801,9 +822,9 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return nil
 	}
 	// Don't hold the val fields for the entire sealing procedure
-	p.lock.RLock()
+	p.signerLock.RLock()
 	val, signFn := p.val, p.signFn
-	p.lock.RUnlock()
+	p.signerLock.RUnlock()
 
 	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
@@ -829,7 +850,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := p.delayForRamanujanFork(snap, header)
 
-	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
+	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex(), "headerHash", header.Hash().Hex(), "gasUsed", header.GasUsed, "block txn number", block.Transactions().Len(), "State Root", header.Root)
 
 	// Sign all the things!
 	sig, err := signFn(val, crypto.Keccak256(parliaRLP(header, p.chainConfig.ChainID)), p.chainConfig.ChainID)
@@ -846,7 +867,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			return
 		case <-time.After(delay):
 		}
-		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
+		if p.shouldWaitForCurrentBlockProcess(p.chainDb, header, snap) {
 			log.Info("[parlia] Waiting for received in turn block to process")
 			select {
 			case <-stop:
@@ -933,12 +954,20 @@ func (p *Parlia) IsSystemContract(to *common.Address) bool {
 	return isToSystemContract(*to)
 }
 
-func (p *Parlia) shouldWaitForCurrentBlockProcess(chain consensus.ChainHeaderReader, header *types.Header, snap *Snapshot) bool {
+func (p *Parlia) shouldWaitForCurrentBlockProcess(chainDb kv.RwDB, header *types.Header, snap *Snapshot) bool {
 	if header.Difficulty.Cmp(diffInTurn) == 0 {
 		return false
 	}
 
-	highestVerifiedHeader := chain.CurrentHeader()
+	roTx, err := chainDb.BeginRo(context.Background())
+	if err != nil {
+		return false
+	}
+	defer roTx.Rollback()
+	hash := rawdb.ReadHeadHeaderHash(roTx)
+	number := rawdb.ReadHeaderNumber(roTx, hash)
+
+	highestVerifiedHeader := rawdb.ReadHeader(roTx, hash, *number)
 	if highestVerifiedHeader == nil {
 		return false
 	}
@@ -1218,7 +1247,7 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), p, &from)
 	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),

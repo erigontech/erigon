@@ -101,7 +101,7 @@ func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 // have .seg no .torrent => get .torrent from .seg
 func seedNewSnapshot(it *proto_downloader.DownloadItem, torrentClient *torrent.Client, snapDir string) (bool, error) {
 	// if we dont have the torrent file we build it if we have the .seg file
-	if err := BuildTorrentFileIfNeed(it.Path, snapDir); err != nil {
+	if err := buildTorrentIfNeed(it.Path, snapDir); err != nil {
 		return false, err
 	}
 
@@ -127,10 +127,10 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 		return false, nil
 	}
 	infoHash := Proto2InfoHash(hash)
-	log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
+	//log.Debug("[downloader] downloading torrent and seg file", "hash", infoHash)
 
 	if _, ok := torrentClient.Torrent(infoHash); ok {
-		log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
+		//log.Debug("[downloader] torrent client related to hash found", "hash", infoHash)
 		return true, nil
 	}
 
@@ -151,6 +151,6 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 			return
 		}
 	}(magnet.String())
-	log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
+	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return false, nil
 }

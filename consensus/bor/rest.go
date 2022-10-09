@@ -39,7 +39,7 @@ func NewHeimdallClient(urlString string) (*HeimdallClient, error) {
 	h := &HeimdallClient{
 		urlString: urlString,
 		client: http.Client{
-			Timeout: time.Duration(5 * time.Second),
+			Timeout: 5 * time.Second,
 		},
 	}
 	return h, nil

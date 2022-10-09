@@ -3,6 +3,8 @@ package sentry_candidates
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/utils"
@@ -10,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/nxadm/tail"
-	"time"
 )
 
 type Intake struct {

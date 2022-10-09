@@ -92,6 +92,11 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
+func IsCorrectHistoryFileName(name string) bool {
+	parts := strings.Split(name, ".")
+	return len(parts) == 3
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
@@ -128,9 +133,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
 
-const MERGE_THRESHOLD = 2 // don't trigger merge if have too small amount of partial segments
-const DEFAULT_SEGMENT_SIZE = 500_000
-const MIN_SEGMENT_SIZE = 1_000
+const Erigon3SeedableSteps = 32
+const Erigon2SegmentSize = 500_000
+const Erigon2MinSegmentSize = 1_000
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -142,7 +147,7 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return common.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool          { return f.To-f.From == DEFAULT_SEGMENT_SIZE }
+func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2SegmentSize }
 func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
@@ -214,7 +219,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 }
 
 func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
-	preverified := snapcfg.KnownCfg(chainName, nil).Preverified
+	preverified := snapcfg.KnownCfg(chainName, nil, nil).Preverified
 	keep := map[string]struct{}{}
 	for _, p := range preverified {
 		ext := filepath.Ext(p.Name)

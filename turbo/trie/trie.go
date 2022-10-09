@@ -44,8 +44,8 @@ var (
 // Use New to create a trie that sits on top of a database.
 //
 // Trie is not safe for concurrent use.
-//Deprecated
-//use package turbo/trie
+// Deprecated
+// use package turbo/trie
 type Trie struct {
 	root node
 
@@ -58,7 +58,7 @@ type Trie struct {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-//Deprecated
+// Deprecated
 // use package turbo/trie
 func New(root common.Hash) *Trie {
 	trie := &Trie{
@@ -381,7 +381,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 				dbPrefix = append(dbPrefix, b<<4)
 			} else {
 				dbPrefix[len(dbPrefix)-1] &= 0xf0
-				dbPrefix[len(dbPrefix)-1] |= (b & 0xf)
+				dbPrefix[len(dbPrefix)-1] |= b & 0xf
 			}
 			bits += 4
 		}
@@ -400,7 +400,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= (i1 & 0xf)
+				newDbPrefix[len(newDbPrefix)-1] |= i1 & 0xf
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
@@ -413,7 +413,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= (i2 & 0xf)
+				newDbPrefix[len(newDbPrefix)-1] |= i2 & 0xf
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
@@ -435,7 +435,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-						newDbPrefix[len(newDbPrefix)-1] |= (byte(i) & 0xf)
+						newDbPrefix[len(newDbPrefix)-1] |= byte(i) & 0xf
 					}
 					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 				}

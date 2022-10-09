@@ -1,15 +1,16 @@
 package state
 
 import (
+	"testing"
+
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
-	"testing"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
 	// convert to common.Address form
-	var addresses []common.Address
+	addresses := make([]common.Address, 0, len(astrings))
 	var addressMap = make(map[common.Address]struct{})
 	for _, astring := range astrings {
 		address := common.HexToAddress(astring)
@@ -36,7 +37,7 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 	}
 	var address = common.HexToAddress(addrString)
 	// convert to common.Hash form
-	var slots []common.Hash
+	slots := make([]common.Hash, 0, len(slotStrings))
 	var slotMap = make(map[common.Hash]struct{})
 	for _, slotString := range slotStrings {
 		s := common.HexToHash(slotString)

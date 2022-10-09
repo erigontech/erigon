@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -29,7 +30,7 @@ func NewClient(ctx context.Context, downloaderAddr string) (proto_downloader.Dow
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 
-	dialOpts = append(dialOpts, grpc.WithInsecure())
+	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, downloaderAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)

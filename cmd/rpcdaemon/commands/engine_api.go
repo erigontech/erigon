@@ -158,14 +158,14 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([][]byte, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
-		transactions[i] = ([]byte)(transaction)
+		transactions[i] = transaction
 	}
 	res, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom),
 		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
 		BlockNumber:   uint64(payload.BlockNumber),
 		GasLimit:      uint64(payload.GasLimit),
@@ -266,23 +266,10 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	if chainConfig.TerminalBlockHash != beaconConfig.TerminalBlockHash {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block hash. expected %s, but instead got: %s", beaconConfig.TerminalBlockHash, chainConfig.TerminalBlockHash)
-	}
-
-	terminalBlockNumber := chainConfig.TerminalBlockNumber
-	if terminalBlockNumber == nil {
-		terminalBlockNumber = common.Big0
-	}
-
-	if terminalBlockNumber.Cmp((*big.Int)(beaconConfig.TerminalBlockNumber)) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block number. expected %v, but instead got: %d", beaconConfig.TerminalBlockNumber, terminalBlockNumber)
-	}
-
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-		TerminalBlockHash:       chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     (*hexutil.Big)(terminalBlockNumber),
+		TerminalBlockHash:       common.Hash{},
+		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
 	}, nil
 }
 

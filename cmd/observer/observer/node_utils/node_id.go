@@ -3,9 +3,10 @@ package node_utils
 import (
 	"errors"
 	"fmt"
+	"net/url"
+
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"net/url"
 )
 
 func NodeID(node *enode.Node) (database.NodeID, error) {

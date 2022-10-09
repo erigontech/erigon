@@ -49,7 +49,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			var bytes []byte
 			var err error
 			bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
-				RequestId:            rand.Uint64(),
+				RequestId:            rand.Uint64(), // nolint: gosec
 				GetBlockBodiesPacket: req.Hashes,
 			})
 			if err != nil {
@@ -88,7 +88,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		case eth.ETH66, eth.ETH67:
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket66{
-				RequestId: rand.Uint64(),
+				RequestId: rand.Uint64(), // nolint: gosec
 				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 					Amount:  req.Length,
 					Reverse: req.Reverse,
@@ -130,7 +130,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 func (cs *MultiClient) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
 	if len(cs.sentries) > 1 {
-		i = rand.Intn(len(cs.sentries) - 1)
+		i = rand.Intn(len(cs.sentries) - 1) // nolint: gosec
 	}
 	to := i
 	return i, true, func() (int, bool) {

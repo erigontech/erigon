@@ -11,7 +11,6 @@
   "petersburgBlock": 7026400,
   "istanbulBlock": 12095200,
   "berlinBlock": 21050600,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "aura": {
     "DBPath": "",
     "InMemory": false,

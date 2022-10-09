@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -377,7 +377,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			t.Errorf("%v: expected status code: %v, but got: %v", idx, c.expectedStatusCode, result.StatusCode)
 		}
 
-		bodyBytes, err := ioutil.ReadAll(result.Body)
+		bodyBytes, err := io.ReadAll(result.Body)
 		if err != nil {
 			t.Errorf("%v: reading response body: %s", idx, err)
 		}
@@ -504,7 +504,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			t.Errorf("%v: creating request: %v", idx, err)
 		}
 
-		r.Body = ioutil.NopCloser(strings.NewReader(c.body))
+		r.Body = io.NopCloser(strings.NewReader(c.body))
 
 		netAPI := rpc.API{
 			Namespace: "",
@@ -537,7 +537,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			t.Errorf("%v: expected status code: %v, but got: %v", idx, c.expectedStatusCode, result.StatusCode)
 		}
 
-		bodyBytes, err := ioutil.ReadAll(result.Body)
+		bodyBytes, err := io.ReadAll(result.Body)
 		if err != nil {
 			t.Errorf("%v: reading response body: %s", idx, err)
 		}
