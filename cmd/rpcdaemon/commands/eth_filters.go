@@ -159,7 +159,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	return rpcSub, nil
 }
 
-// NewPendingTransactions send a notification each time a new (header) block is appended to the chain.
+// NewPendingTransactions send a notification each time when a transaction had added into mempool.
 func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
@@ -202,8 +202,8 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 	return rpcSub, nil
 }
 
-// NewPendingTransactions send a notification each time a new (header) block is appended to the chain.
-func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
+// NewPendingTransactionsWithBody send a notification each time when a transaction had added into mempool.
+func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
