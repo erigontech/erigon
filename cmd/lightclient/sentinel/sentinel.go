@@ -44,7 +44,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV1 *lightrpc.MetadataV1
+	metadataV1 *lightrpc.MetadataV2
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -121,9 +121,10 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV1 = &lightrpc.MetadataV1{
+	s.metadataV1 = &lightrpc.MetadataV2{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
+		Syncnets:  0,
 	}
 
 	// Start stream handlers

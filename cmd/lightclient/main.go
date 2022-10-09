@@ -71,7 +71,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(1 * time.Second)
+	sendReqInterval := time.NewTicker(2 * time.Second)
 
 	for {
 		select {
