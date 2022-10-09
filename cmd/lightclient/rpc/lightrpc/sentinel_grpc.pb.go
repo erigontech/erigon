@@ -18,7 +18,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentinelClient interface {
-	SubscribeBeaconBlock(ctx context.Context, in *GossipRequest, opts ...grpc.CallOption) (Sentinel_SubscribeBeaconBlockClient, error)
+	SubscribeGossip(ctx context.Context, in *GossipRequest, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
 }
 
 type sentinelClient struct {
@@ -29,12 +29,12 @@ func NewSentinelClient(cc grpc.ClientConnInterface) SentinelClient {
 	return &sentinelClient{cc}
 }
 
-func (c *sentinelClient) SubscribeBeaconBlock(ctx context.Context, in *GossipRequest, opts ...grpc.CallOption) (Sentinel_SubscribeBeaconBlockClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Sentinel_ServiceDesc.Streams[0], "/lightrpc.Sentinel/SubscribeBeaconBlock", opts...)
+func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *GossipRequest, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Sentinel_ServiceDesc.Streams[0], "/lightrpc.Sentinel/SubscribeGossip", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &sentinelSubscribeBeaconBlockClient{stream}
+	x := &sentinelSubscribeGossipClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -44,17 +44,17 @@ func (c *sentinelClient) SubscribeBeaconBlock(ctx context.Context, in *GossipReq
 	return x, nil
 }
 
-type Sentinel_SubscribeBeaconBlockClient interface {
-	Recv() (*SignedBeaconBlockBellatrix, error)
+type Sentinel_SubscribeGossipClient interface {
+	Recv() (*GossipData, error)
 	grpc.ClientStream
 }
 
-type sentinelSubscribeBeaconBlockClient struct {
+type sentinelSubscribeGossipClient struct {
 	grpc.ClientStream
 }
 
-func (x *sentinelSubscribeBeaconBlockClient) Recv() (*SignedBeaconBlockBellatrix, error) {
-	m := new(SignedBeaconBlockBellatrix)
+func (x *sentinelSubscribeGossipClient) Recv() (*GossipData, error) {
+	m := new(GossipData)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (x *sentinelSubscribeBeaconBlockClient) Recv() (*SignedBeaconBlockBellatrix
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
 type SentinelServer interface {
-	SubscribeBeaconBlock(*GossipRequest, Sentinel_SubscribeBeaconBlockServer) error
+	SubscribeGossip(*GossipRequest, Sentinel_SubscribeGossipServer) error
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -73,8 +73,8 @@ type SentinelServer interface {
 type UnimplementedSentinelServer struct {
 }
 
-func (UnimplementedSentinelServer) SubscribeBeaconBlock(*GossipRequest, Sentinel_SubscribeBeaconBlockServer) error {
-	return status.Errorf(codes.Unimplemented, "method SubscribeBeaconBlock not implemented")
+func (UnimplementedSentinelServer) SubscribeGossip(*GossipRequest, Sentinel_SubscribeGossipServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeGossip not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
 
@@ -89,24 +89,24 @@ func RegisterSentinelServer(s grpc.ServiceRegistrar, srv SentinelServer) {
 	s.RegisterService(&Sentinel_ServiceDesc, srv)
 }
 
-func _Sentinel_SubscribeBeaconBlock_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _Sentinel_SubscribeGossip_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(GossipRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(SentinelServer).SubscribeBeaconBlock(m, &sentinelSubscribeBeaconBlockServer{stream})
+	return srv.(SentinelServer).SubscribeGossip(m, &sentinelSubscribeGossipServer{stream})
 }
 
-type Sentinel_SubscribeBeaconBlockServer interface {
-	Send(*SignedBeaconBlockBellatrix) error
+type Sentinel_SubscribeGossipServer interface {
+	Send(*GossipData) error
 	grpc.ServerStream
 }
 
-type sentinelSubscribeBeaconBlockServer struct {
+type sentinelSubscribeGossipServer struct {
 	grpc.ServerStream
 }
 
-func (x *sentinelSubscribeBeaconBlockServer) Send(m *SignedBeaconBlockBellatrix) error {
+func (x *sentinelSubscribeGossipServer) Send(m *GossipData) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -119,8 +119,8 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "SubscribeBeaconBlock",
-			Handler:       _Sentinel_SubscribeBeaconBlock_Handler,
+			StreamName:    "SubscribeGossip",
+			Handler:       _Sentinel_SubscribeGossip_Handler,
 			ServerStreams: true,
 		},
 	},
