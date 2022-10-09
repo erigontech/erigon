@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
@@ -230,53 +231,20 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return s.GetPeersCount() >= peers.DefaultMaxPeers
+	return len(s.host.Network().Peers()) >= peers.DefaultMaxPeers
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	return len(s.host.Network().Peers())
-}
+	// Check how many peers are subscribed to beacon block
+	var sub *GossipSubscription
+	for topic, currSub := range s.subManager.subscriptions {
+		if strings.Contains(topic, string(BeaconBlockTopic)) {
+			sub = currSub
+		}
+	}
 
-func RunSentinelService(client lightrpc.LightclientServer, cfg *SentinelConfig) {
-	ctx := context.Background()
-	sent, err := New(context.Background(), cfg)
-	if err != nil {
-		log.Error("error", "err", err)
-		return
+	if sub == nil {
+		return len(s.host.Network().Peers())
 	}
-	if err := sent.Start(); err != nil {
-		log.Error("failed to start sentinel", "err", err)
-		return
-	}
-	gossip_topics := []GossipTopic{
-		BeaconBlockSsz,
-		LightClientFinalityUpdateSsz,
-		LightClientOptimisticUpdateSsz,
-	}
-	for _, v := range gossip_topics {
-		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-	}
-	log.Info("Sentinel started", "enr", sent.String())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt := <-sent.RecvGossip():
-			switch u := pkt.Packet.(type) {
-			case *lightrpc.SignedBeaconBlockBellatrix:
-				if _, err := client.NotifyBeaconBlock(context.Background(), u); err != nil && err != context.Canceled {
-					log.Warn("Could not notify about new beacon block", "err", err)
-				}
-			}
-		}
-	}
+	return len(sub.topic.ListPeers())
 }

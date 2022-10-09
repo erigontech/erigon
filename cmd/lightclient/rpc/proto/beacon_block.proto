@@ -114,7 +114,7 @@ message SignedBeaconBlockBellatrix {
 message LightClientBootstrap {
     BeaconBlockHeader Header = 1 [json_name = "header"];
     SyncCommittee CurrentSyncCommittee = 2 [json_name = "current_sync_committee"];
-    repeated bytes CurrentSyncCommitteeBranch = 3 [json_name = "current_sync_committee_branch"]; // @gotags: sszsize:",32" sszmax:"5"
+    repeated bytes CurrentSyncCommitteeBranch = 3 [json_name = "current_sync_committee_branch"]; // @gotags: sszsize:"5,32"
 }
 
 message SyncCommittee {
@@ -124,9 +124,9 @@ message SyncCommittee {
 message LightClientUpdate {
     BeaconBlockHeader AttestedHeader = 1                  [json_name = "attested_header"];
     SyncCommittee NextSyncCommitee = 2                 [json_name = "next_sync_committee"];
-    repeated bytes NextSyncCommitteeBranch = 3 [json_name = "next_sync_committee_branch"]; // @gotags: sszsize:",32" sszmax:"5"
+    repeated bytes NextSyncCommitteeBranch = 3 [json_name = "next_sync_committee_branch"]; // @gotags: sszsize:"5,32"
     BeaconBlockHeader FinalizedHeader = 4                [json_name = "finalized_header"];
-    repeated bytes FinalityBranch = 5                     [json_name = "finality_branch"]; // @gotags: sszsize:",32" sszmax:"6"
+    repeated bytes FinalityBranch = 5                     [json_name = "finality_branch"]; // @gotags: sszsize:"6,32"
     SyncAggregate SyncAggregate = 6                        [json_name = "sync_aggregate"];
     uint64 SignatureSlot = 7                               [json_name = "signature_slot"];
 }
@@ -134,7 +134,7 @@ message LightClientUpdate {
 message LightClientFinalityUpdate {
     BeaconBlockHeader AttestedHeader = 1   [json_name = "attested_header"];
     BeaconBlockHeader FinalizedHeader = 2 [json_name = "finalized_header"];
-    repeated bytes FinalityBranch = 3      [json_name = "finality_branch"]; // @gotags: sszsize:",32" sszmax:"6"
+    repeated bytes FinalityBranch = 3      [json_name = "finality_branch"]; // @gotags: sszsize:"6,32"
     SyncAggregate SyncAggregate = 4         [json_name = "sync_aggregate"];
     uint64 SignatureSlot = 5                [json_name = "signature_slot"];
 }
