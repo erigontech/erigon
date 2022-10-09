@@ -24,24 +24,18 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
-type LightClientServer struct {
-	lightrpc.UnimplementedLightclientServer
-
-	executionClient remote.ETHBACKENDClient
-	executionServer remote.ETHBACKENDServer
+type LightClient struct {
+	sentinel  lightrpc.SentinelClient
+	execution remote.ETHBACKENDServer
 }
 
-func NewLightclientServer(executionClient remote.ETHBACKENDClient) lightrpc.LightclientServer {
-	return &LightClientServer{
-		executionClient: executionClient,
-	}
-}
-
-func NewLightclientServerInternal(executionServer remote.ETHBACKENDServer) lightrpc.LightclientServer {
-	return &LightClientServer{
-		executionServer: executionServer,
+func NewLightClient(execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
+	return &LightClient{
+		sentinel:  sentinel,
+		execution: execution,
 	}
 }
 
@@ -81,46 +75,51 @@ func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *t
 	}
 }
 
-func (l *LightClientServer) NotifyBeaconBlock(ctx context.Context, beaconBlock *lightrpc.SignedBeaconBlockBellatrix) (*lightrpc.NotificationStatus, error) {
+func (l *LightClient) Start(ctx context.Context) {
+	stream, err := l.sentinel.SubscribeBeaconBlock(ctx, &lightrpc.GossipRequest{})
+	if err != nil {
+		log.Warn("could not start lightclient", "reason", err)
+		return
+	}
+
+	//defer stream.CloseSend()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			block, err := stream.Recv()
+			if err != nil {
+				log.Warn("[Lightclient] block could not be ralayed :/", "reason", err)
+				continue
+			}
+			if err := l.processBeaconBlock(ctx, block); err != nil {
+				log.Warn("[Lightclient] block could not be executed :/", "reason", err)
+				continue
+			}
+		}
+	}
+}
+
+func (l *LightClient) processBeaconBlock(ctx context.Context, beaconBlock *lightrpc.SignedBeaconBlockBellatrix) error {
 	payloadHash := gointerfaces.ConvertHashToH256(
 		common.BytesToHash(beaconBlock.Block.Body.ExecutionPayload.BlockHash))
 
 	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
 	var err error
-	if l.executionClient != nil {
-		_, err = l.executionClient.EngineNewPayloadV1(ctx, payload)
-		if err != nil {
-			return nil, err
-		}
-		// Wait a bit
-		time.Sleep(500 * time.Millisecond)
-		_, err = l.executionClient.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-			ForkchoiceState: &remote.EngineForkChoiceState{
-				HeadBlockHash:      payloadHash,
-				SafeBlockHash:      payloadHash,
-				FinalizedBlockHash: payloadHash,
-			},
-		})
-	} else {
-		_, err = l.executionServer.EngineNewPayloadV1(ctx, payload)
-		if err != nil {
-			return nil, err
-		}
-		// Wait a bit
-		time.Sleep(500 * time.Millisecond)
-		_, err = l.executionServer.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-			ForkchoiceState: &remote.EngineForkChoiceState{
-				HeadBlockHash:      payloadHash,
-				SafeBlockHash:      payloadHash,
-				FinalizedBlockHash: payloadHash,
-			},
-		})
-	}
+	_, err = l.execution.EngineNewPayloadV1(ctx, payload)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return &lightrpc.NotificationStatus{
-		Status: 0,
-	}, err
+	// Wait a bit
+	time.Sleep(500 * time.Millisecond)
+	_, err = l.execution.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
+		ForkchoiceState: &remote.EngineForkChoiceState{
+			HeadBlockHash:      payloadHash,
+			SafeBlockHash:      payloadHash,
+			FinalizedBlockHash: payloadHash,
+		},
+	})
+	return err
 }

@@ -136,7 +136,7 @@ func decodeResponse(sc communication.StreamCodec, responsePacket communication.P
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode packet got=%s, err=%s", string(protoCtx.Raw), err)
 	}
-	log.Info("[Resp] got response from", "response", responsePacket, "peer", peerId)
+	log.Debug("[Resp] got response from", "response", responsePacket, "peer", peerId)
 
 	return responsePacket, nil
 }

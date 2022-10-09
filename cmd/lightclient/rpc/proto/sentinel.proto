@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package lightrpc;
+
+import "beacon_block.proto";
+
+message GossipRequest {}
+
+service Sentinel {
+    rpc SubscribeBeaconBlock(GossipRequest) returns (stream SignedBeaconBlockBellatrix);
+}

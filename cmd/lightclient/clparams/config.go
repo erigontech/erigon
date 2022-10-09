@@ -650,7 +650,6 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
-	fmt.Println(net)
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
 	fmt.Println(genesisConfig)
