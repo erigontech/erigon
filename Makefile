@@ -56,7 +56,7 @@ validate_docker_build_args:
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
-		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
+		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \
 		--build-arg UID=${DOCKER_UID} \
@@ -98,19 +98,20 @@ geth: erigon
 erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
-COMMANDS += cons
-COMMANDS += devnettest
+COMMANDS += devnet
 COMMANDS += downloader
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
-COMMANDS += rpcdaemon22
 COMMANDS += rpctest
 COMMANDS += sentry
 COMMANDS += state
 COMMANDS += txpool
+COMMANDS += verkle
+COMMANDS += evm
+COMMANDS += lightclient
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -119,29 +120,28 @@ $(COMMANDS): %: %.cmd
 all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
-db-tools: git-submodules
+db-tools:
 	@echo "Building db-tools"
 
-	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
-	rm -rf libmdbx
-	git submodule update --init --recursive --force libmdbx
-
-	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
-	cp libmdbx/mdbx_chk $(GOBIN)
-	cp libmdbx/mdbx_copy $(GOBIN)
-	cp libmdbx/mdbx_dump $(GOBIN)
-	cp libmdbx/mdbx_drop $(GOBIN)
-	cp libmdbx/mdbx_load $(GOBIN)
-	cp libmdbx/mdbx_stat $(GOBIN)
+	go mod vendor
+	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 ## test:                              run unit tests with a 50s timeout
 test:
 	$(GOTEST) --timeout 50s
 
+test3:
+	$(GOTEST) --timeout 50s -tags $(BUILD_TAGS),erigon3
+
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
+
+test3-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -155,13 +155,12 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.47.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.49.0
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
-	cd libmdbx/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
@@ -205,7 +204,7 @@ git-submodules:
 
 
 PACKAGE_NAME          := github.com/maticnetwork/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.1
+GOLANG_CROSS_VERSION  ?= v1.18.5
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -268,10 +267,16 @@ user_macos:
 	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
 ## coverage:                          run code coverage report and output total coverage %
+.PHONY: coverage
 coverage:
 	@go test -coverprofile=coverage.out ./... > /dev/null 2>&1 && go tool cover -func coverage.out | grep total | awk '{print substr($$3, 1, length($$3)-1)}'
+
+## hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
+.PHONY: hive
+hive:
+	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
 
 ## help:                              print commands help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
-

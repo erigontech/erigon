@@ -51,7 +51,6 @@ type Contract struct {
 	jumpdests     map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
 	analysis      []uint64                 // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
-	vmType        VmType
 
 	Code     []byte
 	CodeHash common.Hash
@@ -63,7 +62,7 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool, isTEVM bool) *Contract {
+func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: object}
 
 	if parent, ok := caller.(*Contract); ok {
@@ -80,11 +79,6 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 	c.value = value
 
 	c.skipAnalysis = skipAnalysis
-
-	c.vmType = EVMType
-	if isTEVM {
-		c.vmType = TEVMType
-	}
 
 	return c
 }

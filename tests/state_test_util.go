@@ -18,6 +18,7 @@ package tests
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -60,15 +61,47 @@ func (t *StateTest) UnmarshalJSON(in []byte) error {
 type stJSON struct {
 	Env  stEnv                    `json:"env"`
 	Pre  core.GenesisAlloc        `json:"pre"`
+	Tx   stTransactionMarshaling  `json:"transaction"`
 	Out  hexutil.Bytes            `json:"out"`
 	Post map[string][]stPostState `json:"post"`
 }
 
 type stPostState struct {
-	Root            common.Hash   `json:"hash"`
-	Logs            common.Hash   `json:"logs"`
-	Tx              hexutil.Bytes `json:"txbytes"`
-	ExpectException string        `json:"expectException"`
+	Root            common.UnprefixedHash `json:"hash"`
+	Logs            common.UnprefixedHash `json:"logs"`
+	Tx              hexutil.Bytes         `json:"txbytes"`
+	ExpectException string                `json:"expectException"`
+	Indexes         struct {
+		Data  int `json:"data"`
+		Gas   int `json:"gas"`
+		Value int `json:"value"`
+	}
+}
+
+type stTransaction struct {
+	GasPrice             *big.Int            `json:"gasPrice"`
+	MaxFeePerGas         *big.Int            `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *big.Int            `json:"maxPriorityFeePerGas"`
+	Nonce                uint64              `json:"nonce"`
+	To                   string              `json:"to"`
+	Data                 []string            `json:"data"`
+	AccessLists          []*types.AccessList `json:"accessLists,omitempty"`
+	GasLimit             []uint64            `json:"gasLimit"`
+	Value                []string            `json:"value"`
+	PrivateKey           []byte              `json:"secretKey"`
+}
+
+type stTransactionMarshaling struct {
+	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
+	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
+	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
+	PrivateKey           hexutil.Bytes         `json:"secretKey"`
+	To                   string                `json:"to"`
+	Data                 []string              `json:"data"`
+	Value                []string              `json:"value"`
+	AccessLists          []*types.AccessList   `json:"accessLists,omitempty"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
@@ -180,20 +213,25 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 		}
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
-	txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
+	msg, err := toMessage(t.json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	msg, err := txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
-	if err != nil {
-		return nil, common.Hash{}, err
+	if len(post.Tx) != 0 {
+		txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
+		if err != nil {
+			return nil, common.Hash{}, err
+		}
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
+		if err != nil {
+			return nil, common.Hash{}, err
+		}
 	}
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
 	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, contractHasTEVM)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -325,4 +363,104 @@ func rlpHash(x interface{}) (h common.Hash) {
 
 func vmTestBlockHash(n uint64) common.Hash {
 	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+}
+
+func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (core.Message, error) {
+	// Derive sender from private key if present.
+	var from common.Address
+	if len(tx.PrivateKey) > 0 {
+		key, err := crypto.ToECDSA(tx.PrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid private key: %v", err)
+		}
+		from = crypto.PubkeyToAddress(key.PublicKey)
+	}
+
+	// Parse recipient if present.
+	var to *common.Address
+	if tx.To != "" {
+		to = new(common.Address)
+		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
+			return nil, fmt.Errorf("invalid to address: %v", err)
+		}
+	}
+
+	// Get values specific to this post state.
+	if ps.Indexes.Data > len(tx.Data) {
+		return nil, fmt.Errorf("tx data index %d out of bounds", ps.Indexes.Data)
+	}
+	if ps.Indexes.Value > len(tx.Value) {
+		return nil, fmt.Errorf("tx value index %d out of bounds", ps.Indexes.Value)
+	}
+	if ps.Indexes.Gas > len(tx.GasLimit) {
+		return nil, fmt.Errorf("tx gas limit index %d out of bounds", ps.Indexes.Gas)
+	}
+	dataHex := tx.Data[ps.Indexes.Data]
+	valueHex := tx.Value[ps.Indexes.Value]
+	gasLimit := tx.GasLimit[ps.Indexes.Gas]
+
+	value := new(uint256.Int)
+	if valueHex != "0x" {
+		va, ok := math.ParseBig256(valueHex)
+		if !ok {
+			return nil, fmt.Errorf("invalid tx value %q", valueHex)
+		}
+		v, overflow := uint256.FromBig(va)
+		if overflow {
+			return nil, fmt.Errorf("invalid tx value (overflowed) %q", valueHex)
+		}
+		value = v
+	}
+	data, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx data %q", dataHex)
+	}
+	var accessList types.AccessList
+	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {
+		accessList = *tx.AccessLists[ps.Indexes.Data]
+	}
+
+	var feeCap, tipCap big.Int
+
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
+	gasPrice := tx.GasPrice
+	if baseFee != nil {
+		if tx.MaxFeePerGas == nil {
+			tx.MaxFeePerGas = gasPrice
+		}
+		if tx.MaxFeePerGas == nil {
+			tx.MaxFeePerGas = math.NewHexOrDecimal256(0)
+		}
+		if tx.MaxPriorityFeePerGas == nil {
+			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
+		}
+
+		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
+		tipCap = big.Int(*tx.MaxFeePerGas)
+
+		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
+		gasPrice = math.NewHexOrDecimal256(gp.Int64())
+	}
+	if gasPrice == nil {
+		return nil, fmt.Errorf("no gas price provided")
+	}
+
+	gpi := big.Int(*gasPrice)
+	gasPriceInt := uint256.NewInt(gpi.Uint64())
+
+	// TODO the conversion to int64 then uint64 then new int isn't working!
+	msg := types.NewMessage(
+		from,
+		to,
+		uint64(tx.Nonce),
+		value,
+		uint64(gasLimit),
+		gasPriceInt,
+		uint256.NewInt(feeCap.Uint64()),
+		uint256.NewInt(tipCap.Uint64()),
+		data,
+		accessList,
+		false)
+
+	return msg, nil
 }

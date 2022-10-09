@@ -25,6 +25,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Solidity contains information about the solidity compiler.
@@ -165,9 +167,16 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 		if err := json.Unmarshal([]byte(info.Abi), &abi); err != nil {
 			return nil, fmt.Errorf("solc: error reading abi definition (%w)", err)
 		}
+
 		var userdoc, devdoc interface{}
-		json.Unmarshal([]byte(info.Userdoc), &userdoc)
-		json.Unmarshal([]byte(info.Devdoc), &devdoc)
+		marshalErr := json.Unmarshal([]byte(info.Userdoc), &userdoc)
+		if marshalErr != nil {
+			log.Warn("Failed to unmarshal info.Devdoc", "", marshalErr)
+		}
+		marshalErr = json.Unmarshal([]byte(info.Devdoc), &devdoc)
+		if marshalErr != nil {
+			log.Warn("Failed to unmarshal info.Devdoc", "", marshalErr)
+		}
 
 		contracts[name] = &Contract{
 			Code:        "0x" + info.Bin,

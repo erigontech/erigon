@@ -147,13 +147,6 @@ func (proof *RangeProof) VerifyAbsence(key []byte) error {
 			return nil // proof ok
 		} else if cmp == 0 {
 			return cmn.NewError("absence disproved via item #%v", i)
-		} else {
-			if i == len(proof.Leaves)-1 {
-				// If last item, check whether
-				// it's the last item in teh tree.
-
-			}
-			continue
 		}
 	}
 

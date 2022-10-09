@@ -13,7 +13,6 @@
   "muirGlacierBlock": 0,
   "berlinBlock": 0,
   "londonBlock": 0,
-  "terminalBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "clique": {
     "period": 15,
     "epoch": 30000

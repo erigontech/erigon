@@ -65,7 +65,12 @@ func readGenesis(genesisPath string) *core.Genesis {
 	if err != nil {
 		utils.Fatalf("Failed to read genesis file: %v", err)
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		closeErr := file.Close()
+		if closeErr != nil {
+			log.Warn("Failed to close file", "err", closeErr)
+		}
+	}(file)
 
 	genesis := new(core.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
@@ -299,24 +304,36 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("could not write memory profile: ", err)
 			os.Exit(1)
 		}
-		f.Close()
+		closeErr := f.Close()
+		if closeErr != nil {
+			log.Warn("Failed to close file", "err", closeErr)
+		}
 	}
 
 	if ctx.GlobalBool(DebugFlag.Name) {
 		if debugLogger != nil {
-			fmt.Fprintln(os.Stderr, "#### TRACE ####")
+			_, printErr := fmt.Fprintln(os.Stderr, "#### TRACE ####")
+			if printErr != nil {
+				log.Warn("Failed to print to stderr", "err", printErr)
+			}
 			vm.WriteTrace(os.Stderr, debugLogger.StructLogs())
 		}
-		fmt.Fprintln(os.Stderr, "#### LOGS ####")
+		_, printErr := fmt.Fprintln(os.Stderr, "#### LOGS ####")
+		if printErr != nil {
+			log.Warn("Failed to print to stderr", "err", printErr)
+		}
 		vm.WriteLogs(os.Stderr, statedb.Logs())
 	}
 
 	if bench || ctx.GlobalBool(StatDumpFlag.Name) {
-		fmt.Fprintf(os.Stderr, `EVM gas used:    %d
+		_, printErr := fmt.Fprintf(os.Stderr, `EVM gas used:    %d
 execution time:  %v
 allocations:     %d
 allocated bytes: %d
 `, initialGas-leftOverGas, stats.time, stats.allocs, stats.bytesAllocated)
+		if printErr != nil {
+			log.Warn("Failed to print to stderr", "err", printErr)
+		}
 	}
 	if tracer == nil {
 		fmt.Printf("0x%x\n", output)

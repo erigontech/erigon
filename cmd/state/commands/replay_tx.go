@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"path/filepath"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -15,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -41,8 +41,7 @@ var replayTxCmd = &cobra.Command{
 
 func ReplayTx(genesis *core.Genesis) error {
 	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -52,8 +51,9 @@ func ReplayTx(genesis *core.Genesis) error {
 	txNums := make([]uint64, allSnapshots.BlocksAvailable()+1)
 	if err := allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 		for _, b := range bs {
-			if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+			if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
 				txNums[blockNum] = baseTxNum + txAmount
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -103,14 +103,18 @@ func ReplayTx(genesis *core.Genesis) error {
 		txNum = txnum
 	}
 	fmt.Printf("txNum = %d\n", txNum)
-	aggPath := filepath.Join(datadir, "agg22")
-	agg, err := libstate.NewAggregator22(aggPath, AggregationStep)
+	dirs := datadir2.New(datadir)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+	if err != nil {
+		return fmt.Errorf("create history: %w", err)
+	}
+	err = agg.ReopenFiles()
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
 	defer agg.Close()
 	ac := agg.MakeContext()
-	workCh := make(chan state.TxTask)
+	workCh := make(chan *state.TxTask)
 	rs := state.NewReconState(workCh)
 	if err = replayTxNum(ctx, allSnapshots, blockReader, txNum, txNums, rs, ac); err != nil {
 		return err
@@ -149,7 +153,6 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 		gp := new(core.GasPool).AddGas(txn.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(chainConfig, bn)}
-		contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, nil, hash, number)
 			if err != nil {
@@ -161,7 +164,7 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 		logger := log.New()
 		engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 		txnHash := txn.Hash()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, contractHasTEVM)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 		ibs.Prepare(txnHash, blockHash, txIndex)
 		msg, err := txn.AsMessage(*types.MakeSigner(chainConfig, bn), header.BaseFee, rules)
 		if err != nil {

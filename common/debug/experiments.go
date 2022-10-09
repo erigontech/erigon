@@ -70,6 +70,8 @@ func SlowCommit() time.Duration {
 var (
 	stopBeforeStage     string
 	stopBeforeStageFlag sync.Once
+	stopAfterStage      string
+	stopAfterStageFlag  sync.Once
 )
 
 func StopBeforeStage() string {
@@ -81,4 +83,18 @@ func StopBeforeStage() string {
 	}
 	stopBeforeStageFlag.Do(f)
 	return stopBeforeStage
+}
+
+// TODO(allada) We should possibly consider removing `STOP_BEFORE_STAGE`, as `STOP_AFTER_STAGE` can
+// perform all same the functionality, but due to reverse compatibility reasons we are going to
+// leave it.
+func StopAfterStage() string {
+	f := func() {
+		v, _ := os.LookupEnv("STOP_AFTER_STAGE") // see names in eth/stagedsync/stages/stages.go
+		if v != "" {
+			stopAfterStage = v
+		}
+	}
+	stopAfterStageFlag.Do(f)
+	return stopAfterStage
 }

@@ -1,5 +1,10 @@
 name: Release
 
+# Uncomment the following to let goreleaser automatically
+# create a GitHub release when a tag is pushed.
+# permissions:
+#   contents: write
+
 on:
   push:
     branches-ignore:

@@ -54,3 +54,10 @@ func (b *BlockBuilder) Stop() *types.Block {
 
 	return b.block
 }
+
+func (b *BlockBuilder) Block() *types.Block {
+	b.syncCond.L.Lock()
+	defer b.syncCond.L.Unlock()
+
+	return b.block
+}

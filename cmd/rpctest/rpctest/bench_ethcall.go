@@ -12,9 +12,10 @@ import (
 // but also can be used for comparing RPCDaemon with Geth or infura
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-// 		    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-//                  recordFile stores all eth_call returned with success
-//                  errorFile stores information when erigon and geth doesn't return same data
+//
+//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	                 recordFile stores all eth_call returned with success
+//	                 errorFile stores information when erigon and geth doesn't return same data
 func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{

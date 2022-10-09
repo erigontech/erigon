@@ -172,7 +172,7 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("Refund counter below zero"))
+		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
@@ -583,8 +583,8 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 // CreateAccount is called during the EVM CREATE operation. The situation might arise that
 // a contract does the following:
 //
-//   1. sends funds to sha(account ++ (nonce + 1))
-//   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
+//  1. sends funds to sha(account ++ (nonce + 1))
+//  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
@@ -659,8 +659,8 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	emptyRemoval := EIP161Enabled && stateObject.empty()
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -732,7 +732,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *params.Rules, stateWriter Sta
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, so, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}
 
@@ -788,7 +788,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *params.Rules, stateWriter S
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package lightrpc;
+
+message MetadataV1 {
+    uint64 SeqNumber = 1 [json_name="seq_number"];
+    uint64 Attnets = 2 [json_name="attnets"];
+}
+
+message MetadataV2 {
+    uint64 SeqNumber = 1 [json_name="seq_number"];
+    uint64 Attnets = 2 [json_name="attnets"];
+    uint64 Syncnets = 3[json_name="syncnets"];
+}

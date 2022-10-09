@@ -21,15 +21,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
 )
-
-const callTimeout = 5 * time.Minute
 
 const (
 	CALL               = "call"
@@ -895,8 +892,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
-	if callTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
@@ -943,11 +940,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -982,7 +975,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
-		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
 	return traceResult, nil
@@ -1115,8 +1108,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
-	if callTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
@@ -1130,11 +1123,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if header == nil {
 		header = parentHeader
 		useParent = true
-	}
-
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(dbtx)
 	}
 
 	for txIndex, msg := range msgs {
@@ -1173,7 +1161,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
@@ -1225,6 +1213,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			traceResult.Trace = []*ParityTrace{}
 		}
 		results = append(results, traceResult)
+		// When txIndexNeeded is not -1, we are tracing specific transaction in the block and not the entire block, so we stop after we've traced
+		// the required transaction
+		if txIndexNeeded != -1 && txIndex == txIndexNeeded {
+			break
+		}
 	}
 	return results, nil
 }

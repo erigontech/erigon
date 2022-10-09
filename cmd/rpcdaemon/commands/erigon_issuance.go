@@ -50,16 +50,15 @@ func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNr))
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
 	if err != nil {
 		return Issuance{}, err
 	}
-	header := rawdb.ReadHeader(tx, hash, uint64(blockNr))
-	if header == nil {
-		return Issuance{}, fmt.Errorf("could not find block header")
-	}
 
-	body := rawdb.ReadCanonicalBodyWithTransactions(tx, hash, uint64(blockNr))
+	body, _, err := api._blockReader.Body(ctx, tx, header.Hash(), uint64(blockNr))
+	if err != nil {
+		return Issuance{}, err
+	}
 
 	if body == nil {
 		return Issuance{}, fmt.Errorf("could not find block body")
@@ -102,7 +101,7 @@ func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber
 	tips := big.NewInt(0)
 
 	if header.BaseFee != nil {
-		receipts, err := rawdb.ReadReceiptsByHash(tx, hash)
+		receipts, err := rawdb.ReadReceiptsByHash(tx, header.Hash())
 		if err != nil {
 			return Issuance{}, err
 		}

@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -19,10 +21,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
@@ -86,6 +90,18 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
 		},
+		{
+			Name:   "ram",
+			Action: doRam,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+		},
+		{
+			Name:   "decompress_speed",
+			Action: doDecompressSpeed,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+		},
 	},
 }
 
@@ -108,7 +124,7 @@ var (
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
 		Usage: "Amount of blocks in each segment",
-		Value: snap.DEFAULT_SEGMENT_SIZE,
+		Value: snap.Erigon2SegmentSize,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -116,6 +132,72 @@ var (
 	}
 )
 
+func preloadFileAsync(name string) {
+	go func() {
+		ff, _ := os.Open(name)
+		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
+	}()
+}
+
+func doDecompressSpeed(cliCtx *cli.Context) error {
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+
+	compress.SetDecompressionTableCondensity(9)
+
+	preloadFileAsync(f)
+
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	defer decompressor.Close()
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
+		g := decompressor.MakeGetter()
+		buf := make([]byte, 0, 16*etl.BufIOSize)
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+		}
+		log.Info("decompress speed", "took", time.Since(t))
+	}()
+	func() {
+		defer decompressor.EnableReadAhead().DisableReadAhead()
+
+		t := time.Now()
+		g := decompressor.MakeGetter()
+		for g.HasNext() {
+			_ = g.Skip()
+		}
+		log.Info("decompress skip speed", "took", time.Since(t))
+	}()
+	return nil
+}
+func doRam(cliCtx *cli.Context) error {
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	runtime.ReadMemStats(&m)
+	before := m.Alloc
+	log.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	defer decompressor.Close()
+	runtime.ReadMemStats(&m)
+	log.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
+	return nil
+}
 func doIndicesCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
@@ -127,12 +209,28 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
+	dir.MustExist(dirs.SnapHistory)
+
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	if rebuild {
-		cfg := ethconfig.NewSnapCfg(true, true, false)
-		workers := cmp.InRange(1, 4, runtime.GOMAXPROCS(-1)-1)
-		if err := rebuildIndices(ctx, chainDB, cfg, dirs, from, workers); err != nil {
-			log.Error("Error", "err", err)
-		}
+		panic("not implemented")
+	}
+	cfg := ethconfig.NewSnapCfg(true, true, false)
+	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, workers); err != nil {
+		log.Error("Error", "err", err)
+	}
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+	if err != nil {
+		return err
+	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return err
+	}
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	err = agg.BuildMissedIndices()
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -145,35 +243,44 @@ func doUncompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
+
+	preloadFileAsync(f)
+
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
-	wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	var i uint
 	var numBuf [binary.MaxVarintLen64]byte
-	if err := decompressor.WithReadAhead(func() error {
-		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 16*etl.BufIOSize)
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-			if _, err := wr.Write(numBuf[:n]); err != nil {
-				return err
-			}
-			if _, err := wr.Write(buf); err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	defer decompressor.EnableReadAhead().DisableReadAhead()
+
+	g := decompressor.MakeGetter()
+	buf := make([]byte, 0, 1*datasize.MB)
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+		if _, err := wr.Write(numBuf[:n]); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		return err
+		if _, err := wr.Write(buf); err != nil {
+			return err
+		}
+		i++
+		select {
+		case <-logEvery.C:
+			_, fileName := filepath.Split(decompressor.FilePath())
+			progress := 100 * float64(i) / float64(decompressor.Count())
+			log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
@@ -186,16 +293,14 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args[0]
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	workers := runtime.GOMAXPROCS(-1) - 1
-	if workers < 1 {
-		workers = 1
-	}
-	c, err := compress.NewCompressor(ctx, "", f, dirs.Tmp, compress.MinPatternScore, workers, log.LvlInfo)
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
+	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, workers, log.LvlInfo)
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(os.Stdin, 16*etl.BufIOSize)
-	buf := make([]byte, 0, 32*1024*1024)
+	defer c.Close()
+	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
+	buf := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
@@ -254,18 +359,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
 				return err
 			}
-			if err := br.PruneAncientBlocks(tx); err != nil {
-				return err
+			log.Info("prune blocks from db\n")
+			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
+				if err := br.PruneAncientBlocks(tx); err != nil {
+					return err
+				}
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
-	}
-
-	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, snapshots, nil)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -283,32 +386,40 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	dir.MustExist(dirs.Snap)
-	dir.MustExist(filepath.Join(dirs.Snap, "db")) // this folder will be checked on existance - to understand that snapshots are ready
+	dir.MustExist(dirs.SnapHistory)
 	dir.MustExist(dirs.Tmp)
 
 	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
-		log.Error("Error", "err", err)
-	}
-
-	_, err := snapshotsync.EnforceSnapshotsInvariant(db, dirs.Snap, nil, nil)
-	if err != nil {
-		return err
+	{
+		if err := snapshotBlocks(ctx, db, fromBlock, toBlock, segmentSize, dirs.Snap, dirs.Tmp); err != nil {
+			log.Error("Error", "err", err)
+		}
+		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), dirs.Snap)
+		if err := allSnapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteSnapshots(tx, allSnapshots.Files())
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
-	chainConfig := tool.ChainConfigFromDB(db)
+func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildMissedIndices(ctx, allSnapshots.Dir(), *chainID, dirs.Tmp, workers, log.LvlInfo); err != nil {
+	allSnapshots.LogStat()
+
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers); err != nil {
 		return err
 	}
 	return nil

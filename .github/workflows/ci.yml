@@ -16,6 +16,10 @@ on:
       - synchronize
       - ready_for_review
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
@@ -24,7 +28,7 @@ jobs:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
-    steps:
+    steps:      
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
@@ -60,7 +64,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.47
+          version: v1.49
 
       - name: Test
         run: make test
@@ -72,7 +76,7 @@ jobs:
         os: [ windows-2022 ]
     runs-on: ${{ matrix.os }}
 
-    steps:
+    steps:      
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
@@ -104,15 +108,17 @@ jobs:
       - name: Test
         run: .\wmake.ps1 test
 
-  docker:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+  docker-build-check:
+    # don't run this on devel - the PR must have run it to be merged and it misleads that this pushes the docker image
+    if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
     runs-on: ubuntu-20.04
     steps:
+      - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
 
-      - name: make docker
+      - name: make docker (see dockerhub for image builds)
         run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
       # check with root permissions, should be cached from previous build
@@ -120,48 +126,95 @@ jobs:
         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 
   hive:
-    needs:
-      - tests
-      - tests-windows
-      - docker
-    runs-on: ubuntu-20.04
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+     if: ${{ github.ref == 'refs/heads/devel' }}
+     needs:
+       - tests
+       - tests-windows
+     runs-on: self-hosted
+     steps:
+       - uses: AutoModality/action-clean@v1
+       - uses: actions/checkout@v3
+         with:
+           fetch-depth: 0 # fetch git tags for "git describe"
+
+       - name: build erigon image
+         run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+       # check with root permissions, should be cached from previous build
+       - name: build erigon image (root permissions)
+         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+       - name: run hive and parse output
+         run: |
+          sudo mkdir -p /results-${{ github.run_id }}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results-${{ github.run_id }} --client erigon_ci-$GITHUB_SHA --exit.fail=false
+          docker run --rm --pull always -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results-${{ github.run_id }} --outdir=/work/results-${{ github.run_id }} --exclusionsfile=/work/hive/exclusions.json
+
+       - name: archive hive results
+         uses: actions/upload-artifact@v3
+         if: always()
+         with:
+           name: test-results
+           path: results-${{ github.run_id }}/*.xml
+
+       - name: clean up containers
+         if: always()
+         run: |
+          ids=$(docker ps -a -q)
+          for id in $ids
+          do
+            echo "stopping/removing container: $id"
+            docker stop $id && docker rm $id
+          done
+
+  hive-results:
+    needs: hive
+    name: Hive results
+    runs-on: self-hosted
+
+    permissions:
+      checks: write
+      pull-requests: write
+      actions: read
+
     steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0 # fetch git tags for "git describe"
+    - name: parse hive results
+      uses: phoenix-actions/test-reporting@v8
+      with:
+        artifact: test-results
+        name: Tests
+        path: '*.xml'
+        reporter: java-junit
 
-      - name: build erigon image
-        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+    - name: set badge color
+      shell: bash
+      run: |
+        case ${{ fromJSON( steps.test-results.outputs.json ).conclusion }} in
+          success)
+            echo "BADGE_COLOR=31c653" >> $GITHUB_ENV
+            ;;
+          failure)
+            echo "BADGE_COLOR=800000" >> $GITHUB_ENV
+            ;;
+          neutral)
+            echo "BADGE_COLOR=696969" >> $GITHUB_ENV
+            ;;
+        esac
 
-      # check with root permissions, should be cached from previous build
-      - name: build erigon image (root permissions)
-        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+    - name: create badge
+      uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+      with:
+        label: Hive
+        status: '${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.tests }} tests, ${{ fromJSON( steps.test-results.outputs.json ).formatted.stats.runs }} runs: ${{ fromJSON( steps.test-results.outputs.json ).conclusion }}'
+        color: ${{ env.BADGE_COLOR }}
+        path: badge.svg
 
-      - name: run hive
-        run: sudo mkdir /results && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work gatewayfm/hive:latest --sim ethereum/engine --results-root=/work/results --client erigon_ci-$GITHUB_SHA --docker.output --loglevel 5
-
-      - name: parse hive output
-        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput gatewayfm/hive:latest --resultsdir=/work/results --outdir=/work/results
-
-      - name: archive hive results
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: hive-ci-output
-          path: results/*.xml
-
-  event_file:
-    needs:
-      - tests
-      - tests-windows
-      - docker
-    name: archive event file
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    steps:
-      - name: upload
-        uses: actions/upload-artifact@v2
-        with:
-          name: event file
-          path: ${{ github.event_path }}
+    - name: upload badge to gist
+      if: >
+        github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'devel' ||
+        github.event_name != 'workflow_run' && github.ref == 'refs/heads/devel'
+      uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+      with:
+        token: ${{ secrets.GIST_TOKEN }}
+        gistURL: https://gist.githubusercontent.com/revitteth/dc492845ba6eb694e6c7279224634b20
+        file: badge.svg

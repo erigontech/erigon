@@ -24,16 +24,15 @@ import (
 )
 
 var (
-	ErrDataDirUsed    = errors.New("datadir already used by another process")
-	ErrNodeStopped    = errors.New("node not started")
-	ErrNodeRunning    = errors.New("node already running")
-	ErrServiceUnknown = errors.New("unknown service")
+	ErrDataDirUsed = errors.New("datadir already used by another process")
+	ErrNodeStopped = errors.New("node not started")
+	ErrNodeRunning = errors.New("node already running")
 
-	datadirInUseErrnos = map[uint]bool{11: true, 32: true, 35: true}
+	datadirInUseErrNos = map[uint]bool{11: true, 32: true, 35: true}
 )
 
 func convertFileLockError(err error) error {
-	if errno, ok := err.(syscall.Errno); ok && datadirInUseErrnos[uint(errno)] {
+	if errno, ok := err.(syscall.Errno); ok && datadirInUseErrNos[uint(errno)] {
 		return ErrDataDirUsed
 	}
 	return err

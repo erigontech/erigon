@@ -2,12 +2,13 @@ package observer
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/assert"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestKeygen(t *testing.T) {

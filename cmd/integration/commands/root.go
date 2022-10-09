@@ -2,6 +2,7 @@ package commands
 
 import (
 	"path/filepath"
+	"runtime"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
+	"golang.org/x/sync/semaphore"
 )
 
 var rootCmd = &cobra.Command{
@@ -35,8 +37,9 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
-	opts := kv2.NewMDBX(logger).Path(path).Label(label)
+func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
+	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*10 + 1))
+	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 	if label == kv.ChainDB {
 		opts = opts.MapSize(8 * datasize.TB)
 	}

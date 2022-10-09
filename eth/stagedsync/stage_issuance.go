@@ -133,7 +133,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			if header.UncleHash == types.EmptyUncleHash {
 				blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, nil)
 			} else {
-				body, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
+				body, _, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
 				if err != nil {
 					return err
 				}

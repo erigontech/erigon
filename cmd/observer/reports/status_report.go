@@ -3,8 +3,9 @@ package reports
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/observer/database"
 )
 
 type StatusReport struct {

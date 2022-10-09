@@ -41,6 +41,7 @@ type Log struct {
 	// but not secured by consensus.
 	// block in which the transaction was included
 	BlockNumber uint64 `json:"blockNumber" codec:"-"`
+
 	// hash of the transaction
 	TxHash common.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
 	// index of the transaction in the block
@@ -54,6 +55,21 @@ type Log struct {
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed" codec:"-"`
 }
+
+type ErigonLog struct {
+	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
+	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
+	Data        []byte         `json:"data" gencodec:"required" codec:"3"`
+	BlockNumber uint64         `json:"blockNumber" codec:"-"`
+	TxHash      common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxIndex     uint           `json:"transactionIndex" codec:"-"`
+	BlockHash   common.Hash    `json:"blockHash" codec:"-"`
+	Index       uint           `json:"logIndex" codec:"-"`
+	Removed     bool           `json:"removed" codec:"-"`
+	Timestamp   uint64         `json:"timestamp" codec:"-"`
+}
+
+type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 

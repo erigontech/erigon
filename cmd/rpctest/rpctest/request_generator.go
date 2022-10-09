@@ -177,34 +177,6 @@ func (g *RequestGenerator) traceBlock(bn uint64) string {
 	return sb.String()
 }
 
-func (g *RequestGenerator) traceFilterCount(prevBn uint64, bn uint64, count uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "count": %d}]`, prevBn, bn, count)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterAfter(prevBn uint64, bn uint64, after uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "after": %d}]`, prevBn, bn, after)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterCountAfter(prevBn uint64, bn uint64, after, count uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "count": %d, "after": %d}]`, prevBn, bn, count, after)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterUnion(prevBn uint64, bn uint64, from, to common.Address) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "fromAddress": ["0x%x"], "toAddress": ["0x%x"]}]`, prevBn, bn, from, to)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
 func (g *RequestGenerator) traceFilterFrom(prevBn uint64, bn uint64, account common.Address) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "fromAddress": ["0x%x"]}]`, prevBn, bn, account)

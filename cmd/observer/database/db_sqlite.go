@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	_ "modernc.org/sqlite"
 	"net"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type DBSQLite struct {

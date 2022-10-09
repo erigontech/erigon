@@ -20,14 +20,8 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	txsCh := make(chan []types.Transaction, 1)
 	id := api.filters.SubscribePendingTxs(txsCh)
 	go func() {
-		for {
-			select {
-			case txs, ok := <-txsCh:
-				if !ok {
-					return
-				}
-				api.filters.AddPendingTxs(id, txs)
-			}
+		for txs := range txsCh {
+			api.filters.AddPendingTxs(id, txs)
 		}
 	}()
 	return "0x" + string(id), nil
@@ -41,14 +35,8 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	ch := make(chan *types.Header, 1)
 	id := api.filters.SubscribeNewHeads(ch)
 	go func() {
-		for {
-			select {
-			case block, ok := <-ch:
-				if !ok {
-					return
-				}
-				api.filters.AddPendingBlock(id, block)
-			}
+		for block := range ch {
+			api.filters.AddPendingBlock(id, block)
 		}
 	}()
 	return "0x" + string(id), nil
@@ -62,14 +50,8 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	logs := make(chan *types.Log, 1)
 	id := api.filters.SubscribeLogs(logs, crit)
 	go func() {
-		for {
-			select {
-			case lg, ok := <-logs:
-				if !ok {
-					return
-				}
-				api.filters.AddLogs(id, lg)
-			}
+		for lg := range logs {
+			api.filters.AddLogs(id, lg)
 		}
 	}()
 	return hexutil.EncodeUint64(uint64(id)), nil
@@ -115,8 +97,8 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]interfa
 		return stub, nil
 	}
 	if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
-		for _, v := range txs {
-			for _, tx := range v {
+		if len(txs) > 0 {
+			for _, tx := range txs[0] {
 				stub = append(stub, tx.Hash())
 			}
 			return stub, nil

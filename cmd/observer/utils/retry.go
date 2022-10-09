@@ -2,8 +2,9 @@ package utils
 
 import (
 	"context"
-	"github.com/ledgerwatch/log/v3"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func Retry(

@@ -71,11 +71,12 @@ type BlockNumber int64
 type Timestamp uint64
 
 const (
-	FinalizedBlockNumber = BlockNumber(-4)
-	SafeBlockNumber      = BlockNumber(-3)
-	PendingBlockNumber   = BlockNumber(-2)
-	LatestBlockNumber    = BlockNumber(-1)
-	EarliestBlockNumber  = BlockNumber(0)
+	LatestExecutedBlockNumber = BlockNumber(-5)
+	FinalizedBlockNumber      = BlockNumber(-4)
+	SafeBlockNumber           = BlockNumber(-3)
+	PendingBlockNumber        = BlockNumber(-2)
+	LatestBlockNumber         = BlockNumber(-1)
+	EarliestBlockNumber       = BlockNumber(0)
 )
 
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
@@ -105,6 +106,9 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	case "finalized":
 		*bn = FinalizedBlockNumber
+		return nil
+	case "latestExecuted":
+		*bn = LatestExecutedBlockNumber
 		return nil
 	case "null":
 		*bn = LatestBlockNumber

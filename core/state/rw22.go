@@ -3,16 +3,17 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"fmt"
-	"math/bits"
-	"sort"
 	"sync"
 	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -20,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -29,25 +31,28 @@ type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
 	Rules              *params.Rules
-	Header             *types.Header
 	Block              *types.Block
 	BlockHash          common.Hash
 	Sender             *common.Address
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
+	TxAsMessage        types.Message
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
-	CodePrevs          map[string][]byte
+	CodePrevs          map[string]uint64
 	ResultsSize        int64
 	Error              error
+	Logs               []*types.Log
+	TraceFroms         map[common.Address]struct{}
+	TraceTos           map[common.Address]struct{}
 }
 
-type TxTaskQueue []TxTask
+type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
 	return len(h)
@@ -62,7 +67,7 @@ func (h TxTaskQueue) Swap(i, j int) {
 }
 
 func (h *TxTaskQueue) Push(a interface{}) {
-	*h = append(*h, a.(TxTask))
+	*h = append(*h, a.(*TxTask))
 }
 
 func (h *TxTaskQueue) Pop() interface{} {
@@ -76,7 +81,7 @@ const CodeSizeTable = "CodeSize"
 type State22 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
-	triggers     map[uint64]TxTask
+	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
@@ -98,7 +103,7 @@ func stateItemLess(i, j StateItem) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]TxTask{},
+		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[StateItem]{},
 	}
@@ -162,19 +167,19 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *State22) Schedule() (TxTask, bool) {
+func (rs *State22) Schedule() (*TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(TxTask), true
+		return heap.Pop(&rs.queue).(*TxTask), true
 	}
-	return TxTask{}, false
+	return nil, false
 }
 
-func (rs *State22) RegisterSender(txTask TxTask) bool {
+func (rs *State22) RegisterSender(txTask *TxTask) bool {
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
@@ -211,11 +216,14 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *State22) AddWork(txTask TxTask) {
+func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	txTask.ReadLists = nil
 	txTask.WriteLists = nil
 	txTask.ResultsSize = 0
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
@@ -229,77 +237,13 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func serialise2(a *accounts.Account) []byte {
-	var l int
-	l++
-	if a.Nonce > 0 {
-		l += (bits.Len64(a.Nonce) + 7) / 8
-	}
-	l++
-	if !a.Balance.IsZero() {
-		l += a.Balance.ByteLen()
-	}
-	l++
-	if !a.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if a.Incarnation > 0 {
-		l += (bits.Len64(a.Incarnation) + 7) / 8
-	}
-	value := make([]byte, l)
-	pos := 0
-	if a.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
-		value[pos] = byte(nonceBytes)
-		var nonce = a.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if a.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := a.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if a.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		copy(value[pos:pos+32], a.CodeHash[:])
-		pos += 32
-	}
-	if a.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := (bits.Len64(a.Incarnation) + 7) / 8
-		value[pos] = byte(incBytes)
-		var inc = a.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
-	return value
-}
-
-func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	for addr := range txTask.BalanceIncreaseSet {
+		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
 			var err error
@@ -314,7 +258,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			enc0 = serialise2(&a)
+			enc0 = accounts.Serialise2(&a)
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
@@ -335,7 +279,7 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 		addr1 := make([]byte, len(addr)+8)
 		copy(addr1, addr)
 		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
-		prev := serialise2(original)
+		prev := accounts.Serialise2(original)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
 		}
@@ -364,30 +308,31 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		rs.changes[kv.PlainState].AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
-			if !bytes.HasPrefix(item.key, addr1) {
-				return false
-			}
-			for ; e == nil && k != nil && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-				if !bytes.HasPrefix(k, addr1) {
-					k = nil
+		psChanges := rs.changes[kv.PlainState]
+		if psChanges != nil {
+			psChanges.AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+				if !bytes.HasPrefix(item.key, addr1) {
+					return false
 				}
-				if !bytes.Equal(k, item.key) {
-					if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
-						return false
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, item.key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+							return false
+						}
 					}
 				}
-			}
-			if e != nil {
-				return false
-			}
-			if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-				return false
-			}
-			return true
-		})
+				if e != nil {
+					return false
+				}
+				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+					return false
+				}
+				return true
+			})
+		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			if e = agg.AddStoragePrev(addr, libcommon.Copy(k[28:]), libcommon.Copy(v)); e != nil {
+			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
 				return e
 			}
 		}
@@ -406,22 +351,161 @@ func (rs *State22) Apply(emptyRemoval bool, roTx kv.Tx, txTask TxTask, agg *libs
 			return err
 		}
 	}
-	for addrS, val := range txTask.CodePrevs {
-		if err := agg.AddCodePrev([]byte(addrS), val); err != nil {
+	for addrS, incarnation := range txTask.CodePrevs {
+		addr := []byte(addrS)
+		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
+		codeHash := rs.get(kv.PlainContractCode, k)
+		if codeHash == nil {
+			var err error
+			codeHash, err = roTx.GetOne(kv.PlainContractCode, k)
+			if err != nil {
+				return err
+			}
+		}
+		var codePrev []byte
+		if codeHash != nil {
+			codePrev = rs.get(kv.Code, codeHash)
+			if codePrev == nil {
+				var err error
+				codePrev, err = roTx.GetOne(kv.Code, codeHash)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
 			return err
+		}
+	}
+	if txTask.TraceFroms != nil {
+		for addr := range txTask.TraceFroms {
+			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	if txTask.TraceTos != nil {
+		for addr := range txTask.TraceTos {
+			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
+				return err
+			}
+		}
+	}
+	for _, log := range txTask.Logs {
+		if err := agg.AddLogAddr(log.Address[:]); err != nil {
+			return fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+		}
+		for _, topic := range log.Topics {
+			if err := agg.AddLogTopic(topic[:]); err != nil {
+				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
+			}
 		}
 	}
 	if err := agg.FinishTx(); err != nil {
 		return err
 	}
-	if txTask.WriteLists == nil {
-		return nil
-	}
-	for table, list := range txTask.WriteLists {
-		for i, key := range list.Keys {
-			val := list.Vals[i]
-			rs.put(table, key, val)
+	if txTask.WriteLists != nil {
+		for table, list := range txTask.WriteLists {
+			for i, key := range list.Keys {
+				val := list.Vals[i]
+				rs.put(table, key, val)
+			}
 		}
+	}
+	return nil
+}
+
+func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
+	var address common.Address
+	copy(address[:], key)
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
+			copy(acc.CodeHash[:], codeHash)
+		}
+	}
+}
+
+func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.Aggregator22, accumulator *shards.Accumulator) error {
+	agg.SetTx(tx)
+	var currentInc uint64
+	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(k) == length.Addr {
+			if len(v) > 0 {
+				var acc accounts.Account
+				if err := accounts.Deserialise2(&acc, v); err != nil {
+					return fmt.Errorf("%w, %x", err, v)
+				}
+				currentInc = acc.Incarnation
+				// Fetch the code hash
+				recoverCodeHashPlain(&acc, tx, k)
+				var address common.Address
+				copy(address[:], k)
+
+				// cleanup contract code bucket
+				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return fmt.Errorf("read account for %x: %w", address, err)
+				}
+				if original != nil {
+					// clean up all the code incarnations original incarnation and the new one
+					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+						if err != nil {
+							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+						}
+					}
+				}
+
+				newV := make([]byte, acc.EncodingLengthForStorage())
+				acc.EncodeForStorage(newV)
+				if accumulator != nil {
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
+				}
+				if err := next(k, k, newV); err != nil {
+					return err
+				}
+			} else {
+				var address common.Address
+				copy(address[:], k)
+				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return err
+				}
+				if original != nil {
+					currentInc = original.Incarnation
+				} else {
+					currentInc = 1
+				}
+
+				if accumulator != nil {
+					accumulator.DeleteAccount(address)
+				}
+				if err := next(k, k, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if accumulator != nil {
+			var address common.Address
+			var location common.Hash
+			copy(address[:], k[:length.Addr])
+			copy(location[:], k[length.Addr:])
+			accumulator.ChangeStorage(address, currentInc, location, common2.Copy(v))
+		}
+		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
+		if len(v) > 0 {
+			if err := next(k, newKeys, v); err != nil {
+				return err
+			}
+		} else {
+			if err := next(k, newKeys, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -465,8 +549,6 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 				} else if !bytes.Equal(val, item.val) {
 					return false
 				}
-			} else {
-				//fmt.Printf("key [%x] => [%x] not present in changes\n", key, val)
 			}
 		}
 	}
@@ -498,7 +580,7 @@ type StateWriter22 struct {
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
-	codePrevs    map[string][]byte
+	codePrevs    map[string]uint64
 }
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
@@ -513,7 +595,7 @@ func NewStateWriter22(rs *State22) *StateWriter22 {
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
-		codePrevs:    map[string][]byte{},
+		codePrevs:    map[string]uint64{},
 	}
 }
 
@@ -531,17 +613,14 @@ func (w *StateWriter22) ResetWriteSet() {
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string][]byte{}
+	w.codePrevs = map[string]uint64{}
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
-	for _, list := range w.writeLists {
-		sort.Sort(list)
-	}
 	return w.writeLists
 }
 
-func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string][]byte) {
+func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
@@ -553,7 +632,7 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 	var prev []byte
 	if original.Initialised {
-		prev = serialise2(original)
+		prev = accounts.Serialise2(original)
 	}
 	w.accountPrevs[string(address.Bytes())] = prev
 	return nil
@@ -567,7 +646,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
-	w.codePrevs[string(address.Bytes())] = nil
+	w.codePrevs[string(address.Bytes())] = incarnation
 	return nil
 }
 
@@ -603,14 +682,12 @@ func (w *StateWriter22) CreateContract(address common.Address) error {
 }
 
 type StateReader22 struct {
-	tx         kv.Tx
-	txNum      uint64
-	trace      bool
-	rs         *State22
-	readError  bool
-	stateTxNum uint64
-	composite  []byte
-	readLists  map[string]*KvList
+	tx        kv.Tx
+	txNum     uint64
+	trace     bool
+	rs        *State22
+	composite []byte
+	readLists map[string]*KvList
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
@@ -643,9 +720,6 @@ func (r *StateReader22) ResetReadSet() {
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
-	for _, list := range r.readLists {
-		sort.Sort(list)
-	}
 	return r.readLists
 }
 
@@ -663,7 +737,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 		}
 	}
 	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, address.Bytes())
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common.CopyBytes(enc))
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -695,8 +769,8 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 			return nil, err
 		}
 	}
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, common.CopyBytes(r.composite))
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common.CopyBytes(enc))
+	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, common2.Copy(r.composite))
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
 	if r.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), r.txNum)
@@ -720,7 +794,7 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 		}
 	}
 	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, address.Bytes())
-	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common.CopyBytes(enc))
+	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common2.Copy(enc))
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -757,7 +831,7 @@ func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, 
 		}
 	}
 	r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
-	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, common.CopyBytes(enc))
+	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, common2.Copy(enc))
 	if len(enc) == 0 {
 		return 0, nil
 	}

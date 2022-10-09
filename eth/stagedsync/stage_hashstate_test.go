@@ -7,19 +7,22 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestPromoteHashedStateClearState(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	historyV3 := false
 	_, tx1 := memdb.NewTestTx(t)
 	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), context.Background())
+	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background())
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -28,13 +31,15 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	historyV3 := false
 	_, tx1 := memdb.NewTestTx(t)
 	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	cfg := StageHashStateCfg(db2, t.TempDir())
+	cfg := StageHashStateCfg(db2, dirs, historyV3, nil)
 	err := PromoteHashedStateCleanly("logPrefix", tx2, cfg, context.Background())
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
@@ -43,7 +48,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 	generateBlocks(t, 51, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err = promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 50}, 50, 101, tx2, cfg, nil)
+	err = promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, cfg, nil /* quit */, false /* quiet */)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -52,6 +57,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	historyV3 := false
 	_, tx1 := memdb.NewTestTx(t)
 	db2, tx2 := memdb.NewTestTx(t)
 
@@ -59,7 +66,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
 	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := promoteHashedStateIncrementally("logPrefix", &StageState{}, 50, 101, tx2, StageHashStateCfg(db2, t.TempDir()), nil)
+	err := promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), nil /* quit */, false /* quiet */)
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
@@ -67,19 +74,21 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 }
 
 func TestUnwindHashed(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	historyV3 := false
 	_, tx1 := memdb.NewTestTx(t)
 	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, t.TempDir()), context.Background())
+	err := PromoteHashedStateCleanly("logPrefix", tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background())
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, t.TempDir()), nil)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), nil)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}
@@ -88,6 +97,7 @@ func TestUnwindHashed(t *testing.T) {
 }
 
 func TestPromoteIncrementallyShutdown(t *testing.T) {
+	historyV3 := false
 
 	tt := []struct {
 		name           string
@@ -101,6 +111,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 	for _, tc := range tt {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if tc.cancelFuncExec {
@@ -108,7 +119,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			}
 			db, tx := memdb.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, t.TempDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
+			if err := promoteHashedStateIncrementally("logPrefix", 1, 10, tx, StageHashStateCfg(db, dirs, historyV3, nil), ctx.Done(), false /* quiet */); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
 			}
 		})
@@ -118,6 +129,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 }
 
 func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
+	historyV3 := false
 
 	tt := []struct {
 		name           string
@@ -131,6 +143,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 	for _, tc := range tt {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
 			ctx, cancel := context.WithCancel(context.Background())
 
 			defer cancel()
@@ -142,7 +155,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 
-			if err := PromoteHashedStateCleanly("logPrefix", tx, StageHashStateCfg(db, t.TempDir()), ctx); !errors.Is(err, tc.errExp) {
+			if err := PromoteHashedStateCleanly("logPrefix", tx, StageHashStateCfg(db, dirs, historyV3, nil), ctx); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateCleanly , got: %v, expected: %v", err, tc.errExp)
 			}
 
@@ -151,7 +164,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 }
 
 func TestUnwindHashStateShutdown(t *testing.T) {
-
+	historyV3 := false
 	tt := []struct {
 		name           string
 		cancelFuncExec bool
@@ -164,7 +177,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 	for _, tc := range tt {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-
+			dirs := datadir.New(t.TempDir())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -175,7 +188,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 			db, tx := memdb.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			cfg := StageHashStateCfg(db, t.TempDir())
+			cfg := StageHashStateCfg(db, dirs, historyV3, nil)
 			err := PromoteHashedStateCleanly("logPrefix", tx, cfg, ctx)
 			if tc.cancelFuncExec {
 				require.ErrorIs(t, err, libcommon.ErrStopped)

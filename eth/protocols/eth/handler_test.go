@@ -118,10 +118,14 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	m.ReceiveWg.Wait()
-	sent := m.SentMessage(0)
-	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-	require.Equal(t, expect, sent.Data)
+	if m.HistoryV3 {
+		// GetReceiptsMsg disabled for historyV3
+	} else {
+		m.ReceiveWg.Wait()
+		sent := m.SentMessage(0)
+		require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+		require.Equal(t, expect, sent.Data)
+	}
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and

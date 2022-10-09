@@ -81,3 +81,4 @@ dist
 .env
 coverage.out
 
+dist

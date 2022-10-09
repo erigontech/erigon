@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -156,16 +157,20 @@ type GenesisMismatchError struct {
 }
 
 func (e *GenesisMismatchError) Error() string {
-	return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	config := params.ChainConfigByGenesisHash(e.Stored)
+	if config == nil {
+		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	}
+	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
 }
 
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
 //
-//                          genesis == nil       genesis != nil
-//                       +------------------------------------------
-//     db has no genesis |  main-net default  |  genesis
-//     db has genesis    |  from DB           |  genesis (if compatible)
+//	                     genesis == nil       genesis != nil
+//	                  +------------------------------------------
+//	db has no genesis |  main-net default  |  genesis
+//	db has genesis    |  from DB           |  genesis (if compatible)
 //
 // The stored chain configuration will be updated if it is compatible (i.e. does not
 // specify a fork block below the local head block). In case of a conflict, the
@@ -309,13 +314,14 @@ func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
+	_ = g.Alloc //nil-check
 	var root common.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
+		tmpDB := mdbx.NewMDBX(log.New()).InMem().MapSize(2 * datasize.GB).MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
@@ -456,6 +462,9 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 		return nil, nil, err
 	}
 	if err := rawdb.WriteBlock(tx, block); err != nil {
+		return nil, nil, err
+	}
+	if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {
@@ -691,7 +700,7 @@ func DefaultMumbaiGenesisBlock() *Genesis {
 	}
 }
 
-//DefaultBorMainnet returns the Bor Mainnet network gensis block.
+// DefaultBorMainnet returns the Bor Mainnet network gensis block.
 func DefaultBorMainnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.BorMainnetChainConfig,
@@ -739,8 +748,9 @@ func DefaultGnosisGenesisBlock() *Genesis {
 }
 
 // Pre-calculated version of:
-//    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
-//    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+//
+//	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
+//	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
@@ -757,19 +767,6 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/dev.json"),
-	}
-}
-
-func DefaultKilnDevnetGenesisBlock() *Genesis {
-	return &Genesis{
-		Config:     params.KilnDevnetChainConfig,
-		Nonce:      0x1234,
-		Timestamp:  0,
-		GasLimit:   0x400000,
-		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc:      readPrealloc("allocs/kiln-devnet.json"),
 	}
 }
 
@@ -816,8 +813,6 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultBorMainnetGenesisBlock()
 	case networkname.BorDevnetChainName:
 		return DefaultBorDevnetGenesisBlock()
-	case networkname.KilnDevnetChainName:
-		return DefaultKilnDevnetGenesisBlock()
 	case networkname.GnosisChainName:
 		return DefaultGnosisGenesisBlock()
 	default:

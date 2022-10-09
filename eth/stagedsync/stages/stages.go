@@ -29,13 +29,15 @@ import (
 type SyncStage string
 
 var (
-	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	CumulativeIndex     SyncStage = "CumulativeIndex"     // Calculate how much gas has been used up to each block.
-	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
-	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
-	Execution           SyncStage = "Execution"           // Executing each block w/o buildinf a trie
-	Translation         SyncStage = "Translation"         // Translation each marked for translation contract (from EVM to TEVM)
+	Snapshots           SyncStage = "Snapshots"       // Snapshots
+	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
+	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
+	Bodies              SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders             SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
+	Execution           SyncStage = "Execution"       // Executing each block w/o buildinf a trie
+	Translation         SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
+	VerkleTrie          SyncStage = "VerkleTrie"
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
@@ -52,6 +54,7 @@ var (
 )
 
 var AllStages = []SyncStage{
+	Snapshots,
 	Headers,
 	BlockHashes,
 	Bodies,

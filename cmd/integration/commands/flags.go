@@ -1,10 +1,10 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -29,6 +29,9 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+
+	_forceSetHistoryV3 bool
+	workers            uint64
 )
 
 func must(err error) {
@@ -89,14 +92,16 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDataDir2(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	// --datadir is required, but no --chain flag: read chainConfig from db instead
+	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadirCli, "datadir", "", "data directory for temporary ELT files")
+	must(cmd.MarkFlagRequired("datadir"))
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
@@ -106,7 +111,7 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withBatchSize(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&batchSizeStr, "batchSize", "512M", "batch size for execution stage")
+	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
@@ -123,9 +128,14 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
+	must(cmd.MarkFlagRequired("chain"))
 }
 
 func withHeimdall(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
+}
+
+func withWorkers(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&workers, "workers", 1, "")
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -59,7 +60,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := chain.TopBlock.NumberU64()
-		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,7 +73,7 @@ func TestSendRawTransaction(t *testing.T) {
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, nil, txPool, nil, 5000000)
+	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, txPool, nil, 5000000)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)

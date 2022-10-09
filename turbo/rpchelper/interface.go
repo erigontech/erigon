@@ -29,4 +29,5 @@ type ApiBackend interface {
 	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
+	PendingBlock(ctx context.Context) (*types.Block, error)
 }

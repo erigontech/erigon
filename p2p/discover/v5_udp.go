@@ -756,6 +756,7 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr *
 }
 
 // matchWithCall checks whether a handshake attempt matches the active call.
+//
 //nolint:unparam
 func (t *UDPv5) matchWithCall(fromID enode.ID, nonce v5wire.Nonce) (*callV5, error) {
 	c := t.activeCallByAuth[nonce]
@@ -789,7 +790,7 @@ func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr *ne
 
 // collectTableNodes creates a FINDNODE result set for the given distances.
 func (t *UDPv5) collectTableNodes(rip net.IP, distances []uint, limit int) []*enode.Node {
-	var nodes []*enode.Node
+	nodes := make([]*enode.Node, 0, len(distances))
 	var processed = make(map[uint]struct{})
 	for _, dist := range distances {
 		// Reject duplicate / invalid distances.
