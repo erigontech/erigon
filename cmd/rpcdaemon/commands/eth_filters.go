@@ -202,6 +202,49 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 	return rpcSub, nil
 }
 
+// NewPendingTransactionsWithBody send a notification each time when a transaction had added into mempool.
+func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Subscription, error) {
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		defer debug.LogPanic()
+		txsCh := make(chan []types.Transaction, 1)
+		id := api.filters.SubscribePendingTxs(txsCh)
+		defer api.filters.UnsubscribePendingTxs(id)
+
+		for {
+			select {
+			case txs, ok := <-txsCh:
+				for _, t := range txs {
+					if t != nil {
+						err := notifier.Notify(rpcSub.ID, t)
+						if err != nil {
+							log.Warn("error while notifying subscription", "err", err)
+							return
+						}
+					}
+				}
+				if !ok {
+					log.Warn("new pending transactions channel was closed")
+					return
+				}
+			case <-rpcSub.Err():
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
 // Logs send a notification each time a new log appears.
 func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
 	if api.filters == nil {
