@@ -371,6 +371,19 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+	if err != nil {
+		return err
+	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return err
+	}
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	if err = agg.Merge(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
