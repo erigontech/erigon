@@ -16,7 +16,6 @@ package ssz_snappy
 import (
 	"bufio"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 
@@ -68,7 +67,9 @@ func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (err
 	if !ok {
 		return nil
 	}
-
+	if len(prefix) > 0 {
+		return EncodeAndWrite(d.s, val, prefix[0])
+	}
 	return EncodeAndWrite(d.s, val)
 }
 
@@ -123,7 +124,7 @@ func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.Str
 	return c, nil
 }
 
-func EncodeAndWrite(w io.Writer, val ssz.Marshaler) error {
+func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
@@ -131,6 +132,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler) error {
 	wr := bufio.NewWriterSize(w, 10+val.SizeSSZ())
 	defer wr.Flush()
 	// Write length of packet
+	wr.Write(prefix)
 	wr.Write(lengthBuf[:vin])
 	// start using streamed snappy compression
 	sw := snappy.NewBufferedWriter(wr)
@@ -150,32 +152,29 @@ func DecodeAndRead(r io.Reader, val ssz.Unmarshaler) error {
 	if err != nil {
 		return err
 	}
+	sr := snappy.NewReader(r)
 	raw := make([]byte, ln)
-	_, err = io.ReadFull(r, raw)
+	_, err = io.ReadFull(sr, raw)
 	if err != nil {
 		return fmt.Errorf("readPacket: %w", err)
 	}
 	return val.UnmarshalSSZ(raw)
 }
 
-func readUvarint(r io.Reader) (uint64, error) {
-	var x uint64
-	var s uint
-	bs := [1]byte{}
-	for i := 0; i < 10; i++ {
-		_, err := r.Read(bs[:])
+func readUvarint(r io.Reader) (x uint64, err error) {
+	currByte := make([]byte, 1)
+	for shift := uint(0); shift < 64; shift += 7 {
+		_, err := r.Read(currByte)
 		if err != nil {
-			return x, err
+			return 0, err
 		}
-		b := bs[0]
-		if b < 0x80 {
-			if i == 10-1 && b > 1 {
-				return x, errors.New("readUvarint: overflow")
-			}
-			return x | uint64(b)<<s, nil
+		b := uint64(currByte[0])
+		x |= (b & 0x7F) << shift
+		if (b & 0x80) == 0 {
+			return x, nil
 		}
-		x |= uint64(b&0x7f) << s
-		s += 7
 	}
-	return x, errors.New("readUvarint: overflow")
+
+	// The number is too large to represent in a 64-bit value.
+	return 0, nil
 }

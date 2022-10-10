@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
@@ -33,14 +33,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"go.uber.org/zap/buffer"
 )
-
-func (s *Sentinel) SendPingReqV1() (communication.Packet, error) {
-	requestPacket := &p2p.Ping{
-		Id: s.metadataV1.SeqNumber,
-	}
-	responsePacket := &p2p.Ping{}
-	return sendRequest(s, requestPacket, responsePacket, handlers.PingProtocolV1)
-}
 
 func (s *Sentinel) SendPingReqV1Raw() (communication.Packet, error) {
 	requestPacket := &p2p.Ping{
@@ -80,133 +72,41 @@ func (s *Sentinel) SendMetadataReqV1Raw() (communication.Packet, error) {
 	return responsePacket, err
 }
 
-func (s *Sentinel) SendMetadataLReqV1Raw() (communication.Packet, error) {
-	requestPacket := &lightrpc.LightClientFinalityUpdate{}
-
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, requestPacket); err != nil {
-		return nil, err
-	}
+func (s *Sentinel) SendLightClientFinaltyUpdateReqV1() (communication.Packet, error) {
 	responsePacket := &lightrpc.LightClientFinalityUpdate{}
-	reqBody := common.CopyBytes(buffer.Bytes())
-	message, errReq, err := s.SendRequestRaw(reqBody, handlers.LightClientFinalityUpdateV1)
+
+	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientFinalityUpdateV1)
 	if err != nil || errReq {
-		fmt.Println(err)
 		return nil, err
 	}
 
 	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
-	fmt.Println(err)
 	return responsePacket, err
 }
 
-func (s *Sentinel) SendMetadataReqV1() (communication.Packet, error) {
-	requestPacket := &lightrpc.MetadataV1{}
-	responsePacket := &lightrpc.MetadataV1{}
+func (s *Sentinel) SendLightClientOptimisticUpdateReqV1() (communication.Packet, error) {
+	responsePacket := &lightrpc.LightClientOptimisticUpdate{}
 
-	return sendRequest(s, requestPacket, responsePacket, handlers.MetadataProtocolV1)
+	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientOptimisticUpdateV1)
+	if err != nil || errReq {
+		return nil, err
+	}
+
+	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
+	return responsePacket, err
 }
 
 // TODO: add the rest of the request topics
-
-func sendRequest(s *Sentinel, requestPacket communication.Packet, responsePacket communication.Packet, topic string) (communication.Packet, error) {
-	_, peerInfo, err := connectToRandomPeer(s)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to a random peer err=%s", err)
-	}
-
-	peerId := peerInfo.ID
-
-	reqRetryTimer := time.NewTimer(clparams.ReqTimeout)
-	defer reqRetryTimer.Stop()
-
-	retryTicker := time.NewTicker(10 * time.Millisecond)
-	defer retryTicker.Stop()
-
-	sc, err := writeRequest(s, requestPacket, peerId, topic)
-	for err != nil {
-		select {
-		case <-s.ctx.Done():
-			log.Warn("[Req] sentinel has been shut down")
-			return nil, nil
-		case <-reqRetryTimer.C:
-			log.Debug("[Req] timeout", "topic", topic, "peer", peerId)
-			return nil, err
-		case <-retryTicker.C:
-			sc, err = writeRequest(s, requestPacket, peerId, topic)
-		}
-	}
-
-	defer sc.Close()
-	log.Debug("[Req] sent request", "topic", topic, "peer", peerId)
-
-	respRetryTimer := time.NewTimer(clparams.RespTimeout)
-	defer respRetryTimer.Stop()
-
-	responsePacket, err = decodeResponse(sc, responsePacket, peerId)
-	for err != nil {
-		select {
-		case <-s.ctx.Done():
-			log.Warn("[Resp] sentinel has been shutdown")
-			return nil, nil
-		case <-respRetryTimer.C:
-			log.Debug("[Resp] timeout", "topic", topic, "peer", peerId)
-			return nil, err
-		case <-retryTicker.C:
-			responsePacket, err = decodeResponse(sc, responsePacket, peerId)
-		}
-	}
-
-	return responsePacket, nil
-}
-
-func writeRequest(s *Sentinel, requestPacket communication.Packet, peerId peer.ID, topic string) (communication.StreamCodec, error) {
-	stream, err := s.host.NewStream(s.ctx, peerId, protocol.ID(topic))
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin stream, err=%s", err)
-	}
-
-	sc := ssz_snappy.NewStreamCodec(stream)
-	if _, ok := handlers.NoRequestHandlers[topic]; !ok {
-		if err := sc.WritePacket(requestPacket); err != nil {
-			return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
-		}
-	}
-
-	if err := sc.CloseWriter(); err != nil {
-		return nil, fmt.Errorf("failed to close write stream, err=%s", err)
-	}
-
-	return sc, nil
-}
-
-func decodeResponse(sc communication.StreamCodec, responsePacket communication.Packet, peerId peer.ID) (communication.Packet, error) {
-	code, err := sc.ReadByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
-	}
-
-	if code != 0 {
-		errPacket := &communication.ErrorMessage{}
-		protoCtx, err := sc.Decode(errPacket)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode error packet got=%s, err=%s", string(protoCtx.Raw), err)
-		}
-		log.Debug("[Resp] got error packet", "error-message", string(errPacket.Message), "peer", peerId)
-		return errPacket, nil
-	}
-
-	protoCtx, err := sc.Decode(responsePacket)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode packet got=%s, err=%s", string(protoCtx.Raw), err)
-	}
-	log.Info("[Resp] got response from", "response", responsePacket, "peer", peerId)
-
-	return responsePacket, nil
-}
-
 func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, error) {
-	_, peerInfo, err := connectToRandomPeer(s)
+	var (
+		peerInfo *peer.AddrInfo
+		err      error
+	)
+	if strings.Contains(topic, "light_client") {
+		peerInfo, err = connectToRandomLightClientPeer(s)
+	} else {
+		_, peerInfo, err = connectToRandomPeer(s)
+	}
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
