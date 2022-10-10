@@ -41,21 +41,16 @@ func TestMetadataPacketStream(t *testing.T) {
 	defer h2.Close()
 	mock32 := common.HexToHash("9e85f8605954286b4f1958cbd7017041025f6a6000858b09caf0b9b20699662d")
 	mock64 := append(mock32[:], mock32[:]...)
-	mock96 := append(mock64[:], mock32[:]...)
 	mockHeader := &cltypes.BeaconBlockHeader{
 		Slot:          19,
 		ProposerIndex: 24,
-		ParentRoot:    mock32[:],
-		Root:          mock32[:],
-		BodyRoot:      mock32[:],
 	}
 	packet := &cltypes.LightClientFinalityUpdate{
 		AttestedHeader:  mockHeader,
 		FinalizedHeader: mockHeader,
 		FinalityBranch:  [][]byte{mock32[:], mock32[:], mock32[:], mock32[:], mock32[:], mock32[:]},
 		SyncAggregate: &cltypes.SyncAggregate{
-			SyncCommiteeBits:      mock64,
-			SyncCommiteeSignature: mock96,
+			SyncCommiteeBits: mock64,
 		},
 		SignatureSlot: 66,
 	}

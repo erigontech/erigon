@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
@@ -83,10 +82,7 @@ func TestStatusHandler(t *testing.T) {
 	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(StatusProtocolV1))
 	require.NoError(t, err)
 	packet := &cltypes.Status{
-		ForkDigest:    common.Hex2Bytes("69696969"),
-		HeadRoot:      make([]byte, 32),
-		FinalizedRoot: make([]byte, 32),
-		HeadSlot:      666999,
+		HeadSlot: 666999,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
 	require.NoError(t, codec.WritePacket(packet))
