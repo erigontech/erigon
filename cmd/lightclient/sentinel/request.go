@@ -21,9 +21,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/common"
@@ -35,7 +34,7 @@ import (
 )
 
 func (s *Sentinel) SendPingReqV1Raw() (communication.Packet, error) {
-	requestPacket := &p2p.Ping{
+	requestPacket := &cltypes.Ping{
 		Id: 9,
 	}
 
@@ -43,7 +42,7 @@ func (s *Sentinel) SendPingReqV1Raw() (communication.Packet, error) {
 	if err := ssz_snappy.EncodeAndWrite(&buffer, requestPacket); err != nil {
 		return nil, err
 	}
-	responsePacket := &p2p.Ping{}
+	responsePacket := &cltypes.Ping{}
 	reqBody := common.CopyBytes(buffer.Bytes())
 	message, errReq, err := s.SendRequestRaw(reqBody, handlers.PingProtocolV1)
 	if err != nil || errReq {
@@ -55,13 +54,13 @@ func (s *Sentinel) SendPingReqV1Raw() (communication.Packet, error) {
 }
 
 func (s *Sentinel) SendMetadataReqV1Raw() (communication.Packet, error) {
-	requestPacket := &lightrpc.MetadataV1{}
+	requestPacket := &cltypes.MetadataV1{}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, requestPacket); err != nil {
 		return nil, err
 	}
-	responsePacket := &lightrpc.MetadataV1{}
+	responsePacket := &cltypes.MetadataV1{}
 	reqBody := common.CopyBytes(buffer.Bytes())
 	message, errReq, err := s.SendRequestRaw(reqBody, handlers.MetadataProtocolV1)
 	if err != nil || errReq {
@@ -73,7 +72,7 @@ func (s *Sentinel) SendMetadataReqV1Raw() (communication.Packet, error) {
 }
 
 func (s *Sentinel) SendLightClientFinaltyUpdateReqV1() (communication.Packet, error) {
-	responsePacket := &lightrpc.LightClientFinalityUpdate{}
+	responsePacket := &cltypes.LightClientFinalityUpdate{}
 
 	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientFinalityUpdateV1)
 	if err != nil || errReq {
@@ -85,7 +84,7 @@ func (s *Sentinel) SendLightClientFinaltyUpdateReqV1() (communication.Packet, er
 }
 
 func (s *Sentinel) SendLightClientOptimisticUpdateReqV1() (communication.Packet, error) {
-	responsePacket := &lightrpc.LightClientOptimisticUpdate{}
+	responsePacket := &cltypes.LightClientOptimisticUpdate{}
 
 	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientOptimisticUpdateV1)
 	if err != nil || errReq {

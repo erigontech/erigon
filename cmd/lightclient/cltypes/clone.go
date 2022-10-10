@@ -1,4 +1,4 @@
-package lightrpc
+package cltypes
 
 import "github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 
@@ -20,4 +20,12 @@ func (*MetadataV1) Clone() communication.Packet {
 
 func (*MetadataV2) Clone() communication.Packet {
 	return &MetadataV2{}
+}
+
+func (*Ping) Clone() communication.Packet {
+	return &Ping{}
+}
+
+func (*Status) Clone() communication.Packet {
+	return &Status{}
 }

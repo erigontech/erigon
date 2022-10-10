@@ -18,11 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
@@ -40,7 +38,7 @@ func initializeNetwork(t *testing.T, ctx context.Context) (*ConsensusHandlers, h
 	h2pi := h2.Peerstore().PeerInfo(h2.ID())
 	require.NoError(t, h1.Connect(ctx, h2pi))
 
-	return NewConsensusHandlers(h2, &peers.Peers{}, &lightrpc.MetadataV2{}), h1, h2
+	return NewConsensusHandlers(h2, &peers.Peers{}, &cltypes.MetadataV2{}), h1, h2
 }
 
 func TestPingHandler(t *testing.T) {
@@ -53,7 +51,7 @@ func TestPingHandler(t *testing.T) {
 
 	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(PingProtocolV1))
 	require.NoError(t, err)
-	packet := &p2p.Ping{
+	packet := &cltypes.Ping{
 		Id: 32,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
@@ -61,7 +59,7 @@ func TestPingHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
-	r := &p2p.Ping{}
+	r := &cltypes.Ping{}
 
 	code := make([]byte, 1)
 	stream.Read(code)
@@ -83,17 +81,14 @@ func TestStatusHandler(t *testing.T) {
 
 	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(StatusProtocolV1))
 	require.NoError(t, err)
-	packet := &p2p.Status{
-		ForkDigest:    common.Hex2Bytes("69696969"),
-		HeadRoot:      make([]byte, 32),
-		FinalizedRoot: make([]byte, 32),
-		HeadSlot:      666999,
+	packet := &cltypes.Status{
+		HeadSlot: 666999,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
 	require.NoError(t, codec.WritePacket(packet))
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
-	r := &p2p.Status{}
+	r := &cltypes.Status{}
 
 	code := make([]byte, 1)
 	stream.Read(code)

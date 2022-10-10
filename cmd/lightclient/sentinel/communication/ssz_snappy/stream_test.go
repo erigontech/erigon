@@ -18,8 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -42,28 +41,23 @@ func TestMetadataPacketStream(t *testing.T) {
 	defer h2.Close()
 	mock32 := common.HexToHash("9e85f8605954286b4f1958cbd7017041025f6a6000858b09caf0b9b20699662d")
 	mock64 := append(mock32[:], mock32[:]...)
-	mock96 := append(mock64[:], mock32[:]...)
-	mockHeader := &lightrpc.BeaconBlockHeader{
+	mockHeader := &cltypes.BeaconBlockHeader{
 		Slot:          19,
 		ProposerIndex: 24,
-		ParentRoot:    mock32[:],
-		Root:          mock32[:],
-		BodyRoot:      mock32[:],
 	}
-	packet := &lightrpc.LightClientFinalityUpdate{
+	packet := &cltypes.LightClientFinalityUpdate{
 		AttestedHeader:  mockHeader,
 		FinalizedHeader: mockHeader,
 		FinalityBranch:  [][]byte{mock32[:], mock32[:], mock32[:], mock32[:], mock32[:], mock32[:]},
-		SyncAggregate: &lightrpc.SyncAggregate{
-			SyncCommiteeBits:      mock64,
-			SyncCommiteeSignature: mock96,
+		SyncAggregate: &cltypes.SyncAggregate{
+			SyncCommiteeBits: mock64,
 		},
 		SignatureSlot: 66,
 	}
 
 	doneCh := make(chan struct{})
 	h2.SetStreamHandler(protocol.TestingID, func(stream network.Stream) {
-		p := &lightrpc.LightClientFinalityUpdate{}
+		p := &cltypes.LightClientFinalityUpdate{}
 		codecA := NewStreamCodec(stream)
 		_, err := codecA.Decode(p)
 		require.NoError(t, err)
@@ -92,13 +86,13 @@ func TestMetadataPacketStream(t *testing.T) {
 // See https://github.com/libp2p/go-libp2p-pubsub/issues/426
 func TestGossipCodecTest(t *testing.T) {
 	codec := NewGossipCodec(nil, nil).(*GossipCodec)
-	val := &p2p.Ping{
+	val := &cltypes.Ping{
 		Id: 89,
 	}
 	ans, err := utils.EncodeSSZSnappy(val)
 	require.NoError(t, err)
 
-	decoded := &p2p.Ping{}
+	decoded := &cltypes.Ping{}
 	require.NoError(t, codec.decodeData(decoded, ans))
 	assert.Equal(t, decoded, val)
 }
