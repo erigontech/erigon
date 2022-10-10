@@ -380,6 +380,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	if err = agg.BuildMissedIndices(); err != nil {
+		return err
+	}
 	if err = agg.Merge(); err != nil {
 		return err
 	}
