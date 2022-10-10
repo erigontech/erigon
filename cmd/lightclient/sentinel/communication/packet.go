@@ -61,7 +61,7 @@ type StreamCodec interface {
 	CloseReader() error
 
 	Write(payload []byte) (n int, err error)
-	WritePacket(pck Packet, prefix ...byte) (n int, err error)
+	WritePacket(pck Packet, prefix ...byte) (err error)
 	Decode(Packet) (ctx *StreamContext, err error)
 
 	Read(payload []byte) (n int, err error)

@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -71,7 +72,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(2 * time.Second)
+	sendReqInterval := time.NewTicker(500 * time.Millisecond)
 
 	for {
 		select {
@@ -82,12 +83,24 @@ func main() {
 			handleGossipPacket(pkt)
 		case <-sendReqInterval.C:
 			go func() {
-				if _, err := sent.SendPingReqV1(); err != nil {
-					log.Debug("failed to send ping request", "err", err)
+				var resp communication.Packet
+				var err error
+				if resp, err = sent.SendPingReqV1Raw(); err != nil {
+					log.Warn("failed to send ping request", "err", err)
 				}
-				if _, err := sent.SendMetadataReqV1(); err != nil {
-					log.Debug("failed to send metadata request", "err", err)
+				if resp != nil {
+					log.Info("Ping responded", "msg", resp.(*p2p.Ping))
 				}
+				if _, err = sent.SendMetadataReqV1Raw(); err != nil {
+					log.Warn("failed to send ping request", "err", err)
+				}
+				if resp, err = sent.SendLightClientFinaltyUpdateReqV1(); err != nil {
+					log.Warn("failed to send metadata request", "err", err)
+				}
+				if resp != nil {
+					log.Info("Lightclient responded", "msg", resp.(*lightrpc.LightClientFinalityUpdate).AttestedHeader)
+				}
+
 			}()
 		}
 	}

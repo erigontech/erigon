@@ -17,6 +17,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -130,4 +131,64 @@ func connectToRandomPeer(s *Sentinel) (node *enode.Node, peerInfo *peer.AddrInfo
 	}
 
 	return node, peerInfo, nil
+}
+
+// will iterate onto randoms nodes until our sentinel connects to one
+func connectToRandomLightClientPeer(s *Sentinel) (peerInfo *peer.AddrInfo, err error) {
+	var sub *GossipSubscription
+	for topic, currSub := range s.subManager.subscriptions {
+		if strings.Contains(topic, string(LightClientFinalityUpdateTopic)) {
+			sub = currSub
+		}
+	}
+
+	if sub == nil {
+		return nil, fmt.Errorf("no lightclient peers")
+	}
+
+	validPeerList := sub.topic.ListPeers()
+
+	if len(validPeerList) == 0 {
+		return nil, fmt.Errorf("no lightclient peers")
+	}
+
+	iterator := s.listener.RandomNodes()
+	defer iterator.Close()
+
+	connectedPeer := false
+	for !connectedPeer {
+		if exists := iterator.Next(); !exists {
+			break
+		}
+
+		node := iterator.Node()
+		peerInfo, _, err = convertToAddrInfo(node)
+		if !isPeerWhitelisted(peerInfo.ID, validPeerList) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error converting to addres info, err=%s", err)
+		}
+
+		if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
+			log.Debug("couldn't connect to peer", "err", err)
+			continue
+		}
+		connectedPeer = true
+	}
+
+	if !connectedPeer {
+		return nil, fmt.Errorf("failed to connect to peer")
+	}
+
+	return peerInfo, nil
+}
+
+func isPeerWhitelisted(peer peer.ID, whitelist []peer.ID) bool {
+	for _, currPeer := range whitelist {
+		if peer == currPeer {
+			return true
+		}
+	}
+	return false
 }

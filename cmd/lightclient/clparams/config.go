@@ -34,7 +34,7 @@ const (
 	MaxDialTimeout               = 10 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 5 * time.Second
+	ReqTimeout     time.Duration = 200 * time.Millisecond
 	RespTimeout    time.Duration = 10 * time.Second
 )
 

@@ -19,6 +19,17 @@ message GossipData {
     GossipType type = 2;
 }
 
+message RequestData {
+    bytes data = 1; // SSZ encoded data
+    string topic = 2;
+}
+
+message ResponseData {
+    bytes data = 1; // prefix-stripped SSZ encoded data
+    bool error = 2; // did the peer encounter an error
+}
+
 service Sentinel {
     rpc SubscribeGossip(GossipRequest) returns (stream GossipData);
+    rpc SendRequest(RequestData) returns (ResponseData);
 }

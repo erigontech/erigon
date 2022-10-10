@@ -50,6 +50,15 @@ func (s *SentinelServer) SubscribeGossip(_ *lightrpc.GossipRequest, stream light
 	}
 }
 
+func (s *SentinelServer) SendRequest(_ context.Context, req *lightrpc.RequestData) (*lightrpc.ResponseData, error) {
+	// Send the request and get the data if we get an answer.
+	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
+	return &lightrpc.ResponseData{
+		Data:  respData,
+		Error: foundErrReq,
+	}, err
+}
+
 func (s *SentinelServer) ListenToGossip() {
 	for {
 		select {

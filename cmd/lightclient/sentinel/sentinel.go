@@ -239,7 +239,7 @@ func (s *Sentinel) GetPeersCount() int {
 	// Check how many peers are subscribed to beacon block
 	var sub *GossipSubscription
 	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(BeaconBlockTopic)) {
+		if strings.Contains(topic, string(LightClientFinalityUpdateTopic)) {
 			sub = currSub
 		}
 	}

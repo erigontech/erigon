@@ -19,6 +19,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentinelClient interface {
 	SubscribeGossip(ctx context.Context, in *GossipRequest, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
+	SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error)
 }
 
 type sentinelClient struct {
@@ -61,11 +62,21 @@ func (x *sentinelSubscribeGossipClient) Recv() (*GossipData, error) {
 	return m, nil
 }
 
+func (c *sentinelClient) SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error) {
+	out := new(ResponseData)
+	err := c.cc.Invoke(ctx, "/lightrpc.Sentinel/SendRequest", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentinelServer is the server API for Sentinel service.
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
 type SentinelServer interface {
 	SubscribeGossip(*GossipRequest, Sentinel_SubscribeGossipServer) error
+	SendRequest(context.Context, *RequestData) (*ResponseData, error)
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -75,6 +86,9 @@ type UnimplementedSentinelServer struct {
 
 func (UnimplementedSentinelServer) SubscribeGossip(*GossipRequest, Sentinel_SubscribeGossipServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeGossip not implemented")
+}
+func (UnimplementedSentinelServer) SendRequest(context.Context, *RequestData) (*ResponseData, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendRequest not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
 
@@ -110,13 +124,36 @@ func (x *sentinelSubscribeGossipServer) Send(m *GossipData) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Sentinel_SendRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestData)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).SendRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/lightrpc.Sentinel/SendRequest",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).SendRequest(ctx, req.(*RequestData))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentinel_ServiceDesc is the grpc.ServiceDesc for Sentinel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Sentinel_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "lightrpc.Sentinel",
 	HandlerType: (*SentinelServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SendRequest",
+			Handler:    _Sentinel_SendRequest_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "SubscribeGossip",
