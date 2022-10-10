@@ -14,6 +14,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 type NetworkType int
 
 const (
-	MainnetNetwork NetworkType = 0
+	MainnetNetwork NetworkType = 1
 	GoerliNetwork  NetworkType = 5
 	SepoliaNetwork NetworkType = 11155111
 )
@@ -651,6 +652,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
+	fmt.Println(genesisConfig)
 	beaconConfig := BeaconConfigs[net]
 	return &genesisConfig, &networkConfig, &beaconConfig
 }

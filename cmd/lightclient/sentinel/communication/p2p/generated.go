@@ -45,25 +45,15 @@ func (typ *ENRForkID) Clone() communication.Packet {
 type ForkData struct {
 	CurrentVersion [4]byte `json:"current_version" ssz-size:"4" `
 
-	GenesisValidatorsRoot Root `ssz-size:"32" json:"genesis_validators_root" `
+	GenesisValidatorsRoot Root `json:"genesis_validators_root" ssz-size:"32" `
 }
 
 func (typ *ForkData) Clone() communication.Packet {
 	return &ForkData{}
 }
 
-type Goodbye struct {
-	Reason uint64 `json:"reason" `
-}
-
-func (typ *Goodbye) Clone() communication.Packet {
-	return &Goodbye{}
-}
-
 type Ping struct {
 	Id uint64 `json:"id" `
-
-	Syncnets Bitvector64 `json:"syncnets,omitempty" ssz-size:"1" `
 }
 
 func (typ *Ping) Clone() communication.Packet {
@@ -71,7 +61,7 @@ func (typ *Ping) Clone() communication.Packet {
 }
 
 type SingleRoot struct {
-	Root Root `ssz-size:"32" json:"root" `
+	Root Root `json:"root" ssz-size:"32" `
 
 	BodyRoot Root `json:"body_root" ssz-size:"32" `
 }

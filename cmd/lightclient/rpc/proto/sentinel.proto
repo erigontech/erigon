@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package lightrpc;
+
+import "beacon_block.proto";
+
+message GossipRequest {}
+
+enum GossipType {
+    // Lightclient gossip
+    LightClientFinalityUpdateGossipType = 0;
+    LightClientOptimisticUpdateGossipType = 1;
+    // Legacy gossip
+    BeaconBlockGossipType = 2;
+}
+
+message GossipData {
+    bytes data = 1; // SSZ encoded data
+    GossipType type = 2;
+}
+
+service Sentinel {
+    rpc SubscribeGossip(GossipRequest) returns (stream GossipData);
+}

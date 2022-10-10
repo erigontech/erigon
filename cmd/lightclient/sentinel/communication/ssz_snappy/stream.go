@@ -1,3 +1,16 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package ssz_snappy
 
 import (
@@ -6,11 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/network"
 )
@@ -53,10 +64,6 @@ func (d *StreamCodec) CloseReader() error {
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
 func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (n int, err error) {
-	// if its a metadata request we dont write anything
-	if reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV1{}) || reflect.TypeOf(pkt) == reflect.TypeOf(&lightrpc.MetadataV2{}) {
-		return 0, nil
-	}
 	val, ok := pkt.(ssz.Marshaler)
 	if !ok {
 		return 0, nil

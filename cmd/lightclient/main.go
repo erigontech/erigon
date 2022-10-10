@@ -71,7 +71,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(20 * time.Millisecond)
+	sendReqInterval := time.NewTicker(2 * time.Second)
 
 	for {
 		select {
@@ -115,12 +115,12 @@ func handleGossipPacket(pkt *communication.GossipContext) error {
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
+		log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature))
 	case *lightrpc.LightClientOptimisticUpdate:
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
-		log.Info("Got Optimistic Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature))
 	default:
 	}
 	return nil

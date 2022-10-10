@@ -1,3 +1,16 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package sentinel
 
 import (
@@ -28,7 +41,7 @@ func (s *Sentinel) SendMetadataReqV1() (communication.Packet, error) {
 	requestPacket := &lightrpc.MetadataV1{}
 	responsePacket := &lightrpc.MetadataV1{}
 
-	return sendRequest(s, requestPacket, responsePacket, handlers.MedataProtocolV1)
+	return sendRequest(s, requestPacket, responsePacket, handlers.MetadataProtocolV1)
 }
 
 // TODO: add the rest of the request topics
@@ -91,9 +104,10 @@ func writeRequest(s *Sentinel, requestPacket communication.Packet, peerId peer.I
 	}
 
 	sc := ssz_snappy.NewStreamCodec(stream)
-
-	if _, err := sc.WritePacket(requestPacket); err != nil {
-		return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+	if _, ok := handlers.NoRequestHandlers[topic]; !ok {
+		if _, err := sc.WritePacket(requestPacket); err != nil {
+			return nil, fmt.Errorf("failed to write packet type=%s, err=%s", reflect.TypeOf(requestPacket), err)
+		}
 	}
 
 	if err := sc.CloseWriter(); err != nil {
@@ -123,7 +137,7 @@ func decodeResponse(sc communication.StreamCodec, responsePacket communication.P
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode packet got=%s, err=%s", string(protoCtx.Raw), err)
 	}
-	log.Info("[Resp] got response from", "response", responsePacket, "peer", peerId)
+	log.Debug("[Resp] got response from", "response", responsePacket, "peer", peerId)
 
 	return responsePacket, nil
 }
