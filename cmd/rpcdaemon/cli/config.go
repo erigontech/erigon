@@ -349,7 +349,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			allSnapshots.OptimisticReopenWithDB(db)
 			allSnapshots.LogStat()
 
-			if agg, err = libstate.NewAggregator22(cfg.Dirs.SnapHistory, ethconfig.HistoryV3AggregationStep); err != nil {
+			if agg, err = libstate.NewAggregator22(cfg.Dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 			}
 			if err = agg.ReopenFiles(); err != nil {
