@@ -71,7 +71,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(2 * time.Second)
+	sendReqInterval := time.NewTicker(1 * time.Second)
 
 	for {
 		select {
@@ -82,11 +82,21 @@ func main() {
 			handleGossipPacket(pkt)
 		case <-sendReqInterval.C:
 			go func() {
-				if _, err := sent.SendPingReqV1(); err != nil {
+				//var resp communication.Packet
+				var err error
+				if _, err = sent.SendPingReqV1Raw(); err != nil {
 					log.Debug("failed to send ping request", "err", err)
 				}
-				if _, err := sent.SendMetadataReqV1(); err != nil {
-					log.Debug("failed to send metadata request", "err", err)
+				if _, err = sent.SendMetadataReqV1Raw(); err != nil {
+					log.Debug("failed to send ping request", "err", err)
+				}
+				if sent.GetPeersCount() > 0 {
+					if resp, err = sent.SendMetadataLReqV1Raw(); err != nil {
+						log.Debug("failed to send metadata request", "err", err)
+					}
+					if resp != nil {
+						log.Info("Metadata responded", "msg", resp.(*lightrpc.LightClientFinalityUpdate))
+					}
 				}
 			}()
 		}

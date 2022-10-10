@@ -63,25 +63,13 @@ func (d *StreamCodec) CloseReader() error {
 
 // write packet to stream. will add correct header + compression
 // will error if packet does not implement ssz.Marshaler interface
-func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (n int, err error) {
+func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (err error) {
 	val, ok := pkt.(ssz.Marshaler)
 	if !ok {
-		return 0, nil
+		return nil
 	}
-	lengthBuf := make([]byte, 10)
-	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
-	wr := bufio.NewWriterSize(d.s, 10+val.SizeSSZ())
-	defer wr.Flush()
-	wr.Write(prefix) // write prefix first (done for responses)
-	wr.Write(lengthBuf[:vin])
-	sw := snappy.NewBufferedWriter(wr)
-	defer sw.Flush()
-	xs := make([]byte, 0, val.SizeSSZ())
-	enc, err := val.MarshalSSZTo(xs)
-	if err != nil {
-		return 0, err
-	}
-	return sw.Write(enc)
+
+	return EncodeAndWrite(d.s, val)
 }
 
 // write raw bytes to stream
@@ -133,6 +121,41 @@ func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.Str
 		}
 	}
 	return c, nil
+}
+
+func EncodeAndWrite(w io.Writer, val ssz.Marshaler) error {
+	// create prefix for length of packet
+	lengthBuf := make([]byte, 10)
+	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
+	// Create writer size
+	wr := bufio.NewWriterSize(w, 10+val.SizeSSZ())
+	defer wr.Flush()
+	// Write length of packet
+	wr.Write(lengthBuf[:vin])
+	// start using streamed snappy compression
+	sw := snappy.NewBufferedWriter(wr)
+	defer sw.Flush()
+	// Marshall and snap it
+	xs := make([]byte, 0, val.SizeSSZ())
+	enc, err := val.MarshalSSZTo(xs)
+	if err != nil {
+		return err
+	}
+	_, err = sw.Write(enc)
+	return err
+}
+
+func DecodeAndRead(r io.Reader, val ssz.Unmarshaler) error {
+	ln, err := readUvarint(r)
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, ln)
+	_, err = io.ReadFull(r, raw)
+	if err != nil {
+		return fmt.Errorf("readPacket: %w", err)
+	}
+	return val.UnmarshalSSZ(raw)
 }
 
 func readUvarint(r io.Reader) (uint64, error) {

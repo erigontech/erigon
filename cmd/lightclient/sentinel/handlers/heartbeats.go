@@ -25,26 +25,20 @@ import (
 // ping handler
 func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 	// since packets are just structs, they can be resent with no issue
-	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
 	// since packets are just structs, they can be resent with no issue
-	_, err := ctx.Codec.WritePacket(&lightrpc.MetadataV1{
+	return ctx.Codec.WritePacket(&lightrpc.MetadataV1{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
 	}, SuccessfullResponsePrefix)
-	return err
 }
 
 func (c *ConsensusHandlers) metadataV2Handler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
 	// since packets are just structs, they can be resent with no issue
-	_, err := ctx.Codec.WritePacket(c.metadata, SuccessfullResponsePrefix)
-	return err
+	return ctx.Codec.WritePacket(c.metadata, SuccessfullResponsePrefix)
 }
 
 // does nothing
@@ -61,9 +55,5 @@ func statusHandler(ctx *communication.StreamContext, dat *p2p.Status) error {
 		"head slot", dat.HeadSlot,
 		"fork digest", utils.BytesToHex(dat.ForkDigest),
 	)
-	_, err := ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
 }

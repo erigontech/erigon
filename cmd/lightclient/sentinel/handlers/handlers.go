@@ -34,8 +34,9 @@ type ConsensusHandlers struct {
 const SuccessfullResponsePrefix = 0x00
 
 var NoRequestHandlers = map[string]bool{
-	MetadataProtocolV1: true,
-	MetadataProtocolV2: true,
+	MetadataProtocolV1:          true,
+	MetadataProtocolV2:          true,
+	LightClientFinalityUpdateV1: true,
 }
 
 func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *lightrpc.MetadataV2) *ConsensusHandlers {

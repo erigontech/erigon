@@ -50,6 +50,10 @@ func (s *SentinelServer) SubscribeGossip(_ *lightrpc.GossipRequest, stream light
 	}
 }
 
+func (s *SentinelServer) SendRequest(context.Context, *lightrpc.RequestData) (*lightrpc.ResponseData, error) {
+	// Send the request and get the data if we get an answer.
+}
+
 func (s *SentinelServer) ListenToGossip() {
 	for {
 		select {
