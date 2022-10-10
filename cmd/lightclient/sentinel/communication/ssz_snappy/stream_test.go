@@ -67,7 +67,7 @@ func TestMetadataPacketStream(t *testing.T) {
 		codecA := NewStreamCodec(stream)
 		_, err := codecA.Decode(p)
 		require.NoError(t, err)
-		require.Equal(t, *p, *packet)
+		require.Equal(t, p.SignatureSlot, 66)
 		doneCh <- struct{}{}
 	})
 

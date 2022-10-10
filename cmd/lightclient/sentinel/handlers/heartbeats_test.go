@@ -57,7 +57,7 @@ func TestPingHandler(t *testing.T) {
 		Id: 32,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
-	_, err = codec.WritePacket(packet)
+	err = codec.WritePacket(packet)
 	require.NoError(t, err)
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
@@ -90,8 +90,7 @@ func TestStatusHandler(t *testing.T) {
 		HeadSlot:      666999,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
-	_, err = codec.WritePacket(packet)
-	require.NoError(t, err)
+	require.NoError(t, codec.WritePacket(packet))
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
 	r := &p2p.Status{}
