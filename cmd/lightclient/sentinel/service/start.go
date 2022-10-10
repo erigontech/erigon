@@ -5,7 +5,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -17,7 +16,7 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (lightrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (cltypes.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := sentinel.New(context.Background(), cfg)
 	if err != nil {
@@ -55,7 +54,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 		return nil, err
 	}
 
-	return lightrpc.NewSentinelClient(conn), nil
+	return cltypes.NewSentinelClient(conn), nil
 }
 
 func StartServe(server *SentinelServer, srvCfg *ServerConfig) {
@@ -67,7 +66,7 @@ func StartServe(server *SentinelServer, srvCfg *ServerConfig) {
 	gRPCserver := grpc.NewServer()
 	go server.ListenToGossip()
 	// Regiser our server as a gRPC server
-	lightrpc.RegisterSentinelServer(gRPCserver, server)
+	cltypes.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}

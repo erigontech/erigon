@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"sync"
-
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 )
 
 const (
@@ -12,8 +10,8 @@ const (
 )
 
 type gossipObject struct {
-	data []byte              // gossip data
-	t    lightrpc.GossipType // determine which gossip message we are notifying of
+	data []byte             // gossip data
+	t    cltypes.GossipType // determine which gossip message we are notifying of
 }
 
 type gossipNotifier struct {
@@ -28,7 +26,7 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t lightrpc.GossipType, data []byte) {
+func (g *gossipNotifier) notify(t cltypes.GossipType, data []byte) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 

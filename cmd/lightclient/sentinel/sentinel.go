@@ -20,8 +20,8 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
@@ -44,7 +44,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV1 *lightrpc.MetadataV2
+	metadataV1 *cltypes.MetadataV2
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -121,7 +121,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV1 = &lightrpc.MetadataV2{
+	s.metadataV1 = &cltypes.MetadataV2{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
 		Syncnets:  0,

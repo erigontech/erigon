@@ -14,7 +14,7 @@
 package handlers
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 
@@ -28,7 +28,7 @@ type ConsensusHandlers struct {
 	handlers map[protocol.ID]network.StreamHandler
 	host     host.Host
 	peers    *peers.Peers
-	metadata *lightrpc.MetadataV2
+	metadata *cltypes.MetadataV2
 }
 
 const SuccessfullResponsePrefix = 0x00
@@ -39,7 +39,7 @@ var NoRequestHandlers = map[string]bool{
 	LightClientFinalityUpdateV1: true,
 }
 
-func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *lightrpc.MetadataV2) *ConsensusHandlers {
+func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *cltypes.MetadataV2) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:    peers,
 		host:     host,

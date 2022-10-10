@@ -1,4 +1,4 @@
-package lightrpc
+package cltypes
 
 import "github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 

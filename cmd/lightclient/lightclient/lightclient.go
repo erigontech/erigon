@@ -82,7 +82,7 @@ func (l *LightClient) Start(ctx context.Context) {
 		return
 	}
 
-	//defer stream.CloseSend()
+	defer stream.CloseSend()
 
 	for {
 		select {

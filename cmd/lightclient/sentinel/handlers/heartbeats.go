@@ -14,7 +14,7 @@
 package handlers
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
@@ -30,7 +30,7 @@ func pingHandler(ctx *communication.StreamContext, dat *p2p.Ping) error {
 
 func (c *ConsensusHandlers) metadataV1Handler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
 	// since packets are just structs, they can be resent with no issue
-	return ctx.Codec.WritePacket(&lightrpc.MetadataV1{
+	return ctx.Codec.WritePacket(&cltypes.MetadataV1{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
 	}, SuccessfullResponsePrefix)
