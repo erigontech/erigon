@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -92,13 +91,13 @@ func TestMetadataPacketStream(t *testing.T) {
 // See https://github.com/libp2p/go-libp2p-pubsub/issues/426
 func TestGossipCodecTest(t *testing.T) {
 	codec := NewGossipCodec(nil, nil).(*GossipCodec)
-	val := &p2p.Ping{
+	val := &cltypes.Ping{
 		Id: 89,
 	}
 	ans, err := utils.EncodeSSZSnappy(val)
 	require.NoError(t, err)
 
-	decoded := &p2p.Ping{}
+	decoded := &cltypes.Ping{}
 	require.NoError(t, codec.decodeData(decoded, ans))
 	assert.Equal(t, decoded, val)
 }

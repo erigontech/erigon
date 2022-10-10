@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -48,7 +48,7 @@ func ComputeForkDigest(
 		break
 	}
 
-	return computeForkDigest(currentForkVersion, p2p.Root(genesisConfig.GenesisValidatorRoot))
+	return computeForkDigest(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
 type fork struct {
@@ -66,8 +66,8 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 	return
 }
 
-func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (digest [4]byte, err error) {
-	data := p2p.ForkData{
+func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
+	data := cltypes.ForkData{
 		CurrentVersion:        currentVersion,
 		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}
@@ -107,10 +107,10 @@ func ComputeForkId(
 		nextForkVersion = fork.version
 	}
 
-	enrForkID := p2p.ENRForkID{
-		CurrentForkDigest: digest[:],
-		NextForkVersion:   nextForkVersion[:],
-		NextForkEpoch:     p2p.Epoch(nextForkEpoch),
+	enrForkID := cltypes.ENRForkID{
+		CurrentForkDigest: digest,
+		NextForkVersion:   nextForkVersion,
+		NextForkEpoch:     nextForkEpoch,
 	}
 	return enrForkID.MarshalSSZ()
 }

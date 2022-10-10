@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/ledgerwatch/erigon/common"
@@ -52,7 +52,7 @@ func TestPingHandler(t *testing.T) {
 
 	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(PingProtocolV1))
 	require.NoError(t, err)
-	packet := &p2p.Ping{
+	packet := &cltypes.Ping{
 		Id: 32,
 	}
 	codec := ssz_snappy.NewStreamCodec(stream)
@@ -60,7 +60,7 @@ func TestPingHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
-	r := &p2p.Ping{}
+	r := &cltypes.Ping{}
 
 	code := make([]byte, 1)
 	stream.Read(code)
@@ -82,7 +82,7 @@ func TestStatusHandler(t *testing.T) {
 
 	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(StatusProtocolV1))
 	require.NoError(t, err)
-	packet := &p2p.Status{
+	packet := &cltypes.Status{
 		ForkDigest:    common.Hex2Bytes("69696969"),
 		HeadRoot:      make([]byte, 32),
 		FinalizedRoot: make([]byte, 32),
@@ -92,7 +92,7 @@ func TestStatusHandler(t *testing.T) {
 	require.NoError(t, codec.WritePacket(packet))
 	require.NoError(t, codec.CloseWriter())
 	time.Sleep(100 * time.Millisecond)
-	r := &p2p.Status{}
+	r := &cltypes.Status{}
 
 	code := make([]byte, 1)
 	stream.Read(code)

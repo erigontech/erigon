@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/p2p"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -89,7 +88,7 @@ func main() {
 					log.Warn("failed to send ping request", "err", err)
 				}
 				if resp != nil {
-					log.Info("Ping responded", "msg", resp.(*p2p.Ping))
+					log.Info("Ping responded", "msg", resp.(*cltypes.Ping))
 				}
 				if _, err = sent.SendMetadataReqV1Raw(); err != nil {
 					log.Warn("failed to send ping request", "err", err)
