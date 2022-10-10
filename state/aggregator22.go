@@ -280,6 +280,15 @@ func (a *Aggregator22) buildFilesInBackground(step uint64, collation Agg22Collat
 	}()
 	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 	log.Info("[snapshots] history build done", "step", fmt.Sprintf("%d-%d", step, step+1))
+	if err := a.Merge(); err != nil {
+		return nil
+	}
+	closeAll = false
+	return nil
+}
+
+func (a *Aggregator22) Merge() error {
+	closeAll := true
 	maxSpan := uint64(32) * a.aggregationStep
 	for r := a.findMergeRange(a.maxTxNum.Load(), maxSpan); r.any(); r = a.findMergeRange(a.maxTxNum.Load(), maxSpan) {
 		outs := a.staticFilesInRange(r)
@@ -302,7 +311,6 @@ func (a *Aggregator22) buildFilesInBackground(step uint64, collation Agg22Collat
 			return err
 		}
 	}
-
 	closeAll = false
 	return nil
 }
