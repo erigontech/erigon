@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -39,7 +40,7 @@ func NewLightClient(execution remote.ETHBACKENDServer, sentinel lightrpc.Sentine
 	}
 }
 
-func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *types.ExecutionPayload {
+func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.ExecutionPayload) *types.ExecutionPayload {
 	var baseFee *uint256.Int
 
 	if e.BaseFeePerGas != nil {
@@ -58,19 +59,19 @@ func convertLightrpcExecutionPayloadToEthbacked(e *lightrpc.ExecutionPayload) *t
 		}
 	}
 	return &types.ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertHashToH256(common.BytesToHash(e.ParentHash)),
-		Coinbase:      gointerfaces.ConvertAddressToH160(common.BytesToAddress(e.FeeRecipient)),
-		StateRoot:     gointerfaces.ConvertHashToH256(common.BytesToHash(e.StateRoot)),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.BytesToHash(e.ReceiptsRoot)),
+		ParentHash:    gointerfaces.ConvertHashToH256(e.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(e.FeeRecipient),
+		StateRoot:     gointerfaces.ConvertHashToH256(e.StateRoot),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(e.ReceiptsRoot),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(e.LogsBloom),
-		PrevRandao:    gointerfaces.ConvertHashToH256(common.BytesToHash(e.PrevRandao)),
+		PrevRandao:    gointerfaces.ConvertHashToH256(e.PrevRandao),
 		BlockNumber:   e.BlockNumber,
 		GasLimit:      e.GasLimit,
 		GasUsed:       e.GasUsed,
 		Timestamp:     e.Timestamp,
 		ExtraData:     e.ExtraData,
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(common.BytesToHash(e.BlockHash)),
+		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
 		Transactions:  e.Transactions,
 	}
 }
@@ -82,7 +83,7 @@ func (l *LightClient) Start(ctx context.Context) {
 		return
 	}
 
-	defer stream.CloseSend()
+	//defer stream.CloseSend()
 
 	for {
 		select {
@@ -97,7 +98,7 @@ func (l *LightClient) Start(ctx context.Context) {
 			if data.Type != lightrpc.GossipType_BeaconBlockGossipType {
 				continue
 			}
-			block := &lightrpc.SignedBeaconBlockBellatrix{}
+			block := &cltypes.SignedBeaconBlockBellatrix{}
 			if err := block.UnmarshalSSZ(data.Data); err != nil {
 				log.Warn("Could not unmarshall gossip", "reason", err)
 			}
@@ -109,9 +110,8 @@ func (l *LightClient) Start(ctx context.Context) {
 	}
 }
 
-func (l *LightClient) processBeaconBlock(ctx context.Context, beaconBlock *lightrpc.SignedBeaconBlockBellatrix) error {
-	payloadHash := gointerfaces.ConvertHashToH256(
-		common.BytesToHash(beaconBlock.Block.Body.ExecutionPayload.BlockHash))
+func (l *LightClient) processBeaconBlock(ctx context.Context, beaconBlock *cltypes.SignedBeaconBlockBellatrix) error {
+	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Block.Body.ExecutionPayload.BlockHash)
 
 	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
 	var err error

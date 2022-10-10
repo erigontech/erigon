@@ -72,7 +72,7 @@ type SyncAggregate struct {
 type ExecutionPayload struct {
 	ParentHash    [32]byte `ssz-size:"32"`
 	FeeRecipient  [20]byte `ssz-size:"20"`
-	StateRoot     []byte   `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
 	ReceiptsRoot  [32]byte `ssz-size:"32"`
 	LogsBloom     []byte   `ssz-size:"256"`
 	PrevRandao    [32]byte `ssz-size:"32"`

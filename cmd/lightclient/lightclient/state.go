@@ -152,13 +152,13 @@ func (l *LightState) validateLightClientUpdate(u *cltypes.LightClientUpdate) err
 			finalized_root = hashTreeRoot(u.FinalizedHeader)
 		}
 
-		if !isValidMerkleBranch(finalized_root, utils.BytesSliceToBytes32Slice(u.FinalityBranch), 0, 0, utils.BytesToBytes32(u.AttestedHeader.Root)) {
+		if !isValidMerkleBranch(finalized_root, utils.BytesSliceToBytes32Slice(u.FinalityBranch), 0, 0, u.AttestedHeader.Root) {
 			return fmt.Errorf("merkle branch invalid for finality update")
 		}
 	}
 	if isSyncCommitteeUpdate(u) {
 		leaf, _ := u.NextSyncCommitee.HashTreeRoot()
-		if !isValidMerkleBranch(leaf, utils.BytesSliceToBytes32Slice(u.NextSyncCommitteeBranch), 0, 0, utils.BytesToBytes32(u.AttestedHeader.Root)) {
+		if !isValidMerkleBranch(leaf, utils.BytesSliceToBytes32Slice(u.NextSyncCommitteeBranch), 0, 0, u.AttestedHeader.Root) {
 			return fmt.Errorf("merkle branch invalid for sync committee update")
 		}
 	}
