@@ -78,24 +78,16 @@ func main() {
 			go func() {
 				var resp communication.Packet
 				var err error
-				if resp, err = rpc.SendPingReqV1(ctx, &cltypes.Ping{Id: 10}, sentinelClient); err != nil {
+				if _, err = rpc.SendPingReqV1(ctx, &cltypes.Ping{Id: 10}, sentinelClient); err != nil {
 					log.Debug("failed to send ping request", "err", err)
 				}
-				if resp != nil {
-					log.Info("Ping responded", "msg", resp.(*cltypes.Ping))
-				}
-				if resp, err = rpc.SendMetadataReqV1(ctx, sentinelClient); err != nil {
+				if _, err = rpc.SendMetadataReqV1(ctx, sentinelClient); err != nil {
 					log.Debug("failed to send ping request", "err", err)
-				}
-				if resp != nil {
-					log.Info("Ping responded", "msg", resp.(*cltypes.MetadataV1))
 				}
 				if resp, err = rpc.SendLightClientOptimisticUpdateReqV1(ctx, sentinelClient); err != nil {
 					log.Warn("failed to send metadata request", "err", err)
 				}
-				if resp != nil {
-					log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientOptimisticUpdate))
-				}
+				log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientOptimisticUpdate))
 
 			}()
 		}
