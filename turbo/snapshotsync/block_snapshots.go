@@ -176,7 +176,7 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	defer sn.seg.EnableReadAhead().DisableReadAhead()
+	defer sn.seg.EnableMadvNormal().DisableReadAhead()
 
 	var buf []byte
 	g := sn.seg.MakeGetter()
@@ -1666,8 +1666,8 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-	defer d.EnableReadAhead().DisableReadAhead()
-	defer bodiesSegment.EnableReadAhead().DisableReadAhead()
+	defer d.EnableMadvNormal().DisableReadAhead()
+	defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
 
 RETRY:
 	g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
@@ -1840,7 +1840,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	}
 	rs.LogLvl(lvl)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.EnableMadvNormal().DisableReadAhead()
 
 RETRY:
 	g := d.MakeGetter()
