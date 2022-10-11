@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -142,6 +143,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 	var notifyTo = notifyFrom
 	var notifyToHash common.Hash
+	var notifyBlockTime uint64
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
@@ -177,7 +179,11 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		var h types.Header
+		if err := rlp.DecodeBytes(headersRlp[len(headersRlp)-1], &h); err != nil {
+			log.Warn("parsing header to extract timestamp", "error", err)
+		}
+		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "age", common.PrettyAge(time.Unix(int64(h.Time), 0)), "log sending", logTiming)
 	}
 	return nil
 }
