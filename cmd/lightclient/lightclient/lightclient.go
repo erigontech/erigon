@@ -77,7 +77,7 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.ExecutionPayload) *ty
 }
 
 func (l *LightClient) Start(ctx context.Context) {
-	stream, err := l.sentinel.SubscribeGossip(ctx, &lightrpc.GossipRequest{})
+	stream, err := l.sentinel.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
 		return
