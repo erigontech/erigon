@@ -49,7 +49,7 @@ func Start(wg *sync.WaitGroup) {
 
 // StartNode starts an erigon node on the dev chain
 func StartNode(wg *sync.WaitGroup, args []string) {
-	fmt.Printf("Arguments for node %d are: %v\n", nodeNumber, args)
+	fmt.Printf("Running node %d with flags ==> %v\n", nodeNumber, args)
 
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
