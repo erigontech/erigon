@@ -143,7 +143,6 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 	var notifyTo = notifyFrom
 	var notifyToHash common.Hash
-	var notifyBlockTime uint64
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
