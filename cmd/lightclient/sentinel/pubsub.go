@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
@@ -71,19 +71,19 @@ type GossipTopic struct {
 
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
-	Typ:      &lightrpc.SignedBeaconBlockBellatrix{},
+	Typ:      &cltypes.SignedBeaconBlockBellatrix{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientFinalityUpdateSsz = GossipTopic{
 	Name:     LightClientFinalityUpdateTopic,
-	Typ:      &lightrpc.LightClientFinalityUpdate{},
+	Typ:      &cltypes.LightClientFinalityUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientOptimisticUpdateSsz = GossipTopic{
 	Name:     LightClientOptimisticUpdateTopic,
-	Typ:      &lightrpc.LightClientOptimisticUpdate{},
+	Typ:      &cltypes.LightClientOptimisticUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }

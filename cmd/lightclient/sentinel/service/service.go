@@ -4,6 +4,7 @@ import (
 	"context"
 
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
@@ -50,6 +51,15 @@ func (s *SentinelServer) SubscribeGossip(_ *lightrpc.GossipRequest, stream light
 	}
 }
 
+func (s *SentinelServer) SendRequest(_ context.Context, req *lightrpc.RequestData) (*lightrpc.ResponseData, error) {
+	// Send the request and get the data if we get an answer.
+	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
+	return &lightrpc.ResponseData{
+		Data:  respData,
+		Error: foundErrReq,
+	}, err
+}
+
 func (s *SentinelServer) ListenToGossip() {
 	for {
 		select {
@@ -75,11 +85,11 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 		return err
 	}
 	switch pkt.Packet.(type) {
-	case *lightrpc.SignedBeaconBlockBellatrix:
+	case *cltypes.SignedBeaconBlockBellatrix:
 		s.gossipNotifier.notify(lightrpc.GossipType_BeaconBlockGossipType, data)
-	case *lightrpc.LightClientFinalityUpdate:
+	case *cltypes.LightClientFinalityUpdate:
 		s.gossipNotifier.notify(lightrpc.GossipType_LightClientFinalityUpdateGossipType, data)
-	case *lightrpc.LightClientOptimisticUpdate:
+	case *cltypes.LightClientOptimisticUpdate:
 		s.gossipNotifier.notify(lightrpc.GossipType_LightClientOptimisticUpdateGossipType, data)
 	default:
 	}
