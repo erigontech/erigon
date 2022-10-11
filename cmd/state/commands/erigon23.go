@@ -46,8 +46,13 @@ func init() {
 
 	erigon23Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon23Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon23Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
 	rootCmd.AddCommand(erigon23Cmd)
 }
+
+var (
+	commitmentsMode string // flag --commitments.mode [direct|update]
+)
 
 var erigon23Cmd = &cobra.Command{
 	Use:   "erigon23",
@@ -68,18 +73,13 @@ func initSeparatedLogging(logPath string, filePrefix string) (log.Logger, error)
 	}
 
 	logger := log.New()
-	userLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-user.log"), log.LogfmtFormat(), 1<<27) // 128Mb
-	if err != nil {
-		return nil, err
-	}
 	errLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
 	if err != nil {
 		return nil, err
 	}
 
-	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(log.LvlInfo, userLog), log.LvlFilterHandler(log.LvlError, errLog))
-	logger.SetHandler(mux)
-	log.SetRootHandler(mux)
+	fh := log.LvlFilterHandler(log.LvlTrace, errLog)
+	logger.SetHandler(log.MultiHandler(log.Root().GetHandler(), fh))
 	return logger, nil
 }
 
@@ -137,11 +137,20 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}
 	defer agg.Close()
 
+	var mode libstate.CommitmentMode
+	switch commitmentsMode {
+	case "update":
+		mode = libstate.CommitmentModeUpdates
+	default:
+		mode = libstate.CommitmentModeDirect
+	}
+	agg.SetCommitmentMode(mode)
+
 	startTxNum := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
 
 	agg.SetTx(rwTx)
-	latestTx, err := agg.SeekCommitment(startTxNum)
+	latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
@@ -194,7 +203,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	go func() {
 		for range logEvery.C {
 			aStats := agg.Stats()
-			statx.delta(aStats, blockNum).print(aStats, logger)
+			statx.delta(aStats, blockNum, txNum).print(aStats, logger)
 		}
 	}()
 
@@ -218,6 +227,9 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	writeWrapper := &WriterWrapper23{w: agg}
 
 	commitFn := func(txn uint64) error {
+		if db == nil || rwTx == nil {
+			return fmt.Errorf("commit failed due to invalid db/rwTx")
+		}
 		var spaceDirty uint64
 		if spaceDirty, _, err = rwTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
 			return fmt.Errorf("retrieving spaceDirty: %w", err)
@@ -241,13 +253,6 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		readWrapper.roTx = rwTx
 		return nil
 	}
-
-	defer func() {
-		interrupt = true
-		if err := commitFn(txNum); err != nil {
-			log.Error("commit on exit failed", "err", err)
-		}
-	}()
 
 	agg.SetCommitFn(commitFn)
 
@@ -295,7 +300,10 @@ type stat23 struct {
 	misses       uint64
 	prevBlock    uint64
 	hitMissRatio float64
-	speed        float64
+	blockSpeed   float64
+	txSpeed      float64
+	txNum        uint64
+	prevTxNum    uint64
 	prevTime     time.Time
 	mem          runtime.MemStats
 }
@@ -305,21 +313,24 @@ func (s *stat23) print(aStats libstate.FilesStats, logger log.Logger) {
 	totalDatSize := aStats.DataSize
 	totalIdxSize := aStats.IdxSize
 
-	logger.Info("Progress", "block", s.blockNum, "blk/s", s.speed, "state files", totalFiles,
+	logger.Info("Progress", "block", s.blockNum, "blk/s", s.blockSpeed, "tx", s.txNum, "txn/s", s.txSpeed, "state files", totalFiles,
 		"total dat", libcommon.ByteCount(totalDatSize), "total idx", libcommon.ByteCount(totalIdxSize),
 		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
 		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
 	)
 }
 
-func (s *stat23) delta(aStats libstate.FilesStats, blockNum uint64) *stat23 {
+func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat23 {
 	currentTime := time.Now()
 	libcommon.ReadMemStats(&s.mem)
 
 	interval := currentTime.Sub(s.prevTime).Seconds()
 	s.blockNum = blockNum
-	s.speed = float64(s.blockNum-s.prevBlock) / interval
+	s.blockSpeed = float64(s.blockNum-s.prevBlock) / interval
+	s.txNum = txNum
+	s.txSpeed = float64(s.txNum-s.prevTxNum) / interval
 	s.prevBlock = blockNum
+	s.prevTxNum = txNum
 	s.prevTime = currentTime
 
 	total := s.hits + s.misses
@@ -342,6 +353,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
+	ww.w.SetBlockNum(block.NumberU64())
 	rw.blockNum = block.NumberU64()
 	ww.blockNum = block.NumberU64()
 
@@ -408,16 +420,16 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		ww.w.SetTxNum(txNum)
 	}
 
-	if txNum >= startTxNum && chainConfig.IsByzantium(block.NumberU64()) {
-		receiptSha := types.DeriveSha(receipts)
-		if receiptSha != block.ReceiptHash() {
-			fmt.Printf("mismatched receipt headers for block %d\n", block.NumberU64())
-			for j, receipt := range receipts {
-				fmt.Printf("tx %d, used gas: %d\n", j, receipt.GasUsed)
+	if txNum >= startTxNum {
+		if chainConfig.IsByzantium(block.NumberU64()) {
+			receiptSha := types.DeriveSha(receipts)
+			if receiptSha != block.ReceiptHash() {
+				fmt.Printf("mismatched receipt headers for block %d\n", block.NumberU64())
+				for j, receipt := range receipts {
+					fmt.Printf("tx %d, used gas: %d\n", j, receipt.GasUsed)
+				}
 			}
 		}
-	}
-	if txNum >= startTxNum {
 		ibs := state.New(rw)
 		if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
 			return 0, nil, fmt.Errorf("adding coinbase trace: %w", err)
@@ -437,16 +449,6 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 
-		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
-			rootHash, err := ww.w.ComputeCommitment(true, trace)
-			if err != nil {
-				return 0, nil, err
-			}
-			if !bytes.Equal(rootHash, header.Root[:]) {
-				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
-			}
-		}
-
 		if err := ww.w.FinishTx(); err != nil {
 			return 0, nil, fmt.Errorf("failed to finish tx: %w", err)
 		}
@@ -457,6 +459,16 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
+	if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+		rootHash, err := ww.w.ComputeCommitment(true, trace)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !bytes.Equal(rootHash, header.Root[:]) {
+			return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
+		}
+	}
+
 	if err := ww.w.FinishTx(); err != nil {
 		return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
 	}
