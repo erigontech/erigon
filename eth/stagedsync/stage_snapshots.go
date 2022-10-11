@@ -217,7 +217,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Writing total difficulty index", logPrefix), "block_num", header.Number.Uint64())
+					log.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, sn.BlocksAvailable()/1000))
 				default:
 				}
 				return nil
@@ -274,7 +274,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 							case <-ctx.Done():
 								return ctx.Err()
 							case <-logEvery.C:
-								log.Info(fmt.Sprintf("[%s] Writing MaxTxNums index for snapshots", logPrefix), "block_num", blockNum)
+								log.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
 							default:
 							}
 							maxTxNum := baseTxNum + txAmount - 1
