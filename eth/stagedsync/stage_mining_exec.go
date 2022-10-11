@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -201,14 +202,31 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		return receipt.Logs, nil
 	}
 
+	var stopped *time.Ticker
+	defer func() {
+		if stopped != nil {
+			stopped.Stop()
+		}
+	}()
+LOOP:
 	for {
+		// see if we need to stop now
+		if stopped != nil {
+			select {
+			case <-stopped.C:
+				break LOOP
+			default:
+			}
+		}
+
 		if err := libcommon.Stopped(quit); err != nil {
 			return nil, err
 		}
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 {
-			log.Debug("Transaction adding was interrupted", "payload", payloadId)
-			break
+		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
+			log.Debug("Transaction adding was requested to stop", "payload", payloadId)
+			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
+			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done
 		if gasPool.Gas() < params.TxGas {
