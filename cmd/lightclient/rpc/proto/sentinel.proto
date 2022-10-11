@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package lightrpc;
 
-message GossipRequest {}
+message EmptyRequest {}
 
 enum GossipType {
     // Lightclient gossip
@@ -17,6 +17,10 @@ message GossipData {
     GossipType type = 2;
 }
 
+message PeerCount {
+    uint64 amount = 1;
+}
+
 message RequestData {
     bytes data = 1; // SSZ encoded data
     string topic = 2;
@@ -28,6 +32,7 @@ message ResponseData {
 }
 
 service Sentinel {
-    rpc SubscribeGossip(GossipRequest) returns (stream GossipData);
+    rpc SubscribeGossip(EmptyRequest) returns (stream GossipData);
     rpc SendRequest(RequestData) returns (ResponseData);
+    rpc GetPeers(EmptyRequest) returns (PeerCount);
 }

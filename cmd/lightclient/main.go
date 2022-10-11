@@ -15,12 +15,16 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -32,72 +36,65 @@ var (
 )
 
 func main() {
+	ctx := context.Background()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
+	sentinelClient, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        defaultIpAddr,
 		Port:          defaultPort,
 		TCPPort:       defaultTcpPort,
 		GenesisConfig: genesisCfg,
 		NetworkConfig: networkCfg,
 		BeaconConfig:  beaconCfg,
-	})
+	}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
 	if err != nil {
-		log.Error("error", "err", err)
-		return
+		log.Error("Could not start sentinel", "err", err)
 	}
-	if err := sent.Start(); err != nil {
-		log.Error("failed to start sentinel", "err", err)
-		return
-	}
-	log.Info("Sentinel started", "enr", sent.String())
 
-	gossip_topics := []sentinel.GossipTopic{
-		sentinel.BeaconBlockSsz,
-		sentinel.LightClientFinalityUpdateSsz,
-		sentinel.LightClientOptimisticUpdateSsz,
-	}
-	for _, v := range gossip_topics {
-		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-	}
+	log.Info("Sentinel started")
 
 	logInterval := time.NewTicker(5 * time.Second)
 	sendReqInterval := time.NewTicker(500 * time.Millisecond)
 
+	stream, err := sentinelClient.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
+	if err != nil {
+		log.Error("Could not start stream", "err", err)
+		return
+	}
+
+	go gossipHandler(stream)
+
 	for {
 		select {
 		case <-logInterval.C:
-			sent.LogTopicPeers()
-			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
-		case pkt := <-sent.RecvGossip():
-			handleGossipPacket(pkt)
+			count, err := sentinelClient.GetPeers(ctx, &lightrpc.EmptyRequest{})
+			if err != nil {
+				log.Error("Could not get peer count", "err", err)
+				return
+			}
+
+			log.Info("[Lightclient] Networking Report", "peers", count.Amount)
 		case <-sendReqInterval.C:
 			go func() {
 				var resp communication.Packet
 				var err error
-				if resp, err = sent.SendPingReqV1Raw(); err != nil {
-					log.Warn("failed to send ping request", "err", err)
+				if resp, err = rpc.SendPingReqV1(ctx, &cltypes.Ping{Id: 10}, sentinelClient); err != nil {
+					log.Debug("failed to send ping request", "err", err)
 				}
 				if resp != nil {
 					log.Info("Ping responded", "msg", resp.(*cltypes.Ping))
 				}
-				if _, err = sent.SendMetadataReqV1Raw(); err != nil {
-					log.Warn("failed to send ping request", "err", err)
+				if resp, err = rpc.SendMetadataReqV1(ctx, sentinelClient); err != nil {
+					log.Debug("failed to send ping request", "err", err)
 				}
-				if resp, err = sent.SendLightClientFinaltyUpdateReqV1(); err != nil {
+				if resp != nil {
+					log.Info("Ping responded", "msg", resp.(*cltypes.MetadataV1))
+				}
+				if resp, err = rpc.SendLightClientOptimisticUpdateReqV1(ctx, sentinelClient); err != nil {
 					log.Warn("failed to send metadata request", "err", err)
 				}
 				if resp != nil {
-					log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientFinalityUpdate).AttestedHeader)
+					log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientOptimisticUpdate))
 				}
 
 			}()
@@ -105,35 +102,34 @@ func main() {
 	}
 }
 
-func handleGossipPacket(pkt *communication.GossipContext) error {
-	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
-	switch u := pkt.Packet.(type) {
-	case *cltypes.SignedBeaconBlockBellatrix:
-		/*log.Info("[Gossip] beacon_block",
-			"Slot", u.Block.Slot,
-			"Signature", hex.EncodeToString(u.Signature),
-			"graffiti", string(u.Block.Body.Graffiti),
-			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash),
-			"stateRoot", hex.EncodeToString(u.Block.StateRoot),
-			"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
-			"proposerIdx", u.Block.ProposerIndex,
-		)*/
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+func gossipHandler(stream lightrpc.Sentinel_SubscribeGossipClient) {
+	for {
+		gossipData, err := stream.Recv()
 		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+			log.Warn("ending consensus gossip", "err", err)
+			return
 		}
-	case *cltypes.LightClientFinalityUpdate:
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
+		pkt, err := rpc.DecodeGossipData(gossipData)
 		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+			log.Warn("cannot decode gossip", "err", err)
+			return
 		}
-		log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
-	case *cltypes.LightClientOptimisticUpdate:
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
-		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		switch u := pkt.(type) {
+		case *cltypes.SignedBeaconBlockBellatrix:
+			log.Debug("[Gossip] beacon_block",
+				"Slot", u.Block.Slot,
+				"Signature", hex.EncodeToString(u.Signature[:]),
+				"graffiti", string(u.Block.Body.Graffiti),
+				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
+				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
+				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
+				"proposerIdx", u.Block.ProposerIndex,
+			)
+		case *cltypes.LightClientFinalityUpdate:
+			log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
+		case *cltypes.LightClientOptimisticUpdate:
+			log.Info("[Gossip] Got Optimistic Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
+		default:
 		}
-	default:
 	}
-	return nil
 }

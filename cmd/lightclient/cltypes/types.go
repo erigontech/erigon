@@ -1,5 +1,7 @@
 package cltypes
 
+import ssz "github.com/ferranbt/fastssz"
+
 type Eth1Data struct {
 	Root         [32]byte `ssz-size:"32"`
 	DepositCount uint64
@@ -144,4 +146,9 @@ type LightClientOptimisticUpdate struct {
 	AttestedHeader *BeaconBlockHeader
 	SyncAggregate  *SyncAggregate
 	SignatureSlot  uint64
+}
+
+type ObjectSSZ interface {
+	ssz.Marshaler
+	ssz.Unmarshaler
 }

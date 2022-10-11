@@ -21,6 +21,7 @@ import (
 
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/network"
 )
@@ -147,18 +148,30 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz.Unmarshaler) error {
-	ln, err := readUvarint(r)
-	if err != nil {
+func getPrefixFromResponseType(val cltypes.ObjectSSZ) []byte {
+	if val.SizeSSZ() <= 16 {
+		return []byte{0x08}
+	}
+	return []byte{0x4a, 0x26, 0xc5, 0x8b, 0xc8, 0x04}
+}
+
+func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
+	ln := val.SizeSSZ()
+	if _, err := r.Read(make([]byte, len(getPrefixFromResponseType(val)))); err != nil {
 		return err
 	}
+
 	sr := snappy.NewReader(r)
 	raw := make([]byte, ln)
-	_, err = io.ReadFull(sr, raw)
+	_, err := io.ReadFull(sr, raw)
+
 	if err != nil {
 		return fmt.Errorf("readPacket: %w", err)
 	}
-	return val.UnmarshalSSZ(raw)
+
+	err = val.UnmarshalSSZ(raw)
+
+	return err
 }
 
 func readUvarint(r io.Reader) (x uint64, err error) {

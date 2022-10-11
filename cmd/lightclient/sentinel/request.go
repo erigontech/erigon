@@ -14,86 +14,19 @@
 package sentinel
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"go.uber.org/zap/buffer"
 )
-
-func (s *Sentinel) SendPingReqV1Raw() (communication.Packet, error) {
-	requestPacket := &cltypes.Ping{
-		Id: 9,
-	}
-
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, requestPacket); err != nil {
-		return nil, err
-	}
-	responsePacket := &cltypes.Ping{}
-	reqBody := common.CopyBytes(buffer.Bytes())
-	message, errReq, err := s.SendRequestRaw(reqBody, handlers.PingProtocolV1)
-	if err != nil || errReq {
-		return nil, err
-	}
-
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
-	return responsePacket, err
-}
-
-func (s *Sentinel) SendMetadataReqV1Raw() (communication.Packet, error) {
-	requestPacket := &cltypes.MetadataV1{}
-
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, requestPacket); err != nil {
-		return nil, err
-	}
-	responsePacket := &cltypes.MetadataV1{}
-	reqBody := common.CopyBytes(buffer.Bytes())
-	message, errReq, err := s.SendRequestRaw(reqBody, handlers.MetadataProtocolV1)
-	if err != nil || errReq {
-		return nil, err
-	}
-
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
-	return responsePacket, err
-}
-
-func (s *Sentinel) SendLightClientFinaltyUpdateReqV1() (communication.Packet, error) {
-	responsePacket := &cltypes.LightClientFinalityUpdate{}
-
-	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientFinalityUpdateV1)
-	if err != nil || errReq {
-		return nil, err
-	}
-
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
-	return responsePacket, err
-}
-
-func (s *Sentinel) SendLightClientOptimisticUpdateReqV1() (communication.Packet, error) {
-	responsePacket := &cltypes.LightClientOptimisticUpdate{}
-
-	message, errReq, err := s.SendRequestRaw(nil, handlers.LightClientOptimisticUpdateV1)
-	if err != nil || errReq {
-		return nil, err
-	}
-
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message), responsePacket)
-	return responsePacket, err
-}
 
 // TODO: add the rest of the request topics
 func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, error) {
