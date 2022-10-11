@@ -254,7 +254,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	if cfg.HistoryV3 {
 		dir.MustExist(dirs.SnapHistory)
-		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}

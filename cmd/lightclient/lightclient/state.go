@@ -17,7 +17,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -29,23 +29,23 @@ type LightState struct {
 
 	// none of the fields below are protected by a mutex.
 	// the original bootstrap a ala trusted block root
-	bootstrap *lightrpc.LightClientBootstrap
+	bootstrap *cltypes.LightClientBootstrap
 	genesis   [32]byte
 
 	// channel of events
 	events chan LightClientEvent
 
 	// light client state https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/sync-protocol.md#lightclientstore
-	finalized_header                 *lightrpc.BeaconBlockHeader
-	current_sync_committee           *lightrpc.SyncCommittee
-	next_sync_committee              *lightrpc.SyncCommittee
-	best_valid_update                *lightrpc.LightClientUpdate
-	optimistic_header                *lightrpc.BeaconBlockHeader
+	finalized_header                 *cltypes.BeaconBlockHeader
+	current_sync_committee           *cltypes.SyncCommittee
+	next_sync_committee              *cltypes.SyncCommittee
+	best_valid_update                *cltypes.LightClientUpdate
+	optimistic_header                *cltypes.BeaconBlockHeader
 	previous_max_active_participants uint64
 	current_max_active_participants  uint64
 }
 
-func NewLightState(ctx context.Context, bootstrap *lightrpc.LightClientBootstrap, genesis [32]byte) *LightState {
+func NewLightState(ctx context.Context, bootstrap *cltypes.LightClientBootstrap, genesis [32]byte) *LightState {
 	// makes copy of light client bootstrap
 	l := &LightState{
 		bootstrap:              bootstrap,
@@ -70,11 +70,11 @@ func (l *LightState) start(ctx context.Context) {
 		case ev := <-l.events:
 			var err error
 			switch evt := ev.(type) {
-			case *lightrpc.LightClientUpdate:
+			case *cltypes.LightClientUpdate:
 				err = l.onLightClientUpdate(evt)
-			case *lightrpc.LightClientFinalityUpdate:
+			case *cltypes.LightClientFinalityUpdate:
 				err = l.onFinalityUpdate(evt)
-			case *lightrpc.LightClientOptimisticUpdate:
+			case *cltypes.LightClientOptimisticUpdate:
 				err = l.onOptimisticUpdate(evt)
 			}
 			if err != nil {
@@ -84,33 +84,33 @@ func (l *LightState) start(ctx context.Context) {
 	}
 }
 
-func (l *LightState) AddUpdateEvent(u *lightrpc.LightClientUpdate) {
+func (l *LightState) AddUpdateEvent(u *cltypes.LightClientUpdate) {
 	l.events <- u
 }
-func (l *LightState) AddOptimisticUpdateEvent(u *lightrpc.LightClientOptimisticUpdate) {
+func (l *LightState) AddOptimisticUpdateEvent(u *cltypes.LightClientOptimisticUpdate) {
 	l.events <- u
 }
-func (l *LightState) AddFinalityUpdateEvent(u *lightrpc.LightClientFinalityUpdate) {
+func (l *LightState) AddFinalityUpdateEvent(u *cltypes.LightClientFinalityUpdate) {
 	l.events <- u
 }
 
-func (l *LightState) onOptimisticUpdate(u *lightrpc.LightClientOptimisticUpdate) error {
+func (l *LightState) onOptimisticUpdate(u *cltypes.LightClientOptimisticUpdate) error {
 	// TODO: validate update
 	return nil
 }
 
-func (l *LightState) onFinalityUpdate(u *lightrpc.LightClientFinalityUpdate) error {
+func (l *LightState) onFinalityUpdate(u *cltypes.LightClientFinalityUpdate) error {
 	// TODO: validate update
 	return nil
 }
 
-func (l *LightState) onLightClientUpdate(u *lightrpc.LightClientUpdate) error {
+func (l *LightState) onLightClientUpdate(u *cltypes.LightClientUpdate) error {
 	if err := l.validateLightClientUpdate(u); err != nil {
 		return err
 	}
 	return nil
 }
-func (l *LightState) validateLightClientUpdate(u *lightrpc.LightClientUpdate) error {
+func (l *LightState) validateLightClientUpdate(u *cltypes.LightClientUpdate) error {
 	// need to do this but im too lazy to. maybe someone else knows an elegant solution...
 	// if u.SyncAggregate.SyncCommiteeBits < min_sync_participants  {
 	// return fmt.Errorf("not enough participants in commmittee (%d/%d)", )
@@ -152,18 +152,18 @@ func (l *LightState) validateLightClientUpdate(u *lightrpc.LightClientUpdate) er
 			finalized_root = hashTreeRoot(u.FinalizedHeader)
 		}
 
-		if !isValidMerkleBranch(finalized_root, utils.BytesSliceToBytes32Slice(u.FinalityBranch), 0, 0, utils.BytesToBytes32(u.AttestedHeader.Root)) {
+		if !isValidMerkleBranch(finalized_root, utils.BytesSliceToBytes32Slice(u.FinalityBranch), 0, 0, u.AttestedHeader.Root) {
 			return fmt.Errorf("merkle branch invalid for finality update")
 		}
 	}
 	if isSyncCommitteeUpdate(u) {
 		leaf, _ := u.NextSyncCommitee.HashTreeRoot()
-		if !isValidMerkleBranch(leaf, utils.BytesSliceToBytes32Slice(u.NextSyncCommitteeBranch), 0, 0, utils.BytesToBytes32(u.AttestedHeader.Root)) {
+		if !isValidMerkleBranch(leaf, utils.BytesSliceToBytes32Slice(u.NextSyncCommitteeBranch), 0, 0, u.AttestedHeader.Root) {
 			return fmt.Errorf("merkle branch invalid for sync committee update")
 		}
 	}
 
-	var curSyncCommittee *lightrpc.SyncCommittee
+	var curSyncCommittee *cltypes.SyncCommittee
 	if updateSigPeriod == storePeriod {
 		curSyncCommittee = l.current_sync_committee
 	} else {
@@ -196,7 +196,7 @@ func isValidMerkleBranch(
 }
 
 // TODO: implement
-func hashTreeRoot(h *lightrpc.BeaconBlockHeader) [32]byte {
+func hashTreeRoot(h *cltypes.BeaconBlockHeader) [32]byte {
 	return [32]byte{}
 }
 
@@ -216,13 +216,13 @@ func computeSyncCommitteePeriod(slot uint64) uint64 {
 }
 
 // TODO: implement
-func isSyncCommitteeUpdate(update *lightrpc.LightClientUpdate) bool {
+func isSyncCommitteeUpdate(update *cltypes.LightClientUpdate) bool {
 	//   return update.next_sync_committee_branch != [Bytes32() for _ in range(floorlog2(NEXT_SYNC_COMMITTEE_INDEX))]
 	return true
 }
 
 // TODO: implement
-func isFinalityUpdate(update *lightrpc.LightClientUpdate) bool {
+func isFinalityUpdate(update *cltypes.LightClientUpdate) bool {
 	//   return update.next_sync_committee_branch != [Bytes32() for _ in range(floorlog2(NEXT_SYNC_COMMITTEE_INDEX))]
 	return true
 }

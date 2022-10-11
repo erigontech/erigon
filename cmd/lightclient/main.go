@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
@@ -71,7 +71,7 @@ func main() {
 	}
 
 	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(2 * time.Second)
+	sendReqInterval := time.NewTicker(500 * time.Millisecond)
 
 	for {
 		select {
@@ -82,12 +82,24 @@ func main() {
 			handleGossipPacket(pkt)
 		case <-sendReqInterval.C:
 			go func() {
-				if _, err := sent.SendPingReqV1(); err != nil {
-					log.Debug("failed to send ping request", "err", err)
+				var resp communication.Packet
+				var err error
+				if resp, err = sent.SendPingReqV1Raw(); err != nil {
+					log.Warn("failed to send ping request", "err", err)
 				}
-				if _, err := sent.SendMetadataReqV1(); err != nil {
-					log.Debug("failed to send metadata request", "err", err)
+				if resp != nil {
+					log.Info("Ping responded", "msg", resp.(*cltypes.Ping))
 				}
+				if _, err = sent.SendMetadataReqV1Raw(); err != nil {
+					log.Warn("failed to send ping request", "err", err)
+				}
+				if resp, err = sent.SendLightClientFinaltyUpdateReqV1(); err != nil {
+					log.Warn("failed to send metadata request", "err", err)
+				}
+				if resp != nil {
+					log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientFinalityUpdate).AttestedHeader)
+				}
+
 			}()
 		}
 	}
@@ -96,7 +108,7 @@ func main() {
 func handleGossipPacket(pkt *communication.GossipContext) error {
 	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
 	switch u := pkt.Packet.(type) {
-	case *lightrpc.SignedBeaconBlockBellatrix:
+	case *cltypes.SignedBeaconBlockBellatrix:
 		/*log.Info("[Gossip] beacon_block",
 			"Slot", u.Block.Slot,
 			"Signature", hex.EncodeToString(u.Signature),
@@ -110,13 +122,13 @@ func handleGossipPacket(pkt *communication.GossipContext) error {
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
-	case *lightrpc.LightClientFinalityUpdate:
+	case *cltypes.LightClientFinalityUpdate:
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
 		}
-		log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature))
-	case *lightrpc.LightClientOptimisticUpdate:
+		log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
+	case *cltypes.LightClientOptimisticUpdate:
 		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 		if err != nil {
 			log.Warn("[Gossip] Error Forwarding Packet", "err", err)

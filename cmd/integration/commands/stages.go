@@ -1154,7 +1154,7 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 		aggDir := path.Join(datadirCli, "snapshots", "history")
 		dir.MustExist(aggDir)
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep)
+		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
