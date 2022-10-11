@@ -260,6 +260,7 @@ type ChainConfig struct {
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
 	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
@@ -399,7 +400,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -408,6 +409,7 @@ func (c *ChainConfig) String() string {
 			c.EulerBlock,
 			c.GibbsBlock,
 			c.NanoBlock,
+			c.MoranBlock,
 			engine,
 		)
 	}
@@ -550,6 +552,14 @@ func (c *ChainConfig) IsGibbs(num *big.Int) bool {
 
 func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
 	return configNumEqual(c.GibbsBlock, num)
+}
+
+func (c *ChainConfig) IsMoran(num uint64) bool {
+	return isForked(c.MoranBlock, num)
+}
+
+func (c *ChainConfig) IsOnMoran(num *big.Int) bool {
+	return configNumEqual(c.MoranBlock, num)
 }
 
 // IsNano returns whether num is either equal to the euler fork block or greater.
@@ -762,6 +772,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.NanoBlock, newcfg.NanoBlock, head) {
 		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
 	}
+	if isForkIncompatible(c.MoranBlock, newcfg.MoranBlock, head) {
+		return newCompatError("moran fork block", c.MoranBlock, newcfg.MoranBlock)
+	}
 	return nil
 }
 
@@ -832,6 +845,7 @@ type Rules struct {
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
 	IsParlia, IsStarknet, IsAura                            bool
 	IsNano                                                  bool
+	IsMoran                                                 bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -854,6 +868,7 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsShanghai:         c.IsShanghai(num),
 		IsCancun:           c.IsCancun(num),
 		IsNano:             c.IsNano(num),
+		IsMoran:            c.IsMoran(num),
 		IsParlia:           c.Parlia != nil,
 		IsAura:             c.Aura != nil,
 	}
