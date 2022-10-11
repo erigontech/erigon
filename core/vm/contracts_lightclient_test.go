@@ -104,6 +104,13 @@ func TestTmHeaderValidateAndMerkleProofValidate(t *testing.T) {
 	expectedResult := make([]byte, 32)
 	binary.BigEndian.PutUint64(expectedResult[24:], 0x01)
 	require.Equal(t, expectedResult, success)
+
+	moranValidateContract := iavlMerkleProofValidateMoran{}
+	success, err = moranValidateContract.Run(input)
+	require.NoError(t, err)
+	expectedResult = make([]byte, 32)
+	binary.BigEndian.PutUint64(expectedResult[24:], 0x01)
+	require.Equal(t, expectedResult, success)
 }
 
 func TestMerkleProofValidateMoran(t *testing.T) {
