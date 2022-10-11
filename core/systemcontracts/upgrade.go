@@ -3,13 +3,13 @@ package systemcontracts
 import (
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type UpgradeConfig struct {
