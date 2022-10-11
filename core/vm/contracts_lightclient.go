@@ -133,7 +133,7 @@ func (c *iavlMerkleProofValidateNano) Run(_ []byte) (result []byte, err error) {
 	return nil, fmt.Errorf("suspend")
 }
 
-//------------------------------------------------------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------------------------------------------------------
 type iavlMerkleProofValidateMoran struct {
 	basicIavlMerkleProofValidate
 }
