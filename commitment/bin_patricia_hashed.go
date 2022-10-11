@@ -26,9 +26,10 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -126,6 +127,10 @@ func NewBinPatriciaHashed(accountKeyLen int,
 		storageFn:     wrapAccountStorageFn(storageFn),
 		rootPresent:   true,
 	}
+}
+
+func (hph *BinHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, update []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+	return nil, nil, fmt.Errorf("implement me")
 }
 
 func (hph *BinHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {

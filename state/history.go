@@ -31,6 +31,9 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -38,8 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 type History struct {
@@ -748,7 +749,7 @@ func (h *History) prune(txFrom, txTo, limit uint64) error {
 		if err = idxC.DeleteExact(v[:len(v)-8], k); err != nil {
 			return err
 		}
-		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = historyKeysCursor.DeleteCurrent(); err != nil {
 			return err
 		}
@@ -801,7 +802,7 @@ func (h *History) pruneF(txFrom, txTo uint64, f func(txNum uint64, k, v []byte) 
 		if err = idxC.DeleteExact(key, k); err != nil {
 			return err
 		}
-		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = historyKeysCursor.DeleteCurrent(); err != nil {
 			return err
 		}

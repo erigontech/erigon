@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
@@ -84,8 +86,13 @@ func TestAggregator_Merge(t *testing.T) {
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+// here we create a bunch of updates for further aggregation.
+// FinishTx should merge underlying files several times
+// Expected that:
+// - we could close first aggregator and open another with previous data still available
+// - new aggregator SeekCommitment must return txNum equal to amount of total txns
 func TestAggregator_RestartOnFiles(t *testing.T) {
-	aggStep := uint64(100)
+	aggStep := uint64(50)
 	path, db, agg := testDbAndAggregator(t, 0, aggStep)
 	defer db.Close()
 
@@ -101,44 +108,39 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	}()
 	agg.SetTx(tx)
 
-	comit := func(txn uint64) error {
+	var latestCommitTxNum uint64
+	commit := func(txn uint64) error {
 		err = tx.Commit()
 		require.NoError(t, err)
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
+		t.Logf("commit to db txn=%d", txn)
+
+		atomic.StoreUint64(&latestCommitTxNum, txn)
 		agg.SetTx(tx)
 		return nil
 	}
-	agg.SetCommitFn(comit)
+	agg.SetCommitFn(commit)
 
-	txs := uint64(1026)
+	txs := (aggStep / 2) * 11
+	t.Logf("step=%d tx_count=%d", aggStep, txs)
+	var aux [8]byte
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	var maxWrite, otherMaxWrite uint64
+	var maxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		agg.SetTxNum(txNum)
-		var v [8]byte
-		binary.BigEndian.PutUint64(v[:], txNum)
-		var err error
-		if txNum%135 == 0 {
-			err = agg.UpdateCommitmentData([]byte("otherroothash"), v[:])
-			otherMaxWrite = txNum
-		} else {
-			err = agg.UpdateCommitmentData([]byte("roothash"), v[:])
-			maxWrite = txNum
-		}
-		agg.ComputeCommitment(true, false)
-		require.NoError(t, err)
+		binary.BigEndian.PutUint64(aux[:], txNum)
+
+		err = agg.UpdateCommitmentData([]byte("key"), aux[:])
+		maxWrite = txNum
+
 		require.NoError(t, agg.FinishTx())
-		if txNum+1%100 == 0 {
-			comit(txNum)
-		}
 	}
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx = nil
 	agg.Close()
-	agg = nil
+	tx, agg = nil, nil
 
 	anotherAgg, err := NewAggregator(path, aggStep)
 	require.NoError(t, err)
@@ -154,8 +156,10 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 
 	anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	sstartTx, err := anotherAgg.SeekCommitment(startTx)
+	sstartTx, err := anotherAgg.SeekCommitment()
 	require.NoError(t, err)
+	require.GreaterOrEqual(t, sstartTx, startTx)
+	require.EqualValues(t, latestCommitTxNum, sstartTx)
 	_ = sstartTx
 	rwTx.Rollback()
 	rwTx = nil
@@ -166,13 +170,28 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	defer roTx.Rollback()
 
 	dc := anotherAgg.MakeContext()
-	v, err := dc.ReadCommitment([]byte("roothash"), roTx)
+	v, err := dc.ReadCommitment([]byte("key"), roTx)
 	require.NoError(t, err)
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+}
 
-	v, err = dc.ReadCommitment([]byte("otherroothash"), roTx)
+func Test_EncodeCommitmentState(t *testing.T) {
+	cs := commitmentState{
+		txNum:     rand.Uint64(),
+		trieState: make([]byte, 1024),
+	}
+	n, err := rand.Read(cs.trieState)
 	require.NoError(t, err)
+	require.EqualValues(t, len(cs.trieState), n)
 
-	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+	buf, err := cs.Encode()
+	require.NoError(t, err)
+	require.NotEmpty(t, buf)
+
+	var dec commitmentState
+	err = dec.Decode(buf)
+	require.NoError(t, err)
+	require.EqualValues(t, cs.txNum, dec.txNum)
+	require.EqualValues(t, cs.trieState, dec.trieState)
 }

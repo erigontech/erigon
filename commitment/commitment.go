@@ -22,6 +22,8 @@ type Trie interface {
 
 	ReviewKeys(pk, hk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
+	ProcessUpdates(pk, hk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+
 	ResetFns(
 		branchFn func(prefix []byte) ([]byte, error),
 		accountFn func(plainKey []byte, cell *Cell) error,
@@ -340,7 +342,7 @@ func (branchData BranchData) ReplacePlainKeys(accountPlainKeys [][]byte, storage
 }
 
 // IsComplete determines whether given branch data is complete, meaning that all information about all the children is present
-// All of the 16 children of a branch node have two attributes
+// Each of 16 children of a branch node have two attributes
 // touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
 // after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
 func (branchData BranchData) IsComplete() bool {
@@ -427,4 +429,24 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 		bitset ^= bit
 	}
 	return newData, nil
+}
+
+func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]Cell, err error) {
+	touchMap = binary.BigEndian.Uint16(branchData[0:])
+	afterMap = binary.BigEndian.Uint16(branchData[2:])
+	pos := 4
+	for bitset, j := touchMap, 0; bitset != 0; j++ {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		if afterMap&bit != 0 {
+			fieldBits := PartFlags(branchData[pos])
+			pos++
+			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
+				err = fmt.Errorf("faield to fill cell at nibble %x: %w", nibble, err)
+				return
+			}
+		}
+		bitset ^= bit
+	}
+	return
 }
