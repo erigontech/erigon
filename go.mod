@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220923150140-6c08cd337774
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221011062425-d0efd3c1ca5e
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221011145732-a09e268abe14
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20221010023441-7e1da3031ab0
 	github.com/ledgerwatch/log/v3 v3.4.2
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -111,7 +111,6 @@ require (
 	github.com/klauspost/compress v1.15.10 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
-	github.com/ledgerwatch/interfaces v0.0.0-20220914022748-0bc2888c95ce // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -253,6 +252,4 @@ require (
 	modernc.org/token v1.0.1 // indirect
 )
 
-replace (
-	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-)
+replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12

@@ -247,7 +247,7 @@ func StageLoopStep(
 	return headBlockHash, nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -260,7 +260,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	}
 	defer tx.Rollback()
 
-	miningBatch := memdb.NewMemoryBatch(tx)
+	miningBatch := memdb.NewMemoryBatch(tx, tmpDir)
 	defer miningBatch.Rollback()
 
 	if err = mining.Run(nil, miningBatch, false /* firstCycle */, false /* quiet */); err != nil {
