@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -677,9 +679,8 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	})
 }
 
-// [txFrom; txTo)
-func (ii *InvertedIndex) prune(txFrom, txTo uint64) error {
-	keysCursor, err := ii.tx.RwCursorDupSort(ii.indexKeysTable)
+func (ii *InvertedIndex) warmup(txFrom, limit uint64, tx kv.Tx) error {
+	keysCursor, err := tx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
@@ -687,12 +688,65 @@ func (ii *InvertedIndex) prune(txFrom, txTo uint64) error {
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	var k, v []byte
+	idxC, err := tx.CursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	k, v, err = keysCursor.Seek(txKey[:])
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+	txFrom = binary.BigEndian.Uint64(k)
+	txTo := txFrom + ii.aggregationStep
+	if limit != math.MaxUint64 && limit != 0 {
+		txTo = txFrom + limit
+	}
+	for ; err == nil && k != nil; k, v, err = keysCursor.Next() {
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		_, _ = idxC.SeekBothRange(v, k)
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
+	}
+	return nil
+}
+
+// [txFrom; txTo)
+func (ii *InvertedIndex) prune(txFrom, txTo, limit uint64) error {
+	keysCursor, err := ii.tx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return err
 	}
 	defer idxC.Close()
-	for k, v, err = keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
+	k, v, err := keysCursor.Seek(txKey[:])
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+	txFrom = binary.BigEndian.Uint64(k)
+	if limit != math.MaxUint64 && limit != 0 {
+		txTo = cmp.Min(txTo, txFrom+limit)
+	}
+	if txFrom-txTo > 10_000 {
+		log.Info("[snapshots] prune old history", "name", ii.filenameBase, "range", fmt.Sprintf("%.1fm-%.1fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	}
+	for ; err == nil && k != nil; k, v, err = keysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break

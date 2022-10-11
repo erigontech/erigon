@@ -49,10 +49,13 @@ type Aggregator22 struct {
 
 	backgroundResult *BackgroundResult
 	working          atomic.Bool
+
+	db kv.RoDB
 }
 
-func NewAggregator22(dir string, aggregationStep uint64) (*Aggregator22, error) {
-	return &Aggregator22{dir: dir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}}, nil
+func NewAggregator22(dir string, aggregationStep uint64, db kv.RoDB) (*Aggregator22, error) {
+	a := &Aggregator22{dir: dir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db}
+	return a, nil
 }
 
 func (a *Aggregator22) ReopenFiles() error {
@@ -419,41 +422,81 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 		return err
 	}
 
-	if err := a.logAddrs.prune(txUnwindTo, math2.MaxUint64); err != nil {
+	if err := a.logAddrs.prune(txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := a.logTopics.prune(txUnwindTo, math2.MaxUint64); err != nil {
+	if err := a.logTopics.prune(txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := a.tracesFrom.prune(txUnwindTo, math2.MaxUint64); err != nil {
+	if err := a.tracesFrom.prune(txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
-	if err := a.tracesTo.prune(txUnwindTo, math2.MaxUint64); err != nil {
+	if err := a.tracesTo.prune(txUnwindTo, math2.MaxUint64, math2.MaxUint64); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Aggregator22) prune(txFrom, txTo uint64) error {
-	if err := a.accounts.prune(txFrom, txTo); err != nil {
+func (a *Aggregator22) warmup(txFrom, limit uint64) {
+	if a.db == nil {
+		return
+	}
+
+	go func() {
+		if err := a.db.View(context.Background(), func(tx kv.Tx) error {
+			if err := a.accounts.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.storage.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.code.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.logAddrs.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.logTopics.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.tracesFrom.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			if err := a.tracesTo.warmup(txFrom, limit, tx); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			log.Warn("[snapshots] prune warmup", "err", err)
+		}
+	}()
+}
+
+func (a *Aggregator22) Prune(limit uint64) error {
+	return a.prune(0, a.maxTxNum.Load(), limit)
+}
+
+func (a *Aggregator22) prune(txFrom, txTo, limit uint64) error {
+	a.warmup(txFrom, limit) // warmup is asyn and moving faster than data deletion
+	if err := a.accounts.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.storage.prune(txFrom, txTo); err != nil {
+	if err := a.storage.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.code.prune(txFrom, txTo); err != nil {
+	if err := a.code.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.logAddrs.prune(txFrom, txTo); err != nil {
+	if err := a.logAddrs.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.logTopics.prune(txFrom, txTo); err != nil {
+	if err := a.logTopics.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.tracesFrom.prune(txFrom, txTo); err != nil {
+	if err := a.tracesFrom.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.tracesTo.prune(txFrom, txTo); err != nil {
+	if err := a.tracesTo.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
 	return nil
@@ -467,7 +510,7 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
 	a.accounts.InvertedIndex.files.Ascend(func(it *filesItem) bool {
 		bn := tx2block(it.endTxNum)
-		str = append(str, fmt.Sprintf("%d=%d", it.endTxNum/a.aggregationStep, bn))
+		str = append(str, fmt.Sprintf("%d=%dK", (it.endTxNum/a.aggregationStep)/1_000, bn))
 		return true
 	})
 
@@ -547,7 +590,7 @@ func (a *Aggregator22) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
-	fmt.Printf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r)
+	log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
 	return r
 }
 
@@ -770,7 +813,7 @@ func (a *Aggregator22) FinishTx() error {
 		return nil
 	}
 
-	if err := a.prune(0, a.maxTxNum.Load()); err != nil {
+	if err := a.prune(0, a.maxTxNum.Load(), a.aggregationStep); err != nil {
 		return err
 	}
 

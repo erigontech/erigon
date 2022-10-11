@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -215,7 +216,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("value2.2"), v)
 
-	err = d.prune(0, 0, 16)
+	err = d.prune(0, 0, 16, math.MaxUint64)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -345,7 +346,7 @@ func TestHistory(t *testing.T) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -415,7 +416,7 @@ func TestIterationMultistep(t *testing.T) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -461,7 +462,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -492,7 +493,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
-	err = d.prune(step, txFrom, txTo)
+	err = d.prune(step, txFrom, txTo, math.MaxUint64)
 	require.NoError(t, err)
 
 	var r DomainRanges

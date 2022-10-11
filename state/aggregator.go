@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -351,29 +353,29 @@ func (a *Aggregator) integrateFiles(sf AggStaticFiles, txNumFrom, txNumTo uint64
 	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
 }
 
-func (a *Aggregator) prune(step uint64, txFrom, txTo uint64) error {
-	if err := a.accounts.prune(step, txFrom, txTo); err != nil {
+func (a *Aggregator) prune(step uint64, txFrom, txTo, limit uint64) error {
+	if err := a.accounts.prune(step, txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.storage.prune(step, txFrom, txTo); err != nil {
+	if err := a.storage.prune(step, txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.code.prune(step, txFrom, txTo); err != nil {
+	if err := a.code.prune(step, txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.commitment.prune(step, txFrom, txTo); err != nil {
+	if err := a.commitment.prune(step, txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.logAddrs.prune(txFrom, txTo); err != nil {
+	if err := a.logAddrs.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.logTopics.prune(txFrom, txTo); err != nil {
+	if err := a.logTopics.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.tracesFrom.prune(txFrom, txTo); err != nil {
+	if err := a.tracesFrom.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
-	if err := a.tracesTo.prune(txFrom, txTo); err != nil {
+	if err := a.tracesTo.prune(txFrom, txTo, limit); err != nil {
 		return err
 	}
 	return nil
@@ -434,7 +436,7 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
-	fmt.Printf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r)
+	log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
 	return r
 }
 
@@ -1106,7 +1108,7 @@ func (a *Aggregator) FinishTx() error {
 		}
 	}()
 	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	if err = a.prune(step, step*a.aggregationStep, (step+1)*a.aggregationStep); err != nil {
+	if err = a.prune(step, step*a.aggregationStep, (step+1)*a.aggregationStep, math.MaxUint64); err != nil {
 		return err
 	}
 	maxEndTxNum := a.EndTxNumMinimax()

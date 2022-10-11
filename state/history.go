@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -654,8 +656,55 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	})
 }
 
-// [txFrom; txTo)
-func (h *History) prune(txFrom, txTo uint64) error {
+func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
+	if !common.DoMemStat() {
+		return nil
+	}
+	historyKeysCursor, err := tx.CursorDupSort(h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
+	}
+	defer historyKeysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	idxC, err := tx.CursorDupSort(h.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+	valsC, err := tx.Cursor(h.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer valsC.Close()
+	k, v, err := historyKeysCursor.Seek(txKey[:])
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+	txFrom = binary.BigEndian.Uint64(k)
+	txTo := txFrom + h.aggregationStep
+	if limit != math.MaxUint64 && limit != 0 {
+		txTo = txFrom + limit
+	}
+	for ; err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		_, _, _ = valsC.Seek(v[len(v)-8:])
+		_, _ = idxC.SeekBothRange(v[:len(v)-8], k)
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
+	}
+
+	return nil
+}
+
+func (h *History) prune(txFrom, txTo, limit uint64) error {
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -663,7 +712,6 @@ func (h *History) prune(txFrom, txTo uint64) error {
 	defer historyKeysCursor.Close()
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
 	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
 	if err != nil {
 		return err
@@ -674,7 +722,22 @@ func (h *History) prune(txFrom, txTo uint64) error {
 		return err
 	}
 	defer valsC.Close()
-	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+
+	k, v, err := historyKeysCursor.Seek(txKey[:])
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+	txFrom = binary.BigEndian.Uint64(k)
+	if limit != math.MaxUint64 && limit != 0 {
+		txTo = cmp.Min(txTo, txFrom+limit)
+	}
+	if txFrom-txTo > 10_000 {
+		log.Info("[snapshots] prune old history", "name", h.filenameBase, "range", fmt.Sprintf("%.1fm-%.1fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	}
+	for ; err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break

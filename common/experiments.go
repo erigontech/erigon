@@ -14,6 +14,7 @@ func init() {
 	}
 }
 
+func DoMemStat() bool { return doMemstat }
 func ReadMemStats(m *runtime.MemStats) {
 	if doMemstat {
 		runtime.ReadMemStats(m)

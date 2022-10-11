@@ -18,10 +18,12 @@ package state
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type ReadIndices struct {
@@ -183,13 +185,13 @@ func (ri *ReadIndices) integrateFiles(sf RStaticFiles, txNumFrom, txNumTo uint64
 }
 
 func (ri *ReadIndices) prune(step uint64, txFrom, txTo uint64) error {
-	if err := ri.accounts.prune(txFrom, txTo); err != nil {
+	if err := ri.accounts.prune(txFrom, txTo, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := ri.storage.prune(txFrom, txTo); err != nil {
+	if err := ri.storage.prune(txFrom, txTo, math.MaxUint64); err != nil {
 		return err
 	}
-	if err := ri.code.prune(txFrom, txTo); err != nil {
+	if err := ri.code.prune(txFrom, txTo, math.MaxUint64); err != nil {
 		return err
 	}
 	return nil
@@ -224,7 +226,7 @@ func (ri *ReadIndices) findMergeRange(maxEndTxNum, maxSpan uint64) RRanges {
 	r.accounts, r.accountsStartTxNum, r.accountsEndTxNum = ri.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage, r.storageStartTxNum, r.storageEndTxNum = ri.storage.findMergeRange(maxEndTxNum, maxSpan)
 	r.code, r.codeStartTxNum, r.codeEndTxNum = ri.code.findMergeRange(maxEndTxNum, maxSpan)
-	fmt.Printf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r)
+	log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
 	return r
 }
 
