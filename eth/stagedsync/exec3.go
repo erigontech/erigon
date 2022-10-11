@@ -360,6 +360,9 @@ loop:
 					return err
 				}
 				applyTx.CollectMetrics()
+				if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil {
+					return err
+				}
 				if err := applyTx.Commit(); err != nil {
 					return err
 				}
