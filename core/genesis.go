@@ -321,7 +321,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		tmpDB := mdbx.NewMDBX(log.New()).InMem().MapSize(2 * datasize.GB).MustOpen()
+		tmpDB := mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {

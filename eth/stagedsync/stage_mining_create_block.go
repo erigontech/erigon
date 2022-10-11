@@ -213,7 +213,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
-	txs, err = filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee)
+	txs, err = filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee, cfg.tmpdir)
 	if err != nil {
 		return err
 	}
@@ -353,9 +353,9 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 	return
 }
 
-func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int) ([]types.Transaction, error) {
+func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, tmpDir string) ([]types.Transaction, error) {
 	var filtered []types.Transaction
-	simulationTx := memdb.NewMemoryBatch(tx)
+	simulationTx := memdb.NewMemoryBatch(tx, tmpDir)
 	defer simulationTx.Rollback()
 	gasBailout := config.Consensus == params.ParliaConsensus
 
