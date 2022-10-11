@@ -68,14 +68,6 @@ type MdbxOpts struct {
 	roTxsLimiter *semaphore.Weighted
 }
 
-func testKVPath() string {
-	dir, err := os.MkdirTemp(os.TempDir(), "erigon-test-db")
-	if err != nil {
-		panic(err)
-	}
-	return dir
-}
-
 func NewMDBX(log log.Logger) MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg:     WithChaindataTables,
@@ -125,7 +117,17 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 	return opt
 }
 
-func (opts MdbxOpts) InMem() MdbxOpts {
+func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
+	if tmpDir != "" {
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			panic(err)
+		}
+	}
+	path, err := os.MkdirTemp(tmpDir, "erigon-memdb-")
+	if err != nil {
+		panic(err)
+	}
+	opts.path = path
 	opts.inMem = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.LifoReclaim | mdbx.WriteMap
 	opts.mapSize = 512 * datasize.MB
@@ -178,11 +180,6 @@ func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (kv.RwDB, error) {
-	var err error
-	if opts.inMem {
-		opts.path = testKVPath()
-	}
-
 	env, err := mdbx.NewEnv()
 	if err != nil {
 		return nil, err

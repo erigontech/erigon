@@ -32,16 +32,16 @@ type MemoryMutation struct {
 	statelessCursors map[string]kv.RwCursor
 }
 
-// NewBatch - starts in-mem batch
+// NewMemoryBatch - starts in-mem batch
 //
 // Common pattern:
 //
-// batch := db.NewBatch()
+// batch := NewMemoryBatch(db, tmpDir)
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.Tx) *MemoryMutation {
-	tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
+func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
+	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
 		panic(err)

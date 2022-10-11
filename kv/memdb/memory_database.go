@@ -26,17 +26,17 @@ import (
 )
 
 func New() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem().MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem("").MustOpen()
 }
 
 func NewPoolDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem().Label(kv.TxPoolDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.TxPoolDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 }
 func NewDownloaderDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem().Label(kv.DownloaderDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.DownloaderDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).MustOpen()
 }
 func NewSentryDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem().Label(kv.SentryDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.SentryDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
 }
 
 func NewTestDB(tb testing.TB) kv.RwDB {
