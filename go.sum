@@ -159,6 +159,8 @@ github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kB
 github.com/bits-and-blooms/bitset v1.2.0/go.mod h1:gIdJ4wp64HaoK2YrL1Q5/N7Y16edYb8uY+O0FJTyyDA=
 github.com/bits-and-blooms/bitset v1.2.2 h1:J5gbX05GpMdBjCvQ9MteIg2KKDExr7DrgK+Yc15FvIk=
 github.com/bits-and-blooms/bitset v1.2.2/go.mod h1:gIdJ4wp64HaoK2YrL1Q5/N7Y16edYb8uY+O0FJTyyDA=
+github.com/bnb-chain/tendermint v0.31.12 h1:g+blWaXkRw6iHa56lcRfRzPXHgURCWPmgIvaGBSV7Zc=
+github.com/bnb-chain/tendermint v0.31.12/go.mod h1:j6XU7CArrhQ+9XBMRwdIz63iUxdVwSrZ8f7vP7gcCqg=
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625/go.mod h1:HYsPBTaaSFSlLx/70C2HPIMNZpVV8+vt/A+FMnYP11g=
 github.com/bradfitz/iter v0.0.0-20140124041915-454541ec3da2/go.mod h1:PyRFw1Lt2wKX4ZVSQ2mk+PeDa1rxyObEDlApuIsUKuo=
 github.com/bradfitz/iter v0.0.0-20190303215204-33e6a9893b0c/go.mod h1:PyRFw1Lt2wKX4ZVSQ2mk+PeDa1rxyObEDlApuIsUKuo=
@@ -940,8 +942,8 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
 github.com/tendermint/go-amino v0.14.1 h1:o2WudxNfdLNBwMyl2dqOJxiro5rfrEaU0Ugs6offJMk=
 github.com/tendermint/go-amino v0.14.1/go.mod h1:i/UKE5Uocn+argJJBb12qTZsCDBcAYMbR92AaJVmKso=
-github.com/tendermint/tendermint v0.31.11 h1:TIs//4WfEAG4TOZc2eUfJPI3T8KrywXQCCPnGAaM1Wo=
-github.com/tendermint/tendermint v0.31.11/go.mod h1:ymcPyWblXCplCPQjbOYbrF1fWnpslATMVqiGgWbZrlc=
+github.com/tendermint/tendermint v0.31.12 h1:bZSZod1XoV42/rb9GymVz6JS/a3O4iBLgN6VO3w8fP4=
+github.com/tendermint/tendermint v0.31.12/go.mod h1:ymcPyWblXCplCPQjbOYbrF1fWnpslATMVqiGgWbZrlc=
 github.com/tidwall/btree v1.3.1 h1:636+tdVDs8Hjcf35Di260W2xCW4KuoXOKyk9QWOvCpA=
 github.com/tidwall/btree v1.3.1/go.mod h1:LGm8L/DZjPLmeWGjv5kFrY8dL4uVhMmzmmLYmsObdKE=
 github.com/tinylib/msgp v1.0.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=

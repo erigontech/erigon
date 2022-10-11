@@ -64,7 +64,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.0
 	github.com/tendermint/go-amino v0.14.1
-	github.com/tendermint/tendermint v0.31.11
+	github.com/tendermint/tendermint v0.31.12
 	github.com/torquem-ch/mdbx-go v0.26.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
@@ -250,4 +250,8 @@ require (
 	modernc.org/opt v0.1.3 // indirect
 	modernc.org/strutil v1.1.3 // indirect
 	modernc.org/token v1.0.1 // indirect
+)
+
+replace (
+	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 )

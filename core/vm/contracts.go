@@ -110,6 +110,21 @@ var PrecompiledContractsNano = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{101}): &iavlMerkleProofValidateNano{},
 }
 
+var PrecompiledContractsIsMoran = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}): &ecrecover{},
+	common.BytesToAddress([]byte{2}): &sha256hash{},
+	common.BytesToAddress([]byte{3}): &ripemd160hash{},
+	common.BytesToAddress([]byte{4}): &dataCopy{},
+	common.BytesToAddress([]byte{5}): &bigModExp{},
+	common.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}): &blake2F{},
+
+	common.BytesToAddress([]byte{100}): &tmHeaderValidate{},
+	common.BytesToAddress([]byte{101}): &iavlMerkleProofValidateMoran{},
+}
+
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
@@ -139,6 +154,7 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesMoran          []common.Address
 	PrecompiledAddressesNano           []common.Address
 	PrecompiledAddressesBerlin         []common.Address
 	PrecompiledAddressesIstanbul       []common.Address
@@ -166,11 +182,16 @@ func init() {
 	for k := range PrecompiledContractsNano {
 		PrecompiledAddressesNano = append(PrecompiledAddressesNano, k)
 	}
+	for k := range PrecompiledContractsIsMoran {
+		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *params.Rules) []common.Address {
 	switch {
+	case rules.IsMoran:
+		return PrecompiledAddressesMoran
 	case rules.IsNano:
 		return PrecompiledAddressesNano
 	case rules.IsBerlin:
