@@ -185,8 +185,9 @@ func Main(ctx *cli.Context) error {
 	prestate.Env = *inputData.Env
 
 	vmConfig := vm.Config{
-		Tracer: nil,
-		Debug:  ctx.Bool(TraceFlag.Name),
+		Tracer:        nil,
+		Debug:         ctx.Bool(TraceFlag.Name),
+		StatelessExec: true,
 	}
 	// Construct the chainconfig
 	var chainConfig *params.ChainConfig
@@ -282,7 +283,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, true, getTracer)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, getTracer)
 
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
