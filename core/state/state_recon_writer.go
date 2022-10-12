@@ -40,23 +40,31 @@ func ReconnLess(i, thanItem ReconStateItem) bool {
 	return i.txNum < thanItem.txNum
 }
 
-// ReconState is the accumulator of changes to the state
-type ReconState struct {
+type ReconnWork struct {
 	lock          sync.RWMutex
 	doneBitmap    roaring64.Bitmap
 	triggers      map[uint64][]*TxTask
 	workCh        chan *TxTask
 	queue         TxTaskQueue
-	changes       map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
-	sizeEstimate  uint64
 	rollbackCount uint64
+}
+
+// ReconState is the accumulator of changes to the state
+type ReconState struct {
+	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
+
+	lock         sync.RWMutex
+	changes      map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
+	sizeEstimate uint64
 }
 
 func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
-		workCh:   workCh,
-		triggers: map[uint64][]*TxTask{},
-		changes:  map[string]*btree.BTreeG[ReconStateItem]{},
+		ReconnWork: &ReconnWork{
+			workCh:   workCh,
+			triggers: map[uint64][]*TxTask{},
+		},
+		changes: map[string]*btree.BTreeG[ReconStateItem]{},
 	}
 	return rs
 }
@@ -121,7 +129,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState) Schedule() (*TxTask, bool) {
+func (rs *ReconnWork) Schedule() (*TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for rs.queue.Len() < 16 {
@@ -138,7 +146,7 @@ func (rs *ReconState) Schedule() (*TxTask, bool) {
 	return nil, false
 }
 
-func (rs *ReconState) CommitTxNum(txNum uint64) {
+func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if tt, ok := rs.triggers[txNum]; ok {
@@ -150,7 +158,7 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 	rs.doneBitmap.Add(txNum)
 }
 
-func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
+func (rs *ReconnWork) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {
@@ -163,21 +171,21 @@ func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.rollbackCount++
 }
 
-func (rs *ReconState) Done(txNum uint64) bool {
+func (rs *ReconnWork) Done(txNum uint64) bool {
 	rs.lock.RLock()
 	c := rs.doneBitmap.Contains(txNum)
 	rs.lock.RUnlock()
 	return c
 }
 
-func (rs *ReconState) DoneCount() uint64 {
+func (rs *ReconnWork) DoneCount() uint64 {
 	rs.lock.RLock()
 	c := rs.doneBitmap.GetCardinality()
 	rs.lock.RUnlock()
 	return c
 }
 
-func (rs *ReconState) RollbackCount() uint64 {
+func (rs *ReconnWork) RollbackCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.rollbackCount

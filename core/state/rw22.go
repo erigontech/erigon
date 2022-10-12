@@ -86,18 +86,17 @@ type State22 struct {
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]*btree.BTreeG[StateItem]
+	changes      map[string]*btree.BTreeG[pair]
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
 }
 
-type StateItem struct {
-	key []byte
-	val []byte
+type pair struct {
+	key, val []byte
 }
 
-func stateItemLess(i, j StateItem) bool {
+func stateItemLess(i, j pair) bool {
 	return bytes.Compare(i.key, j.key) < 0
 }
 
@@ -105,7 +104,7 @@ func NewState22() *State22 {
 	rs := &State22{
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree.BTreeG[StateItem]{},
+		changes:      map[string]*btree.BTreeG[pair]{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -114,13 +113,15 @@ func NewState22() *State22 {
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[StateItem](32, stateItemLess)
+		t = btree.NewG[pair](32, stateItemLess)
 		rs.changes[table] = t
 	}
-	item := StateItem{key: key, val: val}
+	item := pair{key: key, val: val}
 	t.ReplaceOrInsert(item)
 	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key)) + uint64(len(val))
 }
+
+const SizeOfItem = uint64(unsafe.Sizeof(pair{}))
 
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
@@ -133,7 +134,7 @@ func (rs *State22) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	if i, ok := t.Get(StateItem{key: key}); ok {
+	if i, ok := t.Get(pair{key: key}); ok {
 		return i.val
 	}
 	return nil
@@ -144,7 +145,7 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(item StateItem) bool {
+		t.Ascend(func(item pair) bool {
 			if len(item.val) == 0 {
 				if err = rwTx.Delete(table, item.key); err != nil {
 					return false
@@ -243,11 +244,12 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
+		addrBytes := addr[:]
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addr.Bytes())
+		enc0 := rs.get(kv.PlainState, addrBytes)
 		if enc0 == nil {
 			var err error
-			enc0, err = roTx.GetOne(kv.PlainState, addr.Bytes())
+			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
 			if err != nil {
 				return err
 			}
@@ -269,8 +271,8 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			enc1 = make([]byte, l)
 			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addr.Bytes(), enc1)
-		if err := agg.AddAccountPrev(addr.Bytes(), enc0); err != nil {
+		rs.put(kv.PlainState, addrBytes, enc1)
+		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
 			return err
 		}
 	}
@@ -283,10 +285,10 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
 		}
-		codePrev := rs.get(kv.Code, original.CodeHash.Bytes())
+		codePrev := rs.get(kv.Code, original.CodeHash[:])
 		if codePrev == nil {
 			var err error
-			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash.Bytes())
+			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash[:])
 			if err != nil {
 				return err
 			}
@@ -310,7 +312,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 		psChanges := rs.changes[kv.PlainState]
 		if psChanges != nil {
-			psChanges.AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+			psChanges.AscendGreaterOrEqual(pair{key: addr1}, func(item pair) bool {
 				if !bytes.HasPrefix(item.key, addr1) {
 					return false
 				}
@@ -379,14 +381,14 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
-			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
+			if err := agg.AddTraceFrom(addr[:]); err != nil {
 				return err
 			}
 		}
 	}
 	if txTask.TraceTos != nil {
 		for addr := range txTask.TraceTos {
-			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
+			if err := agg.AddTraceTo(addr[:]); err != nil {
 				return err
 			}
 		}
@@ -528,7 +530,7 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 	//fmt.Printf("ValidReads\n")
 	for table, list := range readLists {
 		//fmt.Printf("Table %s\n", table)
-		var t *btree.BTreeG[StateItem]
+		var t *btree.BTreeG[pair]
 		var ok bool
 		if table == CodeSizeTable {
 			t, ok = rs.changes[kv.Code]
@@ -540,7 +542,7 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 		}
 		for i, key := range list.Keys {
 			val := list.Vals[i]
-			if item, ok := t.Get(StateItem{key: key}); ok {
+			if item, ok := t.Get(pair{key: key}); ok {
 				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
 				if table == CodeSizeTable {
 					if binary.BigEndian.Uint64(val) != uint64(len(item.val)) {
@@ -639,24 +641,24 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 }
 
 func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash.Bytes())
+	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash[:])
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
-	w.codePrevs[string(address.Bytes())] = incarnation
+	w.codePrevs[string(address[:])] = incarnation
 	return nil
 }
 
 func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts.Account) error {
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address.Bytes())
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address[:])
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, address.Bytes())
+		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, address[:])
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
 	if original.Initialised {
@@ -669,7 +671,7 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key[:])
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
