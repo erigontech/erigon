@@ -42,14 +42,16 @@ func ReconnLess(i, thanItem ReconStateItem) bool {
 
 // ReconState is the accumulator of changes to the state
 type ReconState struct {
-	lock          sync.RWMutex
+	lockWork      sync.RWMutex
 	doneBitmap    roaring64.Bitmap
 	triggers      map[uint64][]*TxTask
 	workCh        chan *TxTask
 	queue         TxTaskQueue
-	changes       map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
-	sizeEstimate  uint64
 	rollbackCount uint64
+
+	lockState    sync.RWMutex
+	changes      map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
+	sizeEstimate uint64
 }
 
 func NewReconState(workCh chan *TxTask) *ReconState {
@@ -62,8 +64,8 @@ func NewReconState(workCh chan *TxTask) *ReconState {
 }
 
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.lockState.Lock()
+	defer rs.lockState.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
 		t = btree.NewG[ReconStateItem](32, ReconnLess)
@@ -75,8 +77,8 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 }
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
-	rs.lock.RLock()
-	defer rs.lock.RUnlock()
+	rs.lockState.RLock()
+	defer rs.lockState.RUnlock()
 	t, ok := rs.changes[table]
 	if !ok {
 		return nil
@@ -89,8 +91,8 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 }
 
 func (rs *ReconState) Flush(rwTx kv.RwTx) error {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.lockState.Lock()
+	defer rs.lockState.Unlock()
 	for table, t := range rs.changes {
 		var err error
 		t.Ascend(func(item ReconStateItem) bool {
@@ -122,8 +124,8 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 }
 
 func (rs *ReconState) Schedule() (*TxTask, bool) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.lockWork.Lock()
+	defer rs.lockWork.Unlock()
 	for rs.queue.Len() < 16 {
 		txTask, ok := <-rs.workCh
 		if !ok {
@@ -139,8 +141,8 @@ func (rs *ReconState) Schedule() (*TxTask, bool) {
 }
 
 func (rs *ReconState) CommitTxNum(txNum uint64) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.lockWork.Lock()
+	defer rs.lockWork.Unlock()
 	if tt, ok := rs.triggers[txNum]; ok {
 		for _, t := range tt {
 			heap.Push(&rs.queue, t)
@@ -151,8 +153,8 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 }
 
 func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
+	rs.lockWork.Lock()
+	defer rs.lockWork.Unlock()
 	if rs.doneBitmap.Contains(dependency) {
 		heap.Push(&rs.queue, txTask)
 	} else {
@@ -164,28 +166,28 @@ func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 }
 
 func (rs *ReconState) Done(txNum uint64) bool {
-	rs.lock.RLock()
+	rs.lockWork.RLock()
 	c := rs.doneBitmap.Contains(txNum)
-	rs.lock.RUnlock()
+	rs.lockWork.RUnlock()
 	return c
 }
 
 func (rs *ReconState) DoneCount() uint64 {
-	rs.lock.RLock()
+	rs.lockWork.RLock()
 	c := rs.doneBitmap.GetCardinality()
-	rs.lock.RUnlock()
+	rs.lockWork.RUnlock()
 	return c
 }
 
 func (rs *ReconState) RollbackCount() uint64 {
-	rs.lock.RLock()
-	defer rs.lock.RUnlock()
+	rs.lockWork.RLock()
+	defer rs.lockWork.RUnlock()
 	return rs.rollbackCount
 }
 
 func (rs *ReconState) SizeEstimate() uint64 {
-	rs.lock.RLock()
-	defer rs.lock.RUnlock()
+	rs.lockState.RLock()
+	defer rs.lockState.RUnlock()
 	return rs.sizeEstimate
 }
 
