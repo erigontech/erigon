@@ -29,3 +29,15 @@ func (*Ping) Clone() communication.Packet {
 func (*Status) Clone() communication.Packet {
 	return &Status{}
 }
+
+func (*SingleRoot) Clone() communication.Packet {
+	return &SingleRoot{}
+}
+
+func (*LightClientBootstrap) Clone() communication.Packet {
+	return &LightClientBootstrap{}
+}
+
+func (*LightClientUpdate) Clone() communication.Packet {
+	return &LightClientUpdate{}
+}

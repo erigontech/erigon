@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
@@ -76,19 +75,22 @@ func main() {
 			log.Info("[Lightclient] Networking Report", "peers", count.Amount)
 		case <-sendReqInterval.C:
 			go func() {
-				var resp communication.Packet
 				var err error
 				if _, err = rpc.SendPingReqV1(ctx, &cltypes.Ping{Id: 10}, sentinelClient); err != nil {
 					log.Debug("failed to send ping request", "err", err)
 				}
+
 				if _, err = rpc.SendMetadataReqV1(ctx, sentinelClient); err != nil {
 					log.Debug("failed to send ping request", "err", err)
 				}
-				if resp, err = rpc.SendLightClientOptimisticUpdateReqV1(ctx, sentinelClient); err != nil {
-					log.Warn("failed to send metadata request", "err", err)
-				}
-				log.Info("Lightclient responded", "msg", resp.(*cltypes.LightClientOptimisticUpdate))
 
+				var lol *cltypes.LightClientUpdate
+				if lol, err = rpc.SendLightClientUpdatesReqV1(ctx, 597, sentinelClient); err != nil {
+					log.Warn("failed to send updates by range request", "err", err)
+				}
+				if lol != nil {
+					log.Info("Lightclient responded", "msg", lol)
+				}
 			}()
 		}
 	}
@@ -118,7 +120,7 @@ func gossipHandler(stream lightrpc.Sentinel_SubscribeGossipClient) {
 				"proposerIdx", u.Block.ProposerIndex,
 			)
 		case *cltypes.LightClientFinalityUpdate:
-			log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
+			log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.FinalizedHeader.Root[:]))
 		case *cltypes.LightClientOptimisticUpdate:
 			log.Info("[Gossip] Got Optimistic Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature[:]))
 		default:

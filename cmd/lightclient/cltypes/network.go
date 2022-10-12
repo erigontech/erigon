@@ -32,8 +32,12 @@ type Ping struct {
 }
 
 type SingleRoot struct {
-	Root     [32]byte `ssz-size:"32" `
-	BodyRoot [32]byte `ssz-size:"32" `
+	Root [32]byte `ssz-size:"32" `
+}
+
+type LightClientUpdatesByRangeRequest struct {
+	Period uint64
+	Count  uint64
 }
 
 type Status struct {
