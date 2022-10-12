@@ -13,6 +13,8 @@
 
 package handlers
 
+const MaximumRequestClientUpdates = 128
+
 const ProtocolPrefix = "/eth2/beacon_chain/req"
 const EncodingProtocol = "/ssz_snappy"
 
@@ -29,6 +31,8 @@ const BeaconBlockByRangeTopic = "/beacon_block_by_range"
 const BeaconBlockByRootTopic = "/beacon_block_by_root"
 const LightClientFinalityUpdateTopic = "/light_client_finality_update"
 const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
+const LightClientBootstrapTopic = "/light_client_bootstrap"
+const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
 
 // Request and Response protocol ids
 var (
@@ -44,4 +48,6 @@ var (
 	BeaconBlockByRootProtocolV1   = ProtocolPrefix + BeaconBlockByRootTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
 	LightClientOptimisticUpdateV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
+	LightClientBootstrapV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
+	LightClientUpdatesByRangeV1   = ProtocolPrefix + LightClientUpdatesByRangeTopic + Schema1 + EncodingProtocol
 )
