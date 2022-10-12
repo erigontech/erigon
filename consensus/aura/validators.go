@@ -860,7 +860,7 @@ func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress co
 // ValidatorContract a validator contract with reporting.
 type ValidatorContract struct {
 	contractAddress  common.Address
-	validators       ValidatorSafeContract
+	validators       *ValidatorSafeContract
 	posdaoTransition *uint64
 }
 
