@@ -112,6 +112,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
+COMMANDS += sentinel_node
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
