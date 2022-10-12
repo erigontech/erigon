@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -118,10 +117,10 @@ func (rs *State22) put(table string, key, val []byte) {
 	}
 	item := pair{key: key, val: val}
 	t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += SizeOfItem + uint64(len(key)) + uint64(len(val))
 }
 
-const SizeOfItem = uint64(unsafe.Sizeof(pair{}))
+const SizeOfItem = uint64(48) //unsafe.Sizeof(pair{})
 
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
@@ -244,12 +243,11 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
-		addrBytes := addr[:]
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addrBytes)
+		enc0 := rs.get(kv.PlainState, addr.Bytes())
 		if enc0 == nil {
 			var err error
-			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
+			enc0, err = roTx.GetOne(kv.PlainState, addr.Bytes())
 			if err != nil {
 				return err
 			}
@@ -271,8 +269,8 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			enc1 = make([]byte, l)
 			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addrBytes, enc1)
-		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
+		rs.put(kv.PlainState, addr.Bytes(), enc1)
+		if err := agg.AddAccountPrev(addr.Bytes(), enc0); err != nil {
 			return err
 		}
 	}
@@ -285,10 +283,10 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
 		}
-		codePrev := rs.get(kv.Code, original.CodeHash[:])
+		codePrev := rs.get(kv.Code, original.CodeHash.Bytes())
 		if codePrev == nil {
 			var err error
-			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash[:])
+			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash.Bytes())
 			if err != nil {
 				return err
 			}
@@ -381,14 +379,14 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
-			if err := agg.AddTraceFrom(addr[:]); err != nil {
+			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
 				return err
 			}
 		}
 	}
 	if txTask.TraceTos != nil {
 		for addr := range txTask.TraceTos {
-			if err := agg.AddTraceTo(addr[:]); err != nil {
+			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
 				return err
 			}
 		}
@@ -641,24 +639,24 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 }
 
 func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash[:])
+	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHash.Bytes())
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHash.Bytes())
 	}
-	w.codePrevs[string(address[:])] = incarnation
+	w.codePrevs[string(address.Bytes())] = incarnation
 	return nil
 }
 
 func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts.Account) error {
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address[:])
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, address.Bytes())
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, address[:])
+		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, address.Bytes())
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
 	if original.Initialised {
@@ -671,7 +669,7 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key[:])
+	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
