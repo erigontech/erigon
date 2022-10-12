@@ -26,8 +26,9 @@ type ReconStateItem struct {
 	val        []byte
 }
 
-func (i ReconStateItem) Less(than btree.Item) bool {
-	thanItem := than.(ReconStateItem)
+func (i ReconStateItem) Less(than btree.Item) bool { return ReconnLess(i, than.(ReconStateItem)) }
+
+func ReconnLess(i, thanItem ReconStateItem) bool {
 	if i.txNum == thanItem.txNum {
 		c1 := bytes.Compare(i.key1, thanItem.key1)
 		if c1 == 0 {
@@ -46,7 +47,7 @@ type ReconState struct {
 	triggers      map[uint64][]*TxTask
 	workCh        chan *TxTask
 	queue         TxTaskQueue
-	changes       map[string]*btree.BTree // table => [] (txNum; key1; key2; val)
+	changes       map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
 	sizeEstimate  uint64
 	rollbackCount uint64
 }
@@ -55,7 +56,7 @@ func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
 		workCh:   workCh,
 		triggers: map[uint64][]*TxTask{},
-		changes:  map[string]*btree.BTree{},
+		changes:  map[string]*btree.BTreeG[ReconStateItem]{},
 	}
 	return rs
 }
@@ -65,7 +66,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.New(32)
+		t = btree.NewG[ReconStateItem](32, ReconnLess)
 		rs.changes[table] = t
 	}
 	item := ReconStateItem{key1: libcommon.Copy(key1), key2: libcommon.Copy(key2), val: libcommon.Copy(val), txNum: txNum}
@@ -80,11 +81,11 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 	if !ok {
 		return nil
 	}
-	i := t.Get(ReconStateItem{txNum: txNum, key1: key1, key2: key2})
-	if i == nil {
+	i, ok := t.Get(ReconStateItem{txNum: txNum, key1: key1, key2: key2})
+	if !ok {
 		return nil
 	}
-	return i.(ReconStateItem).val
+	return i.val
 }
 
 func (rs *ReconState) Flush(rwTx kv.RwTx) error {
@@ -92,8 +93,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(i btree.Item) bool {
-			item := i.(ReconStateItem)
+		t.Ascend(func(item ReconStateItem) bool {
 			if len(item.val) == 0 {
 				return true
 			}
@@ -165,14 +165,16 @@ func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 
 func (rs *ReconState) Done(txNum uint64) bool {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.Contains(txNum)
+	c := rs.doneBitmap.Contains(txNum)
+	rs.lock.RUnlock()
+	return c
 }
 
 func (rs *ReconState) DoneCount() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.GetCardinality()
+	c := rs.doneBitmap.GetCardinality()
+	rs.lock.RUnlock()
+	return c
 }
 
 func (rs *ReconState) RollbackCount() uint64 {

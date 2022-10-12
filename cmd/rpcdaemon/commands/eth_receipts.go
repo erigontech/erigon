@@ -375,6 +375,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, api._blockReader)
 		stateReader.SetTxNum(txNum - 1)
+		//stateReader.SetTxNum(txNum)
 		vmConfig := vm.Config{}
 		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		ibs := state.New(stateReader)
