@@ -458,9 +458,8 @@ func calculateTime(amountLeft, rate uint64) string {
 
 	hours := timeLeftInSeconds / 3600
 	minutes := (timeLeftInSeconds / 60) % 60
-	seconds := timeLeftInSeconds % 60
 
-	return fmt.Sprintf("%dhrs:%dm:%ds", hours, minutes, seconds)
+	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
 /* ====== PRUNING ====== */
