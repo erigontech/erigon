@@ -115,7 +115,8 @@ type SignedBeaconBlockBellatrix struct {
 }
 
 type SyncCommittee struct {
-	PubKeys [][48]byte `ssz-size:"512,48"`
+	PubKeys            [][48]byte `ssz-size:"512,48"`
+	AggregatePublicKey [48]byte   `ssz-size:"48"`
 }
 
 type LightClientBootstrap struct {
