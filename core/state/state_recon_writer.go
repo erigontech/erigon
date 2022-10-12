@@ -165,14 +165,16 @@ func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 
 func (rs *ReconState) Done(txNum uint64) bool {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.Contains(txNum)
+	c := rs.doneBitmap.Contains(txNum)
+	rs.lock.RUnlock()
+	return c
 }
 
 func (rs *ReconState) DoneCount() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.GetCardinality()
+	c := rs.doneBitmap.GetCardinality()
+	rs.lock.RUnlock()
+	return c
 }
 
 func (rs *ReconState) RollbackCount() uint64 {
