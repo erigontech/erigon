@@ -33,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-const TmpDirName = "etl-temp"
-
 type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 
