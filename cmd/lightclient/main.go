@@ -13,6 +13,24 @@
 
 package main
 
-func main() {
+import (
+	"context"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+)
+
+const DefaultUri = "https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized"
+
+func main() {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	bs, err := lightclient.RetrieveBeaconState(context.Background(), DefaultUri)
+	if err != nil {
+		log.Error("[Checkpoint Sync] Failed", "reason", err)
+		return
+	}
+	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch,
+		"Root", common.Bytes2Hex(bs.FinalizedCheckpoint.Root[:]))
 }
