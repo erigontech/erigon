@@ -452,7 +452,7 @@ Finish:
 
 func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
-		return "999hrs:99m:99s"
+		return "999hrs:99m"
 	}
 	timeLeftInSeconds := amountLeft / rate
 
