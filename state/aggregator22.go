@@ -510,7 +510,7 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
 	a.accounts.InvertedIndex.files.Ascend(func(it *filesItem) bool {
 		bn := tx2block(it.endTxNum)
-		str = append(str, fmt.Sprintf("%d=%dK", (it.endTxNum/a.aggregationStep)/1_000, bn))
+		str = append(str, fmt.Sprintf("%d=%dK", it.endTxNum/a.aggregationStep, bn/1_000))
 		return true
 	})
 

@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"testing/fstest"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -420,4 +422,29 @@ func TestChangedKeysIterator(t *testing.T) {
 		"000000000000000c",
 		"000000000000001b",
 	}, keys)
+}
+
+func TestScanStaticFiles(t *testing.T) {
+	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
+		files: btree.NewG[*filesItem](32, filesItemLess),
+	}
+	ffs := fstest.MapFS{
+		"test.0-1.ef": {},
+		"test.1-2.ef": {},
+		"test.0-4.ef": {},
+		"test.2-3.ef": {},
+		"test.3-4.ef": {},
+		"test.4-5.ef": {},
+	}
+	files, err := ffs.ReadDir(".")
+	require.NoError(t, err)
+	ii.scanStateFiles(files)
+	var found []string
+	ii.files.Ascend(func(i *filesItem) bool {
+		found = append(found, fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
+		return true
+	})
+	require.Equal(t, 2, len(found))
+	require.Equal(t, "0-4", found[0])
+	require.Equal(t, "4-5", found[1])
 }

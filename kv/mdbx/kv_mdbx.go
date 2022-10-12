@@ -48,18 +48,17 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 }
 
 type MdbxOpts struct {
-	bucketsCfg    TableCfgFunc
-	path          string
-	inMem         bool
-	label         kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	verbosity     kv.DBVerbosityLvl
-	mapSize       datasize.ByteSize
-	growthStep    datasize.ByteSize
-	flags         uint
-	log           log.Logger
-	syncPeriod    time.Duration
-	augumentLimit uint64
-	pageSize      uint64
+	bucketsCfg TableCfgFunc
+	path       string
+	inMem      bool
+	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
+	verbosity  kv.DBVerbosityLvl
+	mapSize    datasize.ByteSize
+	growthStep datasize.ByteSize
+	flags      uint
+	log        log.Logger
+	syncPeriod time.Duration
+	pageSize   uint64
 
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
@@ -90,11 +89,6 @@ func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 
 func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts {
 	opts.roTxsLimiter = l
-	return opts
-}
-
-func (opts MdbxOpts) AugumentLimit(v uint64) MdbxOpts {
-	opts.augumentLimit = v
 	return opts
 }
 

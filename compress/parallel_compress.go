@@ -531,7 +531,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	if cf, err = os.Create(segmentFilePath); err != nil {
 		return err
 	}
-	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
+	cw := bufio.NewWriterSize(cf, 2*etl.BufIOSize)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -646,7 +646,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	wc := 0
 	var hc HuffmanCoder
 	hc.w = cw
-	r := bufio.NewReaderSize(intermediateFile, 8*etl.BufIOSize)
+	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
@@ -935,7 +935,7 @@ func PersistDictrionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, etl.BufIOSize)
+	w := bufio.NewWriterSize(df, 2*etl.BufIOSize)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err

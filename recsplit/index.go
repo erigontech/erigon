@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/mmap"
@@ -188,7 +189,8 @@ func (idx *Index) KeyCount() uint64 {
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	if idx.keyCount == 0 {
-		panic("no Lookup should be done when keyCount==0, please use Empty function to guard")
+		_, fName := filepath.Split(idx.indexFile)
+		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
 	if idx.keyCount == 1 {
 		return 0

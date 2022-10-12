@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,10 @@ type filesItem struct {
 	endTxNum     uint64
 	decompressor *compress.Decompressor
 	index        *recsplit.Index
+}
+
+func (i *filesItem) isSubsetOf(j *filesItem) bool {
+	return j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum
 }
 
 func filesItemLess(i, j *filesItem) bool {
@@ -135,46 +140,93 @@ func (d *Domain) GetAndResetStats() DomainStats {
 }
 
 func (d *Domain) scanStateFiles(files []fs.DirEntry) {
-	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).(kv|kvi)$")
+	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
+	var uselessFiles []string
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
 		}
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
-		if len(subs) != 4 {
+		if len(subs) != 3 {
 			if len(subs) != 0 {
-				log.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
+				log.Warn("File ignored by domain scan, more than 3 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
-		var startTxNum, endTxNum uint64
-		if startTxNum, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
+		var startStep, endStep uint64
+		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
 			log.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endTxNum, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			log.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
-		if startTxNum > endTxNum {
+		if startStep > endStep {
 			log.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
 			continue
 		}
-		var item = &filesItem{startTxNum: startTxNum * d.aggregationStep, endTxNum: endTxNum * d.aggregationStep}
-		var foundI *filesItem
-		d.files.AscendGreaterOrEqual(&filesItem{startTxNum: endTxNum * d.aggregationStep, endTxNum: endTxNum * d.aggregationStep}, func(it *filesItem) bool {
-			if it.endTxNum == endTxNum {
-				foundI = it
+
+		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
+		var item = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
+		{
+			var subSet, superSet *filesItem
+			d.files.DescendLessOrEqual(item, func(it *filesItem) bool {
+				if it.isSubsetOf(item) {
+					subSet = it
+				} else if item.isSubsetOf(it) {
+					superSet = it
+				}
+				return true
+			})
+			if subSet != nil {
+				d.files.Delete(subSet)
+				uselessFiles = append(uselessFiles,
+					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
+					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
+				)
 			}
-			return false
-		})
-		if foundI == nil || foundI.startTxNum > startTxNum {
-			//log.Info("Load state file", "name", name, "startTxNum", startTxNum*d.aggregationStep, "endTxNum", endTxNum*d.aggregationStep)
-			d.files.ReplaceOrInsert(item)
+			if superSet != nil {
+				uselessFiles = append(uselessFiles,
+					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, startStep, endStep),
+					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, startStep, endStep),
+				)
+				continue
+			}
 		}
+		{
+			var subSet, superSet *filesItem
+			d.files.AscendGreaterOrEqual(item, func(it *filesItem) bool {
+				if it.isSubsetOf(item) {
+					subSet = it
+				} else if item.isSubsetOf(it) {
+					superSet = it
+				}
+				return false
+			})
+			if subSet != nil {
+				d.files.Delete(subSet)
+				uselessFiles = append(uselessFiles,
+					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
+					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
+				)
+			}
+			if superSet != nil {
+				uselessFiles = append(uselessFiles,
+					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, startStep, endStep),
+					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, startStep, endStep),
+				)
+				continue
+			}
+		}
+		d.files.ReplaceOrInsert(item)
 	}
+	if len(uselessFiles) > 0 {
+		log.Info("[snapshots] history can delete", "files", strings.Join(uselessFiles, ","))
+	}
+
 }
 
 func (d *Domain) openFiles() error {
@@ -757,7 +809,8 @@ func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
-	defer d.EnableReadAhead().DisableReadAhead()
+	rs.LogLvl(log.LvlDebug)
+	defer d.EnableMadvNormal().DisableReadAhead()
 
 	word := make([]byte, 0, 256)
 	var keyPos, valPos uint64
