@@ -11,11 +11,6 @@ type MetadataV2 struct {
 	Syncnets  uint64 `protobuf:"varint,3,opt,name=Syncnets,json=syncnets,proto3" json:"Syncnets,omitempty"`
 }
 
-type Checkpoint struct {
-	Epoch uint64
-	Root  [32]byte `ssz-size:"32" `
-}
-
 type ENRForkID struct {
 	CurrentForkDigest [4]byte `ssz-size:"4" `
 	NextForkVersion   [4]byte `ssz-size:"4" `

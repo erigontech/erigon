@@ -1,6 +1,8 @@
 package cltypes
 
-import ssz "github.com/ferranbt/fastssz"
+import (
+	ssz "github.com/ferranbt/fastssz"
+)
 
 type Eth1Data struct {
 	Root         [32]byte `ssz-size:"32"`
@@ -88,6 +90,24 @@ type ExecutionPayload struct {
 	Transactions  [][]byte `ssz-size:"?,?" ssz-max:"1048576,1073741824"`
 }
 
+// we will send this to Erigon once validation is done.
+type ExecutionHeader struct {
+	ParentHash      [32]byte `ssz-size:"32"`
+	FeeRecipient    [20]byte `ssz-size:"20"`
+	StateRoot       [32]byte `ssz-size:"32"`
+	ReceiptsRoot    [32]byte `ssz-size:"32"`
+	LogsBloom       []byte   `ssz-size:"256"`
+	PrevRandao      [32]byte `ssz-size:"32"`
+	BlockNumber     uint64
+	GasLimit        uint64
+	GasUsed         uint64
+	Timestamp       uint64
+	ExtraData       []byte   `ssz-max:"32"`
+	BaseFeePerGas   []byte   `ssz-size:"32"`
+	BlockHash       [32]byte `ssz-size:"32"`
+	TransactionRoot [32]byte `ssz-size:"32"`
+}
+
 type BeaconBodyBellatrix struct {
 	RandaoReveal      [96]byte `ssz-size:"96"`
 	Eth1Data          *Eth1Data
@@ -147,6 +167,59 @@ type LightClientOptimisticUpdate struct {
 	AttestedHeader *BeaconBlockHeader
 	SyncAggregate  *SyncAggregate
 	SignatureSlot  uint64
+}
+
+type Fork struct {
+	PreviousVersion [4]byte `ssz-size:"4" `
+	CurrentVersion  [4]byte `ssz-size:"4" `
+	Epoch           uint64
+}
+
+type Validator struct {
+	PublicKey                  [48]byte `ssz-size:"48"`
+	WithdrawalCredentials      []byte   `ssz-size:"32"`
+	EffectiveBalance           uint64
+	Slashed                    bool
+	ActivationEligibilityEpoch uint64
+	ActivationEpoch            uint64
+	ExitEpoch                  uint64
+	WithdrawableEpoch          uint64
+}
+
+type PendingAttestation struct {
+	AggregationBits []byte `ssz-max:"2048"`
+	Data            *AttestationData
+	InclusionDelay  uint64
+	ProposerIndex   uint64
+}
+
+type Checkpoint struct {
+	Epoch uint64
+	Root  [32]byte `ssz-size:"32"`
+}
+
+type BeaconState struct {
+	GenesisTime                 uint64
+	GenesisValidatorsRoot       [32]byte `ssz-size:"32"`
+	Slot                        uint64
+	Fork                        *Fork
+	LatestBlockHeader           *BeaconBlockHeader
+	BlockRoots                  [][32]byte `ssz-size:"8192,32"`
+	StateRoots                  [][32]byte `ssz-size:"8192,32"`
+	HistoricalRoots             [][32]byte `ssz-size:"?,32" ssz-max:"16777216"`
+	Eth1Data                    *Eth1Data
+	Eth1DataVotes               []*Eth1Data `ssz-max:"2048"`
+	Eth1DepositIndex            uint64
+	Validators                  []*Validator          `ssz-max:"1099511627776"`
+	Balances                    []uint64              `ssz-max:"1099511627776"`
+	RandaoMixes                 [][32]byte            `ssz-size:"65536,32"`
+	Slashings                   []uint64              `ssz-size:"8192"`
+	PreviousEpochAttestations   []*PendingAttestation `ssz-max:"4096"`
+	CurrentEpochAttestations    []*PendingAttestation `ssz-max:"4096"`
+	JustificationBits           []byte                `ssz-size:"1"`
+	PreviousJustifiedCheckpoint *Checkpoint
+	CurrentJustifiedCheckpoint  *Checkpoint
+	FinalizedCheckpoint         *Checkpoint
 }
 
 type ObjectSSZ interface {
