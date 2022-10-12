@@ -59,7 +59,7 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 			return nil, false, nil
 		case <-reqRetryTimer.C:
 			log.Debug("[Req] timeout", "topic", topic, "peer", peerId)
-			return nil, false, err
+			return nil, false, fmt.Errorf("timed out, %s", err)
 		case <-retryTicker.C:
 			stream, err = writeRequestRaw(s, data, peerId, topic)
 		}
