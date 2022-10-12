@@ -541,7 +541,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	accountCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
-		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 		accountCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
 	}
@@ -586,7 +586,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	storageCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
-		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 		storageCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
 	}
@@ -631,7 +631,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	codeCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
-		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 		codeCollectorsX[i].LogLvl(log.LvlDebug)
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
