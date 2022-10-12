@@ -102,14 +102,6 @@ func TestT8n(t *testing.T) {
 			output:      t8nOutput{alloc: true, result: true},
 			expExitCode: 3,
 		},
-		{
-			base: "./testdata/1",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Byzantium",
-			},
-			output: t8nOutput{alloc: true, result: true},
-			expOut: "exp.json",
-		},
 		{ // blockhash test
 			base: "./testdata/3",
 			input: t8nInput{
