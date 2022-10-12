@@ -206,7 +206,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
-	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Microsecond) {
+	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
 		log.Info("Commit cycle", "in", commitTime)
 	}
 	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
