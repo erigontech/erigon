@@ -1309,7 +1309,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	}
 	if foundContract {
 		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
-		rewardKind = rewardKind[:len(beneficiaries)]
+		rewardKind = make([]aurainterfaces.RewardKind, len(beneficiaries))
 		for i := 0; i < len(rewardKind); i++ {
 			rewardKind[i] = aurainterfaces.RewardExternal
 		}

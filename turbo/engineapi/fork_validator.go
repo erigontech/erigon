@@ -58,6 +58,7 @@ type ForkValidator struct {
 	validatePayload validatePayloadFunc
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
+	tmpDir        string
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 }
@@ -69,11 +70,12 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	}
 }
 
-func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc) *ForkValidator {
+func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string) *ForkValidator {
 	return &ForkValidator{
 		sideForksBlock:  make(map[common.Hash]forkSegment),
 		validatePayload: validatePayload,
 		currentHeight:   currentHeight,
+		tmpDir:          tmpDir,
 	}
 }
 
@@ -163,7 +165,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if extendCanonical {
 		// If the new block extends the canonical chain we update extendingFork.
 		if fv.extendingFork == nil {
-			fv.extendingFork = memdb.NewMemoryBatch(tx)
+			fv.extendingFork = memdb.NewMemoryBatch(tx, fv.tmpDir)
 			fv.extendingForkNotifications = &shards.Notifications{
 				Events:      shards.NewEvents(),
 				Accumulator: shards.NewAccumulator(),
@@ -223,7 +225,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	batch := memdb.NewMemoryBatch(tx)
+	batch := memdb.NewMemoryBatch(tx, fv.tmpDir)
 	defer batch.Rollback()
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),

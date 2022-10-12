@@ -34,7 +34,7 @@ func New(datadir string) Dirs {
 		RelativeDataDir: relativeDataDir,
 		DataDir:         datadir,
 		Chaindata:       filepath.Join(datadir, "chaindata"),
-		Tmp:             filepath.Join(datadir, "etl-temp"),
+		Tmp:             filepath.Join(datadir, "temp"),
 		Snap:            filepath.Join(datadir, "snapshots"),
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		TxPool:          filepath.Join(datadir, "txpool"),

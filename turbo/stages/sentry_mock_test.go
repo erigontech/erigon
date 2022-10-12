@@ -116,9 +116,9 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_TRANSACTIONS_66, Data: b, PeerId: m.PeerId}) {
 		require.NoError(err)
 	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync)
+	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync, "")
 	require.NoError(err)
 
 	got := <-m.PendingBlocks
