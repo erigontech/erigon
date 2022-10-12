@@ -282,11 +282,6 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
-	found := w.ac.IsMaxStorageTxNum(address.Bytes(), key.Bytes(), w.txNum)
-	if !found {
-		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
-		return nil
-	}
 	if !value.IsZero() {
 		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
 		w.rs.Put(kv.PlainStateR, address.Bytes(), key.Bytes(), value.Bytes(), w.txNum)
