@@ -26,18 +26,7 @@ type ReconStateItem struct {
 	val        []byte
 }
 
-func (i ReconStateItem) Less(than btree.Item) bool {
-	thanItem := than.(ReconStateItem)
-	if i.txNum == thanItem.txNum {
-		c1 := bytes.Compare(i.key1, thanItem.key1)
-		if c1 == 0 {
-			c2 := bytes.Compare(i.key2, thanItem.key2)
-			return c2 < 0
-		}
-		return c1 < 0
-	}
-	return i.txNum < thanItem.txNum
-}
+func (i ReconStateItem) Less(than btree.Item) bool { return ReconnLess(i, than.(ReconStateItem)) }
 
 func ReconnLess(i, thanItem ReconStateItem) bool {
 	if i.txNum == thanItem.txNum {
