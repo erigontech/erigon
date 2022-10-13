@@ -312,17 +312,26 @@ func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
 }
 
 func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	if ch, ok := ff.headsSubs[id]; ok {
-		close(ch)
-		delete(ff.headsSubs, id)
-		ff.storeMu.Lock()
-		defer ff.storeMu.Unlock()
-		delete(ff.pendingHeadsStores, id)
-		return true
+	ff.mu.RLock()
+	ch, ok := ff.headsSubs[id]
+	ff.mu.RUnlock()
+	if !ok {
+		return false
 	}
-	return false
+	for {
+		select {
+		case <-ch:
+		default:
+			if ok := ff.mu.TryLock(); ok {
+				close(ch)
+				delete(ff.headsSubs, id)
+				ff.storeMu.Lock()
+				delete(ff.pendingHeadsStores, id)
+				ff.storeMu.Unlock()
+				return true
+			}
+		}
+	}
 }
 
 func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
@@ -362,17 +371,27 @@ func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsS
 }
 
 func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	if ch, ok := ff.pendingTxsSubs[id]; ok {
-		close(ch)
-		delete(ff.pendingTxsSubs, id)
-		ff.storeMu.Lock()
-		defer ff.storeMu.Unlock()
-		delete(ff.pendingTxsStores, id)
-		return true
+	ff.mu.RLock()
+	ch, ok := ff.pendingTxsSubs[id]
+	ff.mu.RUnlock()
+	if !ok {
+		return false
 	}
-	return false
+	for {
+		select {
+		case <-ch:
+		default:
+			if ok := ff.mu.TryLock(); ok {
+				close(ch)
+				delete(ff.pendingTxsSubs, id)
+				ff.storeMu.Lock()
+				delete(ff.pendingTxsStores, id)
+				ff.storeMu.Unlock()
+				ff.mu.Unlock()
+				return true
+			}
+		}
+	}
 }
 
 func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
