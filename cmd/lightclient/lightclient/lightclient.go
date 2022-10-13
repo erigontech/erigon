@@ -31,6 +31,7 @@ import (
 type LightClient struct {
 	sentinel  lightrpc.SentinelClient
 	execution remote.ETHBACKENDServer
+	store     *LightClientStore
 }
 
 func NewLightClient(execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
@@ -82,8 +83,7 @@ func (l *LightClient) Start(ctx context.Context) {
 		log.Warn("could not start lightclient", "reason", err)
 		return
 	}
-
-	//defer stream.CloseSend()
+	defer stream.CloseSend()
 
 	for {
 		select {
