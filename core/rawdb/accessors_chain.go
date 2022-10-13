@@ -1645,16 +1645,6 @@ func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
 	return res, resHist, nil
 }
 
-func ReadHistorySnapshots(tx kv.Tx) ([]string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
-	if err != nil {
-		return nil, err
-	}
-	var res []string
-	_ = json.Unmarshal(v, &res)
-	return res, nil
-}
-
 func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	res, err := json.Marshal(list)
 	if err != nil {
