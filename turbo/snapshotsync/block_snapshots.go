@@ -470,7 +470,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 // - RPC return Nil for historical blocks if snapshots are not open
 func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		snList, err := rawdb.ReadSnapshots(tx)
+		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
 			return err
 		}
@@ -691,7 +691,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		snList, err := rawdb.ReadSnapshots(tx)
+		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
 			return err
 		}
