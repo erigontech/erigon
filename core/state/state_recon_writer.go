@@ -80,7 +80,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	rs.sizeEstimate += PairSize + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
 
-const PairSize = uint64(48) // uint64(unsafe.Sizeof(item))
+const PairSize = uint64(48) // uint64(unsafe.Sizeof(reconPair{}))
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
 	rs.lock.RLock()
