@@ -318,19 +318,26 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 	if !ok {
 		return false
 	}
+	// Drain the channel to avoid the deadlock in the OnNewTxs function
+	// Draining of the channel is safe without a lock because it does not panic
+	// when the channel is closed
 	for {
 		select {
 		case <-ch:
 		default:
-			if ok := ff.mu.TryLock(); ok {
-				close(ch)
-				delete(ff.headsSubs, id)
-				ff.storeMu.Lock()
-				delete(ff.pendingHeadsStores, id)
-				ff.storeMu.Unlock()
-				ff.mu.Unlock()
-				return true
+			ff.mu.Lock()
+			defer ff.mu.Unlock()
+			// Need to re-check the channel because it might have been closed and removed from the map
+			// which we were not holding the lock
+			if ch, ok = ff.headsSubs[id]; !ok {
+				return false
 			}
+			close(ch)
+			delete(ff.headsSubs, id)
+			ff.storeMu.Lock()
+			delete(ff.pendingHeadsStores, id)
+			ff.storeMu.Unlock()
+			return true
 		}
 	}
 }
@@ -378,19 +385,26 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 	if !ok {
 		return false
 	}
+	// Drain the channel to avoid the deadlock in the OnNewTxs function
+	// Draining of the channel is safe without a lock because it does not panic
+	// when the channel is closed
 	for {
 		select {
 		case <-ch:
 		default:
-			if ok := ff.mu.TryLock(); ok {
-				close(ch)
-				delete(ff.pendingTxsSubs, id)
-				ff.storeMu.Lock()
-				delete(ff.pendingTxsStores, id)
-				ff.storeMu.Unlock()
-				ff.mu.Unlock()
-				return true
+			ff.mu.Lock()
+			defer ff.mu.Unlock()
+			// Need to re-check the channel because it might have been closed and removed from the map
+			// which we were not holding the lock
+			if ch, ok = ff.pendingTxsSubs[id]; !ok {
+				return false
 			}
+			close(ch)
+			delete(ff.pendingTxsSubs, id)
+			ff.storeMu.Lock()
+			delete(ff.pendingTxsStores, id)
+			ff.storeMu.Unlock()
+			return true
 		}
 	}
 }
