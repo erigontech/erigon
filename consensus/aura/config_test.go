@@ -26,3 +26,16 @@ func TestGnosisBlockRewardContractTransitions(t *testing.T) {
 	assert.Equal(t, uint64(9186425), param.BlockRewardContractTransitions[1].blockNum)
 	assert.Equal(t, common.HexToAddress("0x481c034c6d9441db23ea48de68bcae812c5d39ba"), param.BlockRewardContractTransitions[1].address)
 }
+
+func TestInvalidBlockRewardContractTransition(t *testing.T) {
+	config := consensusconfig.GetConfigByChain(networkname.GnosisChainName)
+	spec := JsonSpec{}
+	require.NoError(t, json.Unmarshal(config, &spec))
+
+	// blockRewardContractTransition should be smaller than any block number in blockRewardContractTransitions
+	invalidTransition := uint64(10_000_000)
+	spec.BlockRewardContractTransition = &invalidTransition
+
+	_, err := FromJson(spec)
+	assert.Error(t, err)
+}

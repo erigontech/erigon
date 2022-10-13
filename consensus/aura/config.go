@@ -18,6 +18,7 @@
 package aura
 
 import (
+	"errors"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -204,26 +205,18 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	for blockNum, address := range jsonParams.BlockRewardContractTransitions {
 		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: uint64(blockNum), address: address})
 	}
-
-	/*
-	   if (p.block_reward_contract_code.is_some() || p.block_reward_contract_address.is_some())
-	        && br_transitions
-	            .keys()
-	            .next()
-	            .map_or(false, |&block_num| block_num <= transition_block_num)
-	    {
-	        let s = "blockRewardContractTransition";
-	        panic!("{} should be less than any of the keys in {}s", s, s);
-	    }
-	*/
+	sort.Sort(params.BlockRewardContractTransitions)
 	if jsonParams.BlockRewardContractAddress != nil {
 		transitionBlockNum := uint64(0)
 		if jsonParams.BlockRewardContractTransition != nil {
 			transitionBlockNum = *jsonParams.BlockRewardContractTransition
 		}
-		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
+		if len(params.BlockRewardContractTransitions) > 0 && transitionBlockNum >= params.BlockRewardContractTransitions[0].blockNum {
+			return params, errors.New("blockRewardContractTransition should be less than any of the keys in BlockRewardContractTransitions")
+		}
+		contract := BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress}
+		params.BlockRewardContractTransitions = append(BlockRewardContractList{contract}, params.BlockRewardContractTransitions...)
 	}
-	sort.Sort(params.BlockRewardContractTransitions)
 
 	if jsonParams.ValidateScoreTransition != nil {
 		params.ValidateScoreTransition = *jsonParams.ValidateScoreTransition
