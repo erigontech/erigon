@@ -310,7 +310,7 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 		return nil
 	}
 
-	snInDB, err := rawdb.ReadSnapshots(tx)
+	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
 	if err != nil {
 		return err
 	}
@@ -324,10 +324,6 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	}
 	if len(missingSnapshots) > 0 {
 		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
-	}
-	snHistInDB, err := rawdb.ReadHistorySnapshots(tx)
-	if err != nil {
-		return err
 	}
 
 	// send all hashes to the Downloader service
@@ -430,7 +426,7 @@ Finish:
 		return err
 	}
 
-	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files()); err != nil {
+	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files(), cfg.agg.Files()); err != nil {
 		return err
 	}
 	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
@@ -481,7 +477,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			return err
 		}
 
-		if err := retireBlocksInSingleBackgroundThread(s, cfg.blockRetire, ctx, tx); err != nil {
+		if err := retireBlocksInSingleBackgroundThread(s, cfg.blockRetire, cfg.agg, ctx, tx); err != nil {
 			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 		}
 	}
@@ -496,7 +492,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 // retiring blocks in a single thread in the brackground
-func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, ctx context.Context, tx kv.RwTx) (err error) {
+func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.Aggregator22, ctx context.Context, tx kv.RwTx) (err error) {
 	// if something already happens in background - noop
 	if blockRetire.Working() {
 		return nil
@@ -506,7 +502,7 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 	if ok {
-		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files()); err != nil {
+		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files(), agg.Files()); err != nil {
 			return err
 		}
 	}
