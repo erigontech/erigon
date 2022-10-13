@@ -218,7 +218,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		for _, log := range blockLogs {
 			log.BlockNumber = blockNumber
 			log.BlockHash = blockHash
-			log.TxHash = body.Transactions[log.TxIndex].Hash()
+			// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+			if log.TxIndex == uint(len(body.Transactions)) {
+				log.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+			} else {
+				log.TxHash = body.Transactions[log.TxIndex].Hash()
+			}
 		}
 		logs = append(logs, blockLogs...)
 	}
