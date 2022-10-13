@@ -72,6 +72,15 @@ type SyncAggregate struct {
 	SyncCommiteeSignature [96]byte `ssz-size:"96"` // @gotags: ssz-size:"96"
 }
 
+// return sum of the committee bits
+func (agg *SyncAggregate) Sum() int {
+	ret := 0
+	for _, v := range agg.SyncCommiteeBits {
+		ret += int(v)
+	}
+	return ret
+}
+
 // we will send this to Erigon once validation is done.
 type ExecutionPayload struct {
 	ParentHash    [32]byte `ssz-size:"32"`

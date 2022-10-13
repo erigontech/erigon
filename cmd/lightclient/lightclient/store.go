@@ -10,7 +10,7 @@ type LightClientStore struct {
 	// Beacon block header that is finalized
 	finalizedHeader *cltypes.BeaconBlockHeader
 	// Most recent available reasonably-safe header
-	optimistic_header *cltypes.BeaconBlockHeader
+	optimisticHeader *cltypes.BeaconBlockHeader
 
 	// Sync committees corresponding to the header
 	currentSyncCommittee *cltypes.SyncCommittee
@@ -56,8 +56,8 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 	return &LightClientStore{
 		finalizedHeader:               bootstrap.Header,
 		currentSyncCommittee:          bootstrap.CurrentSyncCommittee,
-		nextSynccommittee:             &cltypes.SyncCommittee{},
-		optimistic_header:             bootstrap.Header,
+		nextSynccommittee:             nil,
+		optimisticHeader:              bootstrap.Header,
 		previousMaxActivePartecipants: 0,
 		currentMaxActivePartecipants:  0,
 	}, nil

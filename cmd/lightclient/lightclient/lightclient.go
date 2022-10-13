@@ -15,69 +15,31 @@ package lightclient
 
 import (
 	"context"
-	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type LightClient struct {
-	sentinel  lightrpc.SentinelClient
-	execution remote.ETHBACKENDServer
-	store     *LightClientStore
+	genesisConfig *clparams.GenesisConfig
+	sentinel      lightrpc.SentinelClient
+	execution     remote.ETHBACKENDServer
+	store         *LightClientStore
 }
 
-func NewLightClient(execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
+func NewLightClient(genesisConfig *clparams.GenesisConfig, execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
 	return &LightClient{
-		sentinel:  sentinel,
-		execution: execution,
+		genesisConfig: genesisConfig,
+		sentinel:      sentinel,
+		execution:     execution,
 	}
 }
 
-func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.ExecutionPayload) *types.ExecutionPayload {
-	var baseFee *uint256.Int
-
-	if e.BaseFeePerGas != nil {
-		// Trim and reverse it.
-		baseFeeBytes := common.CopyBytes(e.BaseFeePerGas)
-		for baseFeeBytes[len(baseFeeBytes)-1] == 0 && len(baseFeeBytes) > 0 {
-			baseFeeBytes = baseFeeBytes[:len(baseFeeBytes)-1]
-		}
-		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-		}
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(new(big.Int).SetBytes(baseFeeBytes))
-		if overflow {
-			panic("NewPayload BaseFeePerGas overflow")
-		}
-	}
-	return &types.ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertHashToH256(e.ParentHash),
-		Coinbase:      gointerfaces.ConvertAddressToH160(e.FeeRecipient),
-		StateRoot:     gointerfaces.ConvertHashToH256(e.StateRoot),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(e.ReceiptsRoot),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(e.LogsBloom),
-		PrevRandao:    gointerfaces.ConvertHashToH256(e.PrevRandao),
-		BlockNumber:   e.BlockNumber,
-		GasLimit:      e.GasLimit,
-		GasUsed:       e.GasUsed,
-		Timestamp:     e.Timestamp,
-		ExtraData:     e.ExtraData,
-		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
-		Transactions:  e.Transactions,
-	}
-}
-
-func (l *LightClient) Start(ctx context.Context) {
+func (l *LightClient) StartWithNoValidation(ctx context.Context) {
 	stream, err := l.sentinel.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
@@ -110,23 +72,39 @@ func (l *LightClient) Start(ctx context.Context) {
 	}
 }
 
-func (l *LightClient) processBeaconBlock(ctx context.Context, beaconBlock *cltypes.SignedBeaconBlockBellatrix) error {
-	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Block.Body.ExecutionPayload.BlockHash)
-
-	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
-	var err error
-	_, err = l.execution.EngineNewPayloadV1(ctx, payload)
-	if err != nil {
-		return err
+func (l *LightClient) Start(ctx context.Context) {
+	if l.store == nil {
+		log.Error("No trusted setup")
+		return
 	}
-	// Wait a bit
-	time.Sleep(500 * time.Millisecond)
-	_, err = l.execution.EngineForkChoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-		ForkchoiceState: &remote.EngineForkChoiceState{
-			HeadBlockHash:      payloadHash,
-			SafeBlockHash:      payloadHash,
-			FinalizedBlockHash: payloadHash,
-		},
-	})
-	return err
+	for {
+		var updates []*cltypes.LightClientUpdate
+		finalizedPeriod := (l.store.finalizedHeader.Slot / 32) / 256
+		optimisticPeriod := (l.store.optimisticHeader.Slot / 32) / 256
+
+		isNextSyncCommitteeKnown := l.store.nextSynccommittee != nil
+		switch {
+		// Clause 4 (i):
+		// if finalized period == optimistic period and the next sync committee is unknown,
+		// fetch the corresponding lightclient update for this cycle
+		case finalizedPeriod == optimisticPeriod && !isNextSyncCommitteeKnown:
+			update, err := l.FetchUpdate(ctx, finalizedPeriod)
+			if err != nil {
+				log.Error("Could not fetch lightclient update", "reason", err)
+			} else {
+				updates = append(updates, update)
+			}
+			break
+		}
+		// Push updates
+
+		// do not have high CPU load
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return
+		}
+	}
+
 }

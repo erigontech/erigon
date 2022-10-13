@@ -61,5 +61,5 @@ func main() {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return
 	}
-
+	lc.Start(ctx)
 }
