@@ -150,6 +150,9 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 }
 
 func getPrefixFromResponseType(val cltypes.ObjectSSZ) []byte {
+	if _, ok := val.(*cltypes.LightClientBootstrap); ok {
+		return make([]byte, 7)
+	}
 	if val.SizeSSZ() <= 16 {
 		return []byte{0x08}
 	}
@@ -158,7 +161,7 @@ func getPrefixFromResponseType(val cltypes.ObjectSSZ) []byte {
 
 func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	ln := val.SizeSSZ()
-	if _, err := r.Read(make([]byte, len(getPrefixFromResponseType(val)))); err != nil {
+	if _, err := r.Read(getPrefixFromResponseType(val)); err != nil {
 		return err
 	}
 

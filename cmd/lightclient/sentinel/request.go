@@ -16,7 +16,6 @@ package sentinel
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
@@ -34,11 +33,11 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 		peerInfo *peer.AddrInfo
 		err      error
 	)
-	if strings.Contains(topic, "light_client") {
+	/*if strings.Contains(topic, "light_client") {
 		peerInfo, err = connectToRandomLightClientPeer(s)
-	} else {
-		_, peerInfo, err = connectToRandomPeer(s)
-	}
+	} else {*/
+	peerInfo, err = connectToRandomPeer(s)
+	//}
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
@@ -59,6 +58,9 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 			return nil, false, nil
 		case <-reqRetryTimer.C:
 			log.Debug("[Req] timeout", "topic", topic, "peer", peerId)
+			if err.Error() == "protocol not supported" {
+				s.peers.DisconnectPeer(peerId)
+			}
 			return nil, false, fmt.Errorf("timed out, %s", err)
 		case <-retryTicker.C:
 			stream, err = writeRequestRaw(s, data, peerId, topic)
