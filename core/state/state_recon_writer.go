@@ -7,7 +7,6 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"sync"
-	"unsafe"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -77,10 +76,12 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 		t = btree.NewG[ReconStateItem](32, ReconnLess)
 		rs.changes[table] = t
 	}
-	item := ReconStateItem{key1: libcommon.Copy(key1), key2: libcommon.Copy(key2), val: libcommon.Copy(val), txNum: txNum}
+	item := ReconStateItem{key1: key1, key2: key2, val: libcommon.Copy(val), txNum: txNum}
 	t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
+	rs.sizeEstimate += PairSize + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
+
+const PairSize = uint64(48) // uint64(unsafe.Sizeof(item))
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
 	rs.lock.RLock()
@@ -252,7 +253,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
-	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
+	w.rs.Put(kv.CodeR, codeHash[:], nil, common.CopyBytes(code), w.txNum)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), nil, codeHash[:], w.txNum)
