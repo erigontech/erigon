@@ -18,15 +18,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-type ReconStateItem struct {
+type reconPair struct {
 	txNum      uint64 // txNum where the item has been created
 	key1, key2 []byte
 	val        []byte
 }
 
-func (i ReconStateItem) Less(than btree.Item) bool { return ReconnLess(i, than.(ReconStateItem)) }
+func (i reconPair) Less(than btree.Item) bool { return ReconnLess(i, than.(reconPair)) }
 
-func ReconnLess(i, thanItem ReconStateItem) bool {
+func ReconnLess(i, thanItem reconPair) bool {
 	if i.txNum == thanItem.txNum {
 		c1 := bytes.Compare(i.key1, thanItem.key1)
 		if c1 == 0 {
@@ -52,7 +52,7 @@ type ReconState struct {
 	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
 
 	lock         sync.RWMutex
-	changes      map[string]*btree.BTreeG[ReconStateItem] // table => [] (txNum; key1; key2; val)
+	changes      map[string]*btree.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
 	sizeEstimate uint64
 }
 
@@ -62,7 +62,7 @@ func NewReconState(workCh chan *TxTask) *ReconState {
 			workCh:   workCh,
 			triggers: map[uint64][]*TxTask{},
 		},
-		changes: map[string]*btree.BTreeG[ReconStateItem]{},
+		changes: map[string]*btree.BTreeG[reconPair]{},
 	}
 	return rs
 }
@@ -72,10 +72,10 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[ReconStateItem](32, ReconnLess)
+		t = btree.NewG[reconPair](32, ReconnLess)
 		rs.changes[table] = t
 	}
-	item := ReconStateItem{key1: key1, key2: key2, val: val, txNum: txNum}
+	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
 	t.ReplaceOrInsert(item)
 	rs.sizeEstimate += PairSize + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
@@ -89,7 +89,7 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 	if !ok {
 		return nil
 	}
-	i, ok := t.Get(ReconStateItem{txNum: txNum, key1: key1, key2: key2})
+	i, ok := t.Get(reconPair{txNum: txNum, key1: key1, key2: key2})
 	if !ok {
 		return nil
 	}
@@ -101,7 +101,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(item ReconStateItem) bool {
+		t.Ascend(func(item reconPair) bool {
 			if len(item.val) == 0 {
 				return true
 			}
