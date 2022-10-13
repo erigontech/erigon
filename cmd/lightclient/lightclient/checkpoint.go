@@ -98,3 +98,4 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 		"root", common.Bytes2Hex(l.store.finalizedHeader.Root[:]))
 	return nil
 }
+

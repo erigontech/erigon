@@ -1629,32 +1629,38 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 var SnapshotsKey = []byte("snapshots")
 var SnapshotsHistoryKey = []byte("snapshots_history")
 
-func ReadSnapshots(tx kv.Tx) ([]string, error) {
+func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
 	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var res []string
+	var res, resHist []string
 	_ = json.Unmarshal(v, &res)
-	return res, nil
-}
 
-func ReadHistorySnapshots(tx kv.Tx) ([]string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
+	v, err = tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var res []string
-	_ = json.Unmarshal(v, &res)
-	return res, nil
+	_ = json.Unmarshal(v, &resHist)
+	return res, resHist, nil
 }
 
-func WriteSnapshots(tx kv.RwTx, list []string) error {
+func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	res, err := json.Marshal(list)
 	if err != nil {
 		return err
 	}
-	return tx.Put(kv.DatabaseInfo, SnapshotsKey, res)
+	if err := tx.Put(kv.DatabaseInfo, SnapshotsKey, res); err != nil {
+		return err
+	}
+	res, err = json.Marshal(histList)
+	if err != nil {
+		return err
+	}
+	if err := tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res); err != nil {
+		return err
+	}
+	return nil
 }
 func WriteHistorySnapshots(tx kv.RwTx, list []string) error {
 	res, err := json.Marshal(list)

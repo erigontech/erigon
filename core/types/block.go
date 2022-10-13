@@ -1267,7 +1267,8 @@ func (b *Block) BaseFee() *big.Int {
 func (b *Block) Seal() (seal []rlp.RawValue) { return b.header.copySeal() }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
-func (b *Block) Header() *Header { return CopyHeader(b.header) }
+func (b *Block) Header() *Header       { return CopyHeader(b.header) }
+func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {

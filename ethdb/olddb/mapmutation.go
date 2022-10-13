@@ -10,8 +10,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 type mapmutation struct {
@@ -165,7 +166,7 @@ func (m *mapmutation) Put(table string, k, v []byte) error {
 		m.puts[table] = make(map[string][]byte)
 	}
 
-	stringKey := *(*string)(unsafe.Pointer(&k))
+	stringKey := string(k)
 
 	var ok bool
 	if _, ok = m.puts[table][stringKey]; !ok {
@@ -176,6 +177,7 @@ func (m *mapmutation) Put(table string, k, v []byte) error {
 	m.puts[table][stringKey] = v
 	m.size += len(k) + len(v)
 	m.count++
+
 	return nil
 }
 

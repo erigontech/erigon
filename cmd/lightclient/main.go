@@ -50,6 +50,7 @@ func main() {
 	log.Info("Sentinel started", "addr", addr)
 
 	bs, err := lightclient.RetrieveBeaconState(ctx, DefaultUri)
+
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return
@@ -60,4 +61,5 @@ func main() {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return
 	}
+
 }

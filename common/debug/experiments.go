@@ -8,6 +8,21 @@ import (
 )
 
 var (
+	writeMap     bool
+	writeMapOnce sync.Once
+)
+
+func WriteMap() bool {
+	writeMapOnce.Do(func() {
+		v, _ := os.LookupEnv("WRITE_MAP")
+		if v == "true" {
+			writeMap = true
+		}
+	})
+	return writeMap
+}
+
+var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )
