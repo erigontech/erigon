@@ -99,12 +99,10 @@ type JsonSpec struct {
 	// contract address is also present then it is added into the map at the block number stored in
 	// `block_reward_contract_transition` or 0 if that block number is not provided. Therefore both
 	// a single block reward contract transition and a map of reward contract transitions can be
-	// used simulataneously in the same configuration. In such a case the code requires that the
+	// used simultaneously in the same configuration. In such a case the code requires that the
 	// block number of the single transition is strictly less than any of the block numbers in the
 	// map.
 	BlockRewardContractTransitions map[uint]common.Address `json:"blockRewardContractTransitions"`
-	/// Block reward code. This overrides the block reward contract address.
-	BlockRewardContractCode []byte `json:"blockRewardContractCode"`
 	// Block at which maximum uncle count should be considered.
 	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
@@ -203,25 +201,10 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		params.StepDurations[0] = *jsonParams.StepDuration
 	}
 
-	//TODO: jsonParams.BlockRewardContractTransitions
-	/*
-			   let mut br_transitions: BTreeMap<_, _> = p
-		           .block_reward_contract_transitions
-		           .unwrap_or_default()
-		           .into_iter()
-		           .map(|(block_num, address)| {
-		               (
-		                   block_num.into(),
-		                   BlockRewardContract::new_from_address(address.into()),
-		               )
-		           })
-		           .collect();
-	*/
-
-	transitionBlockNum := uint64(0)
-	if jsonParams.BlockRewardContractTransition != nil {
-		transitionBlockNum = *jsonParams.BlockRewardContractTransition
+	for blockNum, address := range jsonParams.BlockRewardContractTransitions {
+		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: uint64(blockNum), address: address})
 	}
+
 	/*
 	   if (p.block_reward_contract_code.is_some() || p.block_reward_contract_address.is_some())
 	        && br_transitions
@@ -233,14 +216,11 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	        panic!("{} should be less than any of the keys in {}s", s, s);
 	    }
 	*/
-	if jsonParams.BlockRewardContractCode != nil {
-		/* TODO: support hard-coded reward contract
-		    br_transitions.insert(
-		       transition_block_num,
-		       BlockRewardContract::new_from_code(Arc::new(code.into())),
-		   );
-		*/
-	} else if jsonParams.BlockRewardContractAddress != nil {
+	if jsonParams.BlockRewardContractAddress != nil {
+		transitionBlockNum := uint64(0)
+		if jsonParams.BlockRewardContractTransition != nil {
+			transitionBlockNum = *jsonParams.BlockRewardContractTransition
+		}
 		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
 	}
 	sort.Sort(params.BlockRewardContractTransitions)
