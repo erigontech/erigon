@@ -22,6 +22,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -824,27 +825,29 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer codeCollector.Close()
 	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
-	roTx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
-	if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
-		return plainStateCollector.Collect(k[8:], v)
+	if err = db.View(ctx, func(roTx kv.Tx) error {
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
+			return plainStateCollector.Collect(k[8:], v)
+		}); err != nil {
+			return err
+		}
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
+			return codeCollector.Collect(k[8:], v)
+		}); err != nil {
+			return err
+		}
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
+			return plainContractCollector.Collect(k[8:], v)
+		}); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
-	if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
-		return codeCollector.Collect(k[8:], v)
-	}); err != nil {
-		return err
-	}
-	if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
-		return plainContractCollector.Collect(k[8:], v)
-	}); err != nil {
-		return err
-	}
-	roTx.Rollback()
 
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
