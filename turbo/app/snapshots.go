@@ -347,8 +347,17 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
-	br := snapshotsync.NewBlockRetire(workers, dirs.Tmp, snapshots, db, nil, nil)
+	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, snapshots, db, nil, nil)
+
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db)
+	if err != nil {
+		return err
+	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return err
+	}
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
@@ -356,7 +365,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files()); err != nil {
+			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
 				return err
 			}
 			log.Info("prune blocks from db\n")
@@ -371,15 +380,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db)
-	if err != nil {
-		return err
-	}
-	err = agg.ReopenFiles()
-	if err != nil {
-		return err
-	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	if err = agg.BuildMissedIndices(); err != nil {
 		return err
 	}
@@ -416,8 +416,19 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 		if err := allSnapshots.ReopenFolder(); err != nil {
 			return err
 		}
+
+		agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db)
+		if err != nil {
+			return err
+		}
+		err = agg.ReopenFiles()
+		if err != nil {
+			return err
+		}
+		agg.SetWorkers(estimate.CompressSnapshot.Workers())
+
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			return rawdb.WriteSnapshots(tx, allSnapshots.Files())
+			return rawdb.WriteSnapshots(tx, allSnapshots.Files(), agg.Files())
 		}); err != nil {
 			return err
 		}
