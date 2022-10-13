@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	atomic2 "go.uber.org/atomic"
-	"golang.org/x/sync/semaphore"
 )
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
@@ -466,11 +465,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
-	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*2 + 1))
+	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
-		Flags(func(u uint) uint { return mdbx.UtterlyNoSync }).
-		WriteMap().
-		RoTxsLimiter(limiterB).
+		Flags(func(u uint) uint {
+			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.Exclusive | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap | mdbx.NoSubdir
+		}).
 		WriteMergeThreshold(8192).
 		PageSize(uint64(16 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
