@@ -11,7 +11,6 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -76,7 +75,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 		t = btree.NewG[ReconStateItem](32, ReconnLess)
 		rs.changes[table] = t
 	}
-	item := ReconStateItem{key1: key1, key2: key2, val: libcommon.Copy(val), txNum: txNum}
+	item := ReconStateItem{key1: key1, key2: key2, val: val, txNum: txNum}
 	t.ReplaceOrInsert(item)
 	rs.sizeEstimate += PairSize + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
