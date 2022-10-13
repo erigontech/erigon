@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -232,14 +229,6 @@ func newStateReaderWriter(
 // ================ Erigon3 ================
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	execCtx, cancel := context.WithCancel(ctx)
-	go func() {
-		<-sigs
-		cancel()
-	}()
-
 	workersCount := cfg.workersCount
 	//workersCount := 2
 	if !initialCycle {
@@ -255,7 +244,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
 			log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "from", s.BlockNumber, "to", reconstituteToBlock)
-			if err := ReconstituteState(execCtx, s, cfg.dirs, workersCount, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+			if err := ReconstituteState(ctx, s, cfg.dirs, workersCount, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
 		}
@@ -278,7 +267,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	rs := state.NewState22()
-	if err := Exec3(execCtx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
+	if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
 		cfg.blockReader, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis); err != nil {
