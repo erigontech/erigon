@@ -318,7 +318,7 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 	if !ok {
 		return false
 	}
-	// Drain the channel to avoid the deadlock in the OnNewTxs function
+	// Drain the channel to avoid the deadlock in the OnNewEvent function
 	// Draining of the channel is safe without a lock because it does not panic
 	// when the channel is closed
 	for {
