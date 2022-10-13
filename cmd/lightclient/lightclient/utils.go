@@ -16,7 +16,7 @@ func power(x uint64, e uint64) uint64 {
 	return ret
 }
 
-// Check if leaf at index verifies against the Merkle ``root`` and ``branch``
+// Check if leaf at index verifies against the Merkle root and branch
 func isValidMerkleBranch(leaf [32]byte, branch [][]byte, depth uint64, index uint64, root [32]byte) bool {
 	value := leaf
 	for i := uint64(0); i < depth; i++ {

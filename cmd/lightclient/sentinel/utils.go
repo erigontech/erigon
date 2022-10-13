@@ -104,8 +104,8 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 // will iterate onto randoms nodes until our sentinel connects to one
 func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, err error) {
 	var sub *GossipSubscription
-	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(topic)) {
+	for t, currSub := range s.subManager.subscriptions {
+		if strings.Contains(t, topic) {
 			sub = currSub
 		}
 	}
