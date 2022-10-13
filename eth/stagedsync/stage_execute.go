@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -39,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -381,11 +382,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	startTime := time.Now()
 
-	var batch ethdb.DbWithPendingMutations
-	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-
-	defer batch.Rollback()
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -414,6 +410,15 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		asyncEngine = asyncEngine.WithExecutionContext(ctx)
 		effectiveEngine = asyncEngine.(consensus.Engine)
 	}
+
+	var batch ethdb.DbWithPendingMutations
+	// state is stored through ethdb batches
+	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
+	// avoids stacking defers within the loop
+	defer func() {
+		batch.Rollback()
+	}()
+
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -454,7 +459,8 @@ Loop:
 		}
 		stageProgress = blockNum
 
-		if currentStateGas >= gasState {
+		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
+		if shouldUpdateProgress {
 			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
 			currentStateGas = 0
 			if err = batch.Commit(); err != nil {
@@ -475,8 +481,6 @@ Loop:
 				defer tx.Rollback()
 			}
 			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-			// TODO: This creates stacked up deferrals
-			defer batch.Rollback()
 		}
 
 		gas = gas + block.GasUsed()
