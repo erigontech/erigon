@@ -328,6 +328,7 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 				ff.storeMu.Lock()
 				delete(ff.pendingHeadsStores, id)
 				ff.storeMu.Unlock()
+				ff.mu.Unlock()
 				return true
 			}
 		}
