@@ -794,7 +794,7 @@ func (h *History) mergeFiles(indexFiles, historyFiles []*filesItem, r HistoryRan
 
 func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	if valuesIn == nil {
-		panic("must not happen")
+		return
 	}
 	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 	d.files.ReplaceOrInsert(valuesIn)
@@ -810,12 +810,12 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 
 func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) {
 	if in == nil {
-		panic("must not happen")
+		return
 	}
 	ii.files.ReplaceOrInsert(in)
 	for _, out := range outs {
 		if out == nil {
-			panic("must not happen")
+			panic("must not happen: " + ii.filenameBase)
 		}
 		ii.files.Delete(out)
 		out.decompressor.Close()
@@ -825,13 +825,13 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 
 func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
 	if historyIn == nil {
-		panic("must not happen")
+		return
 	}
 	h.InvertedIndex.integrateMergedFiles(indexOuts, indexIn)
 	h.files.ReplaceOrInsert(historyIn)
 	for _, out := range historyOuts {
 		if out == nil {
-			panic("must not happen")
+			panic("must not happen: " + h.filenameBase)
 		}
 		h.files.Delete(out)
 		out.decompressor.Close()

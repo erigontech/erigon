@@ -23,6 +23,7 @@ import (
 	math2 "math"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -137,42 +138,68 @@ func (a *Aggregator22) closeFiles() {
 }
 
 func (a *Aggregator22) BuildMissedIndices() error {
+	wg := sync.WaitGroup{}
+	errs := make(chan error, 7)
 	if a.accounts != nil {
-		if err := a.accounts.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.accounts.BuildMissedIndices()
+		}()
 	}
 	if a.storage != nil {
-		if err := a.storage.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.storage.BuildMissedIndices()
+		}()
 	}
 	if a.code != nil {
-		if err := a.code.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.code.BuildMissedIndices()
+		}()
 	}
 	if a.logAddrs != nil {
-		if err := a.logAddrs.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.logAddrs.BuildMissedIndices()
+		}()
 	}
 	if a.logTopics != nil {
-		if err := a.logTopics.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.logTopics.BuildMissedIndices()
+		}()
 	}
 	if a.tracesFrom != nil {
-		if err := a.tracesFrom.BuildMissedIndices(); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.tracesFrom.BuildMissedIndices()
+		}()
 	}
 	if a.tracesTo != nil {
-		if err := a.tracesTo.BuildMissedIndices(); err != nil {
-			return err
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.tracesTo.BuildMissedIndices()
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	var lastError error
+	for err := range errs {
+		if err != nil {
+			lastError = err
 		}
 	}
-	return nil
+	return lastError
 }
 
 func (a *Aggregator22) SetLogPrefix(v string) { a.logPrefix = v }
@@ -384,7 +411,9 @@ func (a *Aggregator22) buildFiles(step uint64, collation Agg22Collation) (Agg22S
 	//}()
 	var lastError error
 	for err := range errCh {
-		lastError = err
+		if err != nil {
+			lastError = err
+		}
 	}
 	if lastError == nil {
 		closeFiles = false
@@ -533,7 +562,7 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	common2.ReadMemStats(&m)
 	log.Info("[Snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dk", a.maxTxNum.Load()/1000),
+		"txs", fmt.Sprintf("%dm", a.maxTxNum.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
