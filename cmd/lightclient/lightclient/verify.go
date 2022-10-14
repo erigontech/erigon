@@ -127,6 +127,7 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 		pubKey.Add(&currPubKey)
 	}*/
 	_ = signingRoot
+	_ = pubkeys
 	return true, nil
 	// return signature.Verify(&pubKey, signingRoot[:]), nil
 }
