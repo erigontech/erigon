@@ -27,10 +27,10 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 	b.syncCond = sync.NewCond(new(sync.Mutex))
 
 	go func() {
-		log.Info("Building block...")
+		log.Debug("Building block...")
 		t := time.Now()
 		block, err := build(param, &b.interrupt)
-		log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
+		log.Debug("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 
 		b.syncCond.L.Lock()
 		defer b.syncCond.L.Unlock()
