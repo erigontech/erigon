@@ -354,6 +354,7 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 }
 
 func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, tmpDir string) ([]types.Transaction, error) {
+	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	simulationTx := memdb.NewMemoryBatch(tx, tmpDir)
 	defer simulationTx.Rollback()
@@ -468,6 +469,6 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	log.Info("Filtration", "no sender", noSenderCnt, "no account", noAccountCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt)
+	log.Info("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt)
 	return filtered, nil
 }
