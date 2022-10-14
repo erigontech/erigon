@@ -15,12 +15,11 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -30,49 +29,37 @@ var (
 	defaultTcpPort = uint(9000)
 )
 
+const DefaultUri = "https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized"
+
 func main() {
+	ctx := context.Background()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	discCfg, genesisCfg, networkCfg, beaconCfg, err := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	addr := "localhost:7777"
+	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
+		IpAddr:        defaultIpAddr,
+		Port:          defaultPort,
+		TCPPort:       defaultTcpPort,
+		GenesisConfig: genesisCfg,
+		NetworkConfig: networkCfg,
+		BeaconConfig:  beaconCfg,
+	}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
 	if err != nil {
-		log.Error("error", "err", err)
-		return
+		log.Error("Could not start sentinel", "err", err)
 	}
-	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
-		IpAddr:         defaultIpAddr,
-		Port:           defaultPort,
-		TCPPort:        defaultTcpPort,
-		DiscoverConfig: *discCfg,
-		GenesisConfig:  &genesisCfg,
-		NetworkConfig:  &networkCfg,
-		BeaconConfig:   &beaconCfg,
-	})
+	log.Info("Sentinel started", "addr", addr)
+
+	bs, err := lightclient.RetrieveBeaconState(ctx, DefaultUri)
+
 	if err != nil {
-		log.Error("error", "err", err)
+		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return
 	}
-	if err := sent.Start(); err != nil {
-		log.Error("failed to start sentinel", "err", err)
+	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
+	lc := lightclient.NewLightClient(nil, sentinel)
+	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return
 	}
-	log.Info("Sentinel started", "enr", sent.String())
-	logInterval := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case <-logInterval.C:
-			log.Info("[Lighclient] Networking Report", "peers", sent.GetPeersCount())
-		case blockPacket := <-sent.GossipChannel(sentinel.BeaconBlockTopic):
-			u := blockPacket.(*p2p.SignedBeaconBlockBellatrix)
-			log.Info("[Gossip] beacon_block",
-				"Slot", u.Block.Slot,
-				"Signature", hex.EncodeToString(u.Signature[:]),
-				"graffiti", string(u.Block.Body.Graffiti[:]),
-				"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash[:]),
-				"stateRoot", hex.EncodeToString(u.Block.StateRoot[:]),
-				"parentRoot", hex.EncodeToString(u.Block.ParentRoot[:]),
-				"proposerIdx", u.Block.ProposerIndex,
-			)
-		default:
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
+
 }

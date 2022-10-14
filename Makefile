@@ -112,6 +112,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
+COMMANDS += sentinel_node
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -134,11 +135,14 @@ test:
 	$(GOTEST) --timeout 50s
 
 test3:
-	$(GOTEST) --timeout 50s -tags erigon3
+	$(GOTEST) --timeout 50s -tags $(BUILD_TAGS),erigon3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
+
+test3-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -200,7 +204,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.5
+GOLANG_CROSS_VERSION  ?= v1.18.1
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

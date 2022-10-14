@@ -1,3 +1,16 @@
+/*
+   Copyright 2022 Erigon-Lightclient contributors
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+       http://www.apache.org/licenses/LICENSE-2.0
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package fork
 
 import (
@@ -7,9 +20,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/p2p"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 
 func ComputeForkDigest(
@@ -34,7 +48,7 @@ func ComputeForkDigest(
 		break
 	}
 
-	return computeForkDigest(currentForkVersion, p2p.Root(genesisConfig.GenesisValidatorRoot))
+	return computeForkDigest(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
 type fork struct {
@@ -52,8 +66,8 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 	return
 }
 
-func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot p2p.Root) (digest [4]byte, err error) {
-	data := p2p.ForkData{
+func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
+	data := cltypes.ForkData{
 		CurrentVersion:        currentVersion,
 		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}
@@ -93,10 +107,10 @@ func ComputeForkId(
 		nextForkVersion = fork.version
 	}
 
-	enrForkID := p2p.ENRForkID{
-		CurrentForkDigest: digest[:],
-		NextForkVersion:   nextForkVersion[:],
-		NextForkEpoch:     p2p.Epoch(nextForkEpoch),
+	enrForkID := cltypes.ENRForkID{
+		CurrentForkDigest: digest,
+		NextForkVersion:   nextForkVersion,
+		NextForkEpoch:     nextForkEpoch,
 	}
 	return enrForkID.MarshalSSZ()
 }
@@ -116,4 +130,10 @@ func getLastForkEpoch(
 		break
 	}
 	return currentForkEpoch
+}
+
+// The one suggested by the spec is too over-engineered.
+func MsgID(pmsg *pubsubpb.Message) string {
+	hash := utils.Keccak256(pmsg.Data)
+	return string(hash[:])
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"sort"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -13,6 +14,36 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
+
+var roaringPool = sync.Pool{
+	New: func() any {
+		return roaring.New()
+	},
+}
+
+func NewBitmap() *roaring.Bitmap {
+	a := roaringPool.Get().(*roaring.Bitmap)
+	a.Clear()
+	return a
+}
+func ReturnToPool(a *roaring.Bitmap) {
+	roaringPool.Put(a)
+}
+
+var roaring64Pool = sync.Pool{
+	New: func() any {
+		return roaring64.New()
+	},
+}
+
+func NewBitmap64() *roaring64.Bitmap {
+	a := roaring64Pool.Get().(*roaring64.Bitmap)
+	a.Clear()
+	return a
+}
+func ReturnToPool64(a *roaring64.Bitmap) {
+	roaring64Pool.Put(a)
+}
 
 const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX overflow pages appear: 4096 / 2 - (keySize + 8)
 
@@ -137,7 +168,8 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
-		bm := roaring.New()
+		bm := NewBitmap()
+		defer ReturnToPool(bm)
 		if _, err := bm.ReadFrom(bytes.NewReader(v)); err != nil {
 			return nil, err
 		}
@@ -146,7 +178,6 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 			break
 		}
 	}
-
 	if len(chunks) == 0 {
 		return roaring.New(), nil
 	}
@@ -293,7 +324,8 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 		if !bytes.HasPrefix(k, key) {
 			break
 		}
-		bm := roaring64.New()
+		bm := NewBitmap64()
+		defer ReturnToPool64(bm)
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {
 			return nil, err

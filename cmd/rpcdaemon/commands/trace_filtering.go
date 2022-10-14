@@ -251,7 +251,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if api.historyV3(dbtx) {
-		return api.filter22(ctx, dbtx, fromBlock, toBlock, req, stream)
+		return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream)
 	}
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
@@ -515,7 +515,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	return stream.Flush()
 }
 
-func (api *TraceAPIImpl) filter22(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {

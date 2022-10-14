@@ -1315,6 +1315,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
+	sequenceTo := map[string]uint64{}
 	for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
 		if err != nil {
 			return err
@@ -1346,9 +1347,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			}); err != nil {
 				return err
 			}
-			if err := ResetSequence(tx, bucket, b.BaseTxId); err != nil {
-				return err
-			}
+			sequenceTo[bucket] = b.BaseTxId
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
@@ -1366,6 +1365,11 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		case <-logEvery.C:
 			log.Info("TruncateBlocks", "block", n)
 		default:
+		}
+	}
+	for bucket, sequence := range sequenceTo {
+		if err := ResetSequence(tx, bucket, sequence); err != nil {
+			return err
 		}
 	}
 
@@ -1625,32 +1629,38 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 var SnapshotsKey = []byte("snapshots")
 var SnapshotsHistoryKey = []byte("snapshots_history")
 
-func ReadSnapshots(tx kv.Tx) ([]string, error) {
+func ReadSnapshots(tx kv.Tx) ([]string, []string, error) {
 	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var res []string
+	var res, resHist []string
 	_ = json.Unmarshal(v, &res)
-	return res, nil
-}
 
-func ReadHistorySnapshots(tx kv.Tx) ([]string, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
+	v, err = tx.GetOne(kv.DatabaseInfo, SnapshotsHistoryKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var res []string
-	_ = json.Unmarshal(v, &res)
-	return res, nil
+	_ = json.Unmarshal(v, &resHist)
+	return res, resHist, nil
 }
 
-func WriteSnapshots(tx kv.RwTx, list []string) error {
+func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	res, err := json.Marshal(list)
 	if err != nil {
 		return err
 	}
-	return tx.Put(kv.DatabaseInfo, SnapshotsKey, res)
+	if err := tx.Put(kv.DatabaseInfo, SnapshotsKey, res); err != nil {
+		return err
+	}
+	res, err = json.Marshal(histList)
+	if err != nil {
+		return err
+	}
+	if err := tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res); err != nil {
+		return err
+	}
+	return nil
 }
 func WriteHistorySnapshots(tx kv.RwTx, list []string) error {
 	res, err := json.Marshal(list)
@@ -1848,7 +1858,7 @@ func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {
 		encoded []byte
 		err     error
 	)
-	root = node.Commitment().Bytes()
+	root = node.ComputeCommitment().Bytes()
 	encoded, err = node.Serialize()
 	if err != nil {
 		return err

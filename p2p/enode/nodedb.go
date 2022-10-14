@@ -101,7 +101,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 func newMemoryDB(logger log.Logger) (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = mdbx.NewMDBX(logger).InMem().Label(kv.SentryDB).WithTableCfg(bucketsConfig).Open()
+	db.kv, err = mdbx.NewMDBX(logger).InMem("").Label(kv.SentryDB).WithTableCfg(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}

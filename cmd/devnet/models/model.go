@@ -43,6 +43,14 @@ const (
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
+	// ErigonLogFilePrefix is the default file prefix for logging erigon node info and errors
+	ErigonLogFilePrefix = "erigon_node_"
+
+	// ReqId is the request id for each request
+	ReqId = 0
+
+	// BlockNumLatest is the parameter for the latest block
+	BlockNumLatest = "latest"
 )
 
 type AdminNodeInfoResponse struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
@@ -44,7 +45,23 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader, tmpdir string) error {
+	go func() { //inverted read-ahead - to warmup data
+		_ = db.View(context.Background(), func(tx kv.Tx) error {
+			c, err := tx.Cursor(kv.EthTx)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}()
+
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -95,10 +112,13 @@ func ResetBlocks(tx kv.RwTx, snapshots *snapshotsync.RoSnapshots, br services.He
 	}
 
 	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, "", snapshots, br); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, tmpdir, snapshots, br); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Headers, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Bodies, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
 	}
 
 	return nil
@@ -142,6 +162,7 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 		kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 	}
 	for _, b := range stateBuckets {
+		log.Info("Clear", "table", b)
 		if err := tx.ClearBucket(b); err != nil {
 			return err
 		}
@@ -165,6 +186,7 @@ func ResetExec(tx kv.RwTx, chain string) (err error) {
 			kv.TracesToKeys, kv.TracesToIdx,
 		}
 		for _, b := range buckets {
+			log.Info("Clear", "table", b)
 			if err := tx.ClearBucket(b); err != nil {
 				return err
 			}

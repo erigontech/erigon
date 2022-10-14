@@ -650,18 +650,18 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
-	data := common.FromHex("75286211")
+	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
 	_, err := caller(s.contractAddress, data)
 	if err != nil {
 		return err
 	}
 
 	/*
-	 let data = validator_set::functions::finalize_change::encode_input();
-	        caller(self.contract_address, data)
-	            .map(|_| ())
-	            .map_err(::engines::EngineError::FailedSystemCall)
-	            .map_err(Into::into)
+	   let data = validator_set::functions::finalize_change::encode_input();
+	   caller(self.contract_address, data)
+	       .map(|_| ())
+	       .map_err(::engines::EngineError::FailedSystemCall)
+	       .map_err(Into::into)
 	*/
 	return nil
 }
@@ -860,7 +860,7 @@ func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress co
 // ValidatorContract a validator contract with reporting.
 type ValidatorContract struct {
 	contractAddress  common.Address
-	validators       ValidatorSafeContract
+	validators       *ValidatorSafeContract
 	posdaoTransition *uint64
 }
 

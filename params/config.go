@@ -83,6 +83,7 @@ var (
 var (
 	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
 	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
+	GnosisGenesisStateRoot  = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 )
 
 var (
@@ -258,6 +259,8 @@ type ChainConfig struct {
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
+	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
@@ -397,7 +400,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -405,6 +408,8 @@ func (c *ChainConfig) String() string {
 			c.BrunoBlock,
 			c.EulerBlock,
 			c.GibbsBlock,
+			c.NanoBlock,
+			c.MoranBlock,
 			engine,
 		)
 	}
@@ -547,6 +552,23 @@ func (c *ChainConfig) IsGibbs(num *big.Int) bool {
 
 func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
 	return configNumEqual(c.GibbsBlock, num)
+}
+
+func (c *ChainConfig) IsMoran(num uint64) bool {
+	return isForked(c.MoranBlock, num)
+}
+
+func (c *ChainConfig) IsOnMoran(num *big.Int) bool {
+	return configNumEqual(c.MoranBlock, num)
+}
+
+// IsNano returns whether num is either equal to the euler fork block or greater.
+func (c *ChainConfig) IsNano(num uint64) bool {
+	return isForked(c.NanoBlock, num)
+}
+
+func (c *ChainConfig) IsOnNano(num *big.Int) bool {
+	return configNumEqual(c.NanoBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -747,6 +769,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.GibbsBlock, newcfg.GibbsBlock, head) {
 		return newCompatError("Gibbs fork block", c.GibbsBlock, newcfg.GibbsBlock)
 	}
+	if isForkIncompatible(c.NanoBlock, newcfg.NanoBlock, head) {
+		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
+	}
+	if isForkIncompatible(c.MoranBlock, newcfg.MoranBlock, head) {
+		return newCompatError("moran fork block", c.MoranBlock, newcfg.MoranBlock)
+	}
 	return nil
 }
 
@@ -815,7 +843,9 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
-	IsParlia, IsStarknet                                    bool
+	IsParlia, IsStarknet, IsAura                            bool
+	IsNano                                                  bool
+	IsMoran                                                 bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -837,7 +867,10 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsLondon:           c.IsLondon(num),
 		IsShanghai:         c.IsShanghai(num),
 		IsCancun:           c.IsCancun(num),
+		IsNano:             c.IsNano(num),
+		IsMoran:            c.IsMoran(num),
 		IsParlia:           c.Parlia != nil,
+		IsAura:             c.Aura != nil,
 	}
 }
 

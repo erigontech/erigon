@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"unsafe"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -31,13 +30,13 @@ type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
 	Rules              *params.Rules
-	Header             *types.Header
 	Block              *types.Block
 	BlockHash          common.Hash
 	Sender             *common.Address
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
+	TxAsMessage        types.Message
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList
@@ -86,18 +85,17 @@ type State22 struct {
 	triggerLock  sync.RWMutex
 	queue        TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]*btree.BTreeG[StateItem]
+	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
 }
 
-type StateItem struct {
-	key []byte
-	val []byte
+type statePair struct {
+	key, val []byte
 }
 
-func stateItemLess(i, j StateItem) bool {
+func stateItemLess(i, j statePair) bool {
 	return bytes.Compare(i.key, j.key) < 0
 }
 
@@ -105,7 +103,7 @@ func NewState22() *State22 {
 	rs := &State22{
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree.BTreeG[StateItem]{},
+		changes:      map[string]*btree.BTreeG[statePair]{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -114,12 +112,12 @@ func NewState22() *State22 {
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[StateItem](32, stateItemLess)
+		t = btree.NewG[statePair](32, stateItemLess)
 		rs.changes[table] = t
 	}
-	item := StateItem{key: key, val: val}
+	item := statePair{key: key, val: val}
 	t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += PairSize + uint64(len(key)) + uint64(len(val))
 }
 
 func (rs *State22) Get(table string, key []byte) []byte {
@@ -133,7 +131,7 @@ func (rs *State22) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	if i, ok := t.Get(StateItem{key: key}); ok {
+	if i, ok := t.Get(statePair{key: key}); ok {
 		return i.val
 	}
 	return nil
@@ -144,7 +142,7 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(item StateItem) bool {
+		t.Ascend(func(item statePair) bool {
 			if len(item.val) == 0 {
 				if err = rwTx.Delete(table, item.key); err != nil {
 					return false
@@ -310,7 +308,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 		psChanges := rs.changes[kv.PlainState]
 		if psChanges != nil {
-			psChanges.AscendGreaterOrEqual(StateItem{key: addr1}, func(item StateItem) bool {
+			psChanges.AscendGreaterOrEqual(statePair{key: addr1}, func(item statePair) bool {
 				if !bytes.HasPrefix(item.key, addr1) {
 					return false
 				}
@@ -528,7 +526,7 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 	//fmt.Printf("ValidReads\n")
 	for table, list := range readLists {
 		//fmt.Printf("Table %s\n", table)
-		var t *btree.BTreeG[StateItem]
+		var t *btree.BTreeG[statePair]
 		var ok bool
 		if table == CodeSizeTable {
 			t, ok = rs.changes[kv.Code]
@@ -540,7 +538,7 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 		}
 		for i, key := range list.Keys {
 			val := list.Vals[i]
-			if item, ok := t.Get(StateItem{key: key}); ok {
+			if item, ok := t.Get(statePair{key: key}); ok {
 				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
 				if table == CodeSizeTable {
 					if binary.BigEndian.Uint64(val) != uint64(len(item.val)) {
@@ -728,15 +726,16 @@ func (r *StateReader22) SetTrace(trace bool) {
 }
 
 func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc := r.rs.Get(kv.PlainState, address.Bytes())
+	addr := address.Bytes()
+	enc := r.rs.Get(kv.PlainState, addr)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.PlainState, address.Bytes())
+		enc, err = r.tx.GetOne(kv.PlainState, addr)
 		if err != nil {
 			return nil, err
 		}
 	}
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, address.Bytes())
+	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
 	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
 	if len(enc) == 0 {
 		return nil, nil

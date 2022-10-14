@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package lightrpc;
+
+message EmptyRequest {}
+
+enum GossipType {
+    // Lightclient gossip
+    LightClientFinalityUpdateGossipType = 0;
+    LightClientOptimisticUpdateGossipType = 1;
+    // Legacy gossip
+    BeaconBlockGossipType = 2;
+}
+
+message GossipData {
+    bytes data = 1; // SSZ encoded data
+    GossipType type = 2;
+}
+
+message PeerCount {
+    uint64 amount = 1;
+}
+
+message RequestData {
+    bytes data = 1; // SSZ encoded data
+    string topic = 2;
+}
+
+message ResponseData {
+    bytes data = 1; // prefix-stripped SSZ encoded data
+    bool error = 2; // did the peer encounter an error
+}
+
+service Sentinel {
+    rpc SubscribeGossip(EmptyRequest) returns (stream GossipData);
+    rpc SendRequest(RequestData) returns (ResponseData);
+    rpc GetPeers(EmptyRequest) returns (PeerCount);
+}

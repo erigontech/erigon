@@ -99,7 +99,8 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if end > roaring.MaxUint32 {
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
-	blockNumbers := roaring.New()
+	blockNumbers := bitmapdb.NewBitmap()
+	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
@@ -110,20 +111,17 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		blockNumbers.And(topicsBitmap)
 	}
 
-	var addrBitmap *roaring.Bitmap
-	for _, addr := range crit.Addresses {
+	rx := make([]*roaring.Bitmap, len(crit.Addresses))
+	for idx, addr := range crit.Addresses {
 		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
 		if err != nil {
 			return nil, err
 		}
-		if addrBitmap == nil {
-			addrBitmap = m
-			continue
-		}
-		addrBitmap = roaring.Or(addrBitmap, m)
+		rx[idx] = m
 	}
+	addrBitmap := roaring.FastOr(rx...)
 
-	if addrBitmap != nil {
+	if len(rx) > 0 {
 		blockNumbers.And(addrBitmap)
 	}
 
@@ -194,7 +192,11 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			erigonLog := &types.ErigonLog{}
 			erigonLog.BlockNumber = blockNumber
 			erigonLog.BlockHash = blockHash
-			erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+			if log.TxIndex == uint(len(body.Transactions)) {
+				erigonLog.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+			} else {
+				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+			}
 			erigonLog.Timestamp = timestamp
 			erigonLog.Address = log.Address
 			erigonLog.Topics = log.Topics

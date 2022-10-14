@@ -7,12 +7,10 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"sync"
-	"unsafe"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -20,14 +18,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-type ReconStateItem struct {
+type reconPair struct {
 	txNum      uint64 // txNum where the item has been created
 	key1, key2 []byte
 	val        []byte
 }
 
-func (i ReconStateItem) Less(than btree.Item) bool {
-	thanItem := than.(ReconStateItem)
+func (i reconPair) Less(than btree.Item) bool { return ReconnLess(i, than.(reconPair)) }
+
+func ReconnLess(i, thanItem reconPair) bool {
 	if i.txNum == thanItem.txNum {
 		c1 := bytes.Compare(i.key1, thanItem.key1)
 		if c1 == 0 {
@@ -39,23 +38,31 @@ func (i ReconStateItem) Less(than btree.Item) bool {
 	return i.txNum < thanItem.txNum
 }
 
-// ReconState is the accumulator of changes to the state
-type ReconState struct {
+type ReconnWork struct {
 	lock          sync.RWMutex
 	doneBitmap    roaring64.Bitmap
 	triggers      map[uint64][]*TxTask
 	workCh        chan *TxTask
 	queue         TxTaskQueue
-	changes       map[string]*btree.BTree // table => [] (txNum; key1; key2; val)
-	sizeEstimate  uint64
 	rollbackCount uint64
+}
+
+// ReconState is the accumulator of changes to the state
+type ReconState struct {
+	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
+
+	lock         sync.RWMutex
+	changes      map[string]*btree.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
+	sizeEstimate uint64
 }
 
 func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
-		workCh:   workCh,
-		triggers: map[uint64][]*TxTask{},
-		changes:  map[string]*btree.BTree{},
+		ReconnWork: &ReconnWork{
+			workCh:   workCh,
+			triggers: map[uint64][]*TxTask{},
+		},
+		changes: map[string]*btree.BTreeG[reconPair]{},
 	}
 	return rs
 }
@@ -65,13 +72,15 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.New(32)
+		t = btree.NewG[reconPair](32, ReconnLess)
 		rs.changes[table] = t
 	}
-	item := ReconStateItem{key1: libcommon.Copy(key1), key2: libcommon.Copy(key2), val: libcommon.Copy(val), txNum: txNum}
+	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
 	t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(unsafe.Sizeof(item)) + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
+	rs.sizeEstimate += PairSize + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 }
+
+const PairSize = uint64(48) // uint64(unsafe.Sizeof(reconPair{}))
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
 	rs.lock.RLock()
@@ -80,11 +89,11 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 	if !ok {
 		return nil
 	}
-	i := t.Get(ReconStateItem{txNum: txNum, key1: key1, key2: key2})
-	if i == nil {
+	i, ok := t.Get(reconPair{txNum: txNum, key1: key1, key2: key2})
+	if !ok {
 		return nil
 	}
-	return i.(ReconStateItem).val
+	return i.val
 }
 
 func (rs *ReconState) Flush(rwTx kv.RwTx) error {
@@ -92,8 +101,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(i btree.Item) bool {
-			item := i.(ReconStateItem)
+		t.Ascend(func(item reconPair) bool {
 			if len(item.val) == 0 {
 				return true
 			}
@@ -121,7 +129,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconState) Schedule() (*TxTask, bool) {
+func (rs *ReconnWork) Schedule() (*TxTask, bool) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for rs.queue.Len() < 16 {
@@ -138,7 +146,7 @@ func (rs *ReconState) Schedule() (*TxTask, bool) {
 	return nil, false
 }
 
-func (rs *ReconState) CommitTxNum(txNum uint64) {
+func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if tt, ok := rs.triggers[txNum]; ok {
@@ -150,7 +158,7 @@ func (rs *ReconState) CommitTxNum(txNum uint64) {
 	rs.doneBitmap.Add(txNum)
 }
 
-func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
+func (rs *ReconnWork) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {
@@ -163,19 +171,21 @@ func (rs *ReconState) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.rollbackCount++
 }
 
-func (rs *ReconState) Done(txNum uint64) bool {
+func (rs *ReconnWork) Done(txNum uint64) bool {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.Contains(txNum)
+	c := rs.doneBitmap.Contains(txNum)
+	rs.lock.RUnlock()
+	return c
 }
 
-func (rs *ReconState) DoneCount() uint64 {
+func (rs *ReconnWork) DoneCount() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.doneBitmap.GetCardinality()
+	c := rs.doneBitmap.GetCardinality()
+	rs.lock.RUnlock()
+	return c
 }
 
-func (rs *ReconState) RollbackCount() uint64 {
+func (rs *ReconnWork) RollbackCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.rollbackCount
@@ -242,7 +252,7 @@ func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
-	w.rs.Put(kv.CodeR, codeHash[:], nil, code, w.txNum)
+	w.rs.Put(kv.CodeR, codeHash[:], nil, common.CopyBytes(code), w.txNum)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(address[:], FirstContractIncarnation), nil, codeHash[:], w.txNum)
@@ -270,11 +280,6 @@ func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnati
 		return nil
 	}
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	found := w.ac.IsMaxStorageTxNum(address.Bytes(), key.Bytes(), w.txNum)
-	if !found {
-		//fmt.Printf("no found storage [%x] [%x]\n", address, *key)
 		return nil
 	}
 	if !value.IsZero() {

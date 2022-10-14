@@ -14,7 +14,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
@@ -36,13 +35,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -491,7 +490,8 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		}
 
 		if reset {
-			if err := reset2.ResetBlocks(tx, sn, br); err != nil {
+			dirs := datadir.New(datadirCli)
+			if err := reset2.ResetBlocks(tx, db, sn, br, dirs.Tmp); err != nil {
 				return err
 			}
 			return nil
@@ -583,7 +583,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
+	tmpdir := datadir.New(datadirCli).Tmp
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
 	snapshots, _ := allSnapshots(db)
@@ -1153,7 +1153,7 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 		aggDir := path.Join(datadirCli, "snapshots", "history")
 		dir.MustExist(aggDir)
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep)
+		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
@@ -1168,7 +1168,7 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 			}
 			_allSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
-				_aggSingleton.LogStats(func(endTxNumMinimax uint64) uint64 {
+				_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress
 				})
@@ -1199,7 +1199,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	vmConfig := &vm.Config{}
 
-	events := privateapi.NewEvents()
+	events := shards.NewEvents()
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
@@ -1248,7 +1248,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &stagedsync.Notifications{}, nil, allSn, agg, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil)
 	if err != nil {
 		panic(err)
 	}

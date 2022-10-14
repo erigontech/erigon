@@ -3,9 +3,12 @@ package vm
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
+	cmn "github.com/tendermint/tendermint/libs/common"
 
 	"github.com/ledgerwatch/erigon/core/vm/lightclient"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/tendermint/tendermint/crypto/merkle"
 )
 
 const (
@@ -93,8 +96,10 @@ func (c *tmHeaderValidate) Run(input []byte) (result []byte, err error) {
 
 //------------------------------------------------------------------------------------------------------------------------------------------------
 
-// tmHeaderValidate implemented as a native contract.
-type iavlMerkleProofValidate struct{}
+// iavlMerkleProofValidate implemented as a native contract.
+type iavlMerkleProofValidate struct {
+	basicIavlMerkleProofValidate
+}
 
 func (c *iavlMerkleProofValidate) RequiredGas(input []byte) uint64 {
 	return params.IAVLMerkleProofValidateGas
@@ -104,6 +109,54 @@ func (c *iavlMerkleProofValidate) RequiredGas(input []byte) uint64 {
 // | payload length | payload    |
 // | 32 bytes       |            |
 func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
+// tmHeaderValidate implemented as a native contract.
+type tmHeaderValidateNano struct{}
+
+func (c *tmHeaderValidateNano) RequiredGas(input []byte) uint64 {
+	return params.TendermintHeaderValidateGas
+}
+
+func (c *tmHeaderValidateNano) Run(input []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+type iavlMerkleProofValidateNano struct{}
+
+func (c *iavlMerkleProofValidateNano) RequiredGas(_ []byte) uint64 {
+	return params.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidateNano) Run(_ []byte) (result []byte, err error) {
+	return nil, fmt.Errorf("suspend")
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------
+type iavlMerkleProofValidateMoran struct {
+	basicIavlMerkleProofValidate
+}
+
+func (c *iavlMerkleProofValidateMoran) RequiredGas(_ []byte) uint64 {
+	return params.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidateMoran) Run(input []byte) (result []byte, err error) {
+	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
+		forbiddenAbsenceOpVerifier,
+		singleValueOpVerifier,
+		multiStoreOpVerifier,
+		forbiddenSimpleValueOpVerifier,
+	}
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
+type basicIavlMerkleProofValidate struct {
+	verifiers []merkle.ProofOpVerifier
+}
+
+func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("internal error: %v", r)
@@ -124,6 +177,7 @@ func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 		return nil, err
 	}
 
+	kvmp.SetVerifiers(c.verifiers)
 	valid := kvmp.Validate()
 	if !valid {
 		return nil, fmt.Errorf("invalid merkle proof")
@@ -132,4 +186,57 @@ func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 	result = make([]byte, merkleProofValidateResultLength)
 	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
 	return result, nil
+}
+func forbiddenAbsenceOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if _, ok := op.(iavl.IAVLAbsenceOp); ok {
+		return cmn.NewError("absence proof suspend")
+	}
+	return nil
+}
+
+func forbiddenSimpleValueOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if _, ok := op.(merkle.SimpleValueOp); ok {
+		return cmn.NewError("simple value proof suspend")
+	}
+	return nil
+}
+
+func multiStoreOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if mop, ok := op.(lightclient.MultiStoreProofOp); ok {
+		storeNames := make(map[string]bool, len(mop.Proof.StoreInfos))
+		for _, store := range mop.Proof.StoreInfos {
+			if exist := storeNames[store.Name]; exist {
+				return cmn.NewError("duplicated store")
+			} else {
+				storeNames[store.Name] = true
+			}
+		}
+	}
+	return nil
+}
+
+func singleValueOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if valueOp, ok := op.(iavl.IAVLValueOp); ok {
+		if len(valueOp.Proof.Leaves) != 1 {
+			return cmn.NewError("range proof suspended")
+		}
+		for _, innerNode := range valueOp.Proof.LeftPath {
+			if len(innerNode.Right) > 0 && len(innerNode.Left) > 0 {
+				return cmn.NewError("both right and left hash exit!")
+			}
+		}
+	}
+	return nil
 }

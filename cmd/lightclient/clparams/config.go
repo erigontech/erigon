@@ -14,28 +14,28 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 type NetworkType int
 
 const (
-	MainnetNetwork NetworkType = 0
-	GoerliNetwork  NetworkType = 1
-	SepoliaNetwork NetworkType = 2
+	MainnetNetwork NetworkType = 1
+	GoerliNetwork  NetworkType = 5
+	SepoliaNetwork NetworkType = 11155111
 )
+
 const (
-	MaxDialTimeout            = 10 * time.Second
-	VersionLength      int    = 4
-	SepoliaEth1ChainId uint64 = 5
-	GoerliEth1ChainId  uint64 = 11155111
+	MaxDialTimeout               = 10 * time.Second
+	VersionLength  int           = 4
+	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
+	ReqTimeout     time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 15 * time.Second
 )
 
 var (
@@ -97,7 +97,7 @@ type NetworkConfig struct {
 	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
-	bootNodes               []string
+	BootNodes               []string
 }
 
 type GenesisConfig struct {
@@ -109,12 +109,12 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	MainnetNetwork: {
 		GossipMaxSize:                   1 << 20, // 1 MiB
 		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		MaxChunkSize:                    MaxChunkSize,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -123,7 +123,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         11184524,
-		bootNodes:                       MainnetBootstrapNodes,
+		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	SepoliaNetwork: {
@@ -133,8 +133,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -143,7 +143,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         1273020,
-		bootNodes:                       SepoliaBootstrapNodes,
+		BootNodes:                       SepoliaBootstrapNodes,
 	},
 
 	GoerliNetwork: {
@@ -153,8 +153,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
-		TtfbTimeout:                     5 * time.Second,
-		RespTimeout:                     10 * time.Second,
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -163,7 +163,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         4367322,
-		bootNodes:                       GoerliBootstrapNodes,
+		BootNodes:                       GoerliBootstrapNodes,
 	},
 }
 
@@ -609,8 +609,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ConfigName = "sepolia"
 	cfg.GenesisForkVersion = []byte{0x90, 0x00, 0x00, 0x69}
 	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = SepoliaEth1ChainId
-	cfg.DepositNetworkID = SepoliaEth1ChainId
+	cfg.DepositChainID = uint64(SepoliaNetwork)
+	cfg.DepositNetworkID = uint64(SepoliaNetwork)
 	cfg.AltairForkEpoch = 50
 	cfg.AltairForkVersion = []byte{0x90, 0x00, 0x00, 0x70}
 	cfg.BellatrixForkEpoch = 100
@@ -628,8 +628,8 @@ func goerliConfig() BeaconChainConfig {
 	cfg.ConfigName = "prater"
 	cfg.GenesisForkVersion = []byte{0x00, 0x00, 0x10, 0x20}
 	cfg.SecondsPerETH1Block = 14
-	cfg.DepositChainID = GoerliEth1ChainId
-	cfg.DepositNetworkID = GoerliEth1ChainId
+	cfg.DepositChainID = uint64(GoerliNetwork)
+	cfg.DepositNetworkID = uint64(GoerliNetwork)
 	cfg.AltairForkEpoch = 36660
 	cfg.AltairForkVersion = []byte{0x1, 0x0, 0x10, 0x20}
 	cfg.CapellaForkVersion = []byte{0x3, 0x0, 0x10, 0x20}
@@ -649,23 +649,10 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	GoerliNetwork:  goerliConfig(),
 }
 
-func GetConfigsByNetwork(net NetworkType) (*discover.Config, GenesisConfig, NetworkConfig, BeaconChainConfig, error) {
+func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
-	bootnodes := networkConfig.bootNodes
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
-	}
-	enodes := []*enode.Node{}
-	for _, addr := range bootnodes {
-		enode, err := enode.Parse(enode.ValidSchemes, addr)
-		if err != nil {
-			return nil, GenesisConfig{}, NetworkConfig{}, BeaconChainConfig{}, err
-		}
-		enodes = append(enodes, enode)
-	}
-	return &discover.Config{
-		PrivateKey: privateKey,
-		Bootnodes:  enodes,
-	}, GenesisConfigs[net], networkConfig, BeaconConfigs[net], nil
+	genesisConfig := GenesisConfigs[net]
+	fmt.Println(genesisConfig)
+	beaconConfig := BeaconConfigs[net]
+	return &genesisConfig, &networkConfig, &beaconConfig
 }

@@ -14,8 +14,9 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/proto/ssz_snappy"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -23,37 +24,44 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-var ProtocolPrefix = "/eth2/beacon_chain/req"
-
 type ConsensusHandlers struct {
 	handlers map[protocol.ID]network.StreamHandler
 	host     host.Host
 	peers    *peers.Peers
+	metadata *cltypes.MetadataV2
 }
 
-func NewConsensusHandlers(host host.Host, peers *peers.Peers) *ConsensusHandlers {
+const SuccessfullResponsePrefix = 0x00
+
+var NoRequestHandlers = map[string]bool{
+	MetadataProtocolV1:          true,
+	MetadataProtocolV2:          true,
+	LightClientFinalityUpdateV1: true,
+}
+
+func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *cltypes.MetadataV2) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		peers: peers,
-		host:  host,
+		peers:    peers,
+		host:     host,
+		metadata: metadata,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(ProtocolPrefix + "/ping/1/ssz_snappy"):                   curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
-		protocol.ID(ProtocolPrefix + "/status/1/ssz_snappy"):                 curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
-		protocol.ID(ProtocolPrefix + "/goodbye/1/ssz_snappy"):                curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(ProtocolPrefix + "/metadata/1/ssz_snappy"):               curryStreamHandler(ssz_snappy.NewStreamCodec, metadataHandler),
-		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_range/1/ssz_snappy"): c.blocksByRangeHandler,
-		protocol.ID(ProtocolPrefix + "/beacon_blocks_by_root/1/ssz_snappy"):  c.beaconBlocksByRootHandler,
+		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
+		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
+		protocol.ID(MetadataProtocolV1):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
+		protocol.ID(MetadataProtocolV2):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
+		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
+		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
 	return c
 }
 
 func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
-	defer stream.Close()
 	log.Info("Got block by range handler call")
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
-	defer stream.Close()
 	log.Info("Got beacon block by root handler call")
 }
 

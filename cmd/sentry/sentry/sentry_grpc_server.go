@@ -683,7 +683,7 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) findPeer(minBlock uint64) (*PeerInfo, bool) {
+func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 	// Choose a peer that we can send this request to, with maximum number of permits
 	var foundPeerInfo *PeerInfo
 	var maxPermits int
@@ -705,6 +705,25 @@ func (ss *GrpcServer) findPeer(minBlock uint64) (*PeerInfo, bool) {
 	return foundPeerInfo, maxPermits > 0
 }
 
+func (ss *GrpcServer) findBestPeerWithPermit() (*PeerInfo, bool) {
+	// Choose a peer that we can send this request to, with maximum number of permits
+	var foundPeerInfo *PeerInfo
+	var maxBlock uint64
+	now := time.Now()
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if maxBlock == 0 || peerInfo.Height() > maxBlock {
+			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+			if deadlines < maxPermitsPerPeer {
+				maxBlock = peerInfo.Height()
+				foundPeerInfo = peerInfo
+			}
+		}
+		return true
+	})
+	return foundPeerInfo, foundPeerInfo != nil
+}
+
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
@@ -713,21 +732,17 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
-
-	peerInfo, found := ss.findPeer(inreq.MinBlock)
+	peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
 	if found {
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 	} else {
-		// If peer with specified minBlock is not found, send to 2 random peers
-		i := 0
-		sendToAmount := 2
-		ss.rangePeers(func(peerInfo *PeerInfo) bool {
-			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 0)
-			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
-			i++
-			return i < sendToAmount
-		})
+		// If peer with specified minBlock is not found, send to best peer with permits
+		peerInfo, found = ss.findBestPeerWithPermit()
+		if found {
+			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+		}
 	}
 	return reply, nil
 }
