@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	//"github.com/prysmaticlabs/go-bls"
+	blst "github.com/supranational/blst/bindings/go"
 )
 
 const (
@@ -15,7 +15,10 @@ const (
 	FinalizedRootIndex           = 105
 )
 
-var DomainSyncCommittee = common.Hex2Bytes("07000000")
+var (
+	DomainSyncCommittee = common.Hex2Bytes("07000000")
+	dst                 = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
+)
 
 func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, finalityUpdate bool) (bool, error) {
 	if update.SyncAggregate.Sum() < MinSyncCommitteeParticipants {
@@ -112,24 +115,23 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 	if err != nil {
 		return false, err
 	}
-	// Create signature objects
-	/*var signature bls.Sign
-	if err := signature.Deserialize(update.SyncAggregate.SyncCommiteeSignature[:]); err != nil {
+	_ = signingRoot
+	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
+	if err != nil {
 		return false, err
 	}
-	// Aggreggate public keys
-	var pubKey bls.PublicKey
+
+	var pks []*blst.P1Affine
+
 	for _, key := range pubkeys {
-		var currPubKey bls.PublicKey
-		if err := currPubKey.Deserialize(key[:]); err != nil {
+		pk, err := utils.PublicKeyFromBytes(key[:])
+		if err != nil {
 			return false, err
 		}
-		pubKey.Add(&currPubKey)
-	}*/
-	_ = signingRoot
-	_ = pubkeys
-	return true, nil
-	// return signature.Verify(&pubKey, signingRoot[:]), nil
+		pks = append(pks, pk)
+	}
+
+	return signature.FastAggregateVerify(true, pks, signingRoot[:], dst), nil
 }
 
 func (l *LightClient) validateOptimisticUpdate(update *cltypes.LightClientOptimisticUpdate) (bool, error) {

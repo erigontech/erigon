@@ -32,6 +32,7 @@ var (
 const DefaultUri = "https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized"
 
 func main() {
+
 	ctx := context.Background()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	addr := "localhost:7777"
