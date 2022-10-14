@@ -103,7 +103,6 @@ func (l *LightClient) Start(ctx context.Context) {
 			} else {
 				updates = append(updates, update)
 			}
-			break
 		// Clause 4 (ii):
 		// When finalized_period + 1 < current_period, the light client fetches a LightClientUpdate
 		// for each sync committee period in range [finalized_period + 1, current_period)
@@ -118,7 +117,6 @@ func (l *LightClient) Start(ctx context.Context) {
 					updates = append(updates, update)
 				}
 			}
-			break
 		}
 		// Push updates
 		for _, update := range updates {
