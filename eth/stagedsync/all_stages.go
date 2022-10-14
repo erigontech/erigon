@@ -9,30 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-var syncMetrics = map[stages.SyncStage]*metrics.Counter{
-	stages.Headers:   metrics.GetOrCreateCounter(`sync{stage="headers"}`),
-	stages.Execution: metrics.GetOrCreateCounter(`sync{stage="execution"}`),
-	stages.Finish:    metrics.GetOrCreateCounter(`sync{stage="finish"}`),
-}
+var syncMetrics = map[stages.SyncStage]*metrics.Counter{}
 
 func init() {
-	for _, v := range []stages.SyncStage{
-		stages.Snapshots,
-		stages.CumulativeIndex,
-		stages.BlockHashes,
-		stages.Bodies,
-		stages.Senders,
-		stages.Translation,
-		stages.VerkleTrie,
-		stages.IntermediateHashes,
-		stages.HashState,
-		stages.AccountHistoryIndex,
-		stages.StorageHistoryIndex,
-		stages.LogIndex,
-		stages.CallTraces,
-		stages.TxLookup,
-		stages.Issuance,
-	} {
+	for _, v := range stages.AllStages {
 		syncMetrics[v] = metrics.GetOrCreateCounter(
 			fmt.Sprintf(
 				`sync{stage="%s"}`,
