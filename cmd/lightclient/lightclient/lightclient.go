@@ -15,7 +15,6 @@ package lightclient
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -99,15 +98,18 @@ func (l *LightClient) Start(ctx context.Context) {
 			} else {
 				updates = append(updates, update)
 			}
-			break
 		}
 		// Push updates
 		for _, update := range updates {
-			valid, err := l.validateLegacyUpdate(update, false)
+			valid, err := l.validateLegacyUpdate(update, true)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
 			}
-			fmt.Println(valid)
+			if valid {
+				log.Info("Validation Passed")
+			} else {
+				log.Warn("Validation did not pass")
+			}
 		}
 		// do not have high CPU load
 		timer := time.NewTimer(50 * time.Millisecond)

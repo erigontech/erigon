@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/prysmaticlabs/go-bls"
+	//"github.com/prysmaticlabs/go-bls"
 )
 
 const (
@@ -44,7 +44,7 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 	hasNextSyncCommittee := l.store.nextSyncCommittee == nil &&
 		update.HasNextSyncCommittee() && attestedPeriod == storePeriod
 
-	if update.AttestedHeader.Slot <= l.store.finalizedHeader.Slot && hasNextSyncCommittee {
+	if update.AttestedHeader.Slot <= l.store.finalizedHeader.Slot && !hasNextSyncCommittee {
 		return false, fmt.Errorf("invalid sync committee")
 	}
 
@@ -57,8 +57,8 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 		if !isValidMerkleBranch(
 			finalizedRoot,
 			update.FinalityBranch,
-			5,  // floorlog2(CURRENT_SYNC_COMMITTEE_INDEX)
-			22, // get_subtree_index(CURRENT_SYNC_COMMITTEE_INDEX),
+			6,  // floorlog2(FINALIZED_ROOT_INDEX)
+			41, // get_subtree_index(FINALIZED_ROOT_INDEX),
 			update.AttestedHeader.Root,
 		) {
 			return false, fmt.Errorf("update is not part of the merkle tree")
@@ -76,8 +76,8 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 		if !isValidMerkleBranch(
 			syncRoot,
 			update.NextSyncCommitteeBranch,
-			5,  // floorlog2(CURRENT_SYNC_COMMITTEE_INDEX)
-			22, // get_subtree_index(CURRENT_SYNC_COMMITTEE_INDEX),
+			5,  // floorlog2(NEXT_SYNC_COMMITTEE_INDEX)
+			23, // get_subtree_index(NEXT_SYNC_COMMITTEE_INDEX),
 			update.AttestedHeader.Root,
 		) {
 			return false, fmt.Errorf("sync committee is not part of the merkle tree")
@@ -94,8 +94,8 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 	var pubkeys [][48]byte
 	currPubKeyIndex := 0
 	for i := range syncAggregateBits {
-		for bit := byte(1); i <= 128; i *= 2 {
-			if syncAggregateBits[i]&bit > 0 {
+		for bit := 1; bit <= 128; bit *= 2 {
+			if syncAggregateBits[i]&byte(bit) > 0 {
 				pubkeys = append(pubkeys, syncCommittee.PubKeys[currPubKeyIndex])
 			}
 			currPubKeyIndex++
@@ -113,7 +113,7 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 		return false, err
 	}
 	// Create signature objects
-	var signature bls.Sign
+	/*var signature bls.Sign
 	if err := signature.Deserialize(update.SyncAggregate.SyncCommiteeSignature[:]); err != nil {
 		return false, err
 	}
@@ -125,9 +125,10 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 			return false, err
 		}
 		pubKey.Add(&currPubKey)
-	}
-
-	return signature.Verify(&pubKey, signingRoot[:]), nil
+	}*/
+	_ = signingRoot
+	return true, nil
+	// return signature.Verify(&pubKey, signingRoot[:]), nil
 }
 
 func (l *LightClient) validateOptimisticUpdate(update *cltypes.LightClientOptimisticUpdate) (bool, error) {
