@@ -183,7 +183,6 @@ func Exec3(ctx context.Context,
 			defer tx.Rollback()
 			agg.SetTx(tx)
 			defer rs.Finish()
-			defer agg.FinishWrites()
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
