@@ -13,26 +13,33 @@ var syncMetrics = map[stages.SyncStage]*metrics.Counter{
 	stages.Headers:   metrics.GetOrCreateCounter(`sync{stage="headers"}`),
 	stages.Execution: metrics.GetOrCreateCounter(`sync{stage="execution"}`),
 	stages.Finish:    metrics.GetOrCreateCounter(`sync{stage="finish"}`),
-	// additional
-	stages.Snapshots:           makeSyncMetric(stages.Snapshots),
-	stages.CumulativeIndex:     makeSyncMetric(stages.CumulativeIndex),
-	stages.BlockHashes:         makeSyncMetric(stages.BlockHashes),
-	stages.Bodies:              makeSyncMetric(stages.Bodies),
-	stages.Senders:             makeSyncMetric(stages.Senders),
-	stages.Translation:         makeSyncMetric(stages.Translation),
-	stages.VerkleTrie:          makeSyncMetric(stages.VerkleTrie),
-	stages.IntermediateHashes:  makeSyncMetric(stages.IntermediateHashes),
-	stages.HashState:           makeSyncMetric(stages.HashState),
-	stages.AccountHistoryIndex: makeSyncMetric(stages.AccountHistoryIndex),
-	stages.StorageHistoryIndex: makeSyncMetric(stages.StorageHistoryIndex),
-	stages.LogIndex:            makeSyncMetric(stages.LogIndex),
-	stages.CallTraces:          makeSyncMetric(stages.CallTraces),
-	stages.TxLookup:            makeSyncMetric(stages.TxLookup),
-	stages.Issuance:            makeSyncMetric(stages.Issuance),
 }
 
-func makeSyncMetric(stage stages.SyncStage) *metrics.Counter {
-	return metrics.GetOrCreateCounter(fmt.Sprintf(`sync{stage="%s"}`, xstrings.ToSnakeCase(string(stage))))
+func init() {
+	for _, v := range []stages.SyncStage{
+		stages.Snapshots,
+		stages.CumulativeIndex,
+		stages.BlockHashes,
+		stages.Bodies,
+		stages.Senders,
+		stages.Translation,
+		stages.VerkleTrie,
+		stages.IntermediateHashes,
+		stages.HashState,
+		stages.AccountHistoryIndex,
+		stages.StorageHistoryIndex,
+		stages.LogIndex,
+		stages.CallTraces,
+		stages.TxLookup,
+		stages.Issuance,
+	} {
+		syncMetrics[v] = metrics.GetOrCreateCounter(
+			fmt.Sprintf(
+				`sync{stage="%s"}`,
+				xstrings.ToSnakeCase(string(v)),
+			),
+		)
+	}
 }
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
