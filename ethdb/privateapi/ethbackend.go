@@ -583,9 +583,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// No need for payload building
-	if req.PayloadAttributes == nil || status.Status != remote.EngineStatus_VALID {
-		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(status)}, nil
-	}
+	//if req.PayloadAttributes == nil || status.Status != remote.EngineStatus_VALID {
+	//	return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(status)}, nil
+	//}
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
@@ -612,6 +612,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		log.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
 			"forkChoice.HeadBlockHash", forkChoice.HeadBlockHash, "headHeader.Hash", headHeader.Hash())
 		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(status)}, nil
+	}
+
+	req.PayloadAttributes = &remote.EnginePayloadAttributes{
+		Timestamp:             headHeader.Time + 12,
+		PrevRandao:            gointerfaces.ConvertHashToH256([32]byte{}),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160([20]byte{}),
 	}
 
 	if headHeader.Time >= req.PayloadAttributes.Timestamp {
