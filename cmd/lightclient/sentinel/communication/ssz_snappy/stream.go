@@ -199,7 +199,6 @@ func readUvarint(r io.Reader) (x uint64, err error) {
 func DecodeLightClientUpdate(data []byte) (*cltypes.LightClientUpdate, error) {
 	resp := &cltypes.LightClientUpdate{}
 	singleLen := resp.SizeSSZ()
-	fmt.Println(len(data[7:]))
 	r := bytes.NewReader(data[7:])
 
 	sr := snappy.NewReader(r)
