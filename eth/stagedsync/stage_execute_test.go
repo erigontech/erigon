@@ -125,7 +125,7 @@ func TestExec(t *testing.T) {
 
 func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	agg.SetTx(tx)
-	defer agg.StartWrites().FinishWrites()
+	agg.StartWrites()
 
 	rs := state.NewState22()
 	stateWriter := state.NewStateWriter22(rs)
