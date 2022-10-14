@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -82,37 +83,55 @@ func (l *LightClient) Start(ctx context.Context) {
 		return
 	}
 	for {
-		var updates []*cltypes.LightClientUpdate
-		finalizedPeriod := (l.store.finalizedHeader.Slot / 32) / 256
-		optimisticPeriod := (l.store.optimisticHeader.Slot / 32) / 256
+		start := time.Now()
+		var (
+			updates          = []*cltypes.LightClientUpdate{}
+			finalizedPeriod  = utils.SlotToPeriod(l.store.finalizedHeader.Slot)
+			optimisticPeriod = utils.SlotToPeriod(l.store.optimisticHeader.Slot)
+			currentSlot      = utils.GetCurrentSlot(l.genesisConfig.GenesisTime, l.beaconConfig.SecondsPerSlot)
+			currentPeriod    = utils.SlotToPeriod(currentSlot)
+		)
 
-		isNextSyncCommitteeKnown := l.store.nextSyncCommittee != nil
 		switch {
 		// Clause 4 (i):
 		// if finalized period == optimistic period and the next sync committee is unknown,
 		// fetch the corresponding lightclient update for this cycle
-		case finalizedPeriod == optimisticPeriod && !isNextSyncCommitteeKnown:
+		case finalizedPeriod == optimisticPeriod && l.store.nextSyncCommittee == nil:
 			update, err := l.FetchUpdate(ctx, finalizedPeriod)
 			if err != nil {
-				log.Error("Could not fetch lightclient update", "reason", err)
+				log.Error("[LightClient] Could not fetch lightclient update", "reason", err)
 			} else {
 				updates = append(updates, update)
 			}
+			break
+		// Clause 4 (ii):
+		// When finalized_period + 1 < current_period, the light client fetches a LightClientUpdate
+		// for each sync committee period in range [finalized_period + 1, current_period)
+		case finalizedPeriod+1 < currentPeriod:
+			for period := finalizedPeriod + 1; period < currentPeriod; period++ {
+				update, err := l.FetchUpdate(ctx, period)
+				if err != nil {
+					log.Error("[LightClient] Could not fetch lightclient update, truncating sync session...",
+						"period", period, "reason", err)
+					break
+				} else {
+					updates = append(updates, update)
+				}
+			}
+			break
 		}
 		// Push updates
 		for _, update := range updates {
-			valid, err := l.validateLegacyUpdate(update, true)
+			err := l.processLightClientUpdate(update)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
 			}
-			if valid {
-				log.Info("Validation Passed")
-			} else {
-				log.Warn("Validation did not pass")
-			}
+		}
+		if len(updates) > 0 {
+			log.Info("[LightClient] Synced up", "elapsed", time.Since(start))
 		}
 		// do not have high CPU load
-		timer := time.NewTimer(50 * time.Millisecond)
+		timer := time.NewTimer(200 * time.Millisecond)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
