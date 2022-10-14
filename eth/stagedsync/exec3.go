@@ -278,6 +278,17 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
+
+			if err := rs.Flush(tx); err != nil {
+				panic(err)
+			}
+			tx.CollectMetrics()
+			if err := agg.Flush(); err != nil {
+				panic(err)
+			}
+			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+				panic(err)
+			}
 			//  TODO: why here is no flush?
 			if err = tx.Commit(); err != nil {
 				panic(err)
