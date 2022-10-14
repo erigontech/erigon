@@ -125,6 +125,8 @@ func TestExec(t *testing.T) {
 
 func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	agg.SetTx(tx)
+	defer agg.StartWrites().FinishWrites()
+
 	rs := state.NewState22()
 	stateWriter := state.NewStateWriter22(rs)
 	return func(n, from, numberOfBlocks uint64) {
@@ -147,6 +149,9 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			if n == from+numberOfBlocks-1 {
 				err := rs.Flush(tx)
 				if err != nil {
+					panic(err)
+				}
+				if err := agg.Flush(); err != nil {
 					panic(err)
 				}
 			}
