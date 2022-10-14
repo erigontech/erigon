@@ -135,11 +135,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	var onTime bool
 	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
-		for !onTime {
+		counter := 0
+		for !onTime && counter < 1000 {
 			if onTime, err = cfg.txPool2.Best(maxTransactions, &txSlots, poolTx, executionAt); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)
+			counter++
 		}
 		return nil
 	}); err != nil {
