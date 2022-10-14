@@ -666,14 +666,17 @@ Logs:
 
 func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
-	addrMap := map[common.Address]struct{}{}
+	// populate a set of addresses
+	addrMap := make(map[common.Address]struct{}, len(logs))
 	if len(addresses) > 0 {
 		for _, v := range addresses {
 			addrMap[v] = struct{}{}
 		}
 	}
 	for _, log := range logs {
+		// empty address list means no filter
 		if len(addresses) > 0 {
+			// this is basically the includes function but done with a map
 			if _, ok := addrMap[log.Address]; !ok {
 				continue
 			}
