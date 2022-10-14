@@ -112,6 +112,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		return false, err
 	}
 	_ = signingRoot
+	_ = pubkeys
 
 	/*	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
 		if err != nil {
