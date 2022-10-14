@@ -39,7 +39,7 @@ const (
 	superQ     uint64 = 1 << 14
 	superQMask uint64 = superQ - 1
 	qPerSuperQ uint64 = superQ / q       // 64
-	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/4 = 17
+	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
 
 // EliasFano can be used to encode one monotone sequence
@@ -217,6 +217,10 @@ func (ef EliasFano) Max() uint64 {
 	return ef.maxOffset
 }
 
+func (ef EliasFano) Min() uint64 {
+	return ef.Get(0)
+}
+
 func (ef EliasFano) Count() uint64 {
 	return ef.count + 1
 }
@@ -297,7 +301,7 @@ func (ef *EliasFano) AppendBytes(buf []byte) []byte {
 	return buf
 }
 
-const maxDataSize = 0xFFFFFFFFFFFF
+const maxDataSize = 0xFFFFFFFFFFFF //2^48
 
 // Read inputs the state of golomb rice encoding from a reader s
 func ReadEliasFano(r []byte) (*EliasFano, int) {
@@ -313,6 +317,38 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 func Max(r []byte) uint64 { return binary.BigEndian.Uint64(r[8:16]) - 1 }
+
+func Min(r []byte) uint64 {
+	count := binary.BigEndian.Uint64(r[:8])
+	u := binary.BigEndian.Uint64(r[8:16])
+	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[16]))
+	var l uint64
+	if u/(count+1) == 0 {
+		l = 0
+	} else {
+		l = 63 ^ uint64(bits.LeadingZeros64(u/(count+1))) // pos of first non-zero bit
+	}
+	wordsLowerBits := int(((count+1)*l+63)/64 + 1)
+	wordsUpperBits := int((count + 1 + (u >> l) + 63) / 64)
+	lowerBits := p[:wordsLowerBits]
+	upperBits := p[wordsLowerBits : wordsLowerBits+wordsUpperBits]
+	jump := p[wordsLowerBits+wordsUpperBits:]
+	lower := lowerBits[0]
+
+	mask := uint64(0xffffffff)
+	j := jump[0] + jump[1]&mask
+	currWord := j / 64
+	window := upperBits[currWord] & (uint64(0xffffffffffffffff) << (j % 64))
+
+	if bitCount := bits.OnesCount64(window); bitCount <= 0 {
+		currWord++
+		window = upperBits[currWord]
+	}
+	sel := bitutil.Select64(window, 0)
+	lowerBitsMask := (uint64(1) << l) - 1
+	val := ((currWord*64+uint64(sel))<<l | (lower & lowerBitsMask))
+	return val
+}
 
 // DoubleEliasFano can be used to encode two monotone sequences
 // it is called "double" because the lower bits array contains two sequences interleaved
