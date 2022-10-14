@@ -121,7 +121,7 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 		return false, err
 	}
 
-	var pks []*blst.P1Affine
+	pks := []*blst.P1Affine{}
 
 	for _, key := range pubkeys {
 		pk, err := utils.PublicKeyFromBytes(key[:])
