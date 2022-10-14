@@ -279,16 +279,16 @@ func Exec3(ctx context.Context,
 				}
 			}
 
-			if err := rs.Flush(tx); err != nil {
-				panic(err)
-			}
-			tx.CollectMetrics()
-			if err := agg.Flush(); err != nil {
-				panic(err)
-			}
-			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
-				panic(err)
-			}
+			//if err := rs.Flush(tx); err != nil {
+			//	panic(err)
+			//}
+			//tx.CollectMetrics()
+			//if err := agg.Flush(); err != nil {
+			//	panic(err)
+			//}
+			//if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			//	panic(err)
+			//}
 			//  TODO: why here is no flush?
 			if err = tx.Commit(); err != nil {
 				panic(err)
@@ -416,6 +416,9 @@ loop:
 			if err = rs.Flush(tx); err != nil {
 				return err
 			}
+			if err = agg.Flush(); err != nil {
+				return err
+			}
 			if err = execStage.Update(tx, stageProgress); err != nil {
 				return err
 			}
@@ -425,6 +428,9 @@ loop:
 		}
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
+			return err
+		}
+		if err = agg.Flush(); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -771,6 +777,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
+							if err = agg.Flush(); err != nil {
+								return err
+							}
 							return nil
 						}); err != nil {
 							return err
@@ -837,6 +846,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
+		//if err = agg.Flush(); err != nil {
+		//	return err
+		//}
 		return nil
 	}); err != nil {
 		return err
