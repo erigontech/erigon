@@ -42,7 +42,6 @@ type MiningBlock struct {
 
 type MiningState struct {
 	MiningConfig      *params.MiningConfig
-	StateViewID       uint64
 	PendingResultCh   chan *types.Block
 	MiningResultCh    chan *types.Block
 	MiningResultPOSCh chan *types.Block
