@@ -15,6 +15,7 @@ package lightclient
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -26,13 +27,17 @@ import (
 
 type LightClient struct {
 	genesisConfig *clparams.GenesisConfig
-	sentinel      lightrpc.SentinelClient
-	execution     remote.ETHBACKENDServer
-	store         *LightClientStore
+	beaconConfig  *clparams.BeaconChainConfig
+
+	sentinel  lightrpc.SentinelClient
+	execution remote.ETHBACKENDServer
+	store     *LightClientStore
 }
 
-func NewLightClient(genesisConfig *clparams.GenesisConfig, execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
+func NewLightClient(genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
 	return &LightClient{
+		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		sentinel:      sentinel,
 		execution:     execution,
@@ -82,7 +87,7 @@ func (l *LightClient) Start(ctx context.Context) {
 		finalizedPeriod := (l.store.finalizedHeader.Slot / 32) / 256
 		optimisticPeriod := (l.store.optimisticHeader.Slot / 32) / 256
 
-		isNextSyncCommitteeKnown := l.store.nextSynccommittee != nil
+		isNextSyncCommitteeKnown := l.store.nextSyncCommittee != nil
 		switch {
 		// Clause 4 (i):
 		// if finalized period == optimistic period and the next sync committee is unknown,
@@ -97,7 +102,13 @@ func (l *LightClient) Start(ctx context.Context) {
 			break
 		}
 		// Push updates
-
+		for _, update := range updates {
+			valid, err := l.validateLegacyUpdate(update, false)
+			if err != nil {
+				log.Warn("Could not validate update", "err", err)
+			}
+			fmt.Println(valid)
+		}
 		// do not have high CPU load
 		timer := time.NewTimer(50 * time.Millisecond)
 		select {

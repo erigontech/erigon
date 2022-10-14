@@ -14,7 +14,7 @@ type LightClientStore struct {
 
 	// Sync committees corresponding to the header
 	currentSyncCommittee *cltypes.SyncCommittee
-	nextSynccommittee    *cltypes.SyncCommittee
+	nextSyncCommittee    *cltypes.SyncCommittee
 
 	// Best available header to switch finalized head to if we see nothing else
 	bestValidUpdate *cltypes.LightClientUpdate
@@ -56,7 +56,7 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 	return &LightClientStore{
 		finalizedHeader:               bootstrap.Header,
 		currentSyncCommittee:          bootstrap.CurrentSyncCommittee,
-		nextSynccommittee:             nil,
+		nextSyncCommittee:             nil,
 		optimisticHeader:              bootstrap.Header,
 		previousMaxActivePartecipants: 0,
 		currentMaxActivePartecipants:  0,

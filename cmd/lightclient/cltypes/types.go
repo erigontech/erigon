@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"bytes"
+
 	ssz "github.com/ferranbt/fastssz"
 )
 
@@ -148,6 +150,21 @@ type SyncCommittee struct {
 	AggregatePublicKey [48]byte   `ssz-size:"48"`
 }
 
+func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
+	if !bytes.Equal(s.AggregatePublicKey[:], s2.AggregatePublicKey[:]) {
+		return false
+	}
+	if len(s.PubKeys) != len(s2.PubKeys) {
+		return false
+	}
+	for i := range s.PubKeys {
+		if !bytes.Equal(s.PubKeys[i][:], s2.PubKeys[i][:]) {
+			return false
+		}
+	}
+	return true
+}
+
 type LightClientBootstrap struct {
 	Header                     *BeaconBlockHeader
 	CurrentSyncCommittee       *SyncCommittee
@@ -162,6 +179,21 @@ type LightClientUpdate struct {
 	FinalityBranch          [][]byte `ssz-size:"6,32"`
 	SyncAggregate           *SyncAggregate
 	SignatureSlot           uint64
+}
+
+func (l *LightClientUpdate) HasNextSyncCommittee() bool {
+	if len(l.NextSyncCommitteeBranch) != 5 {
+		return false
+	}
+	for _, leaf := range l.NextSyncCommitteeBranch {
+		if len(leaf) != 32 {
+			return false
+		}
+		if !bytes.Equal(make([]byte, 32), leaf) {
+			return true
+		}
+	}
+	return false
 }
 
 type LightClientFinalityUpdate struct {
@@ -238,4 +270,6 @@ type BeaconState struct {
 type ObjectSSZ interface {
 	ssz.Marshaler
 	ssz.Unmarshaler
+
+	HashTreeRoot() ([32]byte, error)
 }

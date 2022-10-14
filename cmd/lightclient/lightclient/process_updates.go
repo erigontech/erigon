@@ -1,5 +1,9 @@
 package lightclient
 
+func (l *LightClient) processLightClientUpdate() {
+
+}
+
 /*
 def process_light_client_update(store: LightClientStore,
                                 update: LightClientUpdate,
