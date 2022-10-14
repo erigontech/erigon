@@ -360,11 +360,19 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 	gasBailout := config.Consensus == params.ParliaConsensus
 
 	missedTxs := 0
+	noSenderCnt := 0
+	noAccountCnt := 0
+	nonceTooLowCnt := 0
+	notEOACnt := 0
+	feeTooLowCnt := 0
+	balanceTooLowCnt := 0
+	overflowCnt := 0
 	for len(transactions) > 0 && missedTxs != len(transactions) {
 		transaction := transactions[0]
 		sender, ok := transaction.GetSender()
 		if !ok {
 			transactions = transactions[1:]
+			noSenderCnt++
 			continue
 		}
 		var account accounts.Account
@@ -374,11 +382,13 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		}
 		if !ok {
 			transactions = transactions[1:]
+			noAccountCnt++
 			continue
 		}
 		// Check transaction nonce
 		if account.Nonce > transaction.GetNonce() {
 			transactions = transactions[1:]
+			nonceTooLowCnt++
 			continue
 		}
 		if account.Nonce < transaction.GetNonce() {
@@ -391,6 +401,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
 			transactions = transactions[1:]
+			notEOACnt++
 			continue
 		}
 
@@ -403,6 +414,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
 				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256); err != nil {
 					transactions = transactions[1:]
+					feeTooLowCnt++
 					continue
 				}
 			}
@@ -417,6 +429,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		want, overflow := want.MulOverflow(want, txnPrice)
 		if overflow {
 			transactions = transactions[1:]
+			overflowCnt++
 			continue
 		}
 
@@ -425,11 +438,13 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
 			if overflow {
 				transactions = transactions[1:]
+				overflowCnt++
 				continue
 			}
 			want, overflow = want.AddOverflow(want, value)
 			if overflow {
 				transactions = transactions[1:]
+				overflowCnt++
 				continue
 			}
 		}
@@ -437,6 +452,7 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		if accountBalance.Cmp(want) < 0 {
 			if !gasBailout {
 				transactions = transactions[1:]
+				balanceTooLowCnt++
 				continue
 			}
 		}
@@ -452,5 +468,6 @@ func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config pa
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
+	log.Info("Filtration", "no sender", noSenderCnt, "no account", noAccountCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt)
 	return filtered, nil
 }
