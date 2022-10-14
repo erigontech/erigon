@@ -161,7 +161,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}); err != nil {
 		return err
 	}
-	log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
+	log.Info(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
