@@ -36,9 +36,14 @@ type LightClientUpdatesByRangeRequest struct {
 }
 
 type Status struct {
-	ForkDigest     [4]byte  `ssz-size:"4" `
-	FinalizedRoot  [32]byte `ssz-size:"32" `
+	ForkDigest     [4]byte  `ssz-size:"4"`
+	FinalizedRoot  [32]byte `ssz-size:"32"`
 	FinalizedEpoch uint64
-	HeadRoot       [32]byte `ssz-size:"32" `
+	HeadRoot       [32]byte `ssz-size:"32"`
 	HeadSlot       uint64
+}
+
+type SigningData struct {
+	Root   [32]byte `ssz-size:"32"`
+	Domain []byte   `ssz-size:"32"`
 }
