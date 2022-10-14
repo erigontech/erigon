@@ -42,6 +42,7 @@ type MiningBlock struct {
 
 type MiningState struct {
 	MiningConfig      *params.MiningConfig
+	StateViewID       uint64
 	PendingResultCh   chan *types.Block
 	MiningResultCh    chan *types.Block
 	MiningResultPOSCh chan *types.Block
@@ -130,36 +131,40 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	blockNum := executionAt + 1
 	var txs []types.Transaction
+	txSlots := types2.TxsRlp{}
+	var onTime bool
 	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
-		txSlots := types2.TxsRlp{}
-		if err := cfg.txPool2.Best(maxTransactions, &txSlots, poolTx); err != nil {
-			return err
-		}
-
-		var skipByChainIDMismatch uint64 = 0
-		for i := range txSlots.Txs {
-			s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
-
-			transaction, err := types.DecodeTransaction(s)
-			if err == io.EOF {
-				continue
-			}
-			if err != nil {
+		var err error
+		for !onTime {
+			if onTime, err = cfg.txPool2.Best(maxTransactions, &txSlots, poolTx, executionAt); err != nil {
 				return err
 			}
-			if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
-				skipByChainIDMismatch++
-				continue
-			}
-			var sender common.Address
-			copy(sender[:], txSlots.Senders.At(i))
-			// Check if tx nonce is too low
-			txs = append(txs, transaction)
-			txs[len(txs)-1].SetSender(sender)
+			time.Sleep(1 * time.Millisecond)
 		}
 		return nil
 	}); err != nil {
 		return err
+	}
+	var skipByChainIDMismatch uint64 = 0
+	for i := range txSlots.Txs {
+		s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
+
+		transaction, err := types.DecodeTransaction(s)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+			skipByChainIDMismatch++
+			continue
+		}
+		var sender common.Address
+		copy(sender[:], txSlots.Senders.At(i))
+		// Check if tx nonce is too low
+		txs = append(txs, transaction)
+		txs[len(txs)-1].SetSender(sender)
 	}
 	log.Info(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
