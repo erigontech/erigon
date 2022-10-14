@@ -221,7 +221,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	// txpool v2 - doesn't prioritise local txs over remote
 	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
 
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit, "txs", len(txs))
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
