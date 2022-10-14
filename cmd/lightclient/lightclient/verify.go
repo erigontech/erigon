@@ -10,17 +10,14 @@ import (
 	blst "github.com/supranational/blst/bindings/go"
 )
 
-const (
-	MinSyncCommitteeParticipants = 1
-	FinalizedRootIndex           = 105
-)
+const MinSyncCommitteeParticipants = 1
 
 var (
 	DomainSyncCommittee = common.Hex2Bytes("07000000")
 	dst                 = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 )
 
-func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, finalityUpdate bool) (bool, error) {
+func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, error) {
 	if update.SyncAggregate.Sum() < MinSyncCommitteeParticipants {
 		return false, fmt.Errorf("not enough participants")
 	}
@@ -52,7 +49,7 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 	}
 
 	// Verify that the `finality_branch`, if present, confirms `finalized_header`
-	if finalityUpdate {
+	if update.IsFinalityUpdate() {
 		finalizedRoot, err := update.FinalizedHeader.HashTreeRoot()
 		if err != nil {
 			return false, err
@@ -132,12 +129,4 @@ func (l *LightClient) validateLegacyUpdate(update *cltypes.LightClientUpdate, fi
 	}
 
 	return signature.FastAggregateVerify(true, pks, signingRoot[:], dst), nil
-}
-
-func (l *LightClient) validateOptimisticUpdate(update *cltypes.LightClientOptimisticUpdate) (bool, error) {
-	return true, nil
-}
-
-func (l *LightClient) validateFinalityUpdate(update *cltypes.LightClientFinalityUpdate) (bool, error) {
-	return true, nil
 }

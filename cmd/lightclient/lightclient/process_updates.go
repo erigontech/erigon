@@ -1,54 +1,109 @@
 package lightclient
 
-func (l *LightClient) processLightClientUpdate() {
+import (
+	"fmt"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+)
+
+func (l *LightClient) isBetterUpdate(oldUpdate *cltypes.LightClientUpdate, newUpdate *cltypes.LightClientUpdate) bool {
+	var (
+		maxActiveParticipants = len(newUpdate.SyncAggregate.SyncCommiteeBits) * 8 // Bits
+		newActiveParticipants = newUpdate.SyncAggregate.Sum()
+		oldActiveParticipants = oldUpdate.SyncAggregate.Sum()
+		newHasSuperMajority   = newActiveParticipants*3 >= maxActiveParticipants*2
+		oldHasSuperMajority   = oldActiveParticipants*3 >= maxActiveParticipants*2
+	)
+	// Compare supermajority (> 2/3) sync committee participation
+	if newHasSuperMajority != oldHasSuperMajority {
+		return newHasSuperMajority && !oldHasSuperMajority
+	}
+
+	if !newHasSuperMajority && newActiveParticipants != oldActiveParticipants {
+		return newActiveParticipants > oldActiveParticipants
+	}
+
+	// Compare presence of relevant sync committee
+	isNewUpdateRelevant := newUpdate.HasNextSyncCommittee() &&
+		utils.SlotToPeriod(newUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(newUpdate.SignatureSlot)
+	isOldUpdateRelevant := oldUpdate.HasNextSyncCommittee() &&
+		utils.SlotToPeriod(oldUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(oldUpdate.SignatureSlot)
+	if isNewUpdateRelevant != isOldUpdateRelevant {
+		return isNewUpdateRelevant
+	}
+
+	isNewFinality := newUpdate.IsFinalityUpdate()
+	isOldFinality := oldUpdate.IsFinalityUpdate()
+
+	if isNewFinality != isOldFinality {
+		return isNewFinality
+	}
+
+	// Compare sync committee finality
+	if isNewFinality && newUpdate.HasSyncFinality() != oldUpdate.HasSyncFinality() {
+		return newUpdate.HasSyncFinality()
+	}
+
+	// Tie Breakers
+	if newActiveParticipants != oldActiveParticipants {
+		return newActiveParticipants > oldActiveParticipants
+	}
+	if newUpdate.AttestedHeader.Slot != oldUpdate.AttestedHeader.Slot {
+		return newUpdate.AttestedHeader.Slot < oldUpdate.AttestedHeader.Slot
+	}
+	return newUpdate.SignatureSlot < oldUpdate.SignatureSlot
 }
 
-/*
-def process_light_client_update(store: LightClientStore,
-                                update: LightClientUpdate,
-                                current_slot: Slot,
-                                genesis_validators_root: Root) -> None:
-    validate_light_client_update(store, update, current_slot, genesis_validators_root)
+func (l *LightClient) applyLightClientUpdate(update *cltypes.LightClientUpdate) error {
+	storePeriod := utils.SlotToPeriod(l.store.finalizedHeader.Slot)
+	finalizedPeriod := utils.SlotToPeriod(update.FinalizedHeader.Slot)
+	if l.store.nextSyncCommittee == nil {
+		if storePeriod != finalizedPeriod {
+			return fmt.Errorf("periods shall be matching")
+		}
+		l.store.nextSyncCommittee = update.NextSyncCommitee
+	} else if finalizedPeriod == storePeriod+1 {
+		l.store.currentSyncCommittee = l.store.nextSyncCommittee
+		l.store.nextSyncCommittee = update.NextSyncCommitee
+		l.store.previousMaxActivePartecipants = l.store.currentMaxActivePartecipants
+		l.store.currentMaxActivePartecipants = 0
+	}
+	if update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot {
+		l.store.finalizedHeader = update.FinalizedHeader
+		if update.FinalizedHeader.Slot > l.store.optimisticHeader.Slot {
+			l.store.optimisticHeader = update.FinalizedHeader
+		}
+	}
+	return nil
+}
 
-    sync_committee_bits = update.sync_aggregate.sync_committee_bits
+func (l *LightClient) processLightClientUpdate(update *cltypes.LightClientUpdate) error {
+	valid, err := l.validateUpdate(update)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("BLS validation failed")
+	}
 
-    # Update the best update in case we have to force-update to it if the timeout elapses
-    if (
-        store.best_valid_update is None
-        or is_better_update(update, store.best_valid_update)
-    ):
-        store.best_valid_update = update
+	if l.store.bestValidUpdate == nil || l.isBetterUpdate(update, l.store.bestValidUpdate) {
+		l.store.bestValidUpdate = update
+	}
+	updateParticipants := uint64(update.SyncAggregate.Sum())
+	if updateParticipants > l.store.currentMaxActivePartecipants {
+		l.store.currentMaxActivePartecipants = updateParticipants
+	}
 
-    # Track the maximum number of active participants in the committee signatures
-    store.current_max_active_participants = max(
-        store.current_max_active_participants,
-        sum(sync_committee_bits),
-    )
+	// Apply lc update
+	if update.SyncAggregate.Sum()*3 >= len(update.SyncAggregate.SyncCommiteeBits)*16 &&
+		(update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot ||
+			l.store.nextSyncCommittee == nil && update.HasNextSyncCommittee() &&
+				update.IsFinalityUpdate() && update.HasSyncFinality()) {
+		// Conditions are met so we can make all changes
+		err = l.applyLightClientUpdate(update)
+		l.store.bestValidUpdate = nil
+	}
 
-    # Update the optimistic header
-    if (
-        sum(sync_committee_bits) > get_safety_threshold(store)
-        and update.attested_header.slot > store.optimistic_header.slot
-    ):
-        store.optimistic_header = update.attested_header
-
-    # Update finalized header
-    update_has_finalized_next_sync_committee = (
-        not is_next_sync_committee_known(store)
-        and is_sync_committee_update(update) and is_finality_update(update) and (
-            compute_sync_committee_period_at_slot(update.finalized_header.slot)
-            == compute_sync_committee_period_at_slot(update.attested_header.slot)
-        )
-    )
-    if (
-        sum(sync_committee_bits) * 3 >= len(sync_committee_bits) * 2
-        and (
-            update.finalized_header.slot > store.finalized_header.slot
-            or update_has_finalized_next_sync_committee
-        )
-    ):
-        # Normal update through 2/3 threshold
-        apply_light_client_update(store, update)
-        store.best_valid_update = None
-*/
+	return err
+}

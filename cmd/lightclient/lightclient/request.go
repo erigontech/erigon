@@ -28,7 +28,7 @@ func (l *LightClient) FetchUpdate(ctx context.Context, period uint64) (*cltypes.
 			if err != nil {
 				return nil, err
 			}
-			log.Info("Fetching Sync Committee Period", "peers", peers.Amount)
+			log.Info("[LightClient] Fetching Sync Committee Period", "peers", peers.Amount)
 		case <-retryInterval.C:
 			// Async request
 			go func() {

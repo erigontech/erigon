@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 )
 
 type Eth1Data struct {
@@ -77,8 +78,12 @@ type SyncAggregate struct {
 // return sum of the committee bits
 func (agg *SyncAggregate) Sum() int {
 	ret := 0
-	for _, v := range agg.SyncCommiteeBits {
-		ret += int(v)
+	for i := range agg.SyncCommiteeBits {
+		for bit := 1; bit <= 128; bit *= 2 {
+			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
+				ret++
+			}
+		}
 	}
 	return ret
 }
@@ -182,18 +187,16 @@ type LightClientUpdate struct {
 }
 
 func (l *LightClientUpdate) HasNextSyncCommittee() bool {
-	if len(l.NextSyncCommitteeBranch) != 5 {
-		return false
-	}
-	for _, leaf := range l.NextSyncCommitteeBranch {
-		if len(leaf) != 32 {
-			return false
-		}
-		if !bytes.Equal(make([]byte, 32), leaf) {
-			return true
-		}
-	}
-	return false
+	return l.NextSyncCommitee != nil
+}
+
+func (l *LightClientUpdate) IsFinalityUpdate() bool {
+	return l.FinalityBranch != nil
+}
+
+func (l *LightClientUpdate) HasSyncFinality() bool {
+	return l.FinalizedHeader != nil &&
+		utils.SlotToPeriod(l.AttestedHeader.Slot) == utils.SlotToPeriod(l.FinalizedHeader.Slot)
 }
 
 type LightClientFinalityUpdate struct {
