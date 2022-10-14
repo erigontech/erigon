@@ -380,6 +380,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
+	log.Info("Work on history snapshots")
 	if err = agg.BuildMissedIndices(); err != nil {
 		return err
 	}
