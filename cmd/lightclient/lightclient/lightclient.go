@@ -26,26 +26,31 @@ import (
 )
 
 type LightClient struct {
+	ctx           context.Context
 	genesisConfig *clparams.GenesisConfig
 	beaconConfig  *clparams.BeaconChainConfig
+	chainTip      *ChainTipSubscriber
 
-	sentinel  lightrpc.SentinelClient
-	execution remote.ETHBACKENDServer
-	store     *LightClientStore
+	sentinel      lightrpc.SentinelClient
+	execution     remote.ETHBACKENDServer
+	store         *LightClientStore
+	lastValidated *cltypes.LightClientUpdate
 }
 
-func NewLightClient(genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
 	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) *LightClient {
 	return &LightClient{
+		ctx:           ctx,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
+		chainTip:      NewChainTipSubscriber(ctx, sentinel),
 		sentinel:      sentinel,
 		execution:     execution,
 	}
 }
 
-func (l *LightClient) StartWithNoValidation(ctx context.Context) {
-	stream, err := l.sentinel.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
+func (l *LightClient) StartWithNoValidation() {
+	stream, err := l.sentinel.SubscribeGossip(l.ctx, &lightrpc.EmptyRequest{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
 		return
@@ -54,7 +59,7 @@ func (l *LightClient) StartWithNoValidation(ctx context.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-l.ctx.Done():
 			return
 		default:
 			data, err := stream.Recv()
@@ -69,7 +74,7 @@ func (l *LightClient) StartWithNoValidation(ctx context.Context) {
 			if err := block.UnmarshalSSZ(data.Data); err != nil {
 				log.Warn("Could not unmarshall gossip", "reason", err)
 			}
-			if err := l.processBeaconBlock(ctx, block); err != nil {
+			if err := l.processBeaconBlock(block); err != nil {
 				log.Warn("[Lightclient] block could not be executed :/", "reason", err)
 				continue
 			}
@@ -82,6 +87,8 @@ func (l *LightClient) Start(ctx context.Context) {
 		log.Error("No trusted setup")
 		return
 	}
+	logPeers := time.NewTicker(time.Minute)
+	go l.chainTip.StartLoop()
 	for {
 		start := time.Now()
 		var (
@@ -117,6 +124,15 @@ func (l *LightClient) Start(ctx context.Context) {
 					updates = append(updates, update)
 				}
 			}
+		// Clause 4 (iii):
+		// When finalized_period + 1 >= current_period, the light client keeps observing LightClientFinalityUpdate and LightClientOptimisticUpdate.
+		// Received objects are passed to process_light_client_update. This ensures that finalized_header and
+		// optimistic_header reflect the latest blocks.
+		case finalizedPeriod+1 >= currentPeriod:
+			newUpdate := l.chainTip.PopLastUpdate()
+			if newUpdate != nil {
+				updates = append(updates, newUpdate)
+			}
 		}
 		// Push updates
 		for _, update := range updates {
@@ -125,13 +141,24 @@ func (l *LightClient) Start(ctx context.Context) {
 				log.Warn("Could not validate update", "err", err)
 			}
 		}
+
 		if len(updates) > 0 {
-			log.Info("[LightClient] Synced up", "elapsed", time.Since(start))
+			l.lastValidated = updates[len(updates)-1]
+			log.Info("[LightClient] Validated Chain Segements",
+				"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
+				"to", l.lastValidated.AttestedHeader.Slot)
 		}
 		// do not have high CPU load
 		timer := time.NewTimer(200 * time.Millisecond)
 		select {
 		case <-timer.C:
+		case <-logPeers.C:
+			peers, err := l.sentinel.GetPeers(ctx, &lightrpc.EmptyRequest{})
+			if err != nil {
+				log.Warn("could not read peers", "err", err)
+				continue
+			}
+			log.Info("[LightClient] P2P", "peers", peers.Amount)
 		case <-ctx.Done():
 			return
 		}

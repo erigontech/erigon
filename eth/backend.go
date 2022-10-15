@@ -475,7 +475,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				return nil, err
 			}
 
-			lc := lightclient.NewLightClient(genesisCfg, beaconCfg, ethBackendRPC, client)
+			lc := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client)
 			go lc.Start(ctx)
 		} else {
 			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")

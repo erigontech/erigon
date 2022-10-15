@@ -15,6 +15,7 @@ func (l *LightClient) isBetterUpdate(oldUpdate *cltypes.LightClientUpdate, newUp
 		newHasSuperMajority   = newActiveParticipants*3 >= maxActiveParticipants*2
 		oldHasSuperMajority   = oldActiveParticipants*3 >= maxActiveParticipants*2
 	)
+
 	// Compare supermajority (> 2/3) sync committee participation
 	if newHasSuperMajority != oldHasSuperMajority {
 		return newHasSuperMajority && !oldHasSuperMajority
@@ -29,6 +30,7 @@ func (l *LightClient) isBetterUpdate(oldUpdate *cltypes.LightClientUpdate, newUp
 		utils.SlotToPeriod(newUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(newUpdate.SignatureSlot)
 	isOldUpdateRelevant := oldUpdate.HasNextSyncCommittee() &&
 		utils.SlotToPeriod(oldUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(oldUpdate.SignatureSlot)
+
 	if isNewUpdateRelevant != isOldUpdateRelevant {
 		return isNewUpdateRelevant
 	}
@@ -95,9 +97,9 @@ func (l *LightClient) processLightClientUpdate(update *cltypes.LightClientUpdate
 		l.store.currentMaxActivePartecipants = updateParticipants
 	}
 
-	// Apply lc update
+	// Apply lc update (should happen when every 27 hours)
 	if update.SyncAggregate.Sum()*3 >= len(update.SyncAggregate.SyncCommiteeBits)*16 &&
-		(update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot ||
+		((update.IsFinalityUpdate() && update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot) ||
 			l.store.nextSyncCommittee == nil && update.HasNextSyncCommittee() &&
 				update.IsFinalityUpdate() && update.HasSyncFinality()) {
 		// Conditions are met so we can make all changes
