@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1147,13 +1146,14 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 			useSnapshots, _ = snap.Enabled(tx)
 			return nil
 		})
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadirCli, "snapshots"))
+		dirs := datadir.New(datadirCli)
+		dir.MustExist(dirs.SnapHistory)
 
-		aggDir := path.Join(datadirCli, "snapshots", "history")
-		dir.MustExist(aggDir)
+		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
+
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep, db)
+		_aggSingleton, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}

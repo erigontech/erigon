@@ -150,6 +150,8 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
 
 	agg.SetTx(rwTx)
+	defer agg.StartWrites().FinishWrites()
+
 	latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
@@ -238,7 +240,9 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 		}
 		log.Info("database commitment", "block", blockNum, "txNum", txn)
-
+		if err := agg.Flush(); err != nil {
+			return err
+		}
 		if err = rwTx.Commit(); err != nil {
 			return err
 		}
