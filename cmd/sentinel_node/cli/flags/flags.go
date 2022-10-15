@@ -1,4 +1,4 @@
-package utils
+package flags
 
 import "github.com/urfave/cli"
 
@@ -31,7 +31,7 @@ var (
 	LightClientServerAddr = cli.StringFlag{
 		Name:  "lc.server.addr",
 		Usage: "sets the lightclient server host addr (default: localhost)",
-		Value: "127.0.0.1",
+		Value: "localhost",
 	}
 	LightClientServerProtocol = cli.UintFlag{
 		Name:  "lc.server.protocol",

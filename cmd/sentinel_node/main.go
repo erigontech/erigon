@@ -14,12 +14,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
+	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
+	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/urfave/cli"
 
@@ -33,7 +35,7 @@ var (
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runSentinelNode, utils.LightClientDefaultFlags)
+	app := lightclientapp.MakeApp(runSentinelNode, flags.LightClientDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -43,22 +45,26 @@ func main() {
 	}
 }
 
-func runSentinelNode(ctx *cli.Context) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	addr := "localhost:7777"
-	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+func runSentinelNode(cliCtx *cli.Context) {
+	lcCfg := lcCli.SetUpLightClientCfg(cliCtx)
+	ctx := context.Background()
+
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
+
 	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        ctx.GlobalString(utils.LightClientAddr),
-		Port:          ctx.GlobalInt(utils.LightClientPort),
-		TCPPort:       ctx.GlobalUint(utils.LightclientTcpPort),
-		GenesisConfig: genesisCfg,
-		NetworkConfig: networkCfg,
-		BeaconConfig:  beaconCfg,
-	}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
+		IpAddr:        lcCfg.Addr,
+		Port:          int(lcCfg.Port),
+		TCPPort:       lcCfg.ServerTcpPort,
+		GenesisConfig: lcCfg.GenesisCfg,
+		NetworkConfig: lcCfg.NetworkCfg,
+		BeaconConfig:  lcCfg.BeaconCfg,
+	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
-	log.Info("Sentinel started", "addr", addr)
+
+	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+	<-ctx.Done()
 }
 
 /*

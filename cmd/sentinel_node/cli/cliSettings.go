@@ -1,9 +1,10 @@
-package lcCli
+package cli
 
 import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
+	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
 	"github.com/urfave/cli"
 )
 
@@ -16,18 +17,22 @@ type LightClientCliCfg struct {
 	ServerAddr     string
 	ServerProtocol string
 	ServerTcpPort  uint
+	LogLvl         uint
 }
 
-func SetUpLightClientCfg(ctx cli.Context) *LightClientCliCfg {
-	var cfg *LightClientCliCfg
-	chainName := ctx.GlobalString(utils.LightClientChain)
+func SetUpLightClientCfg(ctx *cli.Context) *LightClientCliCfg {
+	cfg := &LightClientCliCfg{}
+	chainName := ctx.GlobalString(flags.LightClientChain.Name)
+	fmt.Println("here")
 	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg = clparams.GetConfigsByNetworkName(chainName)
 
-	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(utils.LightClientServerAddr), ctx.GlobalInt(utils.LightClientServerPort))
-	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(utils.LightClientServerProtocol))
+	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(flags.LightClientServerAddr.Name), ctx.GlobalInt(flags.LightClientServerPort.Name))
+	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(flags.LightClientServerProtocol.Name))
 
-	cfg.Port = uint(ctx.GlobalInt(utils.LightClientPort))
-	cfg.Addr = ctx.GlobalString(utils.LightClientAddr)
+	cfg.Port = uint(ctx.GlobalInt(flags.LightClientPort.Name))
+	cfg.Addr = ctx.GlobalString(flags.LightClientAddr.Name)
+
+	cfg.LogLvl = ctx.GlobalUint(flags.LightClientVerbosity.Name)
 
 	return cfg
 }
