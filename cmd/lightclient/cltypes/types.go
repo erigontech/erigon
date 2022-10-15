@@ -18,6 +18,8 @@ type AttestationData struct {
 	Slot            uint64
 	Index           uint64
 	BeaconBlockHash [32]byte `ssz-size:"32"`
+	Source          *Checkpoint
+	Target          *Checkpoint
 }
 
 type BeaconBlockHeader struct {
@@ -33,10 +35,21 @@ type SignedBeaconBlockHeader struct {
 	Signature [96]byte `ssz-size:"96"`
 }
 
+type IndexedAttestation struct {
+	AttestingIndices []uint64 `ssz-max:"2048"`
+	Data             *AttestationData
+	Signature        [96]byte `ssz-size:"96"`
+}
+
 // Slashing requires 2 blocks with the same signer as proof
-type Slashing struct {
+type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader
 	Header2 *SignedBeaconBlockHeader
+}
+
+type AttesterSlashing struct {
+	Attestation_1 *IndexedAttestation
+	Attestation_2 *IndexedAttestation
 }
 
 // Full signed attestation
@@ -128,8 +141,8 @@ type BeaconBodyBellatrix struct {
 	RandaoReveal      [96]byte `ssz-size:"96"`
 	Eth1Data          *Eth1Data
 	Graffiti          []byte                 `ssz-size:"32"`
-	ProposerSlashings []*Slashing            `ssz-max:"16"`
-	AttesterSlashings []*Slashing            `ssz-max:"2"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
 	Attestations      []*Attestation         `ssz-max:"128"`
 	Deposits          []*Deposit             `ssz-max:"16"`
 	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
