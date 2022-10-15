@@ -51,6 +51,7 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
 
+	log.Info("[LC-Sentinel] running sentinel with configuration", "cfg", lcCfg)
 	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),

@@ -9,15 +9,15 @@ import (
 )
 
 type LightClientCliCfg struct {
-	GenesisCfg     *clparams.GenesisConfig
-	BeaconCfg      *clparams.BeaconChainConfig
-	NetworkCfg     *clparams.NetworkConfig
-	Port           uint
-	Addr           string
-	ServerAddr     string
-	ServerProtocol string
-	ServerTcpPort  uint
-	LogLvl         uint
+	GenesisCfg     *clparams.GenesisConfig     `json:"genesisCfg"`
+	BeaconCfg      *clparams.BeaconChainConfig `json:"beaconCfg"`
+	NetworkCfg     *clparams.NetworkConfig     `json:"networkCfg"`
+	Port           uint                        `json:"port"`
+	Addr           string                      `json:"address"`
+	ServerAddr     string                      `json:"serverAddr"`
+	ServerProtocol string                      `json:"serverProtocol"`
+	ServerTcpPort  uint                        `json:"serverTcpPort"`
+	LogLvl         uint                        `json:"logLevel"`
 }
 
 func SetUpLightClientCfg(ctx *cli.Context) *LightClientCliCfg {
