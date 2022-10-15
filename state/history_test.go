@@ -58,50 +58,55 @@ func testDbAndHistory(tb testing.TB) (string, kv.RwDB, *History) {
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
+	require := require.New(t)
 	_, db, h := testDbAndHistory(t)
 	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	h.SetTx(tx)
+	h.StartWrites("")
+	defer h.FinishWrites()
 
 	h.SetTxNum(2)
 	err = h.AddPrevValue([]byte("key1"), nil, nil)
-	require.NoError(t, err)
+	require.NoError(err)
 
 	h.SetTxNum(3)
 	err = h.AddPrevValue([]byte("key2"), nil, nil)
-	require.NoError(t, err)
+	require.NoError(err)
 
 	h.SetTxNum(6)
 	err = h.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
-	require.NoError(t, err)
+	require.NoError(err)
 	err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
-	require.NoError(t, err)
+	require.NoError(err)
 
 	h.SetTxNum(7)
 	err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
-	require.NoError(t, err)
+	require.NoError(err)
 	err = h.AddPrevValue([]byte("key3"), nil, nil)
-	require.NoError(t, err)
+	require.NoError(err)
 
+	err = h.Flush()
+	require.NoError(err)
 	err = tx.Commit()
-	require.NoError(t, err)
+	require.NoError(err)
 
 	roTx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer roTx.Rollback()
 
 	c, err := h.collate(0, 0, 8, roTx)
-	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.historyPath, "hist.0-1.v"))
-	require.Equal(t, 6, c.historyCount)
-	require.Equal(t, 3, len(c.indexBitmaps))
-	require.Equal(t, []uint64{7}, c.indexBitmaps["key3"].ToArray())
-	require.Equal(t, []uint64{3, 6, 7}, c.indexBitmaps["key2"].ToArray())
-	require.Equal(t, []uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
+	require.NoError(err)
+	require.True(strings.HasSuffix(c.historyPath, "hist.0-1.v"))
+	require.Equal(6, c.historyCount)
+	require.Equal(3, len(c.indexBitmaps))
+	require.Equal([]uint64{7}, c.indexBitmaps["key3"].ToArray())
+	require.Equal([]uint64{3, 6, 7}, c.indexBitmaps["key2"].ToArray())
+	require.Equal([]uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
 
 	sf, err := h.buildFiles(0, c)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer sf.Close()
 	var valWords []string
 	g := sf.historyDecomp.MakeGetter()
@@ -110,8 +115,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 		w, _ := g.Next(nil)
 		valWords = append(valWords, string(w))
 	}
-	require.Equal(t, []string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
-	require.Equal(t, 6, int(sf.historyIdx.KeyCount()))
+	require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
+	require.Equal(6, int(sf.historyIdx.KeyCount()))
 	g = sf.efHistoryDecomp.MakeGetter()
 	g.Reset(0)
 	var keyWords []string
@@ -128,14 +133,14 @@ func TestHistoryCollationBuild(t *testing.T) {
 		}
 		intArrs = append(intArrs, ints)
 	}
-	require.Equal(t, []string{"key1", "key2", "key3"}, keyWords)
-	require.Equal(t, [][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
+	require.Equal([]string{"key1", "key2", "key3"}, keyWords)
+	require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 	r := recsplit.NewIndexReader(sf.efHistoryIdx)
 	for i := 0; i < len(keyWords); i++ {
 		offset := r.Lookup([]byte(keyWords[i]))
 		g.Reset(offset)
 		w, _ := g.Next(nil)
-		require.Equal(t, keyWords[i], string(w))
+		require.Equal(keyWords[i], string(w))
 	}
 	r = recsplit.NewIndexReader(sf.historyIdx)
 	g = sf.historyDecomp.MakeGetter()
@@ -148,7 +153,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			offset := r.Lookup2(txKey[:], []byte(keyWords[i]))
 			g.Reset(offset)
 			w, _ := g.Next(nil)
-			require.Equal(t, valWords[vi], string(w))
+			require.Equal(valWords[vi], string(w))
 			vi++
 		}
 	}
@@ -164,6 +169,8 @@ func TestHistoryAfterPrune(t *testing.T) {
 		}
 	}()
 	h.SetTx(tx)
+	h.StartWrites("")
+	defer h.FinishWrites()
 
 	h.SetTxNum(2)
 	err = h.AddPrevValue([]byte("key1"), nil, nil)
@@ -185,6 +192,8 @@ func TestHistoryAfterPrune(t *testing.T) {
 	err = h.AddPrevValue([]byte("key3"), nil, nil)
 	require.NoError(t, err)
 
+	err = h.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -232,6 +241,9 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
+	h.StartWrites("")
+	defer h.FinishWrites()
+
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -253,6 +265,8 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
+			err = h.Flush()
+			require.NoError(tb, err)
 			err = tx.Commit()
 			require.NoError(tb, err)
 			tx, err = db.BeginRw(context.Background())
@@ -260,6 +274,8 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 			h.SetTx(tx)
 		}
 	}
+	err = h.Flush()
+	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)
 	tx = nil

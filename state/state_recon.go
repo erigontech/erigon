@@ -212,32 +212,31 @@ func (hi *HistoryIterator) advance() {
 				heap.Push(&hi.h, top)
 			}
 		}
-		if !bytes.Equal(hi.key, key) {
-			ef, _ := eliasfano32.ReadEliasFano(val)
-			if n, ok := ef.Search(hi.txNum); ok {
-				hi.key = key
-				var txKey [8]byte
-				binary.BigEndian.PutUint64(txKey[:], n)
-				var historyItem ctxItem
-				var ok bool
-				var search ctxItem
-				search.startTxNum = top.startTxNum
-				search.endTxNum = top.endTxNum
-				if historyItem, ok = hi.hc.historyFiles.Get(search); !ok {
-					panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.key))
-				}
-				offset := historyItem.reader.Lookup2(txKey[:], hi.key)
-				g := historyItem.getter
-				g.Reset(offset)
-				if hi.compressVals {
-					hi.val, _ = g.Next(nil)
-				} else {
-					hi.val, _ = g.NextUncompressed()
-				}
-				hi.hasNext = true
-				return
-			}
+		if bytes.Equal(hi.key, key) {
+			continue
 		}
+		ef, _ := eliasfano32.ReadEliasFano(val)
+		n, ok := ef.Search(hi.txNum)
+		if !ok {
+			continue
+		}
+		hi.key = key
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], n)
+		historyItem, ok := hi.hc.historyFiles.Get(ctxItem{startTxNum: top.startTxNum, endTxNum: top.endTxNum})
+		if !ok {
+			panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.key))
+		}
+		offset = historyItem.reader.Lookup2(txKey[:], hi.key)
+		g := historyItem.getter
+		g.Reset(offset)
+		if hi.compressVals {
+			hi.val, _ = g.Next(nil)
+		} else {
+			hi.val, _ = g.NextUncompressed()
+		}
+		hi.hasNext = true
+		return
 	}
 	hi.hasNext = false
 }

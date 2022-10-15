@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -55,6 +56,7 @@ type InvertedIndex struct {
 	files           *btree.BTreeG[*filesItem]
 
 	workers int
+	w       *invertedIndexWriter
 }
 
 func NewInvertedIndex(
@@ -189,8 +191,10 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 func (ii *InvertedIndex) BuildMissedIndices() (err error) {
 	for _, item := range ii.missedIdxFiles() {
 		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-		if _, err := buildIndex(item.decompressor, idxPath, ii.dir, item.decompressor.Count()/2, false /* values */); err != nil {
+		fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
+		idxPath := filepath.Join(ii.dir, fName)
+		log.Info("[snapshots] build idx", "file", fName)
+		if _, err := buildIndex(item.decompressor, idxPath, ii.dir, item.decompressor.Count()/2, false); err != nil {
 			return err
 		}
 	}
@@ -273,17 +277,87 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 }
 
 func (ii *InvertedIndex) add(key, indexKey []byte) error {
-	if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], key); err != nil {
-		return err
-	}
-	if err := ii.tx.Put(ii.indexTable, indexKey, ii.txNumBytes[:]); err != nil {
-		return err
-	}
-	return nil
+	return ii.w.add(key, indexKey)
 }
 
 func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.add(key, key)
+}
+
+func (ii *InvertedIndex) StartWrites(tmpdir string) { ii.w = ii.newWriter(tmpdir) }
+func (ii *InvertedIndex) FinishWrites() {
+	ii.w.close()
+	ii.w = nil
+}
+
+func (ii *InvertedIndex) Flush() error {
+	if err := ii.w.flush(ii.tx); err != nil {
+		return err
+	}
+	ii.w = ii.newWriter(ii.w.tmpdir)
+	return nil
+}
+
+type invertedIndexWriter struct {
+	ii        *InvertedIndex
+	index     *etl.Collector
+	indexKeys *etl.Collector
+	tmpdir    string
+}
+
+// loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
+// maybe in future we will improve etl, to sort dupSort values in the way that allow use .AppendDup
+func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	return next(k, k, v)
+}
+
+func (ii *invertedIndexWriter) flush(tx kv.RwTx) error {
+	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err := ii.indexKeys.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	ii.close()
+	return nil
+}
+
+func (ii *invertedIndexWriter) close() {
+	if ii == nil {
+		return
+	}
+	ii.index.Close()
+	ii.indexKeys.Close()
+}
+
+func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWriter {
+	w := &invertedIndexWriter{ii: ii,
+		tmpdir: tmpdir,
+		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
+		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
+		index:     etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
+		indexKeys: etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
+	}
+	w.index.LogLvl(log.LvlTrace)
+	w.indexKeys.LogLvl(log.LvlTrace)
+	return w
+}
+
+func (ii *invertedIndexWriter) add(key, indexKey []byte) error {
+	//if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
+	//	return err
+	//}
+	if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
+		return err
+	}
+
+	//if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
+	//	return err
+	//}
+	if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {

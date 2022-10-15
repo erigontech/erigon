@@ -68,6 +68,8 @@ func TestCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
 
 	d.SetTxNum(2)
 	err = d.Put([]byte("key1"), nil, []byte("value1.1"))
@@ -81,12 +83,15 @@ func TestCollationBuild(t *testing.T) {
 	err = d.Put([]byte("key1"), nil, []byte("value1.2"))
 	require.NoError(t, err)
 
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	d.SetTx(tx)
 
 	c, err := d.collate(0, 0, 7, roTx)
 	require.NoError(t, err)
@@ -130,6 +135,8 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
 
 	d.SetTxNum(2)
 	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
@@ -169,6 +176,8 @@ func TestAfterPrune(t *testing.T) {
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
 
 	d.SetTxNum(2)
 	err = d.Put([]byte("key1"), nil, []byte("value1.1"))
@@ -190,6 +199,8 @@ func TestAfterPrune(t *testing.T) {
 	err = d.Put([]byte("key2"), nil, []byte("value2.2"))
 	require.NoError(t, err)
 
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -256,6 +267,9 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
+
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -273,6 +287,8 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
+			err = d.Flush()
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx, err = db.BeginRw(context.Background())
@@ -280,6 +296,8 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			d.SetTx(tx)
 		}
 	}
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
@@ -370,6 +388,8 @@ func TestIterationMultistep(t *testing.T) {
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
 
 	d.SetTxNum(2)
 	err = d.Put([]byte("addr1"), []byte("loc1"), []byte("value1"))
@@ -401,6 +421,8 @@ func TestIterationMultistep(t *testing.T) {
 	err = d.Delete([]byte("addr2"), []byte("loc1"))
 	require.NoError(t, err)
 
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
@@ -558,6 +580,8 @@ func TestDelete(t *testing.T) {
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
@@ -569,6 +593,8 @@ func TestDelete(t *testing.T) {
 		}
 		require.NoError(t, err)
 	}
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
@@ -604,6 +630,9 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
+
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	dat := make(map[string][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
@@ -627,6 +656,8 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 			dat[fmt.Sprintf("%d", keyNum)][txNum] = true
 		}
 		if txNum%d.aggregationStep == 0 {
+			err = d.Flush()
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx, err = db.BeginRw(context.Background())
@@ -712,6 +743,9 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		}
 	}()
 	d.SetTx(tx)
+	d.StartWrites("")
+	defer d.FinishWrites()
+
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	data := make(map[string][]uint64)
@@ -741,6 +775,9 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 				continue
 			}
 			step--
+			err = d.Flush()
+			require.NoError(t, err)
+
 			collateAndMergeOnce(t, d, step)
 
 			err = tx.Commit()
@@ -750,9 +787,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			d.SetTx(tx)
 		}
 	}
+	err = d.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx = nil
 
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)

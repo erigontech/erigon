@@ -58,6 +58,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ii.Add([]byte("key1"))
@@ -73,6 +75,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -129,6 +133,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		}
 	}()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ii.Add([]byte("key1"))
@@ -144,6 +150,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -195,6 +203,9 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 		}
 	}()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
+
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -209,6 +220,8 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
+			err = ii.Flush()
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx, err = db.BeginRw(context.Background())
@@ -216,6 +229,8 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 			ii.SetTx(tx)
 		}
 	}
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	return path, db, ii, txs

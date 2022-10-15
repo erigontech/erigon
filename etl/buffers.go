@@ -108,28 +108,29 @@ func (b *sortableBuffer) SetComparator(cmp kv.CmpFunc) {
 }
 
 func (b *sortableBuffer) Less(i, j int) bool {
-	ki := b.data[b.offsets[i*2] : b.offsets[i*2]+b.lens[i*2]]
-	kj := b.data[b.offsets[j*2] : b.offsets[j*2]+b.lens[j*2]]
+	i2, j2 := i*2, j*2
+	ki := b.data[b.offsets[i2] : b.offsets[i2]+b.lens[i2]]
+	kj := b.data[b.offsets[j2] : b.offsets[j2]+b.lens[j2]]
 	if b.comparator != nil {
-		vi := b.data[b.offsets[i*2+1] : b.offsets[i*2+1]+b.lens[i*2+1]]
-		vj := b.data[b.offsets[j*2+1] : b.offsets[j*2+1]+b.lens[j*2+1]]
+		vi := b.data[b.offsets[i2+1] : b.offsets[i2+1]+b.lens[i2+1]]
+		vj := b.data[b.offsets[j2+1] : b.offsets[j2+1]+b.lens[j2+1]]
 		return b.comparator(ki, kj, vi, vj) < 0
 	}
 	return bytes.Compare(ki, kj) < 0
 }
 
 func (b *sortableBuffer) Swap(i, j int) {
-	b.offsets[i*2], b.offsets[j*2] = b.offsets[j*2], b.offsets[i*2]
-	b.lens[i*2], b.lens[j*2] = b.lens[j*2], b.lens[i*2]
-	b.offsets[i*2+1], b.offsets[j*2+1] = b.offsets[j*2+1], b.offsets[i*2+1]
-	b.lens[i*2+1], b.lens[j*2+1] = b.lens[j*2+1], b.lens[i*2+1]
+	i2, j2 := i*2, j*2
+	b.offsets[i2], b.offsets[j2] = b.offsets[j2], b.offsets[i2]
+	b.offsets[i2+1], b.offsets[j2+1] = b.offsets[j2+1], b.offsets[i2+1]
+	b.lens[i2], b.lens[j2] = b.lens[j2], b.lens[i2]
+	b.lens[i2+1], b.lens[j2+1] = b.lens[j2+1], b.lens[i2+1]
 }
 
 func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyOffset := b.offsets[i*2]
-	keyLen := b.lens[i*2]
-	valOffset := b.offsets[i*2+1]
-	valLen := b.lens[i*2+1]
+	i2 := i * 2
+	keyOffset, valOffset := b.offsets[i2], b.offsets[i2+1]
+	keyLen, valLen := b.lens[i2], b.lens[i2+1]
 	if keyLen > 0 {
 		keyBuf = append(keyBuf, b.data[keyOffset:keyOffset+keyLen]...)
 	}
@@ -145,6 +146,9 @@ func (b *sortableBuffer) Reset() {
 	b.data = b.data[:0]
 }
 func (b *sortableBuffer) Sort() {
+	if sort.IsSorted(b) {
+		return
+	}
 	sort.Stable(b)
 }
 

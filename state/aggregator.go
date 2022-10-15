@@ -25,6 +25,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -60,6 +61,7 @@ type Aggregator struct {
 	commitFn       func(txNum uint64) error
 	rwTx           kv.RwTx
 	stats          FilesStats
+	tmpdir         string
 }
 
 func NewAggregator(
@@ -1109,6 +1111,9 @@ func (a *Aggregator) FinishTx() error {
 		return nil
 	}
 	step-- // Leave one step worth in the DB
+	if err = a.Flush(); err != nil {
+		return err
+	}
 	collation, err := a.collate(step, step*a.aggregationStep, (step+1)*a.aggregationStep, a.rwTx)
 	if err != nil {
 		return err
@@ -1245,6 +1250,56 @@ func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum
 
 func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
+}
+
+// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
+func (a *Aggregator) StartWrites() *Aggregator {
+	a.accounts.StartWrites(a.tmpdir)
+	a.storage.StartWrites(a.tmpdir)
+	a.code.StartWrites(a.tmpdir)
+	a.commitment.StartWrites(a.tmpdir)
+	a.logAddrs.StartWrites(a.tmpdir)
+	a.logTopics.StartWrites(a.tmpdir)
+	a.tracesFrom.StartWrites(a.tmpdir)
+	a.tracesTo.StartWrites(a.tmpdir)
+	return a
+}
+func (a *Aggregator) FinishWrites() {
+	a.accounts.FinishWrites()
+	a.storage.FinishWrites()
+	a.code.FinishWrites()
+	a.commitment.FinishWrites()
+	a.logAddrs.FinishWrites()
+	a.logTopics.FinishWrites()
+	a.tracesFrom.FinishWrites()
+	a.tracesTo.FinishWrites()
+}
+
+// Flush - must be called before Collate, if you did some writes
+func (a *Aggregator) Flush() error {
+	defer func(t time.Time) { log.Info("[snapshots] hitory flush", "took", time.Since(t)) }(time.Now())
+	if err := a.accounts.Flush(); err != nil {
+		return err
+	}
+	if err := a.storage.Flush(); err != nil {
+		return err
+	}
+	if err := a.code.Flush(); err != nil {
+		return err
+	}
+	if err := a.logAddrs.Flush(); err != nil {
+		return err
+	}
+	if err := a.logTopics.Flush(); err != nil {
+		return err
+	}
+	if err := a.tracesFrom.Flush(); err != nil {
+		return err
+	}
+	if err := a.tracesTo.Flush(); err != nil {
+		return err
+	}
+	return nil
 }
 
 type FilesStats struct {

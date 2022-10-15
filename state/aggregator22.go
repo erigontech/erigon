@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -34,7 +35,7 @@ import (
 )
 
 type Aggregator22 struct {
-	dir             string
+	dir, tmpdir     string
 	aggregationStep uint64
 	accounts        *History
 	storage         *History
@@ -54,8 +55,8 @@ type Aggregator22 struct {
 	db kv.RoDB
 }
 
-func NewAggregator22(dir string, aggregationStep uint64, db kv.RoDB) (*Aggregator22, error) {
-	a := &Aggregator22{dir: dir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db}
+func NewAggregator22(dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*Aggregator22, error) {
+	a := &Aggregator22{dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db}
 	return a, nil
 }
 
@@ -353,62 +354,62 @@ func (a *Aggregator22) buildFiles(step uint64, collation Agg22Collation) (Agg22S
 			sf.Close()
 		}
 	}()
-	//var wg sync.WaitGroup
-	//wg.Add(7)
+	var wg sync.WaitGroup
+	wg.Add(7)
 	errCh := make(chan error, 7)
-	//go func() {
-	//	defer wg.Done()
-	var err error
-	if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
-		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	wg.Wait()
-	close(errCh)
-	//}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
 	var lastError error
 	for err := range errCh {
 		if err != nil {
@@ -499,6 +500,53 @@ func (a *Aggregator22) warmup(txFrom, limit uint64) {
 			log.Warn("[snapshots] prune warmup", "err", err)
 		}
 	}()
+}
+
+// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
+func (a *Aggregator22) StartWrites() *Aggregator22 {
+	a.accounts.StartWrites(a.tmpdir)
+	a.storage.StartWrites(a.tmpdir)
+	a.code.StartWrites(a.tmpdir)
+	a.logAddrs.StartWrites(a.tmpdir)
+	a.logTopics.StartWrites(a.tmpdir)
+	a.tracesFrom.StartWrites(a.tmpdir)
+	a.tracesTo.StartWrites(a.tmpdir)
+	return a
+}
+func (a *Aggregator22) FinishWrites() {
+	a.accounts.FinishWrites()
+	a.storage.FinishWrites()
+	a.code.FinishWrites()
+	a.logAddrs.FinishWrites()
+	a.logTopics.FinishWrites()
+	a.tracesFrom.FinishWrites()
+	a.tracesTo.FinishWrites()
+}
+
+func (a *Aggregator22) Flush() error {
+	defer func(t time.Time) { log.Info("[snapshots] hitory flush", "took", time.Since(t)) }(time.Now())
+	if err := a.accounts.Flush(); err != nil {
+		return err
+	}
+	if err := a.storage.Flush(); err != nil {
+		return err
+	}
+	if err := a.code.Flush(); err != nil {
+		return err
+	}
+	if err := a.logAddrs.Flush(); err != nil {
+		return err
+	}
+	if err := a.logTopics.Flush(); err != nil {
+		return err
+	}
+	if err := a.tracesFrom.Flush(); err != nil {
+		return err
+	}
+	if err := a.tracesTo.Flush(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *Aggregator22) Prune(limit uint64) error {
@@ -842,11 +890,11 @@ func (a *Aggregator22) FinishTx() error {
 		return nil
 	}
 
-	if err := a.prune(0, a.maxTxNum.Load(), a.aggregationStep); err != nil {
+	closeAll := true
+
+	if err := a.Flush(); err != nil {
 		return err
 	}
-
-	closeAll := true
 	collation, err := a.collate(step, step*a.aggregationStep, (step+1)*a.aggregationStep, a.rwTx)
 	if err != nil {
 		return err
@@ -864,6 +912,11 @@ func (a *Aggregator22) FinishTx() error {
 			log.Warn("buildFilesInBackground", "err", err)
 		}
 	}()
+
+	if err := a.prune(0, a.maxTxNum.Load(), a.aggregationStep); err != nil {
+		return err
+	}
+
 	closeAll = false
 	return nil
 }

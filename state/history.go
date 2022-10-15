@@ -32,6 +32,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -52,7 +53,7 @@ type History struct {
 	compressVals     bool
 	workers          int
 
-	historyKey []byte
+	w *historyWriter
 }
 
 func NewHistory(
@@ -71,7 +72,6 @@ func NewHistory(
 		settingsTable:    settingsTable,
 		compressVals:     compressVals,
 		workers:          1,
-		historyKey:       make([]byte, 256),
 	}
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
@@ -271,7 +271,9 @@ func (h *History) BuildMissedIndices() (err error) {
 			return nil
 		}
 		fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-		idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+		fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
+		idxPath := filepath.Join(h.dir, fName)
+		log.Info("[snapshots] build idx", "file", fName)
 		count, err := iterateForVi(item, iiItem, h.compressVals, func(v []byte) error { return nil })
 		if err != nil {
 			return err
@@ -343,12 +345,13 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count i
 	_, fName := filepath.Split(historyIdxPath)
 	log.Debug("[snapshots] build idx", "file", fName)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   count,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     dir,
-		IndexFile:  historyIdxPath,
+		KeyCount:    count,
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      dir,
+		IndexFile:   historyIdxPath,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	})
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -402,32 +405,119 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count i
 }
 
 func (h *History) AddPrevValue(key1, key2, original []byte) error {
+	return h.w.addPrevValue(key1, key2, original)
+}
+
+func (h *History) StartWrites(tmpdir string) {
+	h.InvertedIndex.StartWrites(tmpdir)
+	h.w = h.newWriter(tmpdir)
+}
+func (h *History) FinishWrites() {
+	h.InvertedIndex.FinishWrites()
+	h.w.close()
+	h.w = nil
+}
+
+func (h *History) Flush() error {
+	if err := h.InvertedIndex.Flush(); err != nil {
+		return err
+	}
+	if err := h.w.flush(h.tx); err != nil {
+		return err
+	}
+	h.w = h.newWriter(h.w.tmpdir)
+	return nil
+}
+
+type historyWriter struct {
+	h                *History
+	autoIncrement    uint64
+	autoIncrementBuf []byte
+	tmpdir           string
+}
+
+func (h *historyWriter) close() {
+	if h == nil { // allow dobule-close
+		return
+	}
+}
+
+func (h *History) newWriter(tmpdir string) *historyWriter {
+	w := &historyWriter{h: h,
+		tmpdir:           tmpdir,
+		autoIncrementBuf: make([]byte, 8),
+	}
+
+	val, err := h.tx.GetOne(h.settingsTable, historyValCountKey)
+	if err != nil {
+		panic(err)
+		//return err
+	}
+	var valNum uint64
+	if len(val) > 0 {
+		valNum = binary.BigEndian.Uint64(val)
+	}
+	w.autoIncrement = valNum
+	return w
+}
+
+func (h *historyWriter) flush(tx kv.RwTx) error {
+	binary.BigEndian.PutUint64(h.autoIncrementBuf, h.autoIncrement)
+	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *historyWriter) addPrevValue(key1, key2, original []byte) error {
+	/*
+		lk := len(key1) + len(key2)
+		historyKey := make([]byte, lk+8)
+		copy(historyKey, key1)
+		if len(key2) > 0 {
+			copy(historyKey[len(key1):], key2)
+		}
+		if len(original) > 0 {
+			val, err := h.h.tx.GetOne(h.h.settingsTable, historyValCountKey)
+			if err != nil {
+				return err
+			}
+			var valNum uint64
+			if len(val) > 0 {
+				valNum = binary.BigEndian.Uint64(val)
+			}
+			valNum++
+			binary.BigEndian.PutUint64(historyKey[lk:], valNum)
+			if err = h.h.tx.Put(h.h.settingsTable, historyValCountKey, historyKey[lk:]); err != nil {
+				return err
+			}
+			if err = h.h.tx.Put(h.h.historyValsTable, historyKey[lk:], original); err != nil {
+				return err
+			}
+		}
+	*/
+
 	lk := len(key1) + len(key2)
-	//historyKey := h.historyKey[:lk+8]
 	historyKey := make([]byte, lk+8)
 	copy(historyKey, key1)
 	if len(key2) > 0 {
 		copy(historyKey[len(key1):], key2)
 	}
 	if len(original) > 0 {
-		val, err := h.tx.GetOne(h.settingsTable, historyValCountKey)
-		if err != nil {
-			return err
-		}
-		var valNum uint64
-		if len(val) > 0 {
-			valNum = binary.BigEndian.Uint64(val)
-		}
-		valNum++
-		binary.BigEndian.PutUint64(historyKey[lk:], valNum)
-		if err = h.tx.Put(h.settingsTable, historyValCountKey, historyKey[lk:]); err != nil {
-			return err
-		}
-		if err = h.tx.Put(h.historyValsTable, historyKey[lk:], original); err != nil {
+		h.autoIncrement++
+		binary.BigEndian.PutUint64(historyKey[lk:], h.autoIncrement)
+		//if err := h.h.tx.Put(h.h.settingsTable, historyValCountKey, historyKey[lk:]); err != nil {
+		//	return err
+		//}
+		//if err := h.historyVals.Collect(historyKey[lk:], original); err != nil {
+		//	return err
+		//}
+		if err := h.h.tx.Put(h.h.historyValsTable, historyKey[lk:], original); err != nil {
 			return err
 		}
 	}
-	if err := h.InvertedIndex.add(historyKey, historyKey[:lk]); err != nil {
+
+	if err := h.h.InvertedIndex.add(historyKey, historyKey[:lk]); err != nil {
 		return err
 	}
 	return nil
@@ -705,9 +795,6 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 }
 
 func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
-	if !common.DoMemStat() {
-		return nil
-	}
 	historyKeysCursor, err := tx.CursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -914,19 +1001,20 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		g := item.getter
 		g.Reset(offset)
 		k, _ := g.NextUncompressed()
-		if bytes.Equal(k, key) {
-			//fmt.Printf("Found key=%x\n", k)
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			n, ok := ef.Search(txNum)
-			if ok {
-				foundTxNum = n
-				foundEndTxNum = item.endTxNum
-				foundStartTxNum = item.startTxNum
-				found = true
-				//fmt.Printf("Found n=%d\n", n)
-				return false
-			}
+		if !bytes.Equal(k, key) {
+			return true
+		}
+		//fmt.Printf("Found key=%x\n", k)
+		eliasVal, _ := g.NextUncompressed()
+		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+		n, ok := ef.Search(txNum)
+		if ok {
+			foundTxNum = n
+			foundEndTxNum = item.endTxNum
+			foundStartTxNum = item.startTxNum
+			found = true
+			//fmt.Printf("Found n=%d\n", n)
+			return false
 		}
 		return true
 	})
