@@ -53,12 +53,13 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	log.Info("[LC-Sentinel] running sentinel with configuration", "cfg", lcCfg)
 	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        lcCfg.Addr,
-		Port:          int(lcCfg.Port),
-		TCPPort:       lcCfg.ServerTcpPort,
-		GenesisConfig: lcCfg.GenesisCfg,
-		NetworkConfig: lcCfg.NetworkCfg,
-		BeaconConfig:  lcCfg.BeaconCfg,
+		IpAddr:         lcCfg.Addr,
+		Port:           int(lcCfg.Port),
+		TCPPort:        lcCfg.ServerTcpPort,
+		GenesisConfig:  lcCfg.GenesisCfg,
+		NetworkConfig:  lcCfg.NetworkCfg,
+		BeaconConfig:   lcCfg.BeaconCfg,
+		IsDiscoverable: lcCfg.IsDiscoverable,
 	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)

@@ -222,7 +222,10 @@ func (s *Sentinel) Start(
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
-	go s.listenForPeers()
+
+	if s.cfg.IsDiscoverable {
+		go s.listenForPeers()
+	}
 	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }

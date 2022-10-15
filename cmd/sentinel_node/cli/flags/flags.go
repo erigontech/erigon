@@ -5,12 +5,12 @@ import "github.com/urfave/cli"
 var (
 	LightClientPort = cli.IntFlag{
 		Name:  "lc.port",
-		Usage: "sets the lightclient port (default: 7777)",
+		Usage: "sets the lightclient port",
 		Value: 8080,
 	}
 	LightClientAddr = cli.StringFlag{
 		Name:  "lc.addr",
-		Usage: "sets the lightclient host addr (default: localhost)",
+		Usage: "sets the lightclient host addr",
 		Value: "127.0.0.1",
 	}
 	LightClientTcpPort = cli.UintFlag{
@@ -20,17 +20,17 @@ var (
 	}
 	LightClientVerbosity = cli.UintFlag{
 		Name:  "lc.verbosity",
-		Usage: "specify lightclient verbosity level 0=silent, 1=err, 2=warn, 3=info, 4=debug, 5=details (default: 3)",
+		Usage: "specify lightclient verbosity level 0=silent, 1=err, 2=warn, 3=info, 4=debug, 5=details",
 		Value: 3,
 	}
 	LightClientServerPort = cli.IntFlag{
 		Name:  "lc.server.port",
-		Usage: "sets the lightclient server port (default: 7777)",
+		Usage: "sets the lightclient server port",
 		Value: 7777,
 	}
 	LightClientServerAddr = cli.StringFlag{
 		Name:  "lc.server.addr",
-		Usage: "sets the lightclient server host addr (default: localhost)",
+		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
 	}
 	LightClientServerProtocol = cli.UintFlag{
@@ -42,5 +42,9 @@ var (
 		Name:  "lc.chain",
 		Usage: "sets the chain specs for the lightclient",
 		Value: "mainnet",
+	}
+	LightClientDiscovery = cli.BoolTFlag{
+		Name:  "lc.discover",
+		Usage: "turn off or on the lightclient finding peers",
 	}
 )
