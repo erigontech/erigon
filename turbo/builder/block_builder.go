@@ -3,6 +3,7 @@ package builder
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -26,7 +27,10 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 	b.syncCond = sync.NewCond(new(sync.Mutex))
 
 	go func() {
+		log.Debug("Building block...")
+		t := time.Now()
 		block, err := build(param, &b.interrupt)
+		log.Debug("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 
 		b.syncCond.L.Lock()
 		defer b.syncCond.L.Unlock()
