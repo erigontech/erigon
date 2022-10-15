@@ -48,14 +48,25 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.ExecutionPayload) *ty
 	}
 }
 
-func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.SignedBeaconBlockBellatrix) error {
+func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatrix) error {
 	if l.execution == nil {
 		return nil
 	}
-	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Block.Body.ExecutionPayload.BlockHash)
+	// If we recently imported the beacon block, skip.
+	bcRoot, err := beaconBlock.HashTreeRoot()
+	if err != nil {
+		return err
+	}
+	if l.recentHashesCache.Contains(bcRoot) {
+		return nil
+	}
+	// Save as recent
+	l.recentHashesCache.Add(bcRoot, struct{}{})
 
-	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Block.Body.ExecutionPayload)
-	var err error
+	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Body.ExecutionPayload.BlockHash)
+
+	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
+
 	_, err = l.execution.EngineNewPayloadV1(l.ctx, payload)
 	if err != nil {
 		return err
