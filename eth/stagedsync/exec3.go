@@ -183,6 +183,8 @@ func Exec3(ctx context.Context,
 			defer tx.Rollback()
 			agg.SetTx(tx)
 			defer rs.Finish()
+			defer agg.StartWrites().FinishWrites()
+
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -247,11 +249,13 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							tx.CollectMetrics()
+							if err := agg.Flush(); err != nil {
+								return err
+							}
 							if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-
 							if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
@@ -274,11 +278,25 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
+
+			//if err := rs.Flush(tx); err != nil {
+			//	panic(err)
+			//}
+			//tx.CollectMetrics()
+			//if err := agg.Flush(); err != nil {
+			//	panic(err)
+			//}
+			//if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			//	panic(err)
+			//}
+			//  TODO: why here is no flush?
 			if err = tx.Commit(); err != nil {
 				panic(err)
 			}
 		}()
 	}
+
+	defer agg.StartWrites().FinishWrites()
 
 	var b *types.Block
 	var blockNum uint64
@@ -357,10 +375,13 @@ loop:
 			if err := rs.Flush(applyTx); err != nil {
 				return err
 			}
+			if err := agg.Flush(); err != nil {
+				return err
+			}
+			if err = execStage.Update(applyTx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = execStage.Update(applyTx, stageProgress); err != nil {
-					return err
-				}
 				applyTx.CollectMetrics()
 				if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil {
 					return err
@@ -395,6 +416,9 @@ loop:
 			if err = rs.Flush(tx); err != nil {
 				return err
 			}
+			if err = agg.Flush(); err != nil {
+				return err
+			}
 			if err = execStage.Update(tx, stageProgress); err != nil {
 				return err
 			}
@@ -404,6 +428,9 @@ loop:
 		}
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
+			return err
+		}
+		if err = agg.Flush(); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -463,6 +490,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
 	defer agg.EnableMadvNormal().DisableReadAhead()
+	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
 
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
@@ -749,6 +777,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
+							if err = agg.Flush(); err != nil {
+								return err
+							}
 							return nil
 						}); err != nil {
 							return err
@@ -769,7 +800,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}()
 
-	defer blockReader.(WithSnapshots).Snapshots().EnableReadAhead().DisableReadAhead()
+	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	var inputTxNum uint64
 	var b *types.Block
@@ -815,6 +846,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
+		//if err = agg.Flush(); err != nil {
+		//	return err
+		//}
 		return nil
 	}); err != nil {
 		return err
