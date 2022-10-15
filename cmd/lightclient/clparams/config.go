@@ -14,9 +14,10 @@
 package clparams
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
@@ -686,5 +687,9 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 	if !ok {
 		return ""
 	}
-	return checkpoints[rand.Intn(len(checkpoints))]
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
+	if err != nil {
+		panic(err)
+	}
+	return checkpoints[n.Int64()]
 }
