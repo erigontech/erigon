@@ -32,6 +32,7 @@ var (
 const DefaultUri = "https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized"
 
 func main() {
+
 	ctx := context.Background()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	addr := "localhost:7777"
@@ -56,10 +57,10 @@ func main() {
 		return
 	}
 	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
-	lc := lightclient.NewLightClient(nil, sentinel)
+	lc := lightclient.NewLightClient(genesisCfg, beaconCfg, nil, sentinel)
 	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return
 	}
-
+	lc.Start(ctx)
 }

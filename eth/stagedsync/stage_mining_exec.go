@@ -189,7 +189,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		snap := ibs.Snapshot()
-		log.Info("addTransactionsToMiningBlock", "txn hash", txn.Hash())
+		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
