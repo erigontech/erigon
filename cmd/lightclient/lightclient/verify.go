@@ -7,6 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+
+	blst "github.com/supranational/blst/bindings/go"
 )
 
 const MinSyncCommitteeParticipants = 1
@@ -114,21 +116,20 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	_ = signingRoot
 	_ = pubkeys
 
-	/*	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
+	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
+	if err != nil {
+		return false, err
+	}
+
+	pks := []*blst.P1Affine{}
+
+	for _, key := range pubkeys {
+		pk, err := utils.PublicKeyFromBytes(key[:])
 		if err != nil {
 			return false, err
 		}
+		pks = append(pks, pk)
+	}
 
-		pks := []*blst.P1Affine{}
-
-		for _, key := range pubkeys {
-			pk, err := utils.PublicKeyFromBytes(key[:])
-			if err != nil {
-				return false, err
-			}
-			pks = append(pks, pk)
-		}
-
-		return signature.FastAggregateVerify(true, pks, signingRoot[:], dst), nil*/
-	return true, nil
+	return signature.FastAggregateVerify(true, pks, signingRoot[:], dst), nil
 }

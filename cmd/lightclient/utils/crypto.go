@@ -15,8 +15,12 @@ package utils
 
 import (
 	"crypto/sha256"
+	"errors"
+	"fmt"
 	"hash"
 	"sync"
+
+	blst "github.com/supranational/blst/bindings/go"
 )
 
 var hasherPool = sync.Pool{
@@ -41,7 +45,6 @@ func Keccak256(data []byte) [32]byte {
 	return b
 }
 
-/*
 // PublicKeyFromBytes creates a BLS public key from a  BigEndian byte slice.
 func PublicKeyFromBytes(pubKey []byte) (*blst.P1Affine, error) {
 	if len(pubKey) != 48 {
@@ -77,4 +80,3 @@ func SignatureFromBytes(sig []byte) (*blst.P2Affine, error) {
 	}
 	return signature, nil
 }
-*/
