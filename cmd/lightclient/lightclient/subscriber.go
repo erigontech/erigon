@@ -48,11 +48,8 @@ func (c *ChainTipSubscriber) StartLoop() {
 
 	for {
 		data, err := stream.Recv()
-		if err == context.Canceled {
-			return
-		}
 		if err != nil {
-			log.Warn("[Lightclient] could not read gossip :/", "reason", err)
+			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
 			continue
 		}
 		if err := c.handleGossipData(data); err != nil {

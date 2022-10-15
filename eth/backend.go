@@ -479,7 +479,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			if err != nil {
 				return nil, err
 			}
-			go lc.StartWithNoValidation()
+			bs, err := lightclient.RetrieveBeaconState(ctx,
+				clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+
+			if err != nil {
+				return nil, err
+			}
+
+			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+				return nil, err
+			}
+
+			go lc.Start()
 		} else {
 			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
 		}
