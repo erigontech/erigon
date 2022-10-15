@@ -192,7 +192,11 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			erigonLog := &types.ErigonLog{}
 			erigonLog.BlockNumber = blockNumber
 			erigonLog.BlockHash = blockHash
-			erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+			if log.TxIndex == uint(len(body.Transactions)) {
+				erigonLog.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+			} else {
+				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+			}
 			erigonLog.Timestamp = timestamp
 			erigonLog.Address = log.Address
 			erigonLog.Topics = log.Topics

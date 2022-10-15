@@ -34,10 +34,10 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 		peerInfo *peer.AddrInfo
 		err      error
 	)
-	if strings.Contains(topic, "light_client") {
-		peerInfo, err = connectToRandomLightClientPeer(s)
+	if strings.Contains(topic, "light_client") && !strings.Contains(topic, "bootstrap") {
+		peerInfo, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
 	} else {
-		_, peerInfo, err = connectToRandomPeer(s)
+		peerInfo, err = connectToRandomPeer(s, string(BeaconBlockTopic))
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to connect to a random peer err=%s", err)
@@ -59,6 +59,9 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 			return nil, false, nil
 		case <-reqRetryTimer.C:
 			log.Debug("[Req] timeout", "topic", topic, "peer", peerId)
+			if err.Error() == "protocol not supported" {
+				s.peers.DisconnectPeer(peerId)
+			}
 			return nil, false, fmt.Errorf("timed out, %s", err)
 		case <-retryTicker.C:
 			stream, err = writeRequestRaw(s, data, peerId, topic)

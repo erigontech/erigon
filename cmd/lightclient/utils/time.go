@@ -34,3 +34,8 @@ func GetCurrentEpoch(genesisTime uint64, secondsPerSlot uint64, slotsPerEpoch ui
 
 	return GetCurrentSlot(genesisTime, secondsPerSlot) / slotsPerEpoch
 }
+
+// compute current slot.
+func SlotToPeriod(slot uint64) uint64 {
+	return slot / 8192
+}
