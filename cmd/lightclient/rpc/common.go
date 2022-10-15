@@ -156,7 +156,6 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client ligh
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	fmt.Println(len(message.Data))
 	//err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
 	return ssz_snappy.DecodeLightClientUpdate(message.Data)
 }
