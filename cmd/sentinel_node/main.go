@@ -14,11 +14,15 @@
 package main
 
 import (
-	"context"
+	"fmt"
+	"os"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
+	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -29,14 +33,24 @@ var (
 )
 
 func main() {
-	ctx := context.Background()
+	app := lightclientapp.MakeApp(runSentinelNode, utils.LightClientDefaultFlags)
+	if err := app.Run(os.Args); err != nil {
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("Fprintln error", "err", printErr)
+		}
+		os.Exit(1)
+	}
+}
+
+func runSentinelNode(ctx *cli.Context) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	addr := "localhost:7777"
 	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        defaultIpAddr,
-		Port:          defaultPort,
-		TCPPort:       defaultTcpPort,
+		IpAddr:        ctx.GlobalString(utils.LightClientAddr),
+		Port:          ctx.GlobalInt(utils.LightClientPort),
+		TCPPort:       ctx.GlobalUint(utils.LightclientTcpPort),
 		GenesisConfig: genesisCfg,
 		NetworkConfig: networkCfg,
 		BeaconConfig:  beaconCfg,
@@ -45,7 +59,6 @@ func main() {
 		log.Error("Could not start sentinel", "err", err)
 	}
 	log.Info("Sentinel started", "addr", addr)
-	<-ctx.Done()
 }
 
 /*

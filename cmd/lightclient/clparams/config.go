@@ -14,12 +14,12 @@
 package clparams
 
 import (
-	"fmt"
 	"math"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type NetworkType int
@@ -652,7 +652,19 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
-	fmt.Println(genesisConfig)
 	beaconConfig := BeaconConfigs[net]
 	return &genesisConfig, &networkConfig, &beaconConfig
+}
+
+func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
+	switch net {
+	case networkname.MainnetChainName:
+		return GetConfigsByNetwork(MainnetNetwork)
+	case networkname.GoerliChainName:
+		return GetConfigsByNetwork(GoerliNetwork)
+	case networkname.SepoliaChainName:
+		return GetConfigsByNetwork(SepoliaNetwork)
+	default:
+		return GetConfigsByNetwork(MainnetNetwork)
+	}
 }
