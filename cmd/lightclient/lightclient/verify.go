@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+
 	blst "github.com/supranational/blst/bindings/go"
 )
 
@@ -113,6 +114,8 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		return false, err
 	}
 	_ = signingRoot
+	_ = pubkeys
+
 	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
 	if err != nil {
 		return false, err
