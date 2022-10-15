@@ -26,17 +26,17 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	// Check if the timings and slot are valid
 	current_slot := utils.GetCurrentSlot(l.genesisConfig.GenesisTime, l.beaconConfig.SecondsPerSlot)
 	if current_slot < update.SignatureSlot || update.SignatureSlot <= update.AttestedHeader.Slot ||
-		update.AttestedHeader.Slot < update.FinalizedHeader.Slot {
+		(update.IsFinalityUpdate() && update.AttestedHeader.Slot < update.FinalizedHeader.Slot) {
 		return false, fmt.Errorf("too far in the future")
 	}
-	storePeriod := (update.FinalizedHeader.Slot / 32) / 256
-	storeSignaturePeriod := (update.SignatureSlot / 32) / 256
+	storePeriod := utils.SlotToPeriod(l.store.finalizedHeader.Slot)
+	updateSignaturePeriod := utils.SlotToPeriod(update.SignatureSlot)
 
 	if !isNextSyncCommitteeKnown {
-		if storeSignaturePeriod != storePeriod && storeSignaturePeriod != storePeriod+1 {
+		if updateSignaturePeriod != storePeriod && updateSignaturePeriod != storePeriod+1 {
 			return false, fmt.Errorf("mismatching periods")
 		}
-	} else if storePeriod != storeSignaturePeriod {
+	} else if storePeriod != updateSignaturePeriod {
 		return false, fmt.Errorf("mismatching periods")
 	}
 
@@ -85,7 +85,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		}
 	}
 	var syncCommittee *cltypes.SyncCommittee
-	if storeSignaturePeriod == storePeriod {
+	if updateSignaturePeriod == storePeriod {
 		syncCommittee = l.store.currentSyncCommittee
 	} else {
 		syncCommittee = l.store.nextSyncCommittee
@@ -113,8 +113,6 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	if err != nil {
 		return false, err
 	}
-	_ = signingRoot
-	_ = pubkeys
 
 	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
 	if err != nil {

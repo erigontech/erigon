@@ -57,7 +57,7 @@ func main() {
 		return
 	}
 	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
-	lc := lightclient.NewLightClient(genesisCfg, beaconCfg, nil, sentinel)
+	lc := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, nil, sentinel)
 	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return
