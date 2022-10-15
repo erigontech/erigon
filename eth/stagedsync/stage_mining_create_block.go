@@ -129,7 +129,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	blockNum := executionAt + 1
-	var txs []types.Transaction
 	txSlots := types2.TxsRlp{}
 	var onTime bool
 	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
@@ -147,6 +146,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return err
 	}
 	var skipByChainIDMismatch uint64 = 0
+	var txs []types.Transaction //nolint:prealloc
 	for i := range txSlots.Txs {
 		s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
 
