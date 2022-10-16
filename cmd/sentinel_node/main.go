@@ -22,20 +22,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
-	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
+	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/log/v3"
 )
 
-var (
-	defaultIpAddr  = "127.0.0.1" // Localhost
-	defaultPort    = 8080
-	defaultTcpPort = uint(9000)
-)
-
 func main() {
-	app := lightclientapp.MakeApp(runSentinelNode, flags.LightClientDefaultFlags)
+	app := sentinelapp.MakeApp(runSentinelNode, flags.LightClientDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {

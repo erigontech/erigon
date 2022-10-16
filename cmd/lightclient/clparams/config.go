@@ -15,7 +15,6 @@ package clparams
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math"
 	"math/big"
 	"time"
@@ -693,6 +692,7 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	default:
 		return GetConfigsByNetwork(MainnetNetwork)
 	}
+}
 func GetCheckpointSyncEndpoint(net NetworkType) string {
 	checkpoints, ok := CheckpointSyncEndpoints[net]
 	if !ok {
