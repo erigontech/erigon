@@ -94,7 +94,10 @@ func (vm *JSVM) GetBuffer(index int) (rawPtr unsafe.Pointer, outSize uint) {
 		return nil, 0
 	}
 
-	buf := expValue.([]byte)
+	buf, ok := expValue.([]byte)
+	if !ok {
+		return nil, 0
+	}
 	if len(buf) == 0 {
 		return unsafe.Pointer(nil), 0
 	}
