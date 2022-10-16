@@ -15,13 +15,13 @@ package clparams
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math"
 	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type NetworkType int
@@ -677,11 +677,26 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
-	fmt.Println(genesisConfig)
 	beaconConfig := BeaconConfigs[net]
 	return &genesisConfig, &networkConfig, &beaconConfig
 }
 
+func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, string) {
+	switch net {
+	case networkname.MainnetChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
+	case networkname.GoerliChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.GoerliChainName
+	case networkname.SepoliaChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.SepoliaChainName
+	default:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
+	}
+}
 func GetCheckpointSyncEndpoint(net NetworkType) string {
 	checkpoints, ok := CheckpointSyncEndpoints[net]
 	if !ok {

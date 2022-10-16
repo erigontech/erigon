@@ -37,7 +37,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 		if err != nil {
 			log.Error("failed to start sentinel", "err", err)
 		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		err = subscriber.Listen()
 		if err != nil {
 			log.Error("failed to start sentinel", "err", err)
