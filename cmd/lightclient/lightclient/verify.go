@@ -32,16 +32,13 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	storePeriod := utils.SlotToPeriod(l.store.finalizedHeader.Slot)
 	updateSignaturePeriod := utils.SlotToPeriod(update.SignatureSlot)
 
-	if !isNextSyncCommitteeKnown {
-		if updateSignaturePeriod != storePeriod && updateSignaturePeriod != storePeriod+1 {
-			return false, fmt.Errorf("mismatching periods")
-		}
-	} else if storePeriod != updateSignaturePeriod {
+	if !isNextSyncCommitteeKnown &&
+		updateSignaturePeriod != storePeriod && updateSignaturePeriod != storePeriod+1 {
 		return false, fmt.Errorf("mismatching periods")
 	}
 
-	// Verify update is relevant
-	attestedPeriod := (update.AttestedHeader.Slot / 32) / 256
+	// Verify whether update is relevant
+	attestedPeriod := utils.SlotToPeriod(update.AttestedHeader.Slot)
 	hasNextSyncCommittee := l.store.nextSyncCommittee == nil &&
 		update.HasNextSyncCommittee() && attestedPeriod == storePeriod
 
