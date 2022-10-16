@@ -681,16 +681,20 @@ func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *Beac
 	return &genesisConfig, &networkConfig, &beaconConfig
 }
 
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
+func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, string) {
 	switch net {
 	case networkname.MainnetChainName:
-		return GetConfigsByNetwork(MainnetNetwork)
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
 	case networkname.GoerliChainName:
-		return GetConfigsByNetwork(GoerliNetwork)
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.GoerliChainName
 	case networkname.SepoliaChainName:
-		return GetConfigsByNetwork(SepoliaNetwork)
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.SepoliaChainName
 	default:
-		return GetConfigsByNetwork(MainnetNetwork)
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
 	}
 }
 func GetCheckpointSyncEndpoint(net NetworkType) string {

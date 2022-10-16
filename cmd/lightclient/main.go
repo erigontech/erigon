@@ -43,8 +43,10 @@ func main() {
 
 func runLightClientNode(cliCtx *cli.Context) {
 	ctx := context.Background()
-	lcCfg := lcCli.SetUpLightClientCfg(cliCtx)
+	lcCfg, chain := lcCli.SetUpLightClientCfg(cliCtx)
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
+	log.Info("[LC]", "chain", chain)
+	log.Info("[LC] Running lightclient", "cfg", lcCfg)
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         lcCfg.Addr,
 		Port:           int(lcCfg.Port),
