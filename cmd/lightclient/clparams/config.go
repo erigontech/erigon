@@ -14,7 +14,10 @@
 package clparams
 
 import (
+	"crypto/rand"
+	"fmt"
 	"math"
+	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
@@ -179,6 +182,29 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	GoerliNetwork: {
 		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
+	},
+}
+
+// Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
+var CheckpointSyncEndpoints = map[NetworkType][]string{
+	MainnetNetwork: {
+		"https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
+		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
+	},
+	GoerliNetwork: {
+		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
+	},
+	SepoliaNetwork: {
+		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -667,4 +693,14 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	default:
 		return GetConfigsByNetwork(MainnetNetwork)
 	}
+func GetCheckpointSyncEndpoint(net NetworkType) string {
+	checkpoints, ok := CheckpointSyncEndpoints[net]
+	if !ok {
+		return ""
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
+	if err != nil {
+		panic(err)
+	}
+	return checkpoints[n.Int64()]
 }
