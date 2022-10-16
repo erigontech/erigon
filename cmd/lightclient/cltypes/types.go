@@ -7,13 +7,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 )
 
+// Eth1Data represents the relevant ETH1 Data for block buidling.
 type Eth1Data struct {
 	Root         [32]byte `ssz-size:"32"`
 	DepositCount uint64
 	BlockHash    [32]byte `ssz-size:"32"`
 }
 
-// Attestation Metadatas
+// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData struct {
 	Slot            uint64
 	Index           uint64
@@ -22,6 +23,10 @@ type AttestationData struct {
 	Target          *Checkpoint
 }
 
+/*
+ * BeaconBlockHeader is the message we validate in the lightclient.
+ * It contains the hash of the block body, and state root data.
+ */
 type BeaconBlockHeader struct {
 	Slot          uint64
 	ProposerIndex uint64
@@ -30,11 +35,17 @@ type BeaconBlockHeader struct {
 	BodyRoot      [32]byte `ssz-size:"32"`
 }
 
+/*
+ * SignedBeaconBlockHeader is a beacon block header + validator signature.
+ */
 type SignedBeaconBlockHeader struct {
 	Header    *BeaconBlockHeader
 	Signature [96]byte `ssz-size:"96"`
 }
 
+/*
+ * IndexedAttestation are attestantions sets to prove that someone misbehaved.
+ */
 type IndexedAttestation struct {
 	AttestingIndices []uint64 `ssz-max:"2048"`
 	Data             *AttestationData
@@ -47,6 +58,9 @@ type ProposerSlashing struct {
 	Header2 *SignedBeaconBlockHeader
 }
 
+/*
+ * AttesterSlashing, slashing data for attester, needs to provide valid duplicates as proof.
+ */
 type AttesterSlashing struct {
 	Attestation_1 *IndexedAttestation
 	Attestation_2 *IndexedAttestation
@@ -83,9 +97,13 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte `ssz-size:"96"`
 }
 
+/*
+ * SyncAggregate, Determines successfull committee, bits shows active participants,
+ * and signature is the aggregate BLS signature of the committee.
+ */
 type SyncAggregate struct {
-	SyncCommiteeBits      []byte   `ssz-size:"64"` // @gotags: ssz-size:"64"
-	SyncCommiteeSignature [96]byte `ssz-size:"96"` // @gotags: ssz-size:"96"
+	SyncCommiteeBits      []byte   `ssz-size:"64"`
+	SyncCommiteeSignature [96]byte `ssz-size:"96"`
 }
 
 // return sum of the committee bits
@@ -137,6 +155,9 @@ type ExecutionHeader struct {
 	TransactionRoot [32]byte `ssz-size:"32"`
 }
 
+/*
+ * Block body for Consensus Layer, we only care about its hash and execution payload.
+ */
 type BeaconBodyBellatrix struct {
 	RandaoReveal      [96]byte `ssz-size:"96"`
 	Eth1Data          *Eth1Data
@@ -150,6 +171,9 @@ type BeaconBodyBellatrix struct {
 	ExecutionPayload  *ExecutionPayload
 }
 
+/*
+ * Bellatrix block structure.
+ */
 type BeaconBlockBellatrix struct {
 	Slot          uint64
 	ProposerIndex uint64
@@ -158,11 +182,17 @@ type BeaconBlockBellatrix struct {
 	Body          *BeaconBodyBellatrix
 }
 
+/*
+ * We get this object with gossip so we need to do proper decoding.
+ */
 type SignedBeaconBlockBellatrix struct {
 	Block     *BeaconBlockBellatrix
 	Signature [96]byte `ssz-size:"96"`
 }
 
+/*
+ * Sync committe public keys and their aggregate public keys, we use array of pubKeys.
+ */
 type SyncCommittee struct {
 	PubKeys            [][48]byte `ssz-size:"512,48"`
 	AggregatePublicKey [48]byte   `ssz-size:"48"`
@@ -183,12 +213,14 @@ func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 	return true
 }
 
+// LightClientBootstrap is used to bootstrap the lightclient from checkpoint sync.
 type LightClientBootstrap struct {
 	Header                     *BeaconBlockHeader
 	CurrentSyncCommittee       *SyncCommittee
 	CurrentSyncCommitteeBranch [][]byte `ssz-size:"5,32"`
 }
 
+// LightClientUpdate is used to update the sync committee every 27 hours.
 type LightClientUpdate struct {
 	AttestedHeader          *BeaconBlockHeader
 	NextSyncCommitee        *SyncCommittee
@@ -212,6 +244,7 @@ func (l *LightClientUpdate) HasSyncFinality() bool {
 		utils.SlotToPeriod(l.AttestedHeader.Slot) == utils.SlotToPeriod(l.FinalizedHeader.Slot)
 }
 
+// LightClientFinalityUpdate is used to update the sync aggreggate every 6 minutes.
 type LightClientFinalityUpdate struct {
 	AttestedHeader  *BeaconBlockHeader
 	FinalizedHeader *BeaconBlockHeader
@@ -220,18 +253,22 @@ type LightClientFinalityUpdate struct {
 	SignatureSlot   uint64
 }
 
+// LightClientOptimisticUpdate is used for verifying N-1 block.
 type LightClientOptimisticUpdate struct {
 	AttestedHeader *BeaconBlockHeader
 	SyncAggregate  *SyncAggregate
 	SignatureSlot  uint64
 }
 
+// Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch. NOT USED.
 type Fork struct {
 	PreviousVersion [4]byte `ssz-size:"4" `
 	CurrentVersion  [4]byte `ssz-size:"4" `
 	Epoch           uint64
 }
 
+// Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
+// NOT USED but necessary for decoding Checkpoint sync.
 type Validator struct {
 	PublicKey                  [48]byte `ssz-size:"48"`
 	WithdrawalCredentials      []byte   `ssz-size:"32"`
@@ -250,11 +287,14 @@ type PendingAttestation struct {
 	ProposerIndex   uint64
 }
 
+// Checkpoint is used to create the initial store through checkpoint sync.
 type Checkpoint struct {
 	Epoch uint64
 	Root  [32]byte `ssz-size:"32"`
 }
 
+// BeaconState is used to create the initial store through checkpoint sync.
+// we only use FinalizedCheckpoint field.
 type BeaconState struct {
 	GenesisTime                  uint64
 	GenesisValidatorsRoot        [32]byte `ssz-size:"32"`
