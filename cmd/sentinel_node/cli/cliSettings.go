@@ -18,16 +18,19 @@ type LightClientCliCfg struct {
 	ServerProtocol string                      `json:"serverProtocol"`
 	ServerTcpPort  uint                        `json:"serverTcpPort"`
 	LogLvl         uint                        `json:"logLevel"`
-	IsDiscoverable bool                        `json:"discoverable"`
+	NoDiscovery    bool                        `json:"noDiscovery"`
+	CheckpointUri  string                      `json:"checkpointUri"`
 }
 
-func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, string) {
+func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
 	cfg := &LightClientCliCfg{}
 	chainName := ctx.GlobalString(flags.LightClientChain.Name)
-
-	var chain string
-	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, chain = clparams.GetConfigsByNetworkName(chainName)
-
+	var err error
+	var network clparams.NetworkType
+	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, network, err = clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		return nil, err
+	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(flags.LightClientServerAddr.Name), ctx.GlobalInt(flags.LightClientServerPort.Name))
 	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(flags.LightClientServerProtocol.Name))
 
@@ -35,9 +38,9 @@ func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, string) {
 	cfg.Addr = ctx.GlobalString(flags.LightClientAddr.Name)
 
 	cfg.LogLvl = ctx.GlobalUint(flags.LightClientVerbosity.Name)
-	cfg.IsDiscoverable = ctx.GlobalBoolT(flags.LightClientDiscovery.Name)
-
-	return cfg, chain
+	cfg.NoDiscovery = !ctx.GlobalBoolT(flags.LightClientDiscovery.Name)
+	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+	return cfg, nil
 }
 
 func ServerProtocolFromInt(n uint) string {

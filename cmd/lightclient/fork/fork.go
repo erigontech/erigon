@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 
 func ComputeForkDigest(
@@ -130,12 +129,6 @@ func GetLastFork(
 		break
 	}
 	return currentFork
-}
-
-// The one suggested by the spec is too over-engineered.
-func MsgID(pmsg *pubsubpb.Message) string {
-	hash := utils.Keccak256(pmsg.Data)
-	return string(hash[:])
 }
 
 func ComputeDomain(
