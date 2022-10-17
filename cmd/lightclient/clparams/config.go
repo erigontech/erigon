@@ -15,6 +15,7 @@ package clparams
 
 import (
 	"crypto/rand"
+	"fmt"
 	"math"
 	"math/big"
 	"time"
@@ -681,20 +682,19 @@ func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *Beac
 	return &genesisConfig, &networkConfig, &beaconConfig
 }
 
-func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, string) {
+func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
 	case networkname.MainnetChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
-		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
+		return genesisCfg, networkCfg, beaconCfg, MainnetNetwork, nil
 	case networkname.GoerliChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
-		return genesisCfg, networkCfg, beaconCfg, networkname.GoerliChainName
+		return genesisCfg, networkCfg, beaconCfg, GoerliNetwork, nil
 	case networkname.SepoliaChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
-		return genesisCfg, networkCfg, beaconCfg, networkname.SepoliaChainName
+		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
 	default:
-		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
-		return genesisCfg, networkCfg, beaconCfg, networkname.MainnetChainName
+		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
 }
 func GetCheckpointSyncEndpoint(net NetworkType) string {

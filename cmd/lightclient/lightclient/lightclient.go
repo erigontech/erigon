@@ -28,6 +28,7 @@ import (
 )
 
 const maxRecentHashes = 5 // 0.16 KB
+const safetyRange = 8     // 8 block of safety
 
 type LightClient struct {
 	ctx           context.Context
@@ -35,6 +36,7 @@ type LightClient struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	chainTip      *ChainTipSubscriber
 
+	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
 	sentinel          lightrpc.SentinelClient
 	execution         remote.ETHBACKENDServer
@@ -178,9 +180,15 @@ func (l *LightClient) Start() {
 				log.Warn("[LightClient] Wrong ETH1 hashes")
 				continue
 			}
+			eth1Number := curr.Body.ExecutionPayload.BlockNumber
+			if l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange {
+				continue
+			}
 			// If all of the above is gud then do the push
 			if err := l.processBeaconBlock(curr); err != nil {
 				log.Warn("Could not send beacon block to ETH1", "err", err)
+			} else {
+				l.highestSeen = eth1Number
 			}
 		}
 		// do not have high CPU load

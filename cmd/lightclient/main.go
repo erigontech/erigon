@@ -28,8 +28,6 @@ import (
 	"github.com/urfave/cli"
 )
 
-const DefaultUri = "https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized"
-
 func main() {
 	app := lightclientapp.MakeApp(runLightClientNode, flags.LightClientDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
@@ -43,25 +41,28 @@ func main() {
 
 func runLightClientNode(cliCtx *cli.Context) {
 	ctx := context.Background()
-	lcCfg, chain := lcCli.SetUpLightClientCfg(cliCtx)
+	lcCfg, err := lcCli.SetUpLightClientCfg(cliCtx)
+	if err != nil {
+		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
-	log.Info("[LC]", "chain", chain)
-	log.Info("[LC] Running lightclient", "cfg", lcCfg)
+	log.Info("[LightClient]", "chain", cliCtx.GlobalString(flags.LightClientChain.Name))
+	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:         lcCfg.Addr,
-		Port:           int(lcCfg.Port),
-		TCPPort:        lcCfg.ServerTcpPort,
-		GenesisConfig:  lcCfg.GenesisCfg,
-		NetworkConfig:  lcCfg.NetworkCfg,
-		BeaconConfig:   lcCfg.BeaconCfg,
-		IsDiscoverable: lcCfg.IsDiscoverable,
+		IpAddr:        lcCfg.Addr,
+		Port:          int(lcCfg.Port),
+		TCPPort:       lcCfg.ServerTcpPort,
+		GenesisConfig: lcCfg.GenesisCfg,
+		NetworkConfig: lcCfg.NetworkCfg,
+		BeaconConfig:  lcCfg.BeaconCfg,
+		NoDiscovery:   lcCfg.NoDiscovery,
 	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 
-	bs, err := lightclient.RetrieveBeaconState(ctx, DefaultUri)
+	bs, err := lightclient.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
