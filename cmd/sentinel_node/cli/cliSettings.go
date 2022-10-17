@@ -18,8 +18,8 @@ type LightClientCliCfg struct {
 	ServerProtocol string                      `json:"serverProtocol"`
 	ServerTcpPort  uint                        `json:"serverTcpPort"`
 	LogLvl         uint                        `json:"logLevel"`
-	NoDiscovery    bool                        `json:"discoverable"`
-	CheckpointUri  string                      `json:"discoverable"`
+	NoDiscovery    bool                        `json:"noDiscovery"`
+	CheckpointUri  string                      `json:"checkpointUri"`
 }
 
 func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
