@@ -340,7 +340,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, uint256.NewInt(-1), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, nil, code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
@@ -390,7 +390,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, uint256.NewInt(-2), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, nil, code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
