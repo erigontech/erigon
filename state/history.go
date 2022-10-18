@@ -422,6 +422,9 @@ func (h *History) Flush() error {
 	if err := h.InvertedIndex.Flush(); err != nil {
 		return err
 	}
+	if h.w == nil {
+		return nil
+	}
 	if err := h.w.flush(h.tx); err != nil {
 		return err
 	}
