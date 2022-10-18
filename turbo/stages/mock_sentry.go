@@ -251,6 +251,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	})
 
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 	if cfg.HistoryV3 {
 		dir.MustExist(dirs.SnapHistory)
@@ -309,7 +310,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
-	blockReader := snapshotsync.NewBlockReader()
 
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
