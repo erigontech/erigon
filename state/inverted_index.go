@@ -291,6 +291,9 @@ func (ii *InvertedIndex) FinishWrites() {
 }
 
 func (ii *InvertedIndex) Flush() error {
+	if ii.w == nil {
+		return nil
+	}
 	if err := ii.w.flush(ii.tx); err != nil {
 		return err
 	}
