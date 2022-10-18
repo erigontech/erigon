@@ -25,8 +25,9 @@ import (
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
 	expected := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	if err != nil {
@@ -38,6 +39,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -58,7 +60,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -70,6 +72,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	m := stages.MockWithTxPool(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
@@ -89,7 +92,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		RplBlock: rlpBlock,
 	})
 
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.PendingBlockNumber, false)
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
@@ -100,9 +103,10 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	if _, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false); err != nil {
 		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
 	}
@@ -111,6 +115,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -131,7 +136,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	}
 	tx.Commit()
 
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -143,9 +148,10 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	if _, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false); err != nil {
 		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
 	}
@@ -154,6 +160,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -174,7 +181,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -186,10 +193,11 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 func TestGetBlockTransactionCountByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)
@@ -221,9 +229,10 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)

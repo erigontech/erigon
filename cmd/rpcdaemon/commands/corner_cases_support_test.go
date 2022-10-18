@@ -19,9 +19,10 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout),
+		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout),
 		m.DB, nil, nil, nil, 5000000)
 	ctx := context.Background()
 
