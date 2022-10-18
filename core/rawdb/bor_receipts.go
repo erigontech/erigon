@@ -34,7 +34,7 @@ func ReadRawBorReceipt(db kv.Tx, number uint64) (*types.Receipt, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("ReadBorReceipt failed getting bor receipt with blockNumber=%d, err=%s", number, err)
 	}
-	if data == nil {
+	if len(data) == 0 {
 		return nil, false, nil
 	}
 
@@ -43,17 +43,19 @@ func ReadRawBorReceipt(db kv.Tx, number uint64) (*types.Receipt, bool, error) {
 	if err == nil {
 		return borReceipt, false, nil
 	}
-	err = rlp.DecodeBytes(data, borReceipt)
-	if err == nil {
-		return borReceipt, true, nil
+
+	// Convert the receipts from their storage form to their internal representation
+	var borStorageReceipt types.ReceiptForStorage
+	if err := rlp.DecodeBytes(data, &borStorageReceipt); err != nil {
+		log.Error("Invalid receipt array RLP", "err", err)
+		return nil, true, err
 	}
 
-	log.Error("receipt unmarshal failed", "err", err)
-	return nil, false, err
+	return (*types.Receipt)(&borStorageReceipt), true, nil
 }
 
 func ReadBorReceipt(db kv.Tx, blockHash common.Hash, blockNumber uint64, receipts types.Receipts) (*types.Receipt, error) {
-	borReceipt, decodedReceiptUsingRLP, err := ReadRawBorReceipt(db, blockNumber)
+	borReceipt, hasEmbeddedLogs, err := ReadRawBorReceipt(db, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -62,21 +64,18 @@ func ReadBorReceipt(db kv.Tx, blockHash common.Hash, blockNumber uint64, receipt
 		return nil, nil
 	}
 
-	logsData, err := db.GetOne(kv.Log, dbutils.LogKey(blockNumber, uint32(len(receipts))))
-	if err != nil {
-		return nil, fmt.Errorf("ReadBorReceipt failed getting bor logs with blockNumber=%d, err=%s", blockNumber, err)
-	}
-	if logsData != nil {
-		var logs types.Logs
-		if decodedReceiptUsingRLP {
-			err = rlp.DecodeBytes(logsData, logs)
-		} else {
-			err = cbor.Unmarshal(&logs, bytes.NewReader(logsData))
-		}
+	if !hasEmbeddedLogs {
+		logsData, err := db.GetOne(kv.Log, dbutils.LogKey(blockNumber, uint32(len(receipts))))
 		if err != nil {
-			return nil, fmt.Errorf("logs unmarshal failed:  %w", err)
+			return nil, fmt.Errorf("ReadBorReceipt failed getting bor logs with blockNumber=%d, err=%s", blockNumber, err)
 		}
-		borReceipt.Logs = logs
+		if logsData != nil {
+			var logs types.Logs
+			if err = cbor.Unmarshal(&logs, bytes.NewReader(logsData)); err != nil {
+				return nil, fmt.Errorf("logs unmarshal failed:  %w", err)
+			}
+			borReceipt.Logs = logs
+		}
 	}
 
 	types.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
