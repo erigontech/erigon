@@ -36,6 +36,7 @@ type LightClient struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	chainTip      *ChainTipSubscriber
 
+	verbose           bool
 	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
 	sentinel          lightrpc.SentinelClient
@@ -45,7 +46,7 @@ type LightClient struct {
 }
 
 func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient) (*LightClient, error) {
+	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
 	return &LightClient{
 		ctx:               ctx,
@@ -55,40 +56,8 @@ func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, 
 		recentHashesCache: recentHashesCache,
 		sentinel:          sentinel,
 		execution:         execution,
+		verbose:           verbose,
 	}, err
-}
-
-func (l *LightClient) StartWithNoValidation() {
-	stream, err := l.sentinel.SubscribeGossip(l.ctx, &lightrpc.EmptyRequest{})
-	if err != nil {
-		log.Warn("could not start lightclient", "reason", err)
-		return
-	}
-	defer stream.CloseSend()
-
-	for {
-		select {
-		case <-l.ctx.Done():
-			return
-		default:
-			data, err := stream.Recv()
-			if err != nil {
-				log.Warn("[Lightclient] block could not be ralayed :/", "reason", err)
-				continue
-			}
-			if data.Type != lightrpc.GossipType_BeaconBlockGossipType {
-				continue
-			}
-			block := &cltypes.SignedBeaconBlockBellatrix{}
-			if err := block.UnmarshalSSZ(data.Data); err != nil {
-				log.Warn("Could not unmarshall gossip", "reason", err)
-			}
-			if err := l.processBeaconBlock(block.Block); err != nil {
-				log.Warn("[Lightclient] block could not be executed :/", "reason", err)
-				continue
-			}
-		}
-	}
 }
 
 func (l *LightClient) Start() {
@@ -153,9 +122,11 @@ func (l *LightClient) Start() {
 		// log new validated segment
 		if len(updates) > 0 {
 			l.lastValidated = updates[len(updates)-1]
-			log.Info("[LightClient] Validated Chain Segments",
-				"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-				"to", l.lastValidated.AttestedHeader.Slot)
+			if l.verbose {
+				log.Info("[LightClient] Validated Chain Segments",
+					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
+					"to", l.lastValidated.AttestedHeader.Slot)
+			}
 			prev, curr := l.chainTip.GetLastBlocks()
 			if prev == nil {
 				continue
