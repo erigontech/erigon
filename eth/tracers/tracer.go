@@ -702,6 +702,9 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 		case *big.Int:
 			pushBigInt(val, jst.vm)
 
+		case *uint256.Int:
+			pushBigInt(val.ToBig(), jst.vm)
+
 		case int:
 			jst.vm.PushInt(val)
 
