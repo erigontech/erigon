@@ -55,15 +55,17 @@ type EthBackendServer struct {
 	db          kv.RoDB
 	blockReader services.BlockAndTxnReader
 	config      *params.ChainConfig
-	// Block proposing for proof-of-stake
-	payloadId uint64
-	builders  map[uint64]*builder.BlockBuilder
 
-	builderFunc builder.BlockBuilderFunc
-	proposing   bool
-	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	logsFilter  *LogsFilterAggregator
-	hd          *headerdownload.HeaderDownload
+	// Block proposing for proof-of-stake
+	payloadId      uint64
+	lastParameters *core.BlockBuilderParameters
+	builders       map[uint64]*builder.BlockBuilder
+	builderFunc    builder.BlockBuilderFunc
+	proposing      bool
+
+	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	logsFilter *LogsFilterAggregator
+	hd         *headerdownload.HeaderDownload
 }
 
 type EthBackend interface {
@@ -611,24 +613,34 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, &InvalidPayloadAttributesErr
 	}
 
-	// Initiate payload building
-
-	s.evictOldBuilders()
-
-	// payload IDs start from 1 (0 signifies null)
-	s.payloadId++
-
-	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
-	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
-	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
-
+	// First check if we're already building a block with the requested parameters
 	param := core.BlockBuilderParameters{
 		ParentHash:            forkChoice.HeadBlockHash,
 		Timestamp:             req.PayloadAttributes.Timestamp,
-		PrevRandao:            emptyHeader.MixDigest,
-		SuggestedFeeRecipient: emptyHeader.Coinbase,
+		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient),
 		PayloadId:             s.payloadId,
 	}
+	if s.lastParameters != nil && *s.lastParameters == param {
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+			},
+			PayloadId: s.payloadId,
+		}, nil
+	}
+
+	// Initiate new payload building
+	s.evictOldBuilders()
+
+	s.payloadId++
+	param.PayloadId = s.payloadId
+	s.lastParameters = &param
+
+	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
+	emptyHeader.Coinbase = param.SuggestedFeeRecipient
+	emptyHeader.MixDigest = param.PrevRandao
 
 	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param, emptyHeader)
 	log.Debug("BlockBuilder added", "payload", s.payloadId)
