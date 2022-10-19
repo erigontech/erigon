@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -115,7 +116,10 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Components() }
-func (b *SimulatedBackend) HistoryV3() bool           { return b.m.HistoryV3 }
+func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
+	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
+}
+func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {

@@ -69,7 +69,7 @@ func runLightClientNode(cliCtx *cli.Context) {
 		return
 	}
 	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
-	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel)
+	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 	}

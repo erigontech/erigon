@@ -572,5 +572,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	})
+	noop := state.NewNoopWriter()
+	ibs.FinalizeTx(cc.Rules(header.Number.Uint64()), noop)
 	return nil
 }

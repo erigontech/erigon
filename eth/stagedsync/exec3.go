@@ -97,7 +97,7 @@ func Exec3(ctx context.Context,
 		}
 		defer applyTx.Rollback()
 	}
-	if !useExternalTx {
+	if !useExternalTx && blockReader.(WithSnapshots).Snapshots().Cfg().Enabled {
 		defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
 	}
 
