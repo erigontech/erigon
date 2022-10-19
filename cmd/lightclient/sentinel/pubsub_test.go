@@ -82,11 +82,3 @@ func TestGetSubscription(t *testing.T) {
 		require.EqualValues(t, ok, testCase.expectedBool)
 	}
 }
-
-//func TestClose() {
-//	gm := NewMockGossipManager()
-//
-//	gm.Close()
-//
-//	require.EqualValues(gm)
-//}
