@@ -296,7 +296,9 @@ func Exec3(ctx context.Context,
 		}()
 	}
 
-	defer agg.StartWrites().FinishWrites()
+	if !parallel {
+		defer agg.StartWrites().FinishWrites()
+	}
 
 	var b *types.Block
 	var blockNum uint64
