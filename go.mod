@@ -4,9 +4,9 @@ go 1.18
 
 require (
 	github.com/gballet/go-verkle v0.0.0-20220829125900-a702d458d33c
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221018043814-37cdd12e5b19
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221019015140-4dd52a4d29d3
 	github.com/ledgerwatch/erigon-snapshot v1.0.1-0.20221012131543-4bd6d51a4b5b
-	github.com/ledgerwatch/log/v3 v3.4.2
+	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
 )
@@ -74,17 +74,17 @@ require (
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.10.0
 	go.uber.org/zap v1.23.0
-	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
-	golang.org/x/exp v0.0.0-20220921164117-439092de6870
-	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.0.0-20220919091848-fb04ddd9f9c8
-	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
-	google.golang.org/grpc v1.48.0
+	golang.org/x/crypto v0.0.0-20221012134737-56aed061732a
+	golang.org/x/exp v0.0.0-20221018221608-02f3b879a704
+	golang.org/x/sync v0.1.0
+	golang.org/x/sys v0.1.0
+	golang.org/x/time v0.1.0
+	google.golang.org/grpc v1.50.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/yaml.v2 v2.4.0
-	modernc.org/sqlite v1.19.1
+	modernc.org/sqlite v1.19.2
 	pgregory.net/rapid v0.4.7
 )
 
@@ -186,7 +186,7 @@ require (
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
-	github.com/garslo/gogen v0.0.0-20170306192744-1d203ffc1f61 // indirect
+	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -202,7 +202,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lispad/go-generics-tools v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
-	github.com/mattn/go-colorable v0.1.11 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -242,10 +242,10 @@ require (
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.3.0 // indirect
-	lukechampine.com/uint128 v1.1.1 // indirect
-	modernc.org/cc/v3 v3.38.1 // indirect
-	modernc.org/ccgo/v3 v3.16.9 // indirect
-	modernc.org/libc v1.19.0 // indirect
+	lukechampine.com/uint128 v1.2.0 // indirect
+	modernc.org/cc/v3 v3.40.0 // indirect
+	modernc.org/ccgo/v3 v3.16.12 // indirect
+	modernc.org/libc v1.20.3 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.4.0 // indirect
 	modernc.org/opt v0.1.3 // indirect
