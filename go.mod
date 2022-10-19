@@ -66,7 +66,7 @@ require (
 	github.com/supranational/blst v0.3.10
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
-	github.com/torquem-ch/mdbx-go v0.26.1
+	github.com/torquem-ch/mdbx-go v0.26.1-0.20221018030226-ae2ee81bf1f2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.9
