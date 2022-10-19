@@ -78,7 +78,7 @@ require (
 	golang.org/x/exp v0.0.0-20221018221608-02f3b879a704
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.1.0
-	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
+	golang.org/x/time v0.1.0
 	google.golang.org/grpc v1.50.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.1
