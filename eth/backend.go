@@ -457,7 +457,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 
 	// If we choose not to run a consensus layer, run our embedded.
-	if !config.CL && (config.NetworkID == 1 || config.NetworkID == 5 || config.NetworkID == 11155111) {
+	if !config.CL && clparams.Supported(config.NetworkID) {
 		// Chains supported are Sepolia, Mainnet and Goerli
 		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 		if err != nil {
