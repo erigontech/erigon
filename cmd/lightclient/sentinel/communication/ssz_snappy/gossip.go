@@ -70,7 +70,6 @@ func (d *GossipCodec) readPacket(msg *pubsub.Message, p communication.Packet) (*
 	if p == nil {
 		return c, nil
 	}
-
 	return c, d.decodeData(p, msg.Data)
 }
 
