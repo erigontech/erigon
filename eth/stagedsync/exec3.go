@@ -320,20 +320,22 @@ loop:
 			}()
 		}
 		txs := b.Transactions()
+		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
-				BlockNum:  blockNum,
-				Rules:     rules,
-				Block:     b,
-				TxNum:     inputTxNum,
-				TxIndex:   txIndex,
-				BlockHash: b.Hash(),
-				Final:     txIndex == len(txs),
+				BlockNum:     blockNum,
+				Rules:        rules,
+				Block:        b,
+				TxNum:        inputTxNum,
+				TxIndex:      txIndex,
+				BlockHash:    b.Hash(),
+				SkipAnalysis: skipAnalysis,
+				Final:        txIndex == len(txs),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.HeaderNoCopy().BaseFee, txTask.Rules)
 				if err != nil {
 					panic(err)
 				}
@@ -815,21 +817,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		txs := b.Transactions()
+		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
-					BlockNum:  bn,
-					Block:     b,
-					Rules:     rules,
-					TxNum:     inputTxNum,
-					TxIndex:   txIndex,
-					BlockHash: b.Hash(),
-					Final:     txIndex == len(txs),
+					BlockNum:     bn,
+					Block:        b,
+					Rules:        rules,
+					TxNum:        inputTxNum,
+					TxIndex:      txIndex,
+					BlockHash:    b.Hash(),
+					SkipAnalysis: skipAnalysis,
+					Final:        txIndex == len(txs),
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.Header().BaseFee, txTask.Rules)
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), txTask.Block.HeaderNoCopy().BaseFee, txTask.Rules)
 					if err != nil {
 						panic(err)
 					}

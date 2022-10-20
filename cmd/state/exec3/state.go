@@ -160,9 +160,10 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 			}
 		}
 	} else {
+		header := txTask.Block.HeaderNoCopy()
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Block.HeaderNoCopy()); err != nil {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				//fmt.Printf("System tx\n")
@@ -172,10 +173,10 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
-		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
+		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		getHashFn := core.GetHashFn(txTask.Block.HeaderNoCopy(), rw.getHeader)
-		blockContext := core.NewEVMBlockContext(txTask.Block.HeaderNoCopy(), getHashFn, rw.engine, nil /* author */)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
