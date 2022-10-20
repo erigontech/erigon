@@ -11,7 +11,7 @@ var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.EthashDatasetDirFlag,
 	utils.SnapshotFlag,
-	utils.LightClientFlag,
+	utils.ExternalConsensusFlag,
 	utils.TxPoolDisableFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,

@@ -164,9 +164,9 @@ var (
 		Name:  "snapshots",
 		Usage: `Default: use snapshots "true" for BSC, Mainnet and Goerli. use snapshots "false" in all other cases`,
 	}
-	LightClientFlag = cli.BoolFlag{
-		Name:  "experimental.lightclient",
-		Usage: "enables experimental CL lightclient.",
+	ExternalConsensusFlag = cli.BoolFlag{
+		Name:  "externalcl",
+		Usage: "enables external consensus",
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -1428,7 +1428,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.CL = ctx.GlobalBool(LightClientFlag.Name)
+	cfg.CL = ctx.GlobalBool(ExternalConsensusFlag.Name)
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
