@@ -586,7 +586,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 		header.Time,
 		header.Extra,
 	}
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
 	rlp.Encode(hasher, enc)

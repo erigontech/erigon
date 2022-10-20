@@ -291,7 +291,6 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 				MixDigest:     common.Hash{},
 				Nonce:         BlockNonce{},
 				BaseFee:       nil,
-				Eip1559:       false,
 				Seal:          nil,
 				WithSeal:      false,
 				Verkle:        false,

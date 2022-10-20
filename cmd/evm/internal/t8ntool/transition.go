@@ -249,7 +249,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	// manufacture block from above inputs
-	header := NewHeader(prestate.Env, chainConfig.IsLondon(prestate.Env.Number))
+	header := NewHeader(prestate.Env)
 
 	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
 	header.Number.Add(header.Number, big.NewInt(int64(len(prestate.Env.Ommers))))
@@ -555,7 +555,7 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 	return nil
 }
 
-func NewHeader(env stEnv, Eip1559 bool) *types.Header {
+func NewHeader(env stEnv) *types.Header {
 	var header types.Header
 	header.UncleHash = env.ParentUncleHash
 	header.Coinbase = env.Coinbase
@@ -564,7 +564,6 @@ func NewHeader(env stEnv, Eip1559 bool) *types.Header {
 	header.GasLimit = env.GasLimit
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
-	header.Eip1559 = Eip1559
 
 	return &header
 }

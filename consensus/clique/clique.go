@@ -558,7 +558,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 		header.MixDigest,
 		header.Nonce,
 	}
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
 	if err := rlp.Encode(w, enc); err != nil {

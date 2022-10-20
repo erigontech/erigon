@@ -99,7 +99,6 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFeePerGas"`
-	Eip1559     bool           // to avoid relying on BaseFee != nil for that
 	Seal        []rlp.RawValue // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
 	// The verkle proof is ignored in legacy headers
@@ -173,7 +172,7 @@ func (h Header) EncodingSize() int {
 	}
 	// size of BaseFee
 	var baseFeeBitLen, baseFeeLen int
-	if h.Eip1559 {
+	if h.BaseFee != nil {
 		encodingSize++
 		baseFeeBitLen = h.BaseFee.BitLen()
 		if baseFeeBitLen >= 8 {
@@ -302,7 +301,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		encodingSize += len(h.Extra)
 	}
 	var baseFeeBitLen, baseFeeLen int
-	if h.Eip1559 {
+	if h.BaseFee != nil {
 		encodingSize++
 		baseFeeBitLen = h.BaseFee.BitLen()
 		if baseFeeBitLen >= 8 {
@@ -459,7 +458,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
-	if h.Eip1559 {
+	if h.BaseFee != nil {
 		if baseFeeBitLen < 8 {
 			if baseFeeBitLen > 0 {
 				b[0] = byte(h.BaseFee.Uint64())
@@ -597,7 +596,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if b, err = s.Uint256Bytes(); err != nil {
 			if errors.Is(err, rlp.EOL) {
 				h.BaseFee = nil
-				h.Eip1559 = false
 				if err := s.ListEnd(); err != nil {
 					return fmt.Errorf("close header struct (no basefee): %w", err)
 				}
@@ -605,7 +603,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			}
 			return fmt.Errorf("read BaseFee: %w", err)
 		}
-		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)
 	}
 
