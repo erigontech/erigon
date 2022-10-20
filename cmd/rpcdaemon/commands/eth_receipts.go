@@ -164,7 +164,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if blockNumbers.GetCardinality() == 0 {
 		return logs, nil
 	}
-
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, v := range crit.Addresses {
+		addrMap[v] = struct{}{}
+	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
@@ -175,6 +178,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
+
 		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
@@ -184,7 +188,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
+			filtered := filterLogs(logs, addrMap, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
 			}
@@ -337,6 +341,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	if err != nil {
 		return nil, err
 	}
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, v := range crit.Addresses {
+		addrMap[v] = struct{}{}
+	}
 	for iter.HasNext() {
 		txNum := iter.Next()
 		// Find block number
@@ -398,7 +406,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			log.Index = logIndex
 			logIndex++
 		}
-		filtered := filterLogs(rawLogs, crit.Addresses, crit.Topics)
+		filtered := filterLogs(rawLogs, addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = lastBlockHash
@@ -642,7 +650,7 @@ func includes(addresses []common.Address, a common.Address) bool {
 }
 
 // filterLogs creates a slice of logs matching the given criteria.
-func filterLogs2(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogsOld(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 Logs:
 	for _, log := range logs {
@@ -670,20 +678,14 @@ Logs:
 	return result
 }
 
-func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 	// populate a set of addresses
-	addrMap := make(map[common.Address]struct{}, len(logs))
-	if len(addresses) > 0 {
-		for _, v := range addresses {
-			addrMap[v] = struct{}{}
-		}
-	}
 	for _, log := range logs {
 		// empty address list means no filter
 		if len(addresses) > 0 {
 			// this is basically the includes function but done with a map
-			if _, ok := addrMap[log.Address]; !ok {
+			if _, ok := addresses[log.Address]; !ok {
 				continue
 			}
 		}
