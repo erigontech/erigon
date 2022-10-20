@@ -203,31 +203,19 @@ func (tx LegacyTx) EncodingSize() int {
 
 func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	payloadSize++
-	var gasPriceLen int
-	if tx.GasPrice.BitLen() >= 8 {
-		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
-	}
-	payloadSize += gasPriceLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
 	payloadSize++
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
 	payloadSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	payloadSize += valueLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
 	payloadSize++
 	switch len(tx.Data) {
@@ -244,23 +232,11 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	}
 	// size of V
 	payloadSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	payloadSize += vLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
 	payloadSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	payloadSize += rLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	payloadSize += sLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen
 }
 

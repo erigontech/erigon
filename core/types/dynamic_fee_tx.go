@@ -130,36 +130,20 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
-	var chainIdLen int
-	if tx.ChainID.BitLen() >= 8 {
-		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
-	}
-	payloadSize += chainIdLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
 	// size of Nonce
 	payloadSize++
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	// size of MaxPriorityFeePerGas
 	payloadSize++
-	var tipLen int
-	if tx.Tip.BitLen() >= 8 {
-		tipLen = (tx.Tip.BitLen() + 7) / 8
-	}
-	payloadSize += tipLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
 	// size of MaxFeePerGas
 	payloadSize++
-	var feeCapLen int
-	if tx.FeeCap.BitLen() >= 8 {
-		feeCapLen = (tx.FeeCap.BitLen() + 7) / 8
-	}
-	payloadSize += feeCapLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
 	// size of Gas
 	payloadSize++
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -168,11 +152,7 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 	}
 	// size of Value
 	payloadSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	payloadSize += valueLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
 	payloadSize++
 	switch len(tx.Data) {
@@ -196,25 +176,13 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 	payloadSize += accessListLen
 	// size of V
 	payloadSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	payloadSize += vLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
 	// size of R
 	payloadSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	payloadSize += rLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	// size of S
 	payloadSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	payloadSize += sLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 

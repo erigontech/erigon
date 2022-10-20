@@ -121,41 +121,19 @@ func (h Header) EncodingSize() int {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
 	encodingSize++
-	var diffBitLen, diffLen int
 	if h.Difficulty != nil {
-		diffBitLen = h.Difficulty.BitLen()
-		if diffBitLen >= 8 {
-			diffLen = (diffBitLen + 7) / 8
-		}
+		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
 	}
-	encodingSize += diffLen
 	encodingSize++
-	var numberBitLen, numberLen int
 	if h.Number != nil {
-		numberBitLen = h.Number.BitLen()
-		if numberBitLen >= 8 {
-			numberLen = (numberBitLen + 7) / 8
-		}
+		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
 	}
-	encodingSize += numberLen
 	encodingSize++
-	var gasLimitLen int
-	if h.GasLimit >= 128 {
-		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
-	}
-	encodingSize += gasLimitLen
+	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
 	encodingSize++
-	var gasUsedLen int
-	if h.GasUsed >= 128 {
-		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
-	}
-	encodingSize += gasUsedLen
+	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
 	encodingSize++
-	var timeLen int
-	if h.Time >= 128 {
-		timeLen = (bits.Len64(h.Time) + 7) / 8
-	}
-	encodingSize += timeLen
+	encodingSize += rlp.IntLenExcludingHead(h.Time)
 	// size of Extra
 	encodingSize++
 	switch len(h.Extra) {
@@ -267,24 +245,15 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	encodingSize += numberLen
 
 	encodingSize++
-	var gasLimitLen int
-	if h.GasLimit >= 128 {
-		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
-	}
+	gasLimitLen := rlp.IntLenExcludingHead(h.GasLimit)
 	encodingSize += gasLimitLen
 
 	encodingSize++
-	var gasUsedLen int
-	if h.GasUsed >= 128 {
-		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
-	}
+	gasUsedLen := rlp.IntLenExcludingHead(h.GasUsed)
 	encodingSize += gasUsedLen
 
 	encodingSize++
-	var timeLen int
-	if h.Time >= 128 {
-		timeLen = (bits.Len64(h.Time) + 7) / 8
-	}
+	timeLen := rlp.IntLenExcludingHead(h.Time)
 	encodingSize += timeLen
 	// size of Extra
 	encodingSize++

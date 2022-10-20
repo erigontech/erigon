@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"sync"
 
@@ -745,9 +746,28 @@ func putint(b []byte, i uint64) (size int) {
 
 // intsize computes the minimum number of bytes required to store i.
 func intsize(i uint64) (size int) {
-	for size = 1; ; size++ {
-		if i >>= 8; i == 0 {
-			return size
-		}
+	return (bits.Len64(i) + 7) / 8
+}
+
+func IntLenExcludingHead(i uint64) int {
+	if i < 0x80 {
+		return 0
 	}
+	return intsize(i)
+}
+
+func BigIntLenExcludingHead(i *big.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return (bitLen + 7) / 8
+}
+
+func Uint256LenExcludingHead(i *uint256.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return (bitLen + 7) / 8
 }
