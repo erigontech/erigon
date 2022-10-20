@@ -374,13 +374,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
-	homestead := st.evm.ChainRules().IsHomestead
-	istanbul := st.evm.ChainRules().IsIstanbul
-	london := st.evm.ChainRules().IsLondon
-	nano := st.evm.ChainRules().IsNano
 	contractCreation := msg.To() == nil
+	rules := st.evm.ChainRules()
 
-	if nano {
+	if rules.IsNano {
 		for _, blackListAddr := range types.NanoBlackList {
 			if blackListAddr == sender.Address() {
 				return nil, fmt.Errorf("block blacklist account")
@@ -392,7 +389,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, homestead, istanbul)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul)
 	if err != nil {
 		return nil, err
 	}
@@ -410,8 +407,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Set up the initial access list.
-	if st.evm.ChainRules().IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(st.evm.ChainRules()), msg.AccessList())
+	if rules.IsBerlin {
+		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+		// EIP-3651 warm COINBASE
+		if rules.IsShanghai {
+			st.state.AddAddressToAccessList(st.evm.Context().Coinbase)
+		}
 	}
 
 	var (
@@ -430,7 +431,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
 	}
 	if refunds {
-		if london {
+		if rules.IsLondon {
 			// After EIP-3529: refunds are capped to gasUsed / 5
 			st.refundGas(params.RefundQuotientEIP3529)
 		} else {
@@ -439,7 +440,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		}
 	}
 	effectiveTip := st.gasPrice
-	if london {
+	if rules.IsLondon {
 		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context().BaseFee))
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
@@ -450,7 +451,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		st.state.AddBalance(st.evm.Context().Coinbase, amount)
 	}
 	if st.isBor {
-		if london {
+		if rules.IsLondon {
 			burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
 			st.state.AddBalance(burntContractAddress, burnAmount)

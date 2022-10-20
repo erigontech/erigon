@@ -42,6 +42,7 @@ type SentinelConfig struct {
 	RelayNodeAddr string
 	HostAddress   string
 	HostDNS       string
+	NoDiscovery   bool
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {

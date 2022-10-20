@@ -475,8 +475,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				return nil, err
 			}
 
-			lc := lightclient.NewLightClient(ethBackendRPC, client)
-			go lc.Start(ctx)
+			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, false)
+			if err != nil {
+				return nil, err
+			}
+			bs, err := lightclient.RetrieveBeaconState(ctx,
+				clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+
+			if err != nil {
+				return nil, err
+			}
+
+			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+				return nil, err
+			}
+
+			go lc.Start()
 		} else {
 			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
 		}
@@ -885,7 +899,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	}
 
 	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, s.chainDB)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
 	if err != nil {
 		return nil, nil, nil, err
 	}

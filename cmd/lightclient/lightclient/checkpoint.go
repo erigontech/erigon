@@ -66,7 +66,7 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 			if err != nil {
 				return err
 			}
-			log.Info("Retrieving bootstrap", "peers", peers.Amount)
+			log.Info("[Checkpoint Sync] Retrieving bootstrap", "peers", peers.Amount)
 		case <-retryInterval.C:
 			// Async request
 			go func() {

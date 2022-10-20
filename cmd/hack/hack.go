@@ -1171,6 +1171,16 @@ func findPrefix(chaindata string) error {
 	return nil
 }
 
+func rmSnKey(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
+		return nil
+	})
+}
+
 func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -1416,6 +1426,8 @@ func main() {
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
+	case "rmSnKey":
+		err = rmSnKey(*chaindata)
 	}
 
 	if err != nil {

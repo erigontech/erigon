@@ -88,8 +88,9 @@ type MockSentry struct {
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
 
-	HistoryV3 bool
-	agg       *libstate.Aggregator22
+	HistoryV3      bool
+	agg            *libstate.Aggregator22
+	BlockSnapshots *snapshotsync.RoSnapshots
 }
 
 func (ms *MockSentry) Close() {
@@ -225,12 +226,14 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId:    gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		HistoryV3: ethconfig.EnableHistoryV3InTest,
+		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		HistoryV3:      ethconfig.EnableHistoryV3InTest,
+		BlockSnapshots: snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap),
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
 	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots)
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
@@ -250,11 +253,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		return nil
 	})
 
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
-
 	if cfg.HistoryV3 {
 		dir.MustExist(dirs.SnapHistory)
-		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep, db)
+		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
@@ -309,7 +310,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
-	blockReader := snapshotsync.NewBlockReader()
 
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
@@ -342,10 +342,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	if isBor {
 		sprint = mock.ChainConfig.Bor.Sprint
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, allSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
+			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, mock.BlockSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,
@@ -356,14 +356,14 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				allSnapshots,
+				mock.BlockSnapshots,
 				blockReader,
 				dirs.Tmp,
 				mock.Notifications,
 				engineapi.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
-			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, cfg.BatchSize, allSnapshots, blockReader, cfg.HistoryV3),
+			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, cfg.BatchSize, mock.BlockSnapshots, blockReader, cfg.HistoryV3),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil),
 			stagedsync.StageExecuteBlocksCfg(
@@ -390,7 +390,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, allSnapshots, isBor, sprint),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, isBor, sprint),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,

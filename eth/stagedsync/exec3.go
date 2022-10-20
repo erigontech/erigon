@@ -97,7 +97,7 @@ func Exec3(ctx context.Context,
 		}
 		defer applyTx.Rollback()
 	}
-	if !useExternalTx {
+	if !useExternalTx && blockReader.(WithSnapshots).Snapshots().Cfg().Enabled {
 		defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
 	}
 
@@ -183,6 +183,8 @@ func Exec3(ctx context.Context,
 			defer tx.Rollback()
 			agg.SetTx(tx)
 			defer rs.Finish()
+			defer agg.StartWrites().FinishWrites()
+
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -247,11 +249,13 @@ func Exec3(ctx context.Context,
 								return err
 							}
 							tx.CollectMetrics()
+							if err := agg.Flush(); err != nil {
+								return err
+							}
 							if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 								return err
 							}
 							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-
 							if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
@@ -274,10 +278,26 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
+
+			//if err := rs.Flush(tx); err != nil {
+			//	panic(err)
+			//}
+			//tx.CollectMetrics()
+			//if err := agg.Flush(); err != nil {
+			//	panic(err)
+			//}
+			//if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			//	panic(err)
+			//}
+			//  TODO: why here is no flush?
 			if err = tx.Commit(); err != nil {
 				panic(err)
 			}
 		}()
+	}
+
+	if !parallel {
+		defer agg.StartWrites().FinishWrites()
 	}
 
 	var b *types.Block
@@ -357,10 +377,13 @@ loop:
 			if err := rs.Flush(applyTx); err != nil {
 				return err
 			}
+			if err := agg.Flush(); err != nil {
+				return err
+			}
+			if err = execStage.Update(applyTx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = execStage.Update(applyTx, stageProgress); err != nil {
-					return err
-				}
 				applyTx.CollectMetrics()
 				if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil {
 					return err
@@ -395,6 +418,9 @@ loop:
 			if err = rs.Flush(tx); err != nil {
 				return err
 			}
+			if err = agg.Flush(); err != nil {
+				return err
+			}
 			if err = execStage.Update(tx, stageProgress); err != nil {
 				return err
 			}
@@ -404,6 +430,9 @@ loop:
 		}
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
+			return err
+		}
+		if err = agg.Flush(); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -463,23 +492,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
 	defer agg.EnableMadvNormal().DisableReadAhead()
-
-	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
-	dir.Recreate(reconDbPath)
-	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
-	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
-		Flags(func(u uint) uint {
-			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.Exclusive | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap | mdbx.NoSubdir
-		}).
-		WriteMergeThreshold(8192).
-		PageSize(uint64(16 * datasize.KB)).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	defer os.RemoveAll(reconDbPath)
+	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
@@ -563,6 +576,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	log.Info("Scan accounts history", "took", time.Since(t))
 
+	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
+	dir.Recreate(reconDbPath)
+	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
+	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
+		Flags(func(u uint) uint {
+			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.Exclusive | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap | mdbx.NoSubdir
+		}).
+		WriteMergeThreshold(8192).
+		PageSize(uint64(16 * datasize.KB)).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
+		Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	defer os.RemoveAll(reconDbPath)
+
 	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accountCollectorX.Close()
 	accountCollectorX.LogLvl(log.LvlDebug)
@@ -575,6 +605,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		accountCollectorsX[i].Close()
 		accountCollectorsX[i] = nil
 	}
+
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
@@ -749,6 +780,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
+							if err = agg.Flush(); err != nil {
+								return err
+							}
 							return nil
 						}); err != nil {
 							return err
@@ -769,7 +803,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}()
 
-	defer blockReader.(WithSnapshots).Snapshots().EnableReadAhead().DisableReadAhead()
+	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	var inputTxNum uint64
 	var b *types.Block
@@ -815,15 +849,18 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
+		//if err = agg.Flush(); err != nil {
+		//	return err
+		//}
 		return nil
 	}); err != nil {
 		return err
 	}
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	defer plainContractCollector.Close()
 	if err = db.View(ctx, func(roTx kv.Tx) error {
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
@@ -934,6 +971,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	db.Close()
 	// Load all collections into the main collector
 	for i := 0; i < workerCount; i++ {
 		if err = plainStateCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {

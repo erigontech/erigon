@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
-	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 
 func ComputeForkDigest(
@@ -115,25 +114,48 @@ func ComputeForkId(
 	return enrForkID.MarshalSSZ()
 }
 
-func getLastForkEpoch(
+func GetLastFork(
 	beaconConfig *clparams.BeaconChainConfig,
 	genesisConfig *clparams.GenesisConfig,
-) uint64 {
+) [4]byte {
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentForkEpoch := beaconConfig.GenesisEpoch
+	currentFork := utils.BytesToBytes4(beaconConfig.GenesisForkVersion)
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
-			currentForkEpoch = fork.epoch
+			currentFork = fork.version
 			continue
 		}
 		break
 	}
-	return currentForkEpoch
+	return currentFork
 }
 
-// The one suggested by the spec is too over-engineered.
-func MsgID(pmsg *pubsubpb.Message) string {
-	hash := utils.Keccak256(pmsg.Data)
-	return string(hash[:])
+func ComputeDomain(
+	domainType []byte,
+	currentVersion [4]byte,
+	genesisConfig *clparams.GenesisConfig,
+) ([]byte, error) {
+	forkDataRoot, err := (&cltypes.ForkData{
+		CurrentVersion:        currentVersion,
+		GenesisValidatorsRoot: genesisConfig.GenesisValidatorRoot,
+	}).HashTreeRoot()
+	if err != nil {
+		return nil, err
+	}
+	return append(domainType, forkDataRoot[:28]...), nil
+}
+
+func ComputeSigningRoot(
+	obj cltypes.ObjectSSZ,
+	domain []byte,
+) ([32]byte, error) {
+	objRoot, err := obj.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return (&cltypes.SigningData{
+		Root:   objRoot,
+		Domain: domain,
+	}).HashTreeRoot()
 }
