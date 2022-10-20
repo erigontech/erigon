@@ -475,7 +475,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				return nil, err
 			}
 
-			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, false)
+			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
 			if err != nil {
 				return nil, err
 			}
