@@ -604,7 +604,7 @@ func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
 // Best - returns top `n` elements of pending queue
-// id doesn't perform full copy of txs, hovewer underlying elements are immutable
+// id doesn't perform full copy of txs, however underlying elements are immutable
 func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf uint64) (bool, error) {
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
@@ -2070,8 +2070,12 @@ func (p *PendingPool) Updated(mt *metaTx) {
 func (p *PendingPool) Len() int { return len(p.best.ms) }
 
 func (p *PendingPool) Remove(i *metaTx) {
-	heap.Remove(p.worst, i.worstIndex)
-	p.best.UnsafeRemove(i)
+	if i.worstIndex >= 0 {
+		heap.Remove(p.worst, i.worstIndex)
+	}
+	if i.bestIndex >= 0 {
+		p.best.UnsafeRemove(i)
+	}
 	i.currentSubPool = 0
 }
 
