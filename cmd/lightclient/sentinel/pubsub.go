@@ -148,6 +148,7 @@ func (s *GossipManager) Close() {
 	}
 	close(s.ch)
 }
+
 func (s *GossipManager) String() string {
 	sb := new(strings.Builder)
 	s.mu.RLock()
@@ -160,6 +161,7 @@ func (s *GossipManager) String() string {
 	s.mu.RUnlock()
 	return sb.String()
 }
+
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	sub = &GossipSubscription{
 		gossip_topic: topic,

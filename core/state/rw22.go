@@ -33,6 +33,7 @@ type TxTask struct {
 	Block              *types.Block
 	BlockHash          common.Hash
 	Sender             *common.Address
+	SkipAnalysis       bool
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
