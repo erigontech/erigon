@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -79,7 +80,7 @@ var erigon2Cmd = &cobra.Command{
 		if commitmentFrequency < 1 || commitmentFrequency > aggregationStep {
 			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than %d: %d", commitmentFrequency, aggregationStep)
 		}
-		logger := log.New()
+		logger := logging.GetLoggerCmd("erigon2", cmd)
 		return Erigon2(genesis, chainConfig, logger)
 	},
 }
