@@ -95,7 +95,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
