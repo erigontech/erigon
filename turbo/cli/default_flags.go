@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/internal/logging"
 
 	"github.com/urfave/cli"
 )
@@ -141,4 +142,10 @@ var DefaultFlags = []cli.Flag{
 	utils.OverrideMergeNetsplitBlock,
 
 	utils.ConfigFlag,
+	logging.LogConsoleVerbosityFlag,
+	logging.LogDirVerbosityFlag,
+	logging.LogDirPathFlag,
+	logging.LogConsoleJsonFlag,
+	logging.LogJsonFlag,
+	logging.LogDirJsonFlag,
 }

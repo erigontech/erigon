@@ -509,22 +509,15 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
+	var borTx types.Transaction
 	if txn == nil {
-		borTx, _, _, _, err := rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
+		borTx, _, _, _, err = rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 		if borTx == nil {
 			return nil, nil
 		}
-		borReceipt, err := rawdb.ReadBorReceipt(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		if borReceipt == nil {
-			return nil, nil
-		}
-		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
 	}
 
 	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
@@ -534,6 +527,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
+
+	if txn == nil {
+		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
+		if err != nil {
+			return nil, err
+		}
+		if borReceipt == nil {
+			return nil, nil
+		}
+		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
+	}
+
 	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, txnHash, true), nil
 }
 
@@ -574,7 +579,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, blockNum)
+			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), block.NumberU64(), receipts)
 			if err != nil {
 				return nil, err
 			}

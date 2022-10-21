@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"path"
-
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -60,8 +58,4 @@ func withSnapshotBlocks(cmd *cobra.Command) {
 
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
-}
-
-func withLogPath(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&logdir, "log-dir", path.Join(paths.DefaultDataDir(), "logs"), "path to write user and error logs to")
 }

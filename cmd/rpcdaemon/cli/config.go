@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -60,7 +61,9 @@ var rootCmd = &cobra.Command{
 }
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	predefinedFlags := append(debug.Flags, utils.MetricFlags...)
+	predefinedFlags = append(predefinedFlags, logging.Flags...)
+	utils.CobraFlags(rootCmd, predefinedFlags)
 
 	cfg := &httpcfg.HttpCfg{Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
