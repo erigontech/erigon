@@ -40,16 +40,7 @@ import (
 var (
 	EmptyRootHash  = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyUncleHash = rlpHash([]*Header(nil))
-	headerWithSeal = false
 )
-
-func SetHeaderSealFlag(withSeal bool) {
-	headerWithSeal = withSeal
-}
-
-func IsHeaderWithSeal() bool {
-	return headerWithSeal
-}
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
 // mix-hash) that a sufficient amount of computation has been carried
@@ -99,8 +90,8 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFeePerGas"`
-	Seal        []rlp.RawValue // AuRa POA network field
-	WithSeal    bool           // to avoid relying on Seal != nil for that
+	AuRaStep    uint64
+	AuRaSeal    []byte
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte                `json:"verkleProof"`
@@ -111,12 +102,11 @@ func (h Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	var sealListLen int
-	if h.WithSeal {
-		for i := range h.Seal {
-			sealListLen += len(h.Seal[i])
+	if len(h.AuRaSeal) != 0 {
+		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
+		if len(h.AuRaSeal) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.AuRaSeal))) + 7) / 8
 		}
-		encodingSize += sealListLen
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -191,12 +181,11 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	var sealListLen int
-	if h.WithSeal {
-		for i := range h.Seal {
-			sealListLen += len(h.Seal[i])
+	if len(h.AuRaSeal) != 0 {
+		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
+		if len(h.AuRaSeal) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.AuRaSeal))) + 7) / 8
 		}
-		encodingSize += sealListLen
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -245,16 +234,13 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	encodingSize += numberLen
 
 	encodingSize++
-	gasLimitLen := rlp.IntLenExcludingHead(h.GasLimit)
-	encodingSize += gasLimitLen
+	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
 
 	encodingSize++
-	gasUsedLen := rlp.IntLenExcludingHead(h.GasUsed)
-	encodingSize += gasUsedLen
+	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
 
 	encodingSize++
-	timeLen := rlp.IntLenExcludingHead(h.Time)
-	encodingSize += timeLen
+	encodingSize += rlp.IntLenExcludingHead(h.Time)
 	// size of Extra
 	encodingSize++
 	switch len(h.Extra) {
@@ -364,51 +350,25 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if h.GasLimit > 0 && h.GasLimit < 128 {
-		b[0] = byte(h.GasLimit)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], h.GasLimit)
-		b[8-gasLimitLen] = 128 + byte(gasLimitLen)
-		if _, err := w.Write(b[8-gasLimitLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
+		return err
 	}
-	if h.GasUsed > 0 && h.GasUsed < 128 {
-		b[0] = byte(h.GasUsed)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], h.GasUsed)
-		b[8-gasUsedLen] = 128 + byte(gasUsedLen)
-		if _, err := w.Write(b[8-gasUsedLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(h.GasUsed, w, b[:]); err != nil {
+		return err
 	}
-	if h.Time > 0 && h.Time < 128 {
-		b[0] = byte(h.Time)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], h.Time)
-		b[8-timeLen] = 128 + byte(timeLen)
-		if _, err := w.Write(b[8-timeLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
+		return err
 	}
-	if err := EncodeString(h.Extra, w, b[:]); err != nil {
+	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
 		return err
 	}
 
-	if h.WithSeal {
-		for i := range h.Seal {
-			if _, err := w.Write(h.Seal[i]); err != nil {
-				return err
-			}
+	if len(h.AuRaSeal) > 0 {
+		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
+			return err
+		}
+		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
+			return err
 		}
 	} else {
 		b[0] = 128 + 32
@@ -447,7 +407,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.Verkle {
-		if err := EncodeString(h.VerkleProof, w, b[:]); err != nil {
+		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
 			return err
 		}
 
@@ -460,9 +420,6 @@ func (h Header) EncodeRLP(w io.Writer) error {
 }
 
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
-	if !h.WithSeal { // then tests can enable without env flag
-		h.WithSeal = IsHeaderWithSeal()
-	}
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -539,20 +496,20 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Extra: %w", err)
 	}
 
-	if h.WithSeal {
-		h.WithSeal = true
-		for b, err = s.Raw(); err == nil; b, err = s.Raw() {
-			h.Seal = append(h.Seal, b)
+	_, size, err := s.Kind()
+	if err != nil {
+		return fmt.Errorf("read MixDigest: %w", err)
+	}
+	if size != 32 { // AuRa
+		if h.AuRaStep, err = s.Uint(); err != nil {
+			return fmt.Errorf("read AuRaStep: %w", err)
 		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("open accessTuple: %d %w", len(h.Seal), err)
+		if h.AuRaSeal, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
 		if b, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read MixDigest: %w", err)
-		}
-		if len(b) != 32 {
-			return fmt.Errorf("wrong size for MixDigest: %d", len(b))
 		}
 		copy(h.MixDigest[:], b)
 		if b, err = s.Bytes(); err != nil {
@@ -562,18 +519,20 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("wrong size for Nonce: %d", len(b))
 		}
 		copy(h.Nonce[:], b)
-		if b, err = s.Uint256Bytes(); err != nil {
-			if errors.Is(err, rlp.EOL) {
-				h.BaseFee = nil
-				if err := s.ListEnd(); err != nil {
-					return fmt.Errorf("close header struct (no basefee): %w", err)
-				}
-				return nil
-			}
-			return fmt.Errorf("read BaseFee: %w", err)
-		}
-		h.BaseFee = new(big.Int).SetBytes(b)
 	}
+
+	// BaseFee
+	if b, err = s.Uint256Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.BaseFee = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no basefee): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read BaseFee: %w", err)
+	}
+	h.BaseFee = new(big.Int).SetBytes(b)
 
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
@@ -650,17 +609,6 @@ func (h *Header) EmptyBody() bool {
 // EmptyReceipts returns true if there are no receipts for this header/block.
 func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
-}
-
-func (h *Header) copySeal() []rlp.RawValue {
-	seal := h.Seal
-	if len(seal) > 0 {
-		seal = make([]rlp.RawValue, len(seal))
-		for i, s := range h.Seal {
-			seal[i] = common.CopyBytes(s)
-		}
-	}
-	return seal
 }
 
 // Body is a simple (mutable, non-safe) data container for storing and moving
@@ -1011,7 +959,7 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 	return b
 }
 
-// NewBlockWithHeader creates a blxock with the given header data. The
+// NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
 func NewBlockWithHeader(header *Header) *Block {
@@ -1036,7 +984,10 @@ func CopyHeader(h *Header) *Header {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
-	cpy.Seal = h.copySeal()
+	if len(h.AuRaSeal) > 0 {
+		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
+		copy(cpy.AuRaSeal, h.AuRaSeal)
+	}
 	return &cpy
 }
 
@@ -1230,7 +1181,6 @@ func (b *Block) BaseFee() *big.Int {
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
-func (b *Block) Seal() (seal []rlp.RawValue) { return b.header.copySeal() }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }

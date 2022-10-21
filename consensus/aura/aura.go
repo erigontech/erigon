@@ -554,23 +554,16 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newH
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
-	//nolint
-	step, err := headerStep(header)
-	if err != nil {
-		return err
-	}
+	step := header.AuRaStep
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-	//nolint
-	parentStep, err := headerStep(parent)
-	if err != nil {
-		return err
-	}
+	parentStep := parent.AuRaStep
 	//nolint
 	validators, setNumber, err := c.epochSet(chain, e, header, syscall)
 	if err != nil {
 		return err
 	}
 	return nil
+	// TODO(yperbasis): re-enable the rest
 
 	// Ensure header is from the step after parent.
 	//nolint
@@ -1105,17 +1098,14 @@ func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64, c
 //
 // This operation is synchronous and may (quite reasonably) not be available, in which case
 // `Seal::None` will be returned.
-func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []rlp.RawValue {
+func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []byte {
 	// first check to avoid generating signature most of the time
 	// (but there's still a race to the `compare_exchange`)
 	if !c.step.canPropose.Load() {
 		log.Trace("[aura] Aborting seal generation. Can't propose.")
 		return nil
 	}
-	parentStep, err := headerStep(parent)
-	if err != nil {
-		panic(err)
-	}
+	parentStep := parent.AuRaStep
 	step := c.step.inner.inner.Load()
 
 	// filter messages from old and future steps and different parents
@@ -1151,6 +1141,8 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 		log.Warn("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?")
 		return nil
 	}
+
+	// TODO(yperbasis) re-enable the rest
 
 	_ = setNumber
 	/*
@@ -1207,24 +1199,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochRead
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-// nolint
-func headerStep(current *types.Header) (val uint64, err error) {
-	if len(current.Seal) < 1 {
-		panic("was either checked with verify_block_basic or is genesis; has 2 fields; qed (Make sure the spec file has a correct genesis seal)")
-	}
-	err = rlp.Decode(bytes.NewReader(current.Seal[0]), &val)
-	if err != nil {
-		return val, err
-	}
-	return val, err
-}
-
-func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
-	var parentStep uint64
-	err := rlp.Decode(bytes.NewReader(parentSeal[0]), &parentStep)
-	if err != nil {
-		panic(err)
-	}
+func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *big.Int {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
 	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()

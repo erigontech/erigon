@@ -199,7 +199,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
-		parent.Seal(),
+		parent.Header().AuRaStep,
 	)
 }
 
@@ -298,7 +298,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
-	types.SetHeaderSealFlag(config.IsHeaderWithSeal())
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
@@ -479,10 +478,9 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
-		parent.Seal(),
+		parent.Header().AuRaStep,
 	)
-	header.Seal = engine.GenerateSeal(chain, header, parent.Header(), nil)
-	header.WithSeal = chain.Config().IsHeaderWithSeal()
+	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }
