@@ -414,7 +414,9 @@ loop:
 		// Check for interrupts
 		select {
 		case <-logEvery.C:
-			progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+			if !parallel {
+				progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+			}
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)
