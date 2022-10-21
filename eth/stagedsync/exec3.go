@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,12 +75,12 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
-	var txNums []string
-	for _, t := range rws {
-		txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
-	}
-	s := strings.Join(txNums, ",")
-	log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
+	//var txNums []string
+	//for _, t := range rws {
+	//	txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
+	//}
+	//s := strings.Join(txNums, ",")
+	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
 	p.prevCount = count
