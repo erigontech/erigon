@@ -105,7 +105,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := utils.SetupCobra(cmd); err != nil {
+		if err := debug.SetupCobra(cmd); err != nil {
 			return err
 		}
 		cfg.WithDatadir = cfg.DataDir != ""

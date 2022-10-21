@@ -220,7 +220,7 @@ func (command *Command) withErigonLogPath() {
 func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags) error) error {
 	command.command.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// apply debug flags
-		return utils.SetupCobra(cmd)
+		return debug.SetupCobra(cmd)
 	}
 	command.command.PersistentPostRun = func(cmd *cobra.Command, args []string) {
 		debug.Exit()

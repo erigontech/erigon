@@ -21,7 +21,7 @@ var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := utils.SetupCobra(cmd); err != nil {
+		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
 		if chaindata == "" {
