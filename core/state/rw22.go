@@ -244,11 +244,12 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	defer rs.lock.Unlock()
 	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
+		addrBytes := addr.Bytes()
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addr.Bytes())
+		enc0 := rs.get(kv.PlainState, addrBytes)
 		if enc0 == nil {
 			var err error
-			enc0, err = roTx.GetOne(kv.PlainState, addr.Bytes())
+			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
 			if err != nil {
 				return err
 			}
@@ -270,8 +271,8 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			enc1 = make([]byte, l)
 			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addr.Bytes(), enc1)
-		if err := agg.AddAccountPrev(addr.Bytes(), enc0); err != nil {
+		rs.put(kv.PlainState, addrBytes, enc1)
+		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
 			return err
 		}
 	}
@@ -284,10 +285,11 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
 		}
-		codePrev := rs.get(kv.Code, original.CodeHash.Bytes())
+		codeHashBytes := original.CodeHash.Bytes()
+		codePrev := rs.get(kv.Code, codeHashBytes)
 		if codePrev == nil {
 			var err error
-			codePrev, err = roTx.GetOne(kv.Code, original.CodeHash.Bytes())
+			codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
 			if err != nil {
 				return err
 			}
@@ -380,14 +382,14 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
-			if err := agg.AddTraceFrom(addr.Bytes()); err != nil {
+			if err := agg.AddTraceFrom(addr[:]); err != nil {
 				return err
 			}
 		}
 	}
 	if txTask.TraceTos != nil {
 		for addr := range txTask.TraceTos {
-			if err := agg.AddTraceTo(addr.Bytes()); err != nil {
+			if err := agg.AddTraceTo(addr[:]); err != nil {
 				return err
 			}
 		}
