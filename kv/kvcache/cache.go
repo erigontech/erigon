@@ -86,17 +86,23 @@ type CacheView interface {
 //   - changes in Canonical View SHOULD reflect in stateEvict
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hits, miss, timeout          *metrics.Counter
-	keys, evict                  *metrics.Counter
-	codeHits, codeMiss, codeKeys *metrics.Counter
-	codeEvictLen                 *metrics.Counter
-	latestStateView              *CoherentRoot
-	roots                        map[ViewID]*CoherentRoot
-	stateEvict, codeEvict        *ThreadSafeEvictionList
-	lock                         sync.RWMutex
-	cfg                          CoherentConfig
-	latestViewID                 ViewID
-	hasher                       hash.Hash
+	hasher          hash.Hash
+	codeEvictLen    *metrics.Counter
+	codeKeys        *metrics.Counter
+	keys            *metrics.Counter
+	evict           *metrics.Counter
+	latestStateView *CoherentRoot
+	codeMiss        *metrics.Counter
+	timeout         *metrics.Counter
+	hits            *metrics.Counter
+	codeHits        *metrics.Counter
+	roots           map[ViewID]*CoherentRoot
+	stateEvict      *ThreadSafeEvictionList
+	codeEvict       *ThreadSafeEvictionList
+	miss            *metrics.Counter
+	cfg             CoherentConfig
+	latestViewID    ViewID
+	lock            sync.RWMutex
 }
 
 type CoherentRoot struct {
@@ -115,9 +121,9 @@ type CoherentRoot struct {
 // CoherentView - dumb object, which proxy all requests to Coherent object.
 // It's thread-safe, because immutable
 type CoherentView struct {
-	viewID ViewID
-	cache  *Coherent
 	tx     kv.Tx
+	cache  *Coherent
+	viewID ViewID
 }
 
 func (c *CoherentView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, c.viewID) }
@@ -129,12 +135,12 @@ var _ CacheView = (*CoherentView)(nil) // compile-time interface check
 const DEGREE = 32
 
 type CoherentConfig struct {
+	MetricsLabel  string
 	KeepViews     uint64        // keep in memory up to this amount of views, evict older
 	NewBlockWait  time.Duration // how long wait
-	MetricsLabel  string
-	WithStorage   bool
 	KeysLimit     int
 	CodeKeysLimit int
+	WithStorage   bool
 }
 
 var DefaultCoherentConfig = CoherentConfig{
