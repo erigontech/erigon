@@ -90,6 +90,7 @@ type State22 struct {
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
+	searchItem   statePair
 }
 
 type statePair struct {
@@ -132,7 +133,8 @@ func (rs *State22) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	if i, ok := t.Get(statePair{key: key}); ok {
+	rs.searchItem.key = key
+	if i, ok := t.Get(rs.searchItem); ok {
 		return i.val
 	}
 	return nil
@@ -522,12 +524,14 @@ func (rs *State22) SizeEstimate() uint64 {
 }
 
 func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
+	search := statePair{}
+	var t *btree.BTreeG[statePair]
+
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	//fmt.Printf("ValidReads\n")
 	for table, list := range readLists {
 		//fmt.Printf("Table %s\n", table)
-		var t *btree.BTreeG[statePair]
 		var ok bool
 		if table == CodeSizeTable {
 			t, ok = rs.changes[kv.Code]
@@ -538,14 +542,14 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 			continue
 		}
 		for i, key := range list.Keys {
-			val := list.Vals[i]
-			if item, ok := t.Get(statePair{key: key}); ok {
+			search.key = key
+			if item, ok := t.Get(search); ok {
 				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
 				if table == CodeSizeTable {
-					if binary.BigEndian.Uint64(val) != uint64(len(item.val)) {
+					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(item.val)) {
 						return false
 					}
-				} else if !bytes.Equal(val, item.val) {
+				} else if !bytes.Equal(list.Vals[i], item.val) {
 					return false
 				}
 			}
@@ -802,10 +806,11 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReader22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc := r.rs.Get(kv.Code, codeHash.Bytes())
+	codeHashBytes := codeHash.Bytes()
+	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.Code, codeHash.Bytes())
+		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
 			return 0, err
 		}
