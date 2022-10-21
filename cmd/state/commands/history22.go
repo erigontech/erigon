@@ -105,7 +105,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, ethconfig.HistoryV3AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
