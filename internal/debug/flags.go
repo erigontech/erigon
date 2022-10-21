@@ -79,7 +79,7 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	_ = logging.GetLogger("debug")
+	_ = logging.GetLoggerCmd("debug", cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
