@@ -253,6 +253,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
 
+        count := 0
 	for txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
 		tip := tx.GetEffectiveGasTip(baseFee)
@@ -262,7 +263,8 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
 			heap.Push(s, tip)
-			if s.Len() >= limit {
+                        count = count + 1
+			if count  >= limit {
 				break
 			}
 		}
