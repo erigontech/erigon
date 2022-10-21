@@ -57,6 +57,7 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash common.Hash, blockNum
 		receipt.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
+
 	return nil
 }
 

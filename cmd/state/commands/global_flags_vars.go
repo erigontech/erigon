@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"path"
-
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -12,7 +10,7 @@ import (
 )
 
 var (
-	datadir         string
+	datadirCli      string
 	chaindata       string
 	statsfile       string
 	block           uint64
@@ -34,7 +32,7 @@ func withBlock(cmd *cobra.Command) {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
@@ -60,8 +58,4 @@ func withSnapshotBlocks(cmd *cobra.Command) {
 
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
-}
-
-func withLogPath(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&logdir, "log-dir", path.Join(paths.DefaultDataDir(), "logs"), "path to write user and error logs to")
 }

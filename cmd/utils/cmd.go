@@ -23,9 +23,6 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
-
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 )
@@ -56,16 +53,4 @@ func StartNode(stack *node.Node) {
 	}
 
 	go debug.ListenSignals(stack)
-}
-
-func SetupCobra(cmd *cobra.Command) error {
-	return debug.SetupCobra(cmd)
-}
-
-func StopDebug() {
-	debug.Exit()
-}
-
-func SetupUrfave(ctx *cli.Context) error {
-	return debug.Setup(ctx)
 }

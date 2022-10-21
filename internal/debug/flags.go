@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
-	"os"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/log/v3"
@@ -32,15 +32,6 @@ import (
 )
 
 var (
-	verbosityFlag = cli.IntFlag{
-		Name:  "verbosity",
-		Usage: "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail",
-		Value: 3,
-	}
-	logjsonFlag = cli.BoolFlag{
-		Name:  "log.json",
-		Usage: "Format logs with JSON",
-	}
 	//nolint
 	vmoduleFlag = cli.StringFlag{
 		Name:  "vmodule",
@@ -80,46 +71,15 @@ var (
 
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
-	verbosityFlag, logjsonFlag, //backtraceAtFlag, vmoduleFlag, debugFlag,
 	pprofFlag, pprofAddrFlag, pprofPortFlag,
 	cpuprofileFlag, traceFlag,
-}
-
-//var glogger *log.GlogHandler
-
-func init() {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	//glogger.Verbosity(log.LvlInfo)
-	//log.Root().SetHandler(glogger)
 }
 
 func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
-	lvl, err := flags.GetInt(verbosityFlag.Name)
-	if err != nil {
-		return err
-	}
 
-	/*
-		dbg, err := flags.GetBool(debugFlag.Name)
-		if err != nil {
-			return err
-		}
-		vmodule, err := flags.GetString(vmoduleFlag.Name)
-		if err != nil {
-			return err
-		}
-		backtrace, err := flags.GetString(backtraceAtFlag.Name)
-		if err != nil {
-			return err
-		}
-
-		_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
-		log.PrintOrigins(dbg)
-	*/
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lvl), log.StderrHandler))
+	_ = logging.GetLoggerCmd("debug", cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -182,26 +142,8 @@ func SetupCobra(cmd *cobra.Command) error {
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
 	RaiseFdLimit()
-	//var ostream log.Handler
-	//output := io.Writer(os.Stderr)
-	if ctx.Bool(logjsonFlag.Name) {
-		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(verbosityFlag.Name)), log.StreamHandler(os.Stderr, log.JsonFormat())))
-		//ostream = log.StreamHandler(output, log.JsonFormat())
-	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(verbosityFlag.Name)), log.StderrHandler))
-	}
-	//log.Root().SetHandler(ostream)
 
-	/*
-		glogger.SetHandler(ostream)
-		// logging
-		log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
-		_, glogger = log.SetupDefaultTerminalLogger(
-			log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
-			ctx.GlobalString(vmoduleFlag.Name),
-			ctx.GlobalString(backtraceAtFlag.Name),
-		)
-	*/
+	_ = logging.GetLoggerCtx("debug", ctx)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {

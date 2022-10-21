@@ -15,14 +15,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/spf13/cobra"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -33,16 +29,19 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/internal/logging"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
 )
 
 func init() {
 	withBlock(erigon23Cmd)
 	withDataDir(erigon23Cmd)
 	withChain(erigon23Cmd)
-	withLogPath(erigon23Cmd)
 
 	erigon23Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon23Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
@@ -58,29 +57,9 @@ var erigon23Cmd = &cobra.Command{
 	Use:   "erigon23",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger, err := initSeparatedLogging(logdir, "erigon23")
-		if err != nil {
-			return err
-		}
+		logger := logging.GetLoggerCmd("erigon23", cmd)
 		return Erigon23(genesis, chainConfig, logger)
 	},
-}
-
-func initSeparatedLogging(logPath string, filePrefix string) (log.Logger, error) {
-	err := os.MkdirAll(logPath, 0764)
-	if err != nil {
-		return nil, err
-	}
-
-	logger := log.New()
-	errLog, err := log.FileHandler(path.Join(logPath, filePrefix+"-error.log"), log.LogfmtFormat(), 1<<27) // 128Mb
-	if err != nil {
-		return nil, err
-	}
-
-	fh := log.LvlFilterHandler(log.LvlTrace, errLog)
-	logger.SetHandler(log.MultiHandler(log.Root().GetHandler(), fh))
-	return logger, nil
 }
 
 func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
@@ -93,7 +72,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		interruptCh <- true
 	}()
 
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadirCli, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -105,7 +84,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "db23")
+	stateDbPath := path.Join(datadirCli, "db23")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -119,7 +98,8 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}
 	defer db.Close()
 
-	aggPath := filepath.Join(datadir, "erigon23")
+	dirs := datadir2.New(datadirCli)
+	aggPath := filepath.Join(datadirCli, "erigon23")
 
 	var rwTx kv.RwTx
 	defer func() {
@@ -131,7 +111,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -210,7 +190,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)

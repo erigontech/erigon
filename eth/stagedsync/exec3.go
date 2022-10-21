@@ -50,7 +50,7 @@ type Progress struct {
 	commitThreshold    uint64
 }
 
-func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueue, queueSize, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -69,12 +69,19 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
-		"resultQueue", rws.Len(),
+		"resultQueue", fmt.Sprintf("%d/%d", rws.Len(), queueSize),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
+	//var txNums []string
+	//for _, t := range rws {
+	//	txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
+	//}
+	//s := strings.Join(txNums, ",")
+	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
+
 	p.prevTime = currentTime
 	p.prevCount = count
 	p.prevOutputBlockNum = outputBlockNum
@@ -198,7 +205,7 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+					progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate >= commitThreshold {
@@ -406,7 +413,9 @@ loop:
 		// Check for interrupts
 		select {
 		case <-logEvery.C:
-			progress.Log(execStage.LogPrefix(), rs, rws, count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+			if !parallel {
+				progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+			}
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)

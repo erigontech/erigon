@@ -375,8 +375,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
-		// Don't log "Wrote block ..." unless we're actually writing something
-		log.Info(fmt.Sprintf("[%s] No block bodies to write in this log period", logPrefix), "block number", committed, "blk/second", speed)
+		log.Info(fmt.Sprintf("[%s] No block bodies to write in this log period", logPrefix), "block number", committed)
 		return
 	}
 

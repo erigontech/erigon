@@ -817,10 +817,7 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 	encodingSize := 0
 	// Size of RequestID
 	encodingSize++
-	var requestIdLen int
-	if ptp66.RequestId >= 128 {
-		requestIdLen = (bits.Len64(ptp66.RequestId) + 7) / 8
-	}
+	requestIdLen := rlp.IntLenExcludingHead(ptp66.RequestId)
 	encodingSize += requestIdLen
 	// size of Transactions
 	encodingSize++
