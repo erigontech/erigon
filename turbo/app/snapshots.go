@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
+	"golang.org/x/sync/semaphore"
 )
 
 const ASSERT = false
@@ -222,7 +223,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
-	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, estimate.IndexSnapshot.Workers()); err != nil {
+	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, sem); err != nil {
 		log.Error("Error", "err", err)
 	}
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
@@ -234,7 +236,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
-	err = agg.BuildMissedIndices()
+	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
 	}
@@ -386,10 +388,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Work on history snapshots")
-	if err = agg.BuildMissedIndices(); err != nil {
+	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
-	if err = agg.Merge(); err != nil {
+	if err = agg.Merge(ctx); err != nil {
 		return err
 	}
 
@@ -442,7 +445,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, sem *semaphore.Weighted) error {
 	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -452,7 +455,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 	}
 	allSnapshots.LogStat()
 
-	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, sem); err != nil {
 		return err
 	}
 	return nil

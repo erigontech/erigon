@@ -59,7 +59,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	dirs := datadir2.New(datadir)
+	dirs := datadir2.New(datadirCli)
 	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
@@ -71,13 +71,13 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := filepath.Join(datadir, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
+	aggPath := filepath.Join(datadirCli, "erigon23")
+	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
 	defer h.Close()
-	readDbPath := path.Join(datadir, "readdb")
+	readDbPath := path.Join(datadirCli, "readdb")
 	if block == 0 {
 		if _, err = os.Stat(readDbPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -92,7 +92,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		return err
 	}
 	defer db.Close()
-	readPath := filepath.Join(datadir, "reads")
+	readPath := filepath.Join(datadirCli, "reads")
 	if block == 0 {
 		if _, err = os.Stat(readPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -105,7 +105,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	ri, err := libstate.NewReadIndices(readPath, ethconfig.HistoryV3AggregationStep)
+	ri, err := libstate.NewReadIndices(readPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
 	if err != nil {
 		return fmt.Errorf("create read indices: %w", err)
 	}
@@ -132,7 +132,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	prevTime := time.Now()
 
 	var blockReader services.FullBlockReader
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)

@@ -131,7 +131,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 			stats.BytesCompleted += uint64(t.BytesCompleted())
 			stats.BytesTotal += uint64(t.Length())
+			if !t.Complete.Bool() {
+				log.Debug("[downloader] file not downloaded yet", "name", t.Name())
+			}
 		default:
+			log.Debug("[downloader] file has no metadata yet", "name", t.Name())
 		}
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
