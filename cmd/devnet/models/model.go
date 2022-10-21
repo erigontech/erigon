@@ -44,9 +44,9 @@ const (
 	// ChainParam is the chain parameter
 	ChainParam = "dev"
 	// DevPeriodParam is the dev.period parameter
-	DevPeriodParam = "30"
+	DevPeriodParam = "0"
 	// VerbosityParam is the verbosity parameter
-	VerbosityParam = "1"
+	VerbosityParam = "0"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
@@ -74,13 +74,13 @@ const (
 	ContractTx TransactionType = "contract"
 
 	// ETHGetTransactionCount represents the eth_getTransactionCount method
-	ETHGetTransactionCount = "eth_getTransactionCount"
+	ETHGetTransactionCount RPCMethod = "eth_getTransactionCount"
 	// ETHGetBalance represents the eth_getBalance method
-	ETHGetBalance = "eth_getBalance"
+	ETHGetBalance RPCMethod = "eth_getBalance"
 	// ETHSendRawTransaction represents the eth_sendRawTransaction method
-	ETHSendRawTransaction = "eth_sendRawTransaction"
+	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
 	// AdminNodeInfo represents the admin_nodeInfo method
-	AdminNodeInfo = "admin_nodeInfo"
+	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 )
 
 var (

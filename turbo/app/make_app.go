@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/internal/flags"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -22,6 +23,9 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 	app := flags.NewApp(params.GitCommit, "", "erigon experimental cli")
 	app.Action = action
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
+
+	// TODO: Ask Max if can add the verbosity flag to the debug flags list? so extra append is not needed
+	app.Flags = append(cliFlags, logging.LogVerbosityFlag) // adding the verbosity flag to the cliFlags
 	app.Before = func(ctx *cli.Context) error {
 		return debug.Setup(ctx)
 	}
