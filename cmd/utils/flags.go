@@ -1600,18 +1600,20 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 	return preloads
 }
 
-func CobraFlags(cmd *cobra.Command, urfaveCliFlags []cli.Flag) {
+func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 	flags := cmd.PersistentFlags()
-	for _, flag := range urfaveCliFlags {
-		switch f := flag.(type) {
-		case cli.IntFlag:
-			flags.Int(f.Name, f.Value, f.Usage)
-		case cli.StringFlag:
-			flags.String(f.Name, f.Value, f.Usage)
-		case cli.BoolFlag:
-			flags.Bool(f.Name, false, f.Usage)
-		default:
-			panic(fmt.Errorf("unexpected type: %T", flag))
+	for _, urfaveCliFlags := range urfaveCliFlagsLists {
+		for _, flag := range urfaveCliFlags {
+			switch f := flag.(type) {
+			case cli.IntFlag:
+				flags.Int(f.Name, f.Value, f.Usage)
+			case cli.StringFlag:
+				flags.String(f.Name, f.Value, f.Usage)
+			case cli.BoolFlag:
+				flags.Bool(f.Name, false, f.Usage)
+			default:
+				panic(fmt.Errorf("unexpected type: %T", flag))
+			}
 		}
 	}
 }

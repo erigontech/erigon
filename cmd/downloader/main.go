@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
@@ -48,8 +49,7 @@ var (
 )
 
 func init() {
-	flags := append(debug.Flags, utils.MetricFlags...)
-	utils.CobraFlags(rootCmd, flags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
 
@@ -104,6 +104,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		_ = logging.GetLoggerCmd("downloader", cmd)
 		if err := Downloader(cmd.Context()); err != nil {
 			log.Error("Downloader", "err", err)
 			return nil

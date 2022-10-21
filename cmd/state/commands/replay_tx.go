@@ -41,7 +41,7 @@ var replayTxCmd = &cobra.Command{
 
 func ReplayTx(genesis *core.Genesis) error {
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, true, true), path.Join(datadirCli, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -103,7 +103,7 @@ func ReplayTx(genesis *core.Genesis) error {
 		txNum = txnum
 	}
 	fmt.Printf("txNum = %d\n", txNum)
-	dirs := datadir2.New(datadir)
+	dirs := datadir2.New(datadirCli)
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, nil)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)

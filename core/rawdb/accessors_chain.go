@@ -947,7 +947,13 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 			return fmt.Errorf("receipt unmarshal failed:  %w", err)
 		}
 
-		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
+		txIndex := int(binary.BigEndian.Uint32(k[8:]))
+
+		// only return logs from real txs (not from block's stateSyncReceipt)
+		if txIndex < len(receipts) {
+			receipts[txIndex].Logs = logs
+		}
+
 		return nil
 	}); err != nil {
 		log.Error("logs fetching failed", "err", err)
