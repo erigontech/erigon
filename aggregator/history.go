@@ -37,8 +37,8 @@ import (
 // History is a utility class that allows reading history of state
 // from state files, history files, and bitmap files produced by an Aggregator
 type History struct {
-	diffDir         string // Directory where the state diff files are stored
 	files           [NumberOfTypes]*btree.BTreeG[*byEndBlockItem]
+	diffDir         string // Directory where the state diff files are stored
 	aggregationStep uint64
 }
 

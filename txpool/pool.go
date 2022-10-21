@@ -68,19 +68,17 @@ const ASSERT = false
 
 type Config struct {
 	DBDir                 string
+	TracedSenders         []string // List of senders for which tx pool should print out debugging info
 	SyncToNewPeersEvery   time.Duration
 	ProcessRemoteTxsEvery time.Duration
 	CommitEvery           time.Duration
 	LogEvery              time.Duration
-
-	PendingSubPoolLimit int
-	BaseFeeSubPoolLimit int
-	QueuedSubPoolLimit  int
-
-	MinFeeCap     uint64
-	AccountSlots  uint64   // Number of executable transaction slots guaranteed per account
-	PriceBump     uint64   // Price bump percentage to replace an already existing transaction
-	TracedSenders []string // List of senders for which tx pool should print out debugging info
+	PendingSubPoolLimit   int
+	BaseFeeSubPoolLimit   int
+	QueuedSubPoolLimit    int
+	MinFeeCap             uint64
+	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
+	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
 }
 
 var DefaultConfig = Config{
@@ -220,15 +218,15 @@ func (r DiscardReason) String() string {
 // metaTx holds transaction and some metadata
 type metaTx struct {
 	Tx                        *types.TxSlot
-	subPool                   SubPoolMarker
+	minFeeCap                 uint256.Int
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
-	minFeeCap                 uint256.Int
 	minTip                    uint64
 	bestIndex                 int
 	worstIndex                int
-	currentSubPool            SubPoolType
 	timestamp                 uint64 // when it was added to pool
+	subPool                   SubPoolMarker
+	currentSubPool            SubPoolType
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestmap uint64) *metaTx {
@@ -289,38 +287,34 @@ func calcProtocolBaseFee(baseFee uint64) uint64 {
 //
 // It preserve TxSlot objects immutable
 type TxPool struct {
-	lock *sync.RWMutex
-
-	started        atomic.Bool
-	lastSeenBlock  atomic.Uint64
-	pendingBaseFee atomic.Uint64
-	blockGasLimit  atomic.Uint64
-
+	_chainDB               kv.RoDB // remote db - use it wisely
+	_stateCache            kvcache.Cache
+	lock                   *sync.RWMutex
+	recentlyConnectedPeers *recentlyConnectedPeers // all txs will be propagated to this peers eventually, and clear list
+	senders                *sendersBatch
 	// batch processing of remote transactions
 	// handling works fast without batching, but batching allow:
 	//   - reduce amount of _chainDB transactions
 	//   - batch notifications about new txs (reduce P2P spam to other nodes about txs propagation)
 	//   - and as a result reducing pool.RWLock contention
 	unprocessedRemoteTxs    *types.TxSlots
-	unprocessedRemoteByHash map[string]int // to reject duplicates
-
-	byHash            map[string]*metaTx // tx_hash => tx : only not committed to db yet records
-	discardReasonsLRU *simplelru.LRU     // tx_hash => discard_reason : non-persisted
-	pending           *PendingPool
-	baseFee, queued   *SubPool
-	isLocalLRU        *simplelru.LRU    // tx_hash => is_local : to restore isLocal flag of unwinded transactions
-	newPendingTxs     chan types.Hashes // notifications about new txs in Pending sub-pool
-	deletedTxs        []*metaTx         // list of discarded txs since last db commit
-	all               *BySenderAndNonce // senderID => (sorted map of tx nonce => *metaTx)
-	promoted          types.Hashes      // pre-allocated temporary buffer to write promoted to pending pool txn hashes
-	_chainDB          kv.RoDB           // remote db - use it wisely
-	_stateCache       kvcache.Cache
-	cfg               Config
-
-	recentlyConnectedPeers *recentlyConnectedPeers // all txs will be propagated to this peers eventually, and clear list
-	senders                *sendersBatch
-
-	chainID uint256.Int
+	unprocessedRemoteByHash map[string]int     // to reject duplicates
+	byHash                  map[string]*metaTx // tx_hash => tx : only not committed to db yet records
+	discardReasonsLRU       *simplelru.LRU     // tx_hash => discard_reason : non-persisted
+	pending                 *PendingPool
+	baseFee                 *SubPool
+	queued                  *SubPool
+	isLocalLRU              *simplelru.LRU    // tx_hash => is_local : to restore isLocal flag of unwinded transactions
+	newPendingTxs           chan types.Hashes // notifications about new txs in Pending sub-pool
+	all                     *BySenderAndNonce // senderID => (sorted map of tx nonce => *metaTx)
+	deletedTxs              []*metaTx         // list of discarded txs since last db commit
+	promoted                types.Hashes      // pre-allocated temporary buffer to write promoted to pending pool txn hashes
+	cfg                     Config
+	chainID                 uint256.Int
+	lastSeenBlock           atomic.Uint64
+	started                 atomic.Bool
+	pendingBaseFee          atomic.Uint64
+	blockGasLimit           atomic.Uint64
 }
 
 func New(newTxs chan types.Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int) (*TxPool, error) {
@@ -1787,8 +1781,8 @@ var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 // DoS protection and performance saving
 // it doesn't track if peer disconnected, it's fine
 type recentlyConnectedPeers struct {
-	lock  sync.RWMutex
 	peers []types.PeerID
+	lock  sync.RWMutex
 }
 
 func (l *recentlyConnectedPeers) AddPeer(p types.PeerID) {
@@ -1817,10 +1811,10 @@ func (sc *sendersBatch) printDebug(prefix string) {
 // flushing to db periodicaly. it doesn't play as read-cache (because db is small and memory-mapped - doesn't need cache)
 // non thread-safe
 type sendersBatch struct {
-	senderID      uint64
 	senderIDs     map[string]uint64
 	senderID2Addr map[uint64][]byte
 	tracedSenders map[string]struct{}
+	senderID      uint64
 }
 
 func newSendersCache(tracedSenders map[string]struct{}) *sendersBatch {
@@ -1992,12 +1986,12 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx) *metaTx {
 // It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
 // pending.best slice for mining (because we consider txs and metaTx are immutable)
 type PendingPool struct {
-	limit  int
-	t      SubPoolType
 	best   *bestSlice
 	worst  *WorstQueue
-	adding bool
 	added  types.Hashes
+	limit  int
+	t      SubPoolType
+	adding bool
 }
 
 func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
@@ -2100,12 +2094,12 @@ func (p *PendingPool) DebugPrint(prefix string) {
 }
 
 type SubPool struct {
-	limit  int
-	t      SubPoolType
 	best   *BestQueue
 	worst  *WorstQueue
-	adding bool
 	added  types.Hashes
+	limit  int
+	t      SubPoolType
+	adding bool
 }
 
 func NewSubPool(t SubPoolType, limit int) *SubPool {

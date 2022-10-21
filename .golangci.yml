@@ -85,7 +85,6 @@ linters-settings:
   govet:
     disable:
       - deepequalerrors
-      - fieldalignment
       - shadow
       - unsafeptr
   goconst:

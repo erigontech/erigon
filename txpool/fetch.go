@@ -41,17 +41,16 @@ import (
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
 type Fetch struct {
-	ctx                context.Context       // Context used for cancellation and closing of the fetcher
-	sentryClients      []direct.SentryClient // sentry clients that will be used for accessing the network
-	pool               Pool                  // Transaction pool implementation
-	coreDB             kv.RoDB
-	db                 kv.RwDB
-	wg                 *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	stateChangesClient StateChangesClient
-
+	ctx                      context.Context // Context used for cancellation and closing of the fetcher
+	pool                     Pool            // Transaction pool implementation
+	coreDB                   kv.RoDB
+	db                       kv.RwDB
+	stateChangesClient       StateChangesClient
+	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesParseCtx     *types2.TxParseContext
-	stateChangesParseCtxLock sync.Mutex
 	pooledTxsParseCtx        *types2.TxParseContext
+	sentryClients            []direct.SentryClient // sentry clients that will be used for accessing the network
+	stateChangesParseCtxLock sync.Mutex
 	pooledTxsParseCtxLock    sync.Mutex
 }
 

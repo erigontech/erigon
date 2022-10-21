@@ -50,28 +50,27 @@ const ASSERT = false
 // After that, `Compress` function needs to be called to perform the compression
 // and eventually create output file
 type Compressor struct {
-	uncompressedFile           *DecompressedFile
-	outputFile, tmpOutFilePath string // File where to output the dictionary and compressed data
-	tmpDir                     string // temporary directory to use for ETL when building dictionary
-	workers                    int
-
+	ctx              context.Context
+	wg               *sync.WaitGroup
+	superstrings     chan []byte
+	uncompressedFile *DecompressedFile
+	tmpDir           string // temporary directory to use for ETL when building dictionary
+	logPrefix        string
+	outputFile       string // File where to output the dictionary and compressed data
+	tmpOutFilePath   string // File where to output the dictionary and compressed data
+	suffixCollectors []*etl.Collector
 	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
 	superstring      []byte
-	superstringLen   int
-	superstrings     chan []byte
-	wg               *sync.WaitGroup
-	suffixCollectors []*etl.Collector
 	wordsCount       uint64
 	superstringCount uint64
-
-	ctx       context.Context
-	logPrefix string
-	Ratio     CompressionRatio
-	trace     bool
-	lvl       log.Lvl
+	superstringLen   int
+	workers          int
+	Ratio            CompressionRatio
+	lvl              log.Lvl
+	trace            bool
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl) (*Compressor, error) {
@@ -239,10 +238,10 @@ const samplingFactor = 4
 const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {
-	limit         int
 	lastWord      []byte
-	lastWordScore uint64
 	items         []*Pattern
+	limit         int
+	lastWordScore uint64
 }
 
 func (db *DictionaryBuilder) Reset(limit int) {
@@ -325,11 +324,11 @@ func (db *DictionaryBuilder) Close() {
 // patterns are stored in a patricia tree and contain pattern score (calculated during
 // the initial dictionary building), frequency of usage, and code
 type Pattern struct {
+	word     []byte // Pattern characters
 	score    uint64 // Score assigned to the pattern during dictionary building
 	uses     uint64 // How many times this pattern has been used during search and optimisation
 	code     uint64 // Allocated numerical code
 	codeBits int    // Number of bits in the code
-	word     []byte // Pattern characters
 	depth    int    // Depth of the pattern in the huffman tree (for encoding in the file)
 }
 
@@ -351,10 +350,12 @@ func patternListLess(i, j *Pattern) bool {
 // It has two children, each of which may either be another intermediate node (h0 or h1)
 // or leaf node, which is Pattern (p0 or p1).
 type PatternHuff struct {
+	p0         *Pattern
+	p1         *Pattern
+	h0         *PatternHuff
+	h1         *PatternHuff
 	uses       uint64
 	tieBreaker uint64
-	p0, p1     *Pattern
-	h0, h1     *PatternHuff
 }
 
 func (h *PatternHuff) AddZero() {
@@ -448,10 +449,12 @@ type Position struct {
 }
 
 type PositionHuff struct {
+	p0         *Position
+	p1         *Position
+	h0         *PositionHuff
+	h1         *PositionHuff
 	uses       uint64
 	tieBreaker uint64
-	p0, p1     *Position
-	h0, h1     *PositionHuff
 }
 
 func (h *PositionHuff) AddZero() {
@@ -668,11 +671,10 @@ func (r *Ring) Truncate(i int) {
 }
 
 type DictAggregator struct {
+	collector     *etl.Collector
+	dist          map[int]int
 	lastWord      []byte
 	lastWordScore uint64
-	collector     *etl.Collector
-
-	dist map[int]int
 }
 
 func (da *DictAggregator) processWord(word []byte, score uint64) error {
@@ -732,11 +734,11 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 
 // DecompressedFile - .dat file format - simple format for temporary data store
 type DecompressedFile struct {
-	filePath string
 	f        *os.File
 	w        *bufio.Writer
-	count    uint64
+	filePath string
 	buf      []byte
+	count    uint64
 }
 
 func NewUncompressedFile(filePath string) (*DecompressedFile, error) {

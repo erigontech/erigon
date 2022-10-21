@@ -169,48 +169,49 @@ func ParseFileType(s string) (FileType, bool) {
 }
 
 type Aggregator struct {
-	diffDir              string // Directory where the state diff files are stored
-	files                [NumberOfTypes]*btree.BTree
-	fileLocks            [NumberOfTypes]sync.RWMutex
-	unwindLimit          uint64              // How far the chain may unwind
-	aggregationStep      uint64              // How many items (block, but later perhaps txs or changes) are required to form one state diff file
-	changesBtree         *btree.BTree        // btree of ChangesItem
-	trace                bool                // Turns on tracing for specific accounts and locations
-	tracedKeys           map[string]struct{} // Set of keys being traced during aggregations
-	hph                  commitment.Trie     //*commitment.HexPatriciaHashed
-	keccak               hash.Hash
-	changesets           bool // Whether to generate changesets (off by default)
-	commitments          bool // Whether to calculate commitments
-	aggChannel           chan *AggregationTask
-	aggError             chan error
-	aggWg                sync.WaitGroup
-	mergeChannel         chan struct{}
-	mergeError           chan error
-	mergeWg              sync.WaitGroup
-	historyChannel       chan struct{}
-	historyError         chan error
-	historyWg            sync.WaitGroup
-	fileHits, fileMisses uint64                       // Counters for state file hit ratio
-	arches               [NumberOfStateTypes][]uint32 // Over-arching hash tables containing the block number of last aggregation
-	archHasher           murmur3.Hash128
+	files           [NumberOfTypes]*btree.BTree
+	hph             commitment.Trie //*commitment.HexPatriciaHashed
+	archHasher      murmur3.Hash128
+	keccak          hash.Hash
+	historyChannel  chan struct{}
+	mergeChannel    chan struct{}
+	tracedKeys      map[string]struct{} // Set of keys being traced during aggregations
+	changesBtree    *btree.BTree        // btree of ChangesItem
+	historyError    chan error
+	mergeError      chan error
+	aggChannel      chan *AggregationTask
+	aggError        chan error
+	diffDir         string                       // Directory where the state diff files are stored
+	arches          [NumberOfStateTypes][]uint32 // Over-arching hash tables containing the block number of last aggregation
+	historyWg       sync.WaitGroup
+	aggWg           sync.WaitGroup
+	mergeWg         sync.WaitGroup
+	unwindLimit     uint64 // How far the chain may unwind
+	aggregationStep uint64 // How many items (block, but later perhaps txs or changes) are required to form one state diff file
+	fileHits        uint64 // Counter for state file hit ratio
+	fileMisses      uint64 // Counter for state file hit ratio
+	fileLocks       [NumberOfTypes]sync.RWMutex
+	commitments     bool // Whether to calculate commitments
+	changesets      bool // Whether to generate changesets (off by default)
+	trace           bool // Turns on tracing for specific accounts and locations
 }
 
 type ChangeFile struct {
-	dir         string
-	step        uint64
-	namebase    string
-	path        string
-	pathTx      string
-	file        *os.File
-	fileTx      *os.File
-	w           *bufio.Writer
-	wTx         *bufio.Writer
 	r           *bufio.Reader
 	rTx         *bufio.Reader
-	txNum       uint64 // Currently read transaction number
-	txRemaining uint64 // Remaining number of bytes to read in the current transaction
+	w           *bufio.Writer
+	fileTx      *os.File
+	wTx         *bufio.Writer
+	file        *os.File
+	pathTx      string
+	path        string
+	dir         string
+	namebase    string
 	words       []byte // Words pending for the next block record, in the same slice
 	wordOffsets []int  // Offsets of words in the `words` slice
+	step        uint64
+	txNum       uint64 // Currently read transaction number
+	txRemaining uint64 // Remaining number of bytes to read in the current transaction
 }
 
 func (cf *ChangeFile) closeFile() error {
@@ -388,11 +389,11 @@ func (cf *ChangeFile) deleteFile() error {
 
 type Changes struct {
 	namebase string
+	dir      string
 	keys     ChangeFile
 	before   ChangeFile
 	after    ChangeFile
 	step     uint64
-	dir      string
 	beforeOn bool
 }
 
@@ -919,8 +920,6 @@ func (i *ChangesItem) Less(than btree.Item) bool {
 }
 
 type byEndBlockItem struct {
-	startBlock   uint64
-	endBlock     uint64
 	decompressor *compress.Decompressor
 	getter       *compress.Getter // reader for the decompressor
 	getterMerge  *compress.Getter // reader for the decompressor used in the background merge thread
@@ -928,6 +927,8 @@ type byEndBlockItem struct {
 	indexReader  *recsplit.IndexReader         // reader for the index
 	readerMerge  *recsplit.IndexReader         // index reader for the background merge thread
 	tree         *btree.BTreeG[*AggregateItem] // Substitute for decompressor+index combination
+	startBlock   uint64
+	endBlock     uint64
 }
 
 func ByEndBlockItemLess(i, than *byEndBlockItem) bool {
@@ -1193,8 +1194,8 @@ func (a *Aggregator) rebuildRecentState(tx kv.RwTx) error {
 }
 
 type AggregationTask struct {
-	changes   [NumberOfStateTypes]Changes
 	bt        [NumberOfStateTypes]*btree.BTreeG[*AggregateItem]
+	changes   [NumberOfStateTypes]Changes
 	blockFrom uint64
 	blockTo   uint64
 }
@@ -2121,12 +2122,12 @@ func (r *Reader) ReadAccountCodeSize(addr []byte, trace bool) (int, error) {
 }
 
 type Writer struct {
+	tx            kv.RwTx
 	a             *Aggregator
+	commTree      *btree.BTreeG[*CommitmentItem] // BTree used for gathering commitment data
+	changes       [NumberOfStateTypes]Changes
 	blockNum      uint64
 	changeFileNum uint64 // Block number associated with the current change files. It is the last block number whose changes will go into that file
-	changes       [NumberOfStateTypes]Changes
-	commTree      *btree.BTreeG[*CommitmentItem] // BTree used for gathering commitment data
-	tx            kv.RwTx
 }
 
 func (a *Aggregator) MakeStateWriter(beforeOn bool) *Writer {
@@ -2632,12 +2633,13 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
-	t        CursorType // Whether this item represents state file or DB record, or tree
-	endBlock uint64
-	key, val []byte
+	c        kv.Cursor
 	dg       *compress.Getter
 	tree     *btree.BTreeG[*AggregateItem]
-	c        kv.Cursor
+	key      []byte
+	val      []byte
+	endBlock uint64
+	t        CursorType // Whether this item represents state file or DB record, or tree
 }
 
 type CursorHeap []*CursorItem

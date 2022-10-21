@@ -51,10 +51,10 @@ var (
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
-	startTxNum   uint64
-	endTxNum     uint64
 	decompressor *compress.Decompressor
 	index        *recsplit.Index
+	startTxNum   uint64
+	endTxNum     uint64
 }
 
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
@@ -89,14 +89,13 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 // Domain should not have any go routines or locks
 type Domain struct {
 	*History
-	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
-	valsTable string // key + invertedStep -> values
-
 	files       *btree.BTreeG[*filesItem] // Static files pertaining to this domain, items are of type `filesItem`
-	prefixLen   int                       // Number of bytes in the keys that can be used for prefix iteration
-	stats       DomainStats
-	mergesCount uint64
 	defaultDc   *DomainContext
+	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
+	valsTable   string // key + invertedStep -> values
+	stats       DomainStats
+	prefixLen   int // Number of bytes in the keys that can be used for prefix iteration
+	mergesCount uint64
 }
 
 func NewDomain(
@@ -398,12 +397,14 @@ const (
 // CursorItem is the item in the priority queue used to do merge interation
 // over storage of a given account
 type CursorItem struct {
+	c        kv.CursorDupSort
+	dg       *compress.Getter
+	dg2      *compress.Getter
+	key      []byte
+	val      []byte
+	endTxNum uint64
 	t        CursorType // Whether this item represents state file or DB record, or tree
 	reverse  bool
-	endTxNum uint64
-	key, val []byte
-	dg, dg2  *compress.Getter
-	c        kv.CursorDupSort
 }
 
 type CursorHeap []*CursorItem
@@ -442,10 +443,10 @@ func (ch *CursorHeap) Pop() interface{} {
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type ctxItem struct {
-	startTxNum uint64
-	endTxNum   uint64
 	getter     *compress.Getter
 	reader     *recsplit.IndexReader
+	startTxNum uint64
+	endTxNum   uint64
 }
 
 func ctxItemLess(i, j ctxItem) bool {
@@ -593,13 +594,13 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 
 // Collation is the set of compressors created after aggregation
 type Collation struct {
-	valuesPath   string
 	valuesComp   *compress.Compressor
-	valuesCount  int
-	historyPath  string
 	historyComp  *compress.Compressor
-	historyCount int
 	indexBitmaps map[string]*roaring64.Bitmap
+	valuesPath   string
+	historyPath  string
+	valuesCount  int
+	historyCount int
 }
 
 func (c Collation) Close() {

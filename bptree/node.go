@@ -77,10 +77,10 @@ func (kv KeyValues) String() string {
 }
 
 type Node23 struct {
-	isLeaf   bool
 	children []*Node23
 	keys     []*Felt
 	values   []*Felt
+	isLeaf   bool
 	exposed  bool
 	updated  bool
 }

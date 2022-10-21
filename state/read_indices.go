@@ -28,13 +28,13 @@ import (
 )
 
 type ReadIndices struct {
-	aggregationStep uint64
+	rwTx            kv.RwTx
 	accounts        *InvertedIndex
 	storage         *InvertedIndex
 	code            *InvertedIndex
-	txNum           uint64
-	rwTx            kv.RwTx
 	keyBuf          []byte
+	aggregationStep uint64
+	txNum           uint64
 }
 
 func NewReadIndices(
@@ -210,12 +210,15 @@ func (ri *ReadIndices) endTxNumMinimax() uint64 {
 }
 
 type RRanges struct {
-	accountsStartTxNum, accountsEndTxNum uint64
-	accounts                             bool
-	storageStartTxNum, storageEndTxNum   uint64
-	storage                              bool
-	codeStartTxNum, codeEndTxNum         uint64
-	code                                 bool
+	accountsStartTxNum uint64
+	accountsEndTxNum   uint64
+	storageStartTxNum  uint64
+	storageEndTxNum    uint64
+	codeStartTxNum     uint64
+	codeEndTxNum       uint64
+	accounts           bool
+	storage            bool
+	code               bool
 }
 
 func (r RRanges) any() bool {
@@ -233,10 +236,10 @@ func (ri *ReadIndices) findMergeRange(maxEndTxNum, maxSpan uint64) RRanges {
 
 type RSelectedStaticFiles struct {
 	accounts  []*filesItem
-	accountsI int
 	storage   []*filesItem
-	storageI  int
 	code      []*filesItem
+	accountsI int
+	storageI  int
 	codeI     int
 }
 

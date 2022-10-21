@@ -24,9 +24,9 @@ import (
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
-	mu     sync.RWMutex
 	hasher murmur3.Hash128
 	index  *Index
+	mu     sync.RWMutex
 }
 
 // NewIndexReader creates new IndexReader

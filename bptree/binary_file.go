@@ -31,10 +31,10 @@ const BLOCKSIZE int64 = 4096
 
 // BinaryFile type represents an open binary file.
 type BinaryFile struct {
+	file      *os.File
 	path      string
 	blockSize int64
 	size      int64
-	file      *os.File
 	opened    bool
 }
 

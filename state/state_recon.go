@@ -59,11 +59,11 @@ func (hc *HistoryContext) IsMaxTxNum(key []byte, txNum uint64) bool {
 }
 
 type ReconItem struct {
+	g           *compress.Getter
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64
 	endTxNum    uint64
-	g           *compress.Getter
 	startOffset uint64
 	lastOffset  uint64
 }
@@ -110,16 +110,17 @@ func (rh *ReconHeap) Pop() interface{} {
 }
 
 type ScanIterator struct {
-	hc             *HistoryContext
-	h              ReconHeap
-	uptoTxNum      uint64
-	hasNext        bool
-	nextTxNum      uint64
-	nextKey        []byte
-	fromKey, toKey []byte
-	key            []byte
-	progress       uint64
-	total          uint64
+	hc        *HistoryContext
+	h         ReconHeap
+	nextKey   []byte
+	fromKey   []byte
+	toKey     []byte
+	key       []byte
+	uptoTxNum uint64
+	nextTxNum uint64
+	progress  uint64
+	total     uint64
+	hasNext   bool
 }
 
 func (si *ScanIterator) advance() {
@@ -188,15 +189,17 @@ func (hc *HistoryContext) iterateReconTxs(fromKey, toKey []byte, uptoTxNum uint6
 }
 
 type HistoryIterator struct {
-	hc             *HistoryContext
-	h              ReconHeap
-	txNum          uint64
-	key, val       []byte
-	hasNext        bool
-	compressVals   bool
-	fromKey, toKey []byte
-	progress       uint64
-	total          uint64
+	hc           *HistoryContext
+	h            ReconHeap
+	key          []byte
+	val          []byte
+	fromKey      []byte
+	toKey        []byte
+	txNum        uint64
+	progress     uint64
+	total        uint64
+	hasNext      bool
+	compressVals bool
 }
 
 func (hi *HistoryIterator) advance() {

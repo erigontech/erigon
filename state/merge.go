@@ -69,12 +69,12 @@ func (h *History) endTxNumMinimax() uint64 {
 type DomainRanges struct {
 	valuesStartTxNum  uint64
 	valuesEndTxNum    uint64
-	values            bool
 	historyStartTxNum uint64
 	historyEndTxNum   uint64
-	history           bool
 	indexStartTxNum   uint64
 	indexEndTxNum     uint64
+	values            bool
+	history           bool
 	index             bool
 }
 
@@ -143,9 +143,9 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 type HistoryRanges struct {
 	historyStartTxNum uint64
 	historyEndTxNum   uint64
-	history           bool
 	indexStartTxNum   uint64
 	indexEndTxNum     uint64
+	history           bool
 	index             bool
 }
 

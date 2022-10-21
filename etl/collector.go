@@ -41,12 +41,12 @@ type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) err
 type Collector struct {
 	extractNextFunc ExtractNextFunc
 	flushBuffer     func([]byte, bool) error
+	logPrefix       string
 	dataProviders   []dataProvider
-	allFlushed      bool
-	autoClean       bool
 	logLvl          log.Lvl
 	bufType         int
-	logPrefix       string
+	allFlushed      bool
+	autoClean       bool
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -169,7 +169,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 	heap.Init(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
-			he := HeapElem{key, i, value}
+			he := HeapElem{key, value, i}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",

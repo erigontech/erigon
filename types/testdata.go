@@ -79,8 +79,8 @@ var txRopstenTests = []parseTxTest{
 }
 
 var allNetsTestCases = []struct {
-	chainID uint256.Int
 	tests   []parseTxTest
+	chainID uint256.Int
 }{
 	{
 		chainID: *uint256.NewInt(1),

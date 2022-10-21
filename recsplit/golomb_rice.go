@@ -30,8 +30,8 @@ var bijMemo []uint32 = []uint32{0, 0, 0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 1
 
 // GolombRice can build up the golomb-rice encoding of the sequeuce of numbers, as well as read the numbers back from it.
 type GolombRice struct {
-	bitCount int      // Speficic to the builder - number of bits added to the encoding so far
 	data     []uint64 // Present in the builder and in the reader
+	bitCount int      // Speficic to the builder - number of bits added to the encoding so far
 }
 
 // appendUnaryAll adds the unary encoding of specified sequence of numbers to the end of the

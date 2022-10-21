@@ -64,17 +64,15 @@ type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
+	Quit              <-chan struct{}
+	LogDetailsExtract AdditionalLogArguments
+	LogDetailsLoad    AdditionalLogArguments
+	Comparator        kv.CmpFunc
 	// [ExtractStartKey, ExtractEndKey)
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
 	BufferType      int
 	BufferSize      int
-	Quit            <-chan struct{}
-
-	LogDetailsExtract AdditionalLogArguments
-	LogDetailsLoad    AdditionalLogArguments
-
-	Comparator kv.CmpFunc
 }
 
 func Transform(

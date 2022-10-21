@@ -27,12 +27,11 @@ import (
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string
 type node struct {
-	p0 uint32
-	p1 uint32
-	//size   uint64
+	val interface{} // value associated with the key
 	n0  *node
 	n1  *node
-	val interface{} // value associated with the key
+	p0  uint32
+	p1  uint32
 }
 
 func tostr(x uint32) string {
@@ -345,9 +344,9 @@ func (pt PatriciaTree) Get(key []byte) (interface{}, bool) {
 }
 
 type Match struct {
+	Val   interface{}
 	Start int
 	End   int
-	Val   interface{}
 }
 
 type Matches []Match
@@ -365,9 +364,9 @@ func (m *Matches) Swap(i, j int) {
 }
 
 type MatchFinder struct {
+	pt      *PatriciaTree
 	s       state
 	matches []Match
-	pt      *PatriciaTree
 }
 
 func NewMatchFinder(pt *PatriciaTree) *MatchFinder {
@@ -375,15 +374,17 @@ func NewMatchFinder(pt *PatriciaTree) *MatchFinder {
 }
 
 type MatchFinder2 struct {
-	nodeStack    []*node
-	matchStack   []Match
-	top          *node // Top of nodeStack
-	headLen      int
-	tailLen      int
-	side         int // 0, 1, or 2 (if side is not determined yet)
-	matches      Matches
-	pt           *PatriciaTree
-	sa, lcp, inv []int32
+	top        *node // Top of nodeStack
+	pt         *PatriciaTree
+	nodeStack  []*node
+	matchStack []Match
+	matches    Matches
+	sa         []int32
+	lcp        []int32
+	inv        []int32
+	headLen    int
+	tailLen    int
+	side       int // 0, 1, or 2 (if side is not determined yet)
 }
 
 func NewMatchFinder2(pt *PatriciaTree) *MatchFinder2 {

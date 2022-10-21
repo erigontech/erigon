@@ -312,9 +312,9 @@ func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*
 }
 
 type StateChangePubSub struct {
-	mu    sync.RWMutex
-	id    uint
 	chans map[uint]chan *remote.StateChangeBatch
+	id    uint
+	mu    sync.RWMutex
 }
 
 func newStateChangeStreams() *StateChangePubSub {

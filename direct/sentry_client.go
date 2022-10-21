@@ -169,8 +169,8 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCount
 // SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
 // instance of SentryServer
 type SentryClientDirect struct {
-	protocol uint
 	server   sentry.SentryServer
+	protocol uint
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentry.SentryServer) *SentryClientDirect {

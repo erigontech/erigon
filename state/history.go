@@ -48,13 +48,12 @@ import (
 
 type History struct {
 	*InvertedIndex
+	files            *btree.BTreeG[*filesItem]
+	w                *historyWriter
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	settingsTable    string
-	files            *btree.BTreeG[*filesItem]
-	compressVals     bool
 	workers          int
-
-	w *historyWriter
+	compressVals     bool
 }
 
 func NewHistory(
@@ -466,9 +465,9 @@ func (h *History) Flush() error {
 
 type historyWriter struct {
 	h                *History
-	autoIncrement    uint64
-	autoIncrementBuf []byte
 	tmpdir           string
+	autoIncrementBuf []byte
+	autoIncrement    uint64
 }
 
 func (h *historyWriter) close() {
@@ -559,10 +558,10 @@ func (h *historyWriter) addPrevValue(key1, key2, original []byte) error {
 }
 
 type HistoryCollation struct {
-	historyPath  string
 	historyComp  *compress.Compressor
-	historyCount int
 	indexBitmaps map[string]*roaring64.Bitmap
+	historyPath  string
+	historyCount int
 }
 
 func (c HistoryCollation) Close() {
@@ -1180,21 +1179,30 @@ func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx
 }
 
 type HistoryIterator1 struct {
-	hc           *HistoryContext
-	compressVals bool
-	total        uint64
-
-	hasNextInFiles                      bool
-	hasNextInDb                         bool
-	startTxKey, txnKey                  [8]byte
-	startTxNum, endTxNum                uint64
-	roTx                                kv.Tx
-	idxCursor, txNum2kCursor            kv.CursorDupSort
-	indexTable, idxKeysTable, valsTable string
-	h                                   ReconHeap
-
-	nextKey, nextVal, nextFileKey, nextFileVal, nextDbKey, nextDbVal []byte
-	advFileCnt, advDbCnt                                             int
+	roTx           kv.Tx
+	txNum2kCursor  kv.CursorDupSort
+	idxCursor      kv.CursorDupSort
+	hc             *HistoryContext
+	valsTable      string
+	idxKeysTable   string
+	indexTable     string
+	nextFileKey    []byte
+	nextDbKey      []byte
+	nextDbVal      []byte
+	nextFileVal    []byte
+	nextVal        []byte
+	nextKey        []byte
+	h              ReconHeap
+	total          uint64
+	endTxNum       uint64
+	startTxNum     uint64
+	advFileCnt     int
+	advDbCnt       int
+	startTxKey     [8]byte
+	txnKey         [8]byte
+	hasNextInFiles bool
+	hasNextInDb    bool
+	compressVals   bool
 }
 
 func (hi *HistoryIterator1) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }

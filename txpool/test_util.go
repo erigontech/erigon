@@ -29,11 +29,11 @@ import (
 //go:generate moq -stub -out mocks_test.go . Pool
 
 type MockSentry struct {
+	ctx context.Context
 	*sentry.SentryServerMock
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
 	peersStreams []sentry.Sentry_PeerEventsServer
 	StreamWg     sync.WaitGroup
-	ctx          context.Context
 	lock         sync.RWMutex
 }
 

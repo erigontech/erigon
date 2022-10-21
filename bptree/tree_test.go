@@ -57,8 +57,8 @@ type IsTree23Test struct {
 }
 
 type RootHashTest struct {
-	initialItems KeyValues
 	expectedHash string
+	initialItems KeyValues
 }
 
 type UpsertTest struct {
@@ -112,9 +112,9 @@ var isTree23TestTable = []IsTree23Test{
 }
 
 var rootHashTestTable = []RootHashTest{
-	{K([]Felt{}), ""},
-	{K([]Felt{1}), "532deabf88729cb43995ab5a9cd49bf9b90a079904dc0645ecda9e47ce7345a9"},
-	{K([]Felt{1, 2}), "d3782c59c224da5b6344108ef3431ba4e01d2c30b6570137a91b8b383908c361"},
+	{"", K([]Felt{})},
+	{"532deabf88729cb43995ab5a9cd49bf9b90a079904dc0645ecda9e47ce7345a9", K([]Felt{1})},
+	{"d3782c59c224da5b6344108ef3431ba4e01d2c30b6570137a91b8b383908c361", K([]Felt{1, 2})},
 }
 
 var insertTestTable = []UpsertTest{

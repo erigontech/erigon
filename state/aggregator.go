@@ -43,26 +43,25 @@ import (
 // Reconstruction of the aggregator in another package, `aggregator`
 
 type Aggregator struct {
-	aggregationStep uint64
-	accounts        *Domain
-	storage         *Domain
-	code            *Domain
+	keccak          hash.Hash
+	rwTx            kv.RwTx
+	logAddrs        *InvertedIndex
+	tracesTo        *InvertedIndex
 	commitment      *Domain
 	commTree        *btree.BTreeG[*CommitmentItem]
-	keccak          hash.Hash
+	storage         *Domain
 	patriciaTrie    *commitment.HexPatriciaHashed
-	logAddrs        *InvertedIndex
+	accounts        *Domain
 	logTopics       *InvertedIndex
 	tracesFrom      *InvertedIndex
-	tracesTo        *InvertedIndex
-	txNum           uint64
+	code            *Domain
+	commitFn        func(txNum uint64) error
+	tmpdir          string
+	stats           FilesStats
 	blockNum        uint64
-
-	commitmentMode CommitmentMode
-	commitFn       func(txNum uint64) error
-	rwTx           kv.RwTx
-	stats          FilesStats
-	tmpdir         string
+	commitmentMode  CommitmentMode
+	txNum           uint64
+	aggregationStep uint64
 }
 
 func NewAggregator(
@@ -199,14 +198,14 @@ func (a *Aggregator) SetCommitmentMode(mode CommitmentMode) {
 }
 
 type AggCollation struct {
-	accounts   Collation
-	storage    Collation
-	code       Collation
-	commitment Collation
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
 	tracesFrom map[string]*roaring64.Bitmap
 	tracesTo   map[string]*roaring64.Bitmap
+	accounts   Collation
+	storage    Collation
+	code       Collation
+	commitment Collation
 }
 
 func (c AggCollation) Close() {
@@ -422,18 +421,22 @@ func (a *Aggregator) EndTxNumMinimax() uint64 {
 }
 
 type Ranges struct {
-	accounts                                 DomainRanges
-	storage                                  DomainRanges
-	code                                     DomainRanges
-	commitment                               DomainRanges
-	logAddrsStartTxNum, logAddrsEndTxNum     uint64
-	logAddrs                                 bool
-	logTopicsStartTxNum, logTopicsEndTxNum   uint64
-	logTopics                                bool
-	tracesFromStartTxNum, tracesFromEndTxNum uint64
-	tracesFrom                               bool
-	tracesToStartTxNum, tracesToEndTxNum     uint64
-	tracesTo                                 bool
+	accounts             DomainRanges
+	storage              DomainRanges
+	code                 DomainRanges
+	commitment           DomainRanges
+	logTopicsEndTxNum    uint64
+	logAddrsEndTxNum     uint64
+	logTopicsStartTxNum  uint64
+	logAddrsStartTxNum   uint64
+	tracesFromStartTxNum uint64
+	tracesFromEndTxNum   uint64
+	tracesToStartTxNum   uint64
+	tracesToEndTxNum     uint64
+	logAddrs             bool
+	logTopics            bool
+	tracesFrom           bool
+	tracesTo             bool
 }
 
 func (r Ranges) any() bool {
@@ -455,26 +458,30 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 }
 
 type SelectedStaticFiles struct {
-	accounts                      []*filesItem
-	accountsIdx, accountsHist     []*filesItem
-	accountsI                     int
-	storage                       []*filesItem
-	storageIdx, storageHist       []*filesItem
-	storageI                      int
-	code                          []*filesItem
-	codeIdx, codeHist             []*filesItem
-	codeI                         int
-	commitment                    []*filesItem
-	commitmentIdx, commitmentHist []*filesItem
-	commitmentI                   int
-	logAddrs                      []*filesItem
-	logAddrsI                     int
-	logTopics                     []*filesItem
-	logTopicsI                    int
-	tracesFrom                    []*filesItem
-	tracesFromI                   int
-	tracesTo                      []*filesItem
-	tracesToI                     int
+	commitment     []*filesItem
+	logAddrs       []*filesItem
+	accountsHist   []*filesItem
+	codeHist       []*filesItem
+	storage        []*filesItem
+	storageIdx     []*filesItem
+	storageHist    []*filesItem
+	tracesTo       []*filesItem
+	code           []*filesItem
+	codeIdx        []*filesItem
+	tracesFrom     []*filesItem
+	logTopics      []*filesItem
+	commitmentHist []*filesItem
+	commitmentIdx  []*filesItem
+	accounts       []*filesItem
+	accountsIdx    []*filesItem
+	commitmentI    int
+	logAddrsI      int
+	tracesFromI    int
+	logTopicsI     int
+	tracesToI      int
+	codeI          int
+	storageI       int
+	accountsI      int
 }
 
 func (sf SelectedStaticFiles) Close() {
@@ -853,9 +860,9 @@ func (a *Aggregator) SeekCommitment() (uint64, error) {
 }
 
 type commitmentState struct {
+	trieState []byte
 	txNum     uint64
 	blockNum  uint64
-	trieState []byte
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {

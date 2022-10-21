@@ -36,10 +36,9 @@ type SentryClient interface {
 // does not initiate any messages by self
 type Send struct {
 	ctx           context.Context
-	sentryClients []direct.SentryClient // sentry clients that will be used for accessing the network
 	pool          Pool
-
-	wg *sync.WaitGroup
+	wg            *sync.WaitGroup
+	sentryClients []direct.SentryClient // sentry clients that will be used for accessing the network
 }
 
 func NewSend(ctx context.Context, sentryClients []direct.SentryClient, pool Pool) *Send {

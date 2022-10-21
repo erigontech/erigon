@@ -24,8 +24,8 @@ import (
 
 type HeapElem struct {
 	Key     []byte
-	TimeIdx int
 	Value   []byte
+	TimeIdx int
 }
 
 type Heap struct {

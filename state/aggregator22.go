@@ -36,24 +36,23 @@ import (
 )
 
 type Aggregator22 struct {
-	dir, tmpdir     string
-	aggregationStep uint64
-	accounts        *History
-	storage         *History
-	code            *History
-	logAddrs        *InvertedIndex
-	logTopics       *InvertedIndex
-	tracesFrom      *InvertedIndex
-	tracesTo        *InvertedIndex
-	txNum           uint64
-	logPrefix       string
-	rwTx            kv.RwTx
-	maxTxNum        atomic.Uint64
-
+	rwTx             kv.RwTx
+	db               kv.RoDB
+	storage          *History
+	tracesTo         *InvertedIndex
 	backgroundResult *BackgroundResult
+	code             *History
+	logAddrs         *InvertedIndex
+	logTopics        *InvertedIndex
+	tracesFrom       *InvertedIndex
+	accounts         *History
+	logPrefix        string
+	dir              string
+	tmpdir           string
+	txNum            uint64
+	aggregationStep  uint64
+	maxTxNum         atomic.Uint64
 	working          atomic.Bool
-
-	db kv.RoDB
 }
 
 func NewAggregator22(dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*Aggregator22, error) {
@@ -229,13 +228,13 @@ func (a *Aggregator22) SetTxNum(txNum uint64) {
 }
 
 type Agg22Collation struct {
-	accounts   HistoryCollation
-	storage    HistoryCollation
-	code       HistoryCollation
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
 	tracesFrom map[string]*roaring64.Bitmap
 	tracesTo   map[string]*roaring64.Bitmap
+	accounts   HistoryCollation
+	storage    HistoryCollation
+	code       HistoryCollation
 }
 
 func (c Agg22Collation) Close() {
@@ -642,17 +641,21 @@ func (a *Aggregator22) recalcMaxTxNum() {
 }
 
 type Ranges22 struct {
-	accounts                                 HistoryRanges
-	storage                                  HistoryRanges
-	code                                     HistoryRanges
-	logAddrsStartTxNum, logAddrsEndTxNum     uint64
-	logAddrs                                 bool
-	logTopicsStartTxNum, logTopicsEndTxNum   uint64
-	logTopics                                bool
-	tracesFromStartTxNum, tracesFromEndTxNum uint64
-	tracesFrom                               bool
-	tracesToStartTxNum, tracesToEndTxNum     uint64
-	tracesTo                                 bool
+	accounts             HistoryRanges
+	storage              HistoryRanges
+	code                 HistoryRanges
+	logTopicsStartTxNum  uint64
+	logAddrsEndTxNum     uint64
+	logAddrsStartTxNum   uint64
+	logTopicsEndTxNum    uint64
+	tracesFromStartTxNum uint64
+	tracesFromEndTxNum   uint64
+	tracesToStartTxNum   uint64
+	tracesToEndTxNum     uint64
+	logAddrs             bool
+	logTopics            bool
+	tracesFrom           bool
+	tracesTo             bool
 }
 
 func (r Ranges22) any() bool {
@@ -673,20 +676,23 @@ func (a *Aggregator22) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
 }
 
 type SelectedStaticFiles22 struct {
-	accountsIdx, accountsHist []*filesItem
-	accountsI                 int
-	storageIdx, storageHist   []*filesItem
-	storageI                  int
-	codeIdx, codeHist         []*filesItem
-	codeI                     int
-	logAddrs                  []*filesItem
-	logAddrsI                 int
-	logTopics                 []*filesItem
-	logTopicsI                int
-	tracesFrom                []*filesItem
-	tracesFromI               int
-	tracesTo                  []*filesItem
-	tracesToI                 int
+	logTopics    []*filesItem
+	accountsHist []*filesItem
+	tracesTo     []*filesItem
+	storageIdx   []*filesItem
+	storageHist  []*filesItem
+	tracesFrom   []*filesItem
+	codeIdx      []*filesItem
+	codeHist     []*filesItem
+	accountsIdx  []*filesItem
+	logAddrs     []*filesItem
+	codeI        int
+	logAddrsI    int
+	logTopicsI   int
+	storageI     int
+	tracesFromI  int
+	accountsI    int
+	tracesToI    int
 }
 
 func (sf SelectedStaticFiles22) Close() {
@@ -1125,8 +1131,8 @@ func (a *Aggregator22) Accounts() *History { return a.accounts }
 func (a *Aggregator22) Storage() *History  { return a.storage }
 
 type Aggregator22Context struct {
+	tx         kv.Tx
 	a          *Aggregator22
-	keyBuf     []byte
 	accounts   *HistoryContext
 	storage    *HistoryContext
 	code       *HistoryContext
@@ -1134,8 +1140,7 @@ type Aggregator22Context struct {
 	logTopics  *InvertedIndexContext
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
-
-	tx kv.Tx
+	keyBuf     []byte
 }
 
 func (a *Aggregator22) MakeContext() *Aggregator22Context {
@@ -1155,8 +1160,8 @@ func (ac *Aggregator22Context) SetTx(tx kv.Tx) { ac.tx = tx }
 // BackgroundResult - used only indicate that some work is done
 // no much reason to pass exact results by this object, just get latest state when need
 type BackgroundResult struct {
-	has bool
 	err error
+	has bool
 }
 
 func (br *BackgroundResult) Has() bool     { return br.has }

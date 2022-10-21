@@ -24,9 +24,9 @@ func (p *Progress) percent() int {
 
 // ProgressSet - tracks multiple background job progress
 type ProgressSet struct {
-	lock sync.RWMutex
-	i    int
 	b    *btree.BTreeG[*Progress]
+	i    int
+	lock sync.RWMutex
 }
 
 func NewProgressSet() *ProgressSet {

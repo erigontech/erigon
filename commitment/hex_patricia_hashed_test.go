@@ -206,14 +206,14 @@ func Test_Sepolia(t *testing.T) {
 	ms := NewMockState(t)
 
 	type TestData struct {
-		expectedRoot string
 		balances     map[string][]byte
+		expectedRoot string
 	}
 
 	tests := []TestData{
 		{
-			"5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
-			map[string][]byte{
+			expectedRoot: "5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
+			balances: map[string][]byte{
 				"a2a6d93439144ffe4d27c9e088dcd8b783946263": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
 				"bc11295936aa79d594139de1b2e12629414f3bdb": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
 				"7cf5b79bfe291a67ab02b393e456ccc4c266f753": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
@@ -232,14 +232,14 @@ func Test_Sepolia(t *testing.T) {
 			},
 		},
 		{
-			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
-			map[string][]byte{
+			expectedRoot: "c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			balances: map[string][]byte{
 				"2f14582947e292a2ecd20c430b46f2d27cfe213c": {0x1B, 0xC1, 0x6D, 0x67, 0x4E, 0xC8, 0x00, 0x00},
 			},
 		},
 		{
-			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
-			map[string][]byte{},
+			expectedRoot: "c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			balances:     map[string][]byte{},
 		},
 	}
 

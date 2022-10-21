@@ -37,17 +37,16 @@ type cursorEntry struct {
 
 // cursor
 type memoryMutationCursor struct {
+	// entry history
 	cursor    kv.CursorDupSort
 	memCursor kv.RwCursorDupSort
-
-	isPrevFromDb bool
-	// entry history
+	// we keep the mining mutation so that we can insert new elements in db
+	mutation        *MemoryMutation
+	table           string
 	currentPair     cursorEntry
 	currentDbEntry  cursorEntry
 	currentMemEntry cursorEntry
-	// we keep the mining mutation so that we can insert new elements in db
-	mutation *MemoryMutation
-	table    string
+	isPrevFromDb    bool
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {

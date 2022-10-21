@@ -62,63 +62,63 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
-	bucketSize        int
-	keyExpectedCount  uint64          // Number of keys in the hash table
-	keysAdded         uint64          // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
-	baseDataID        uint64          // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
-	bucketCount       uint64          // Number of buckets
 	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	etlBufLimit       datasize.ByteSize
-	lvl               log.Lvl
-	bucketCollector   *etl.Collector // Collector that sorts by buckets
-	enums             bool           // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
-	offsetCollector   *etl.Collector // Collector that sorts by offsets
-	built             bool           // Flag indicating that the hash function has been built and no more keys can be added
-	currentBucketIdx  uint64         // Current bucket being accumulated
-	currentBucket     []uint64       // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
-	currentBucketOffs []uint64       // Index offsets for the current bucket
-	maxOffset         uint64         // Maximum value of index offset to later decide how many bytes to use for the encoding
-	gr                GolombRice     // Helper object to encode the tree of hash function salts using Golomb-Rice code.
+	offsetCollector   *etl.Collector  // Collector that sorts by offsets
+	indexW            *bufio.Writer
+	indexF            *os.File
+	offsetEf          *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
+	bucketCollector   *etl.Collector         // Collector that sorts by buckets
+	indexFileName     string
+	indexFile         string
+	tmpDir            string
+	gr                GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
+	bucketPosAcc      []uint64   // Accumulator for position of every bucket in the encoding of the hash function
+	startSeed         []uint64
+	count             []uint16
+	currentBucket     []uint64 // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
+	currentBucketOffs []uint64 // Index offsets for the current bucket
+	offsetBuffer      []uint64
+	buffer            []uint64
+	golombRice        []uint32
+	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
-	offsetEf           *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketSizeAcc      []uint64               // Bucket size accumulator
-	bucketPosAcc       []uint64               // Accumulator for position of every bucket in the encoding of the hash function
-	leafSize           uint16                 // Leaf size for recursive split algorithm
-	primaryAggrBound   uint16                 // The lower bound for primary key aggregation (computed from leafSize)
-	secondaryAggrBound uint16                 // The lower bound for secondary key aggregation (computed from leadSize)
-	startSeed          []uint64
-	golombRice         []uint32
-	buffer             []uint64
-	offsetBuffer       []uint64
-	count              []uint16
-	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
-	collision          bool
-	tmpDir             string
-	indexFile          string
-	indexFileName      string
-	indexF             *os.File
-	indexW             *bufio.Writer
+	lvl                log.Lvl
 	bytesPerRec        int
-	numBuf             [8]byte
-	bucketKeyBuf       [16]byte
-	trace              bool
-	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
 	minDelta           uint64 // minDelta for Elias Fano encoding of "enum -> offset" index
+	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
+	bucketSize         int
+	keyExpectedCount   uint64 // Number of keys in the hash table
+	keysAdded          uint64 // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
+	maxOffset          uint64 // Maximum value of index offset to later decide how many bytes to use for the encoding
+	currentBucketIdx   uint64 // Current bucket being accumulated
+	baseDataID         uint64 // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
+	bucketCount        uint64 // Number of buckets
+	etlBufLimit        datasize.ByteSize
+	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
+	leafSize           uint16 // Leaf size for recursive split algorithm
+	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
+	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
+	bucketKeyBuf       [16]byte
+	numBuf             [8]byte
+	collision          bool
+	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	built              bool // Flag indicating that the hash function has been built and no more keys can be added
+	trace              bool
 }
 
 type RecSplitArgs struct {
-	KeyCount    int
-	BucketSize  int
-	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
-	LeafSize    uint16
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
 	StartSeed   []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
-	Enums       bool     // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
+	KeyCount    int
+	BucketSize  int
 	BaseDataID  uint64
 	EtlBufLimit datasize.ByteSize
+	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	LeafSize    uint16
+	Enums       bool // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size

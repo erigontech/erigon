@@ -20,19 +20,19 @@ import (
 
 // generate the messages and services
 type remoteOpts struct {
+	remoteKV    remote.KVClient
+	log         log.Logger
 	bucketsCfg  mdbx.TableCfgFunc
 	DialAddress string
 	version     gointerfaces.Version
-	remoteKV    remote.KVClient
-	log         log.Logger
 }
 
 type RemoteKV struct {
 	remoteKV     remote.KVClient
 	log          log.Logger
 	buckets      kv.TableCfg
-	opts         remoteOpts
 	roTxsLimiter *semaphore.Weighted
+	opts         remoteOpts
 }
 
 type remoteTx struct {
@@ -40,10 +40,10 @@ type remoteTx struct {
 	ctx                context.Context
 	streamCancelFn     context.CancelFunc
 	db                 *RemoteKV
-	cursors            []*remoteCursor
 	statelessCursors   map[string]kv.Cursor
-	streamingRequested bool
+	cursors            []*remoteCursor
 	id                 uint64
+	streamingRequested bool
 }
 
 type remoteCursor struct {

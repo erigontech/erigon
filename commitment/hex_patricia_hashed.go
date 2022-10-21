@@ -60,54 +60,52 @@ func (w *ByteArrayWriter) Write(data []byte) (int, error) {
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
-	root Cell // Root cell of the tree
-	// Rows of the grid correspond to the level of depth in the patricia tree
-	// Columns of the grid correspond to pointers to the nodes further from the root
-	grid [128][16]Cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
-	// How many rows (starting from row 0) are currently active and have corresponding selected columns
-	// Last active row does not have selected column
-	activeRows int
-	// Length of the key that reflects current positioning of the grid. It maybe larger than number of active rows,
-	// if a account leaf cell represents multiple nibbles in the key
-	currentKeyLen int
-	currentKey    [128]byte // For each row indicates which column is currently selected
-	depths        [128]int  // For each row, the depth of cells in that row
-	rootChecked   bool      // Set to false if it is not known whether the root is empty, set to true if it is checked
-	rootTouched   bool
-	rootPresent   bool
-	branchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
+	keccak2 keccakState
+	keccak  keccakState
 	// Function used to load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	branchFn func(prefix []byte) ([]byte, error)
 	// Function used to fetch account with given plain key
-	accountFn func(plainKey []byte, cell *Cell) error
+	storageFn func(plainKey []byte, cell *Cell) error
 	// Function used to fetch account with given plain key
-	storageFn       func(plainKey []byte, cell *Cell) error
-	keccak          keccakState
-	keccak2         keccakState
-	accountKeyLen   int
-	trace           bool
-	hashAuxBuffer   [128]byte // buffer to compute cell hash or write hash-related things
+	accountFn       func(plainKey []byte, cell *Cell) error
 	byteArrayWriter ByteArrayWriter
+	// Rows of the grid correspond to the level of depth in the patricia tree
+	// Columns of the grid correspond to pointers to the nodes further from the root
+	grid          [128][16]Cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
+	depths        [128]int      // For each row, the depth of cells in that row
+	root          Cell          // Root cell of the tree
+	accountKeyLen int
+	// Length of the key that reflects current positioning of the grid. It maybe larger than number of active rows,
+	// if a account leaf cell represents multiple nibbles in the key
+	currentKeyLen int
+	// How many rows (starting from row 0) are currently active and have corresponding selected columns
+	// Last active row does not have selected column
+	activeRows    int
+	touchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	afterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
+	branchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	currentKey    [128]byte   // For each row indicates which column is currently selected
+	hashAuxBuffer [128]byte   // buffer to compute cell hash or write hash-related things
+	rootTouched   bool
+	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	rootPresent   bool
+	trace         bool
 }
 
 // represents state of the tree
 type state struct {
+	Root          []byte      // encoded root cell
+	Depths        [128]int    // For each row, the depth of cells in that row
 	TouchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	AfterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
+	BranchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	CurrentKey    [128]byte   // For each row indicates which column is currently selected
 	CurrentKeyLen int8
-	Root          []byte // encoded root cell
-	RootChecked   bool   // Set to false if it is not known whether the root is empty, set to true if it is checked
+	RootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
 	RootTouched   bool
 	RootPresent   bool
-	BranchBefore  [128]bool // For each row, whether there was a branch node in the database loaded in unfold
-	CurrentKey    [128]byte // For each row indicates which column is currently selected
-	Depths        [128]int  // For each row, the depth of cells in that row
-
-	//RootCell ecell
 }
 
 type ecell struct {
@@ -115,13 +113,13 @@ type ecell struct {
 	APK        []byte
 	SPK        []byte
 	DHK        []byte
-	DHL        int
 	EXT        []byte
-	ExtLen     int
-	Nonce      uint64
-	Balance    uint256.Int
 	CodeHash   []byte
 	Storage    []byte
+	Balance    uint256.Int
+	DHL        int
+	ExtLen     int
+	Nonce      uint64
 	StorageLen int
 }
 
@@ -141,21 +139,21 @@ func NewHexPatriciaHashed(accountKeyLen int,
 }
 
 type Cell struct {
-	h             [length.Hash]byte               // cell hash
-	hl            int                             // Length of the hash (or embedded)
-	apk           [length.Addr]byte               // account plain key
-	apl           int                             // length of account plain key
-	spk           [length.Addr + length.Hash]byte // storage plain key
-	spl           int                             // length of the storage plain key
-	downHashedKey [128]byte
-	downHashedLen int
-	extension     [64]byte
-	extLen        int
-	Nonce         uint64
 	Balance       uint256.Int
-	CodeHash      [length.Hash]byte // hash of the bytecode
-	Storage       [length.Hash]byte
+	Nonce         uint64
+	hl            int // Length of the hash (or embedded)
 	StorageLen    int
+	apl           int // length of account plain key
+	spl           int // length of the storage plain key
+	downHashedLen int
+	extLen        int
+	downHashedKey [128]byte
+	extension     [64]byte
+	spk           [length.Addr + length.Hash]byte // storage plain key
+	h             [length.Hash]byte               // cell hash
+	CodeHash      [length.Hash]byte               // hash of the bytecode
+	Storage       [length.Hash]byte
+	apk           [length.Addr]byte // account plain key
 	Delete        bool
 }
 
@@ -1784,7 +1782,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 	return rootHash, branchNodeUpdates, nil
 }
 
-//nolint
+// nolint
 // Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
 func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 	hashedKey := make([]byte, length.Hash)

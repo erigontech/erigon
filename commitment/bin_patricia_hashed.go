@@ -79,38 +79,38 @@ func compactToBin(compact []byte) []byte {
 // BinHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type BinHashed struct {
-	root BinCell // Root cell of the tree
-	// Rows of the grid correspond to the level of depth in the patricia tree
-	// Columns of the grid correspond to pointers to the nodes further from the root
-	grid [maxKeySize][maxChild]BinCell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
-	// How many rows (starting from row 0) are currently active and have corresponding selected columns
-	// Last active row does not have selected column
-	activeRows int
-	// Length of the key that reflects current positioning of the grid. It maybe larger than number of active rows,
-	// if a account leaf cell represents multiple nibbles in the key
-	currentKeyLen int
-	currentKey    [maxKeySize]byte // For each row indicates which column is currently selected
-	depths        [maxKeySize]int  // For each row, the depth of cells in that row
-	rootChecked   bool             // Set to false if it is not known whether the root is empty, set to true if it is checked
-	rootTouched   bool
-	rootPresent   bool
-	branchBefore  [maxKeySize]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap      [maxKeySize]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap      [maxKeySize]uint16 // For each row, bitmap of cells that were present after modification
+	keccak2 keccakState
+	keccak  keccakState
 	// Function used to load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	branchFn func(prefix []byte) ([]byte, error)
 	// Function used to fetch account with given plain key
-	accountFn func(plainKey []byte, cell *BinCell) error
+	storageFn func(plainKey []byte, cell *BinCell) error
 	// Function used to fetch account with given plain key
-	storageFn       func(plainKey []byte, cell *BinCell) error
-	keccak          keccakState
-	keccak2         keccakState
-	accountKeyLen   int
-	trace           bool
-	auxBuf          [1 + length.Hash]byte
+	accountFn       func(plainKey []byte, cell *BinCell) error
 	byteArrayWriter ByteArrayWriter
+	// Rows of the grid correspond to the level of depth in the patricia tree
+	// Columns of the grid correspond to pointers to the nodes further from the root
+	grid          [maxKeySize][maxChild]BinCell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
+	depths        [maxKeySize]int               // For each row, the depth of cells in that row
+	root          BinCell                       // Root cell of the tree
+	accountKeyLen int
+	// Length of the key that reflects current positioning of the grid. It maybe larger than number of active rows,
+	// if a account leaf cell represents multiple nibbles in the key
+	currentKeyLen int
+	// How many rows (starting from row 0) are currently active and have corresponding selected columns
+	// Last active row does not have selected column
+	activeRows   int
+	touchMap     [maxKeySize]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	afterMap     [maxKeySize]uint16 // For each row, bitmap of cells that were present after modification
+	branchBefore [maxKeySize]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	currentKey   [maxKeySize]byte   // For each row indicates which column is currently selected
+	auxBuf       [1 + length.Hash]byte
+	rootTouched  bool
+	rootChecked  bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	rootPresent  bool
+	trace        bool
 }
 
 func NewBinPatriciaHashed(accountKeyLen int,
@@ -1061,21 +1061,21 @@ func (hph *BinHashed) deleteCell(hashedKey []byte) {
 }
 
 type BinCell struct {
-	h             [length.Hash]byte               // cell hash
-	hl            int                             // Length of the hash (or embedded)
-	apk           [length.Addr]byte               // account plain key
-	apl           int                             // length of account plain key
-	spk           [length.Addr + length.Hash]byte // storage plain key
-	spl           int                             // length of the storage plain key
-	downHashedKey [maxKeySize]byte
-	downHashedLen int
-	extension     [keyHalfSize]byte
-	extLen        int
-	Nonce         uint64
 	Balance       uint256.Int
-	CodeHash      [length.Hash]byte // hash of the bytecode
-	Storage       [length.Hash]byte
+	extLen        int
+	hl            int // Length of the hash (or embedded)
+	apl           int // length of account plain key
 	StorageLen    int
+	spl           int // length of the storage plain key
+	Nonce         uint64
+	downHashedLen int
+	downHashedKey [maxKeySize]byte
+	extension     [keyHalfSize]byte
+	spk           [length.Addr + length.Hash]byte // storage plain key
+	h             [length.Hash]byte               // cell hash
+	CodeHash      [length.Hash]byte               // hash of the bytecode
+	Storage       [length.Hash]byte
+	apk           [length.Addr]byte // account plain key
 }
 
 func (cell *BinCell) unwrapToHexCell() (cl *Cell) {

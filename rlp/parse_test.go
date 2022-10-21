@@ -11,10 +11,10 @@ import (
 )
 
 var parseU64Tests = []struct {
+	expectErr error
 	payload   []byte
 	expectPos int
 	expectRes uint64
-	expectErr error
 }{
 	{payload: common.MustDecodeHex("820400"), expectPos: 3, expectRes: 1024},
 	{payload: common.MustDecodeHex("07"), expectPos: 1, expectRes: 7},
@@ -26,10 +26,10 @@ var parseU64Tests = []struct {
 }
 
 var parseU32Tests = []struct {
+	expectErr error
 	payload   []byte
 	expectPos int
 	expectRes uint32
-	expectErr error
 }{
 	{payload: common.MustDecodeHex("820400"), expectPos: 3, expectRes: 1024},
 	{payload: common.MustDecodeHex("07"), expectPos: 1, expectRes: 7},
@@ -41,10 +41,10 @@ var parseU32Tests = []struct {
 }
 
 var parseU256Tests = []struct {
+	expectErr error
+	expectRes *uint256.Int
 	payload   []byte
 	expectPos int
-	expectRes *uint256.Int
-	expectErr error
 }{
 	{payload: common.MustDecodeHex("8BFFFFFFFFFFFFFFFFFF7C"), expectErr: fmt.Errorf("%w: unexpected end of payload", ErrParse)},
 	{payload: common.MustDecodeHex("8AFFFFFFFFFFFFFFFFFF7C"), expectPos: 11, expectRes: new(uint256.Int).SetBytes(common.MustDecodeHex("FFFFFFFFFFFFFFFFFF7C"))},

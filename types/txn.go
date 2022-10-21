@@ -44,21 +44,23 @@ type TxParseConfig struct {
 // TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
-	Keccak1          hash.Hash
-	Keccak2          hash.Hash
-	ChainID, R, S, V uint256.Int // Signature values
-	ChainIDMul       uint256.Int
-	DeriveChainID    uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
-	buf              [65]byte    // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
-	Sighash          [32]byte
-	Sig              [65]byte
-	withSender       bool
-	allowPreEip2s    bool // Allow s > secp256k1n/2; see EIP-2
-	chainIDRequired  bool
-	IsProtected      bool
-	validateRlp      func([]byte) error
-
-	cfg TxParseConfig
+	Keccak2         hash.Hash
+	Keccak1         hash.Hash
+	validateRlp     func([]byte) error
+	ChainID         uint256.Int // Signature values
+	R               uint256.Int // Signature values
+	S               uint256.Int // Signature values
+	V               uint256.Int // Signature values
+	ChainIDMul      uint256.Int
+	DeriveChainID   uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
+	cfg             TxParseConfig
+	buf             [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
+	Sig             [65]byte
+	Sighash         [32]byte
+	withSender      bool
+	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
+	chainIDRequired bool
+	IsProtected     bool
 }
 
 func NewTxParseContext(chainID uint256.Int) *TxParseContext {
@@ -80,21 +82,20 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxillary information, like ephemeral fields, and indices within priority queues
 type TxSlot struct {
-	Nonce          uint64      // Nonce of the transaction
+	Rlp            []byte      // TxPool set it to nil after save it to db
+	Value          uint256.Int // Value transferred by the transaction
 	Tip            uint256.Int // Maximum tip that transaction is giving to miner/block proposer
 	FeeCap         uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
-	Gas            uint64      // Gas limit of the transaction
-	Value          uint256.Int // Value transferred by the transaction
-	IDHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
 	SenderID       uint64      // SenderID - require external mapping to it's address
-	Traced         bool        // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Creation       bool        // Set to true if "To" field of the transaction is not set
+	Nonce          uint64      // Nonce of the transaction
 	DataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
 	DataNonZeroLen int
-	AlAddrCount    int // Number of addresses in the access list
-	AlStorCount    int // Number of storage keys in the access list
-
-	Rlp []byte // TxPool set it to nil after save it to db
+	AlAddrCount    int      // Number of addresses in the access list
+	AlStorCount    int      // Number of storage keys in the access list
+	Gas            uint64   // Gas limit of the transaction
+	IDHash         [32]byte // Transaction hash for the purposes of using it as a transaction Id
+	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
+	Creation       bool     // Set to true if "To" field of the transaction is not set
 }
 
 const (
@@ -689,8 +690,8 @@ type AccessList []AccessTuple
 
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	Address     [20]byte   `json:"address"        gencodec:"required"`
 	StorageKeys [][32]byte `json:"storageKeys"    gencodec:"required"`
+	Address     [20]byte   `json:"address"        gencodec:"required"`
 }
 
 // StorageKeys returns the total number of storage keys in the access list.

@@ -73,11 +73,11 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 }
 
 type sortableBuffer struct {
+	comparator  kv.CmpFunc
 	offsets     []int
 	lens        []int
 	data        []byte
 	optimalSize int
-	comparator  kv.CmpFunc
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -181,10 +181,10 @@ func NewAppendBuffer(bufferOptimalSize datasize.ByteSize) *appendSortableBuffer 
 
 type appendSortableBuffer struct {
 	entries     map[string][]byte
+	comparator  kv.CmpFunc
+	sortedBuf   []sortableBufferEntry
 	size        int
 	optimalSize int
-	sortedBuf   []sortableBufferEntry
-	comparator  kv.CmpFunc
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
@@ -273,10 +273,10 @@ func NewOldestEntryBuffer(bufferOptimalSize datasize.ByteSize) *oldestEntrySorta
 
 type oldestEntrySortableBuffer struct {
 	entries     map[string][]byte
+	comparator  kv.CmpFunc
+	sortedBuf   []sortableBufferEntry
 	size        int
 	optimalSize int
-	sortedBuf   []sortableBufferEntry
-	comparator  kv.CmpFunc
 }
 
 func (b *oldestEntrySortableBuffer) SetComparator(cmp kv.CmpFunc) {

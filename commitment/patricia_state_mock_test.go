@@ -17,9 +17,9 @@ import (
 // In memory commitment and state to use with the tests
 type MockState struct {
 	t      *testing.T
-	numBuf [binary.MaxVarintLen64]byte
 	sm     map[string][]byte     // backbone of the state
 	cm     map[string]BranchData // backbone of the commitments
+	numBuf [binary.MaxVarintLen64]byte
 }
 
 func NewMockState(t *testing.T) *MockState {

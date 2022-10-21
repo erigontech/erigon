@@ -45,19 +45,18 @@ import (
 )
 
 type InvertedIndex struct {
-	indexKeysTable string // txnNum_u64 -> key (k+auto_increment)
-	indexTable     string // k -> txnNum_u64 , Needs to be table with DupSort
-
-	dir, tmpdir     string // Directory where static files are created
-	aggregationStep uint64
-	filenameBase    string
 	tx              kv.RwTx
-	txNum           uint64
-	txNumBytes      [8]byte
 	files           *btree.BTreeG[*filesItem]
-
-	workers int
-	w       *invertedIndexWriter
+	w               *invertedIndexWriter
+	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
+	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
+	dir             string // Directory where static files are created
+	tmpdir          string // Directory where static files are created
+	filenameBase    string
+	aggregationStep uint64
+	txNum           uint64
+	workers         int
+	txNumBytes      [8]byte
 }
 
 func NewInvertedIndex(
@@ -416,16 +415,17 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 // InvertedIterator must be closed after use to prevent leaking of resources like cursor
 type InvertedIterator struct {
-	key                  []byte
-	startTxNum, endTxNum uint64
-	stack                []ctxItem
-	efIt                 *eliasfano32.EliasFanoIter
-	next                 uint64
-	hasNextInFiles       bool
-	hasNextInDb          bool
-	roTx                 kv.Tx
-	indexTable           string
-	cursor               kv.CursorDupSort
+	roTx           kv.Tx
+	cursor         kv.CursorDupSort
+	efIt           *eliasfano32.EliasFanoIter
+	indexTable     string
+	key            []byte
+	stack          []ctxItem
+	startTxNum     uint64
+	endTxNum       uint64
+	next           uint64
+	hasNextInFiles bool
+	hasNextInDb    bool
 }
 
 func (it *InvertedIterator) Close() {
@@ -568,16 +568,19 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum ui
 }
 
 type InvertedIterator1 struct {
-	hasNextInFiles                       bool
-	hasNextInDb                          bool
-	startTxKey                           [8]byte
-	startTxNum                           uint64
-	endTxNum                             uint64
-	roTx                                 kv.Tx
-	cursor                               kv.CursorDupSort
-	indexTable                           string
-	h                                    ReconHeap
-	key, nextKey, nextFileKey, nextDbKey []byte
+	roTx           kv.Tx
+	cursor         kv.CursorDupSort
+	indexTable     string
+	key            []byte
+	h              ReconHeap
+	nextKey        []byte
+	nextFileKey    []byte
+	nextDbKey      []byte
+	endTxNum       uint64
+	startTxNum     uint64
+	startTxKey     [8]byte
+	hasNextInDb    bool
+	hasNextInFiles bool
 }
 
 func (it *InvertedIterator1) Close() {

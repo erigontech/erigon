@@ -206,8 +206,8 @@ func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *Com
 // To allow multiple words to be processed concurrently, order field is used to collect all
 // the words after processing without disrupting their order
 type CompressionWord struct {
-	order uint64
 	word  []byte
+	order uint64
 }
 
 type CompressionQueue []*CompressionWord
