@@ -283,18 +283,15 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	var baseFee *big.Int
-	eip1559 := false
 
 	if req.BaseFeePerGas != nil {
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
-		eip1559 = true
 	}
 	header := types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
 		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
 		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		Eip1559:     eip1559,
 		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      big.NewInt(int64(req.BlockNumber)),

@@ -22,21 +22,18 @@ func TestIssuanceStage(t *testing.T) {
 		BaseFee: big.NewInt(10),
 		GasUsed: 1000,
 		Number:  big.NewInt(1),
-		Eip1559: true,
 	}
 
 	header2 := &types.Header{
 		BaseFee: big.NewInt(30),
 		GasUsed: 1000,
 		Number:  big.NewInt(2),
-		Eip1559: true,
 	}
 
 	header3 := &types.Header{
 		BaseFee: big.NewInt(100),
 		GasUsed: 1000,
 		Number:  big.NewInt(3),
-		Eip1559: true,
 	}
 	// Write Headers
 	rawdb.WriteHeader(tx, header1)
