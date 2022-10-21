@@ -488,11 +488,11 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Add(1)
 			outputBlockNum.Store(txTask.BlockNum)
-			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+			fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
 			repeatCount.Add(1)
-			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+			fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}
 }
