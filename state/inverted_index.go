@@ -29,7 +29,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -193,38 +192,41 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
 	missedFiles := ii.missedIdxFiles()
-	errs := make(chan error, len(missedFiles))
-	wg := sync.WaitGroup{}
+	//errs := make(chan error, len(missedFiles))
+	//wg := sync.WaitGroup{}
 	for _, item := range missedFiles {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			errs <- err
-			break
-		}
-		wg.Add(1)
-		go func(item *filesItem) {
-			defer sem.Release(1)
-			defer wg.Done()
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
-			idxPath := filepath.Join(ii.dir, fName)
-			log.Info("[snapshots] build idx", "file", fName)
-			_, err := buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false)
-			errs <- err
-		}(item)
-	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	var lastError error
-	for err := range errs {
+		//if err := sem.Acquire(ctx, 1); err != nil {
+		//	errs <- err
+		//	break
+		//}
+		//wg.Add(1)
+		//go func(item *filesItem) {
+		//	defer sem.Release(1)
+		//	defer wg.Done()
+		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+		fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
+		idxPath := filepath.Join(ii.dir, fName)
+		log.Info("[snapshots] build idx", "file", fName)
+		_, err := buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false)
 		if err != nil {
-			lastError = err
+			return err
 		}
+		//errs <- err
+		//}(item)
 	}
-	if lastError != nil {
-		return lastError
-	}
+	//go func() {
+	//	wg.Wait()
+	//	close(errs)
+	//}()
+	//var lastError error
+	//for err := range errs {
+	//	if err != nil {
+	//		lastError = err
+	//	}
+	//}
+	//if lastError != nil {
+	//	return lastError
+	//}
 	return ii.openFiles()
 }
 
