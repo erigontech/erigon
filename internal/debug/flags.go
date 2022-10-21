@@ -79,7 +79,7 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	_ = logging.GetLogger("debug")
+	_ = logging.GetLoggerCmd("debug", cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -142,6 +142,8 @@ func SetupCobra(cmd *cobra.Command) error {
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
 	RaiseFdLimit()
+
+	_ = logging.GetLoggerCtx("debug", ctx)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {

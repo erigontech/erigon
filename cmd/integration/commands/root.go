@@ -9,6 +9,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -20,7 +21,7 @@ var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := utils.SetupCobra(cmd); err != nil {
+		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
 		if chaindata == "" {
@@ -28,12 +29,12 @@ var rootCmd = &cobra.Command{
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		defer utils.StopDebug()
+		defer debug.Exit()
 	},
 }
 
 func RootCommand() *cobra.Command {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	return rootCmd
 }
 

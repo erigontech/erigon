@@ -49,9 +49,7 @@ var (
 )
 
 func init() {
-	flags := append(debug.Flags, utils.MetricFlags...)
-	flags = append(flags, logging.Flags...)
-	utils.CobraFlags(rootCmd, flags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
 

@@ -51,10 +51,7 @@ var (
 )
 
 func init() {
-	predefinedFlags := append(debug.Flags, utils.MetricFlags...)
-	predefinedFlags = append(predefinedFlags, logging.Flags...)
-
-	utils.CobraFlags(rootCmd, predefinedFlags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")

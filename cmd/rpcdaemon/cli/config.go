@@ -61,9 +61,7 @@ var rootCmd = &cobra.Command{
 }
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
-	predefinedFlags := append(debug.Flags, utils.MetricFlags...)
-	predefinedFlags = append(predefinedFlags, logging.Flags...)
-	utils.CobraFlags(rootCmd, predefinedFlags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	cfg := &httpcfg.HttpCfg{Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
@@ -107,7 +105,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := utils.SetupCobra(cmd); err != nil {
+		if err := debug.SetupCobra(cmd); err != nil {
 			return err
 		}
 		cfg.WithDatadir = cfg.DataDir != ""
@@ -123,7 +121,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
-		utils.StopDebug()
+		debug.Exit()
 		return nil
 	}
 
