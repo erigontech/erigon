@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -37,6 +38,13 @@ import (
 
 const ASSERT = false
 
+func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
+	for _, list := range lists {
+		res = append(res, list...)
+	}
+	return res
+}
+
 var snapshotCommand = cli.Command{
 	Name:        "snapshots",
 	Description: `Managing snapshots (historical data partitions)`,
@@ -46,60 +54,60 @@ var snapshotCommand = cli.Command{
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
+			Flags: joinFlags([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
-			}, debug.Flags...),
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
+			Flags: joinFlags([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotRebuildFlag,
-			}, debug.Flags...),
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "retire",
 			Action: doRetireCommand,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
+			Flags: joinFlags([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotEveryFlag,
-			}, debug.Flags...),
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "compress",
 			Action: doCompress,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 	},
 }
