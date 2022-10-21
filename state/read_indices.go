@@ -17,6 +17,7 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sync"
@@ -37,7 +38,7 @@ type ReadIndices struct {
 }
 
 func NewReadIndices(
-	dir string,
+	dir, tmpdir string,
 	aggregationStep uint64,
 ) (*ReadIndices, error) {
 	ri := &ReadIndices{
@@ -50,13 +51,13 @@ func NewReadIndices(
 		}
 	}()
 	var err error
-	if ri.accounts, err = NewInvertedIndex(dir, aggregationStep, "raccounts", kv.RAccountKeys, kv.RAccountIdx); err != nil {
+	if ri.accounts, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "raccounts", kv.RAccountKeys, kv.RAccountIdx); err != nil {
 		return nil, err
 	}
-	if ri.storage, err = NewInvertedIndex(dir, aggregationStep, "rstorage", kv.RStorageKeys, kv.RStorageIdx); err != nil {
+	if ri.storage, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rstorage", kv.RStorageKeys, kv.RStorageIdx); err != nil {
 		return nil, err
 	}
-	if ri.code, err = NewInvertedIndex(dir, aggregationStep, "rcode", kv.RCodeKeys, kv.RCodeIdx); err != nil {
+	if ri.code, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rcode", kv.RCodeKeys, kv.RCodeIdx); err != nil {
 		return nil, err
 	}
 	closeIndices = false
@@ -132,7 +133,7 @@ func (sf RStaticFiles) Close() {
 	sf.code.Close()
 }
 
-func (ri *ReadIndices) buildFiles(step uint64, collation RCollation) (RStaticFiles, error) {
+func (ri *ReadIndices) buildFiles(ctx context.Context, step uint64, collation RCollation) (RStaticFiles, error) {
 	var sf RStaticFiles
 	closeFiles := true
 	defer func() {
@@ -146,21 +147,21 @@ func (ri *ReadIndices) buildFiles(step uint64, collation RCollation) (RStaticFil
 	go func() {
 		defer wg.Done()
 		var err error
-		if sf.accounts, err = ri.accounts.buildFiles(step, collation.accounts); err != nil {
+		if sf.accounts, err = ri.accounts.buildFiles(ctx, step, collation.accounts); err != nil {
 			errCh <- err
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
-		if sf.storage, err = ri.storage.buildFiles(step, collation.storage); err != nil {
+		if sf.storage, err = ri.storage.buildFiles(ctx, step, collation.storage); err != nil {
 			errCh <- err
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
-		if sf.code, err = ri.code.buildFiles(step, collation.code); err != nil {
+		if sf.code, err = ri.code.buildFiles(ctx, step, collation.code); err != nil {
 			errCh <- err
 		}
 	}()
@@ -287,7 +288,7 @@ func (mf RMergedFiles) Close() {
 	}
 }
 
-func (ri *ReadIndices) mergeFiles(files RSelectedStaticFiles, r RRanges, maxSpan uint64) (RMergedFiles, error) {
+func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFiles, r RRanges, maxSpan uint64) (RMergedFiles, error) {
 	var mf RMergedFiles
 	closeFiles := true
 	defer func() {
@@ -302,7 +303,7 @@ func (ri *ReadIndices) mergeFiles(files RSelectedStaticFiles, r RRanges, maxSpan
 		defer wg.Done()
 		var err error
 		if r.accounts {
-			if mf.accounts, err = ri.accounts.mergeFiles(files.accounts, r.accountsStartTxNum, r.accountsEndTxNum, maxSpan); err != nil {
+			if mf.accounts, err = ri.accounts.mergeFiles(ctx, files.accounts, r.accountsStartTxNum, r.accountsEndTxNum, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -311,7 +312,7 @@ func (ri *ReadIndices) mergeFiles(files RSelectedStaticFiles, r RRanges, maxSpan
 		defer wg.Done()
 		var err error
 		if r.storage {
-			if mf.storage, err = ri.storage.mergeFiles(files.storage, r.storageStartTxNum, r.storageEndTxNum, maxSpan); err != nil {
+			if mf.storage, err = ri.storage.mergeFiles(ctx, files.storage, r.storageStartTxNum, r.storageEndTxNum, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -320,7 +321,7 @@ func (ri *ReadIndices) mergeFiles(files RSelectedStaticFiles, r RRanges, maxSpan
 		defer wg.Done()
 		var err error
 		if r.code {
-			if mf.code, err = ri.code.mergeFiles(files.code, r.codeStartTxNum, r.codeEndTxNum, maxSpan); err != nil {
+			if mf.code, err = ri.code.mergeFiles(ctx, files.code, r.codeStartTxNum, r.codeEndTxNum, maxSpan); err != nil {
 				errCh <- err
 			}
 		}
@@ -396,7 +397,7 @@ func (ri *ReadIndices) FinishTx() error {
 			collation.Close()
 		}
 	}()
-	sf, err := ri.buildFiles(step, collation)
+	sf, err := ri.buildFiles(context.Background(), step, collation)
 	if err != nil {
 		return err
 	}
@@ -418,7 +419,7 @@ func (ri *ReadIndices) FinishTx() error {
 				outs.Close()
 			}
 		}()
-		in, err := ri.mergeFiles(outs, r, maxSpan)
+		in, err := ri.mergeFiles(context.Background(), outs, r, maxSpan)
 		if err != nil {
 			return err
 		}

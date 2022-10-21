@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
@@ -41,13 +42,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/semaphore"
 )
 
 type InvertedIndex struct {
 	indexKeysTable string // txnNum_u64 -> key (k+auto_increment)
 	indexTable     string // k -> txnNum_u64 , Needs to be table with DupSort
 
-	dir             string // Directory where static files are created
+	dir, tmpdir     string // Directory where static files are created
 	aggregationStep uint64
 	filenameBase    string
 	tx              kv.RwTx
@@ -60,7 +62,7 @@ type InvertedIndex struct {
 }
 
 func NewInvertedIndex(
-	dir string,
+	dir, tmpdir string,
 	aggregationStep uint64,
 	filenameBase string,
 	indexKeysTable string,
@@ -68,6 +70,7 @@ func NewInvertedIndex(
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
 		dir:             dir,
+		tmpdir:          tmpdir,
 		files:           btree.NewG[*filesItem](32, filesItemLess),
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
@@ -188,15 +191,39 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (ii *InvertedIndex) BuildMissedIndices() (err error) {
-	for _, item := range ii.missedIdxFiles() {
-		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-		fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
-		idxPath := filepath.Join(ii.dir, fName)
-		log.Info("[snapshots] build idx", "file", fName)
-		if _, err := buildIndex(item.decompressor, idxPath, ii.dir, item.decompressor.Count()/2, false); err != nil {
-			return err
+func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
+	missedFiles := ii.missedIdxFiles()
+	errs := make(chan error, len(missedFiles))
+	wg := sync.WaitGroup{}
+	for _, item := range missedFiles {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			errs <- err
+			break
 		}
+		wg.Add(1)
+		go func(item *filesItem) {
+			defer sem.Release(1)
+			defer wg.Done()
+			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
+			idxPath := filepath.Join(ii.dir, fName)
+			log.Info("[snapshots] build idx", "file", fName)
+			_, err := buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false)
+			errs <- err
+		}(item)
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	var lastError error
+	for err := range errs {
+		if err != nil {
+			lastError = err
+		}
+	}
+	if lastError != nil {
+		return lastError
 	}
 	return ii.openFiles()
 }
@@ -729,7 +756,7 @@ func (sf InvertedFiles) Close() {
 	}
 }
 
-func (ii *InvertedIndex) buildFiles(step uint64, bitmaps map[string]*roaring64.Bitmap) (InvertedFiles, error) {
+func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap) (InvertedFiles, error) {
 	var decomp *compress.Decompressor
 	var index *recsplit.Index
 	var comp *compress.Compressor
@@ -751,7 +778,7 @@ func (ii *InvertedIndex) buildFiles(step uint64, bitmaps map[string]*roaring64.B
 	txNumFrom := step * ii.aggregationStep
 	txNumTo := (step + 1) * ii.aggregationStep
 	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
-	comp, err = compress.NewCompressor(context.Background(), "ef", datPath, ii.dir, compress.MinPatternScore, ii.workers, log.LvlDebug)
+	comp, err = compress.NewCompressor(ctx, "ef", datPath, ii.tmpdir, compress.MinPatternScore, ii.workers, log.LvlDebug)
 	if err != nil {
 		return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
@@ -786,7 +813,7 @@ func (ii *InvertedIndex) buildFiles(step uint64, bitmaps map[string]*roaring64.B
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 	idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep))
-	if index, err = buildIndex(decomp, idxPath, ii.dir, len(keys), false /* values */); err != nil {
+	if index, err = buildIndex(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	closeComp = false

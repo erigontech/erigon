@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"testing"
 	"testing/fstest"
 
@@ -36,6 +37,7 @@ import (
 func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 	t.Helper()
 	path := t.TempDir()
+	t.Cleanup(func() { os.RemoveAll(path) })
 	logger := log.New()
 	keysTable := "Keys"
 	indexTable := "Index"
@@ -45,16 +47,17 @@ func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 			indexTable: kv.TableCfgItem{Flags: kv.DupSort},
 		}
 	}).MustOpen()
-	ii, err := NewInvertedIndex(path, 16 /* aggregationStep */, "inv" /* filenameBase */, keysTable, indexTable)
+	t.Cleanup(db.Close)
+	ii, err := NewInvertedIndex(path, path, 16 /* aggregationStep */, "inv" /* filenameBase */, keysTable, indexTable)
 	require.NoError(t, err)
+	t.Cleanup(ii.Close)
 	return path, db, ii
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
 	_, db, ii := testDbAndInvertedIndex(t)
-	defer db.Close()
-	defer ii.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
@@ -80,7 +83,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -91,7 +94,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.Equal(t, []uint64{2, 6}, bs["key1"].ToArray())
 	require.Equal(t, []uint64{6}, bs["key3"].ToArray())
 
-	sf, err := ii.buildFiles(0, bs)
+	sf, err := ii.buildFiles(ctx, 0, bs)
 	require.NoError(t, err)
 	defer sf.Close()
 	g := sf.decomp.MakeGetter()
@@ -123,9 +126,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 
 func TestInvIndexAfterPrune(t *testing.T) {
 	_, db, ii := testDbAndInvertedIndex(t)
-	defer db.Close()
-	defer ii.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -155,18 +157,18 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
 	bs, err := ii.collate(0, 16, roTx)
 	require.NoError(t, err)
 
-	sf, err := ii.buildFiles(0, bs)
+	sf, err := ii.buildFiles(ctx, 0, bs)
 	require.NoError(t, err)
 	defer sf.Close()
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	ii.SetTx(tx)
 
@@ -176,7 +178,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	ii.SetTx(tx)
 
@@ -195,7 +197,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 	t.Helper()
 	path, db, ii := testDbAndInvertedIndex(t)
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -224,7 +227,7 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			ii.SetTx(tx)
 		}
@@ -238,6 +241,7 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 
 func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
+	ctx := context.Background()
 	ic := ii.MakeContext()
 	// Check the iterator ranges first without roTx
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -254,7 +258,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		require.False(t, it.HasNext())
 	}
 	// Now check ranges that require access to DB
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -274,6 +278,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
+	ctx := context.Background()
 	// Leave the last 2 aggregation steps un-collated
 	var tx kv.RwTx
 	defer func() {
@@ -284,16 +289,16 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(context.Background())
+			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
 			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
 			require.NoError(t, err)
 			roTx.Rollback()
-			sf, err := ii.buildFiles(step, bs)
+			sf, err := ii.buildFiles(ctx, step, bs)
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			ii.SetTx(tx)
 			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
@@ -307,7 +312,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			maxSpan := uint64(16 * 16)
 			for found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan); found; found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan) {
 				outs, _ := ii.staticFilesInRange(startTxNum, endTxNum)
-				in, err := ii.mergeFiles(outs, startTxNum, endTxNum, maxSpan)
+				in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, maxSpan)
 				require.NoError(t, err)
 				ii.integrateMergedFiles(outs, in)
 				err = ii.deleteFiles(outs)
@@ -319,8 +324,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 func TestInvIndexRanges(t *testing.T) {
 	_, db, ii, txs := filledInvIndex(t)
-	defer db.Close()
-	defer ii.Close()
+	ctx := context.Background()
 	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
@@ -331,15 +335,15 @@ func TestInvIndexRanges(t *testing.T) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(context.Background())
+			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
 			roTx.Rollback()
 			require.NoError(t, err)
-			sf, err := ii.buildFiles(step, bs)
+			sf, err := ii.buildFiles(ctx, step, bs)
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			ii.SetTx(tx)
 			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
@@ -362,15 +366,12 @@ func TestInvIndexMerge(t *testing.T) {
 
 func TestInvIndexScanFiles(t *testing.T) {
 	path, db, ii, txs := filledInvIndex(t)
-	defer db.Close()
-	defer func() {
-		ii.Close()
-	}()
 	ii.Close()
 	// Recreate InvertedIndex to scan the files
 	var err error
-	ii, err = NewInvertedIndex(path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable)
+	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable)
 	require.NoError(t, err)
+	defer ii.Close()
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
@@ -378,12 +379,9 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 func TestChangedKeysIterator(t *testing.T) {
 	_, db, ii, txs := filledInvIndex(t)
-	defer db.Close()
-	defer func() {
-		ii.Close()
-	}()
+	ctx := context.Background()
 	mergeInverted(t, db, ii, txs)
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer func() {
 		roTx.Rollback()

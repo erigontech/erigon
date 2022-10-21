@@ -38,6 +38,7 @@ import (
 func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 	t.Helper()
 	path := t.TempDir()
+	t.Cleanup(func() { os.RemoveAll(path) })
 	logger := log.New()
 	keysTable := "Keys"
 	valsTable := "Vals"
@@ -55,16 +56,18 @@ func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
 		}
 	}).MustOpen()
-	d, err := NewDomain(path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, prefixLen, true /* compressVals */)
+	t.Cleanup(db.Close)
+	d, err := NewDomain(path, path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, prefixLen, true /* compressVals */)
 	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	return path, db, d
 }
 
 func TestCollationBuild(t *testing.T) {
 	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
@@ -88,7 +91,7 @@ func TestCollationBuild(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	d.SetTx(tx)
@@ -103,7 +106,7 @@ func TestCollationBuild(t *testing.T) {
 	require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
 	require.Equal(t, []uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
 
-	sf, err := d.buildFiles(0, c)
+	sf, err := d.buildFiles(ctx, 0, c)
 	require.NoError(t, err)
 	defer sf.Close()
 	g := sf.valuesDecomp.MakeGetter()
@@ -129,9 +132,8 @@ func TestCollationBuild(t *testing.T) {
 
 func TestIterationBasic(t *testing.T) {
 	_, db, d := testDbAndDomain(t, 5 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
@@ -166,9 +168,9 @@ func TestIterationBasic(t *testing.T) {
 
 func TestAfterPrune(t *testing.T) {
 	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -204,18 +206,18 @@ func TestAfterPrune(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
 	c, err := d.collate(0, 0, 16, roTx)
 	require.NoError(t, err)
 
-	sf, err := d.buildFiles(0, c)
+	sf, err := d.buildFiles(ctx, 0, c)
 	require.NoError(t, err)
 	defer sf.Close()
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	d.SetTx(tx)
 
@@ -233,7 +235,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	d.SetTx(tx)
 
@@ -259,7 +261,8 @@ func TestAfterPrune(t *testing.T) {
 func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	path, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -291,7 +294,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 		}
@@ -306,6 +309,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
+	ctx := context.Background()
 	var err error
 	// Check the history
 	var roTx kv.Tx
@@ -314,7 +318,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 		if txNum == 976 {
 			// Create roTx obnly for the last several txNum, because all history before that
 			// we should be able to read without any DB access
-			roTx, err = db.BeginRo(context.Background())
+			roTx, err = db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
 		}
@@ -343,8 +347,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 func TestHistory(t *testing.T) {
 	_, db, d, txs := filledDomain(t)
-	defer db.Close()
-	defer d.Close()
+	ctx := context.Background()
 	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
@@ -355,15 +358,15 @@ func TestHistory(t *testing.T) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(context.Background())
+			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
 			roTx.Rollback()
 			require.NoError(t, err)
-			sf, err := d.buildFiles(step, c)
+			sf, err := d.buildFiles(ctx, step, c)
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
@@ -378,9 +381,8 @@ func TestHistory(t *testing.T) {
 
 func TestIterationMultistep(t *testing.T) {
 	_, db, d := testDbAndDomain(t, 5 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -429,15 +431,15 @@ func TestIterationMultistep(t *testing.T) {
 
 	for step := uint64(0); step <= 2; step++ {
 		func() {
-			roTx, err := db.BeginRo(context.Background())
+			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
 			roTx.Rollback()
 			require.NoError(t, err)
-			sf, err := d.buildFiles(step, c)
+			sf, err := d.buildFiles(ctx, step, c)
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
@@ -448,7 +450,7 @@ func TestIterationMultistep(t *testing.T) {
 		}()
 	}
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 	d.SetTx(tx)
 
@@ -465,6 +467,7 @@ func TestIterationMultistep(t *testing.T) {
 
 func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
+	ctx := context.Background()
 	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
@@ -474,16 +477,16 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(context.Background())
+			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
 			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
 			require.NoError(t, err)
 			roTx.Rollback()
-			sf, err := d.buildFiles(step, c)
+			sf, err := d.buildFiles(ctx, step, c)
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
@@ -496,7 +499,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			maxSpan := uint64(16 * 16)
 			for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 				valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r)
-				valuesIn, indexIn, historyIn, err := d.mergeFiles(valuesOuts, indexOuts, historyOuts, r, maxSpan)
+				valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, maxSpan)
 				require.NoError(t, err)
 				d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 				err = d.deleteFiles(valuesOuts, indexOuts, historyOuts)
@@ -508,12 +511,13 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	t.Helper()
+	ctx := context.Background()
 	txFrom, txTo := (step)*d.aggregationStep, (step+1)*d.aggregationStep
 
 	c, err := d.collate(step, txFrom, txTo, d.tx)
 	require.NoError(t, err)
 
-	sf, err := d.buildFiles(step, c)
+	sf, err := d.buildFiles(ctx, step, c)
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
@@ -525,7 +529,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	maxSpan := d.aggregationStep * d.aggregationStep
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := d.mergeFiles(valuesOuts, indexOuts, historyOuts, r, maxSpan)
+		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, maxSpan)
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
@@ -561,7 +565,7 @@ func TestScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
 	d.Close()
-	d, err = NewDomain(path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
+	d, err = NewDomain(path, path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
 	require.NoError(t, err)
 	d.SetTxNum(txNum)
 	// Check the history
@@ -570,9 +574,8 @@ func TestScanFiles(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -600,7 +603,7 @@ func TestDelete(t *testing.T) {
 	tx = nil
 	collateAndMerge(t, db, d, 1000)
 	// Check the history
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	dc := d.MakeContext()
@@ -622,7 +625,8 @@ func TestDelete(t *testing.T) {
 func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.RwDB, *Domain, map[string][]bool) {
 	t.Helper()
 	path, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	tx, err := db.BeginRw(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -660,7 +664,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 		}
@@ -677,14 +681,14 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 // in real life we periodically do collate-merge-prune without stopping adding data
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
-	path, db, dom, data := filledDomainFixedSize(t, keyCount, txCount)
+	_, db, dom, data := filledDomainFixedSize(t, keyCount, txCount)
 	defer db.Close()
 	defer dom.Close()
-	defer os.Remove(path)
 
 	collateAndMerge(t, db, dom, txCount)
 
-	roTx, err := db.BeginRo(context.Background())
+	ctx := context.Background()
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -731,11 +735,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	keysCount, txCount := uint64(16), uint64(64)
 
 	path, db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
+	ctx := context.Background()
 	defer os.Remove(path)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -782,7 +785,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 
 			err = tx.Commit()
 			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
 		}
@@ -792,7 +795,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 

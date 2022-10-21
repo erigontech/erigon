@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"math/rand"
+	"os"
 	"sync/atomic"
 	"testing"
 
@@ -17,19 +18,20 @@ import (
 func testDbAndAggregator(t *testing.T, prefixLen int, aggStep uint64) (string, kv.RwDB, *Aggregator) {
 	t.Helper()
 	path := t.TempDir()
+	t.Cleanup(func() { os.RemoveAll(path) })
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
-	agg, err := NewAggregator(path, aggStep)
+	t.Cleanup(db.Close)
+	agg, err := NewAggregator(path, path, aggStep)
 	require.NoError(t, err)
+	t.Cleanup(agg.Close)
 	return path, db, agg
 }
 
 func TestAggregator_Merge(t *testing.T) {
 	_, db, agg := testDbAndAggregator(t, 0, 100)
-	defer db.Close()
-	defer agg.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -98,7 +100,6 @@ func TestAggregator_Merge(t *testing.T) {
 func TestAggregator_RestartOnFiles(t *testing.T) {
 	aggStep := uint64(50)
 	path, db, agg := testDbAndAggregator(t, 0, aggStep)
-	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	agg.Close()
 	tx, agg = nil, nil
 
-	anotherAgg, err := NewAggregator(path, aggStep)
+	anotherAgg, err := NewAggregator(path, path, aggStep)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 

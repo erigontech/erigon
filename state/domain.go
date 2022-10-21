@@ -34,6 +34,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 
@@ -99,7 +100,7 @@ type Domain struct {
 }
 
 func NewDomain(
-	dir string,
+	dir, tmpdir string,
 	aggregationStep uint64,
 	filenameBase string,
 	keysTable string,
@@ -118,7 +119,7 @@ func NewDomain(
 		files:     btree.NewG[*filesItem](32, filesItemLess),
 	}
 	var err error
-	if d.History, err = NewHistory(dir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals); err != nil {
+	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals); err != nil {
 		return nil, err
 	}
 	files, err := os.ReadDir(dir)
@@ -629,7 +630,7 @@ func (d *Domain) collate(step, txFrom, txTo uint64, roTx kv.Tx) (Collation, erro
 		}
 	}()
 	valuesPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
-	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
+	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(d.keysTable)
@@ -719,8 +720,8 @@ func (sf StaticFiles) Close() {
 
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
-func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, error) {
-	hStaticFiles, err := d.History.buildFiles(step, HistoryCollation{
+func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation) (StaticFiles, error) {
+	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
 		historyPath:  collation.historyPath,
 		historyComp:  collation.historyComp,
 		historyCount: collation.historyCount,
@@ -756,7 +757,7 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
-	if valuesIdx, err = buildIndex(valuesDecomp, valuesIdxPath, d.dir, collation.valuesCount, false); err != nil {
+	if valuesIdx, err = buildIndex(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 	}
 	closeComp = false
@@ -782,8 +783,8 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices() (err error) {
-	if err := d.History.BuildMissedIndices(); err != nil {
+func (d *Domain) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
+	if err := d.History.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
 	for _, item := range d.missedIdxFiles() {
@@ -793,7 +794,7 @@ func (d *Domain) BuildMissedIndices() (err error) {
 	return d.openFiles()
 }
 
-func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values bool) (*recsplit.Index, error) {
+func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) (*recsplit.Index, error) {
 	_, fName := filepath.Split(idxPath)
 	log.Debug("[snapshots] build idx", "file", fName)
 	var rs *recsplit.RecSplit
@@ -803,7 +804,7 @@ func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
-		TmpDir:     dir,
+		TmpDir:     tmpdir,
 		IndexFile:  idxPath,
 	}); err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)

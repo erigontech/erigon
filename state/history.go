@@ -29,12 +29,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -57,7 +59,7 @@ type History struct {
 }
 
 func NewHistory(
-	dir string,
+	dir, tmpdir string,
 	aggregationStep uint64,
 	filenameBase string,
 	indexKeysTable string,
@@ -74,7 +76,7 @@ func NewHistory(
 		workers:          1,
 	}
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, aggregationStep, filenameBase, indexKeysTable, indexTable)
+	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -260,28 +262,58 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (h *History) BuildMissedIndices() (err error) {
-	if err := h.InvertedIndex.BuildMissedIndices(); err != nil {
+func (h *History) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
+	if err := h.InvertedIndex.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
-	for _, item := range h.missedIdxFiles() {
-		search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
-		iiItem, ok := h.InvertedIndex.files.Get(search)
-		if !ok {
-			return nil
+
+	missedFiles := h.missedIdxFiles()
+	errs := make(chan error, len(missedFiles))
+	wg := sync.WaitGroup{}
+
+	for _, item := range missedFiles {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			errs <- err
+			break
 		}
-		fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-		fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
-		idxPath := filepath.Join(h.dir, fName)
-		log.Info("[snapshots] build idx", "file", fName)
-		count, err := iterateForVi(item, iiItem, h.compressVals, func(v []byte) error { return nil })
+		wg.Add(1)
+		go func(item *filesItem) {
+			defer sem.Release(1)
+			defer wg.Done()
+
+			search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
+			iiItem, ok := h.InvertedIndex.files.Get(search)
+			if !ok {
+				errs <- nil
+				return
+			}
+
+			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
+			idxPath := filepath.Join(h.dir, fName)
+			log.Info("[snapshots] build idx", "file", fName)
+			count, err := iterateForVi(item, iiItem, h.compressVals, func(v []byte) error { return nil })
+			if err != nil {
+				errs <- err
+				return
+			}
+			errs <- buildVi(item, iiItem, idxPath, h.tmpdir, count, false /* values */, h.compressVals)
+		}(item)
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	var lastError error
+	for err := range errs {
 		if err != nil {
-			return err
-		}
-		if err := buildVi(item, iiItem, idxPath, h.dir, count, false /* values */, h.compressVals); err != nil {
-			return err
+			lastError = err
 		}
 	}
+	if lastError != nil {
+		return lastError
+	}
+
 	return h.openFiles()
 }
 
@@ -341,7 +373,7 @@ func iterateForVi(historyItem, iiItem *filesItem, compressVals bool, f func(v []
 	return count, nil
 }
 
-func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count int, values, compressVals bool) error {
+func buildVi(historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, count int, values, compressVals bool) error {
 	_, fName := filepath.Split(historyIdxPath)
 	log.Debug("[snapshots] build idx", "file", fName)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -349,7 +381,7 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, dir string, count i
 		Enums:       false,
 		BucketSize:  2000,
 		LeafSize:    8,
-		TmpDir:      dir,
+		TmpDir:      tmpdir,
 		IndexFile:   historyIdxPath,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	})
@@ -551,7 +583,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.dir, compress.MinPatternScore, h.workers, log.LvlDebug); err != nil {
+	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlDebug); err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
@@ -646,7 +678,7 @@ func (sf HistoryFiles) Close() {
 
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
-func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFiles, error) {
+func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation) (HistoryFiles, error) {
 	historyComp := collation.historyComp
 	var historyDecomp, efHistoryDecomp *compress.Decompressor
 	var historyIdx, efHistoryIdx *recsplit.Index
@@ -690,7 +722,7 @@ func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFi
 	}
 	// Build history ef
 	efHistoryPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.ef", h.filenameBase, step, step+1))
-	efHistoryComp, err = compress.NewCompressor(context.Background(), "ef history", efHistoryPath, h.dir, compress.MinPatternScore, h.workers, log.LvlDebug)
+	efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlDebug)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
@@ -726,7 +758,7 @@ func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFi
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	efHistoryIdxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1))
-	if efHistoryIdx, err = buildIndex(efHistoryDecomp, efHistoryIdxPath, h.dir, len(keys), false /* values */); err != nil {
+	if efHistoryIdx, err = buildIndex(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false /* values */); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -734,7 +766,7 @@ func (h *History) buildFiles(step uint64, collation HistoryCollation) (HistoryFi
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
-		TmpDir:     h.dir,
+		TmpDir:     h.tmpdir,
 		IndexFile:  historyIdxPath,
 	}); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)

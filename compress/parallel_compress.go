@@ -399,7 +399,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 
 		select {
 		case <-logEvery.C:
-			log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch))
+			log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", workers)
 		default:
 		}
 		return nil
