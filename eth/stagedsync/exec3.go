@@ -63,11 +63,6 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 	if count > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
 	}
-	var txNums []string
-	for _, t := range rws {
-		txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
-	}
-	s := strings.Join(txNums, ",")
 	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
 		"at blk", outputBlockNum,
@@ -75,12 +70,19 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rws state.TxTaskQueu
 		"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
-		"resultQueue", fmt.Sprintf("%d/%d txNums=%s", rws.Len(), queueSize, s),
+		"resultQueue", fmt.Sprintf("%d/%d", rws.Len(), queueSize),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
+	var txNums []string
+	for _, t := range rws {
+		txNums = append(txNums, fmt.Sprintf("%d", t.TxNum))
+	}
+	s := strings.Join(txNums, ",")
+	log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
+
 	p.prevTime = currentTime
 	p.prevCount = count
 	p.prevOutputBlockNum = outputBlockNum
