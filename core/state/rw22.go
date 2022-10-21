@@ -90,7 +90,6 @@ type State22 struct {
 	sizeEstimate uint64
 	txsDone      uint64
 	finished     bool
-	searchItem   statePair
 }
 
 type statePair struct {
@@ -133,8 +132,7 @@ func (rs *State22) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	rs.searchItem.key = key
-	if i, ok := t.Get(rs.searchItem); ok {
+	if i, ok := t.Get(statePair{key: key}); ok {
 		return i.val
 	}
 	return nil
