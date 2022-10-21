@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
+        "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -164,7 +164,16 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 		return nil, nil
 	}
 
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx)
+        additionalFields := make(map[string]interface{})
+        td, err := rawdb.ReadTd(db, block.Hash(), block.NumberU64())
+        if err != nil {
+                return nil, err
+        }
+        if td != nil {
+                additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+        }
+
+        response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
