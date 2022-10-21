@@ -54,7 +54,3 @@ func StartNode(stack *node.Node) {
 
 	go debug.ListenSignals(stack)
 }
-
-func StopDebug() {
-	debug.Exit()
-}

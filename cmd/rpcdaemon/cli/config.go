@@ -121,7 +121,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
-		utils.StopDebug()
+		debug.Exit()
 		return nil
 	}
 
