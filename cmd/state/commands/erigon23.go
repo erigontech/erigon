@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/spf13/cobra"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -73,7 +74,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		interruptCh <- true
 	}()
 
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadirCli, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -85,7 +86,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "db23")
+	stateDbPath := path.Join(datadirCli, "db23")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -99,7 +100,8 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}
 	defer db.Close()
 
-	aggPath := filepath.Join(datadir, "erigon23")
+	dirs := datadir2.New(datadirCli)
+	aggPath := filepath.Join(datadirCli, "erigon23")
 
 	var rwTx kv.RwTx
 	defer func() {
@@ -111,7 +113,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, ethconfig.HistoryV3AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -190,7 +192,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
