@@ -3,7 +3,6 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -63,8 +63,8 @@ func (req *RequestGenerator) call(target string, method, body string, response i
 	}
 }
 
-func (req *RequestGenerator) Erigon(method, body string, response interface{}) rpctest.CallResult {
-	return req.call(models.ErigonUrl, method, body, response)
+func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, response interface{}) rpctest.CallResult {
+	return req.call(models.ErigonUrl, string(method), body, response)
 }
 
 func (req *RequestGenerator) getAdminNodeInfo() string {
@@ -72,9 +72,19 @@ func (req *RequestGenerator) getAdminNodeInfo() string {
 	return fmt.Sprintf(template, req.reqID)
 }
 
-func (req *RequestGenerator) getBalance(address common.Address, blockNum string) string {
-	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x","%v"],"id":%d}`
-	return fmt.Sprintf(template, address, blockNum, req.reqID)
+func (req *RequestGenerator) getBalance(address common.Address, blockNum models.BlockNumber) string {
+	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) getTransactionCount(address common.Address, blockNum models.BlockNumber) string {
+	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHGetTransactionCount, address, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
+	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHSendRawTransaction, signedTx, req.reqID)
 }
 
 func (req *RequestGenerator) txpoolContent() string {

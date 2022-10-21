@@ -3,7 +3,18 @@ package models
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
+)
+
+type (
+	// TransactionType is the type of transaction attempted to be made, can be regular or contract
+	TransactionType string
+	// BlockNumber represents the block number type
+	BlockNumber string
+
+	// RPCMethod is the type for rpc methods used
+	RPCMethod string
 )
 
 const (
@@ -35,7 +46,7 @@ const (
 	// DevPeriodParam is the dev.period parameter
 	DevPeriodParam = "30"
 	// VerbosityParam is the verbosity parameter
-	VerbosityParam = "0"
+	VerbosityParam = "1"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
@@ -49,8 +60,32 @@ const (
 	// ReqId is the request id for each request
 	ReqId = 0
 
-	// BlockNumLatest is the parameter for the latest block
-	BlockNumLatest = "latest"
+	// Latest is the parameter for the latest block
+	Latest BlockNumber = "latest"
+
+	// hexPrivateKey is the hex value for the private key
+	hexPrivateKey = "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48"
+	// DevAddress is the developer address for sending
+	DevAddress = "67b1d87101671b127f5f8714789C7192f7ad340e"
+
+	// NonContractTx is the transaction type for sending ether
+	NonContractTx TransactionType = "non-contract"
+	// ContractTx is the transaction type for sending ether
+	ContractTx TransactionType = "contract"
+
+	// ETHGetTransactionCount represents the eth_getTransactionCount method
+	ETHGetTransactionCount = "eth_getTransactionCount"
+	// ETHGetBalance represents the eth_getBalance method
+	ETHGetBalance = "eth_getBalance"
+	// ETHSendRawTransaction represents the eth_sendRawTransaction method
+	ETHSendRawTransaction = "eth_sendRawTransaction"
+	// AdminNodeInfo represents the admin_nodeInfo method
+	AdminNodeInfo = "admin_nodeInfo"
+)
+
+var (
+	// DevSignedPrivateKey is the signed private key for signing transactions
+	DevSignedPrivateKey, _ = crypto.HexToECDSA(hexPrivateKey)
 )
 
 type AdminNodeInfoResponse struct {

@@ -9,11 +9,10 @@ import (
 )
 
 const (
-	addr     = "0x71562b71999873DB5b286dF957af199Ec94617F7"
-	ethValue = 10000
+	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
 )
 
-func callGetBalance(addr, blockNum string, checkBal uint64) {
+func callGetBalance(addr string, blockNum models.BlockNumber, checkBal uint64) {
 	fmt.Printf("Getting balance for address: %q...\n", addr)
 	address := common.HexToAddress(addr)
 	bal, err := requests.GetBalance(models.ReqId, address, blockNum)
