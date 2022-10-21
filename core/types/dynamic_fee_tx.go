@@ -17,7 +17,6 @@
 package types
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -235,17 +234,8 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 		return err
 	}
 	// encode Nonce
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
 	}
 	// encode MaxPriorityFeePerGas
 	if err := tx.Tip.EncodeRLP(w); err != nil {
@@ -256,17 +246,8 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 		return err
 	}
 	// encode Gas
-	if tx.Gas > 0 && tx.Gas < 128 {
-		b[0] = byte(tx.Gas)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		b[8-gasLen] = 128 + byte(gasLen)
-		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
 	}
 	// encode To
 	if tx.To == nil {
@@ -287,7 +268,7 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 		return err
 	}
 	// encode Data
-	if err := EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -323,7 +304,7 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	envelopeSize += 2
 	var b [33]byte
 	// envelope
-	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
