@@ -280,9 +280,8 @@ func (ef *EliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*uint64Size)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -295,17 +294,14 @@ func (ef *EliasFano) AppendBytes(buf []byte) []byte {
 	buf = append(buf, numBuf[:]...)
 	binary.BigEndian.PutUint64(numBuf[:], ef.u)
 	buf = append(buf, numBuf[:]...)
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	buf = append(buf, b[:len(ef.data)*8]...)
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*uint64Size)
+	buf = append(buf, b...)
 	return buf
 }
 
-const maxDataSize = 0xFFFFFFFFFFFF //2^48
-
 // Read inputs the state of golomb rice encoding from a reader s
 func ReadEliasFano(r []byte) (*EliasFano, int) {
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[16]))
+	p := unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
 	ef := &EliasFano{
 		count: binary.BigEndian.Uint64(r[:8]),
 		u:     binary.BigEndian.Uint64(r[8:16]),
@@ -318,10 +314,12 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 
 func Max(r []byte) uint64 { return binary.BigEndian.Uint64(r[8:16]) - 1 }
 
+const uint64Size = 8
+
 func Min(r []byte) uint64 {
 	count := binary.BigEndian.Uint64(r[:8])
 	u := binary.BigEndian.Uint64(r[8:16])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[16]))
+	p := unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
 	var l uint64
 	if u/(count+1) == 0 {
 		l = 0
@@ -650,9 +648,8 @@ func (ef *DoubleEliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*uint64Size)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -665,8 +662,7 @@ func (ef *DoubleEliasFano) Read(r []byte) int {
 	ef.uPosition = binary.BigEndian.Uint64(r[16:24])
 	ef.cumKeysMinDelta = binary.BigEndian.Uint64(r[24:32])
 	ef.posMinDelta = binary.BigEndian.Uint64(r[32:40])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[40]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[40])), (len(r)-40)/uint64Size)
 	ef.deriveFields()
 	return 40 + 8*len(ef.data)
 }

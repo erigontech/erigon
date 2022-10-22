@@ -52,10 +52,16 @@ func TestEliasFano(t *testing.T) {
 	v, ok = ef.Search(11)
 	assert.True(t, ok, "search4")
 	assert.Equal(t, uint64(14), v, "search4")
+
 	buf := bytes.NewBuffer(nil)
 	ef.Write(buf)
-	assert.Equal(t, ef.Max(), Max(buf.Bytes()))
-	assert.Equal(t, ef.Min(), Min(buf.Bytes()))
+	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
+
+	ef2, _ := ReadEliasFano(buf.Bytes())
+	assert.Equal(t, ef.Min(), ef2.Min())
+	assert.Equal(t, ef.Max(), ef2.Max())
+	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
+	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
 }
 
 func TestIterator(t *testing.T) {
