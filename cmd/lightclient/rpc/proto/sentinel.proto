@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package lightrpc;
 
+option go_package = "../lightrpc";
+
 message EmptyRequest {}
 
 enum GossipType {
@@ -10,6 +12,9 @@ enum GossipType {
     LightClientOptimisticUpdateGossipType = 1;
     // Legacy gossip
     BeaconBlockGossipType = 2;
+    
+    // Phase0 gossip global topics.
+    AggregateAndProofGossipType = 3;
 }
 
 message GossipData {
