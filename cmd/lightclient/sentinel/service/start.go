@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -47,9 +48,18 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 
 	server := NewSentinelServer(ctx, sent)
 	go StartServe(server, srvCfg)
-	// Wait a bit for the serving (TODO: make it better, this is ugly)
-	time.Sleep(5 * time.Second)
-
+	timeOutTimer := time.NewTimer(5 * time.Second)
+WaitingLoop:
+	for {
+		select {
+		case <-timeOutTimer.C:
+			return nil, fmt.Errorf("[Server] timeout beginning server")
+		default:
+			if _, err := server.GetPeers(ctx, &lightrpc.EmptyRequest{}); err == nil {
+				break WaitingLoop
+			}
+		}
+	}
 	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
