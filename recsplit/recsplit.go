@@ -658,13 +658,13 @@ func (rs *RecSplit) Build() error {
 }
 
 // Stats returns the size of golomb rice encoding and ellias fano encoding
-func (rs RecSplit) Stats() (int, int) {
+func (rs *RecSplit) Stats() (int, int) {
 	return len(rs.gr.Data()), len(rs.ef.Data())
 }
 
 // Collision returns true if there was a collision detected during mapping of keys
 // into 64-bit values
 // RecSplit needs to be reset, re-populated with keys, and rebuilt
-func (rs RecSplit) Collision() bool {
+func (rs *RecSplit) Collision() bool {
 	return rs.collision
 }

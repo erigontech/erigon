@@ -83,7 +83,7 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 }
 
 // Bits returns currrent number of bits in the compact encoding of the hash function representation
-func (g GolombRice) Bits() int {
+func (g *GolombRice) Bits() int {
 	return g.bitCount
 }
 
@@ -153,7 +153,7 @@ func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
 }
 
 // Data returns the binary representation of the Golomb-Rice code that is built
-func (g GolombRice) Data() []uint64 {
+func (g *GolombRice) Data() []uint64 {
 	return g.data
 }
 

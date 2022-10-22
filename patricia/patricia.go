@@ -339,7 +339,7 @@ func (pt *PatriciaTree) Insert(key []byte, value interface{}) {
 	pt.root.insert(key, value)
 }
 
-func (pt PatriciaTree) Get(key []byte) (interface{}, bool) {
+func (pt *PatriciaTree) Get(key []byte) (interface{}, bool) {
 	return pt.root.get(key)
 }
 

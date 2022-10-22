@@ -82,7 +82,7 @@ func (ef *EliasFano) AddOffset(offset uint64) {
 	ef.delta += ef.minDelta
 }
 
-func (ef EliasFano) jumpSizeWords() int {
+func (ef *EliasFano) jumpSizeWords() int {
 	size := ((ef.count + 1) / superQ) * superQSize // Whole blocks
 	if (ef.count+1)%superQ != 0 {
 		size += 1 + (((ef.count+1)%superQ+q-1)/q+3)/4 // Partial block
@@ -151,7 +151,7 @@ func (ef *EliasFano) Build() {
 	}
 }
 
-func (ef EliasFano) get(i uint64) (val, window uint64, sel int, currWord, lower, delta uint64) {
+func (ef *EliasFano) get(i uint64) (val, window uint64, sel int, currWord, lower, delta uint64) {
 	lower = i * ef.l
 	idx64 := lower / 64
 	shift := lower % 64
@@ -184,12 +184,12 @@ func (ef EliasFano) get(i uint64) (val, window uint64, sel int, currWord, lower,
 	return
 }
 
-func (ef EliasFano) Get(i uint64) uint64 {
+func (ef *EliasFano) Get(i uint64) uint64 {
 	val, _, _, _, _, _ := ef.get(i)
 	return val
 }
 
-func (ef EliasFano) Get2(i uint64) (val, valNext uint64) {
+func (ef *EliasFano) Get2(i uint64) (val, valNext uint64) {
 	var window uint64
 	var sel int
 	var currWord uint64

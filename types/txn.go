@@ -525,7 +525,7 @@ type TxSlots struct {
 	IsLocal []bool
 }
 
-func (s TxSlots) Valid() error {
+func (s *TxSlots) Valid() error {
 	if len(s.Txs) != len(s.IsLocal) {
 		return fmt.Errorf("TxSlots: expect equal len of isLocal=%d and txs=%d", len(s.IsLocal), len(s.Txs))
 	}
