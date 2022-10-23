@@ -24,5 +24,6 @@ import (
 	_ "github.com/ledgerwatch/interfaces/txpool"
 	_ "github.com/ledgerwatch/interfaces/types"
 	_ "github.com/ledgerwatch/interfaces/web3"
+	_ "github.com/matryer/moq"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

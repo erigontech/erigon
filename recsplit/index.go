@@ -154,6 +154,9 @@ func (idx *Index) Size() int64 {
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 
 func (idx *Index) Close() error {
+	if idx == nil {
+		return nil
+	}
 	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
 		return err
 	}
@@ -248,7 +251,8 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	}
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
-	return binary.BigEndian.Uint64(idx.data[1+8+idx.bytesPerRec*(rec+1):]) & idx.recMask
+	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+	return binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 }
 
 // OrdinalLookup returns the offset of i-th element in the index
