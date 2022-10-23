@@ -383,7 +383,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
+	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
