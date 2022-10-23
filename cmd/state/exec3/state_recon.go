@@ -336,7 +336,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Block.Number(), ibs)
+			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
