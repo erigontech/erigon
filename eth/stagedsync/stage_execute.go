@@ -45,6 +45,9 @@ import (
 
 const (
 	logInterval = 20 * time.Second
+
+	// stateStreamLimit - don't accumulate state changes if jump is bigger than this amount of blocks
+	stateStreamLimit uint64 = 1_000
 )
 
 type HasChangeSetWriter interface {
@@ -129,10 +132,10 @@ func executeBlock(
 	writeReceipts bool,
 	writeCallTraces bool,
 	initialCycle bool,
-	effectiveEngine consensus.Engine,
+	stateStream bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
 	if err != nil {
 		return err
 	}
@@ -380,6 +383,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
+	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -434,7 +438,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, effectiveEngine); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -565,7 +569,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	storageKeyLength := length.Addr + length.Incarnation + length.Hash
 
 	var accumulator *shards.Accumulator
-	if !initialCycle && cfg.stateStream {
+	if !initialCycle && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
 
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
