@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"golang.org/x/exp/slices"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -563,6 +564,16 @@ type KvList struct {
 	Keys, Vals [][]byte
 }
 
+func (l *KvList) Reset() {
+	for i := range l.Keys {
+		l.Keys[i], l.Vals[i] = nil, nil
+	}
+	l.Keys, l.Vals = l.Keys[:0], l.Vals[:0]
+}
+func (l *KvList) Clone() *KvList {
+	return &KvList{Keys: slices.Clone(l.Keys), Vals: slices.Clone(l.Vals)}
+}
+
 func (l KvList) Len() int {
 	return len(l.Keys)
 }
@@ -607,12 +618,12 @@ func (w *StateWriter22) SetTxNum(txNum uint64) {
 }
 
 func (w *StateWriter22) ResetWriteSet() {
-	w.writeLists = map[string]*KvList{
-		kv.PlainState:        {},
-		kv.Code:              {},
-		kv.PlainContractCode: {},
-		kv.IncarnationMap:    {},
-	}
+	w.writeLists[kv.PlainState].Reset()
+	w.writeLists[kv.Code].Reset()
+	w.writeLists[kv.PlainContractCode].Reset()
+	w.writeLists[kv.IncarnationMap].Reset()
+
+	//}
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
@@ -620,7 +631,12 @@ func (w *StateWriter22) ResetWriteSet() {
 }
 
 func (w *StateWriter22) WriteSet() map[string]*KvList {
-	return w.writeLists
+	return map[string]*KvList{
+		kv.PlainState:        w.writeLists[kv.PlainState].Clone(),
+		kv.Code:              w.writeLists[kv.Code].Clone(),
+		kv.PlainContractCode: w.writeLists[kv.PlainContractCode].Clone(),
+		kv.IncarnationMap:    w.writeLists[kv.IncarnationMap].Clone(),
+	}
 }
 
 func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
@@ -714,16 +730,19 @@ func (r *StateReader22) SetTx(tx kv.Tx) {
 }
 
 func (r *StateReader22) ResetReadSet() {
-	r.readLists = map[string]*KvList{
-		kv.PlainState:     {},
-		kv.Code:           {},
-		CodeSizeTable:     {},
-		kv.IncarnationMap: {},
-	}
+	r.readLists[kv.PlainState].Reset()
+	r.readLists[kv.Code].Reset()
+	r.readLists[CodeSizeTable].Reset()
+	r.readLists[kv.IncarnationMap].Reset()
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
-	return r.readLists
+	return map[string]*KvList{
+		kv.PlainState:     r.readLists[kv.PlainState].Clone(),
+		kv.Code:           r.readLists[kv.Code].Clone(),
+		CodeSizeTable:     r.readLists[CodeSizeTable].Clone(),
+		kv.IncarnationMap: r.readLists[kv.IncarnationMap].Clone(),
+	}
 }
 
 func (r *StateReader22) SetTrace(trace bool) {
