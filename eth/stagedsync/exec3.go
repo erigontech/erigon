@@ -824,6 +824,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var b *types.Block
 	var txKey [8]byte
 	for bn = uint64(0); bn <= blockNum; bn++ {
+		t := time.Now()
 		rules := chainConfig.Rules(bn)
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
@@ -855,6 +856,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
+		core.BlockExecutionTimer.UpdateDuration(t)
+		syncMetrics[stages.Execution].Set(blockNum)
 	}
 	close(workCh)
 	wg.Wait()
