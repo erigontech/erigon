@@ -569,7 +569,6 @@ func (l *KvList) Reset() {
 		l.Keys[i], l.Vals[i] = nil, nil
 	}
 	l.Keys, l.Vals = l.Keys[:0], l.Vals[:0]
-	return
 }
 func (l *KvList) Clone() *KvList {
 	return &KvList{Keys: slices.Clone(l.Keys), Vals: slices.Clone(l.Vals)}
