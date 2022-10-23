@@ -311,6 +311,8 @@ func Exec3(ctx context.Context,
 	var blockNum uint64
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
+		t := time.Now()
+
 		inputBlockNum.Store(blockNum)
 		rules := chainConfig.Rules(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
@@ -379,6 +381,8 @@ loop:
 
 			inputTxNum++
 		}
+		core.BlockExecutionTimer.UpdateDuration(t)
+		syncMetrics[stages.Execution].Set(blockNum)
 
 		if rs.SizeEstimate() >= commitThreshold {
 			commitStart := time.Now()
