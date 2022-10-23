@@ -76,12 +76,6 @@ func (c *ChainTipSubscriber) handleGossipData(data *lightrpc.GossipData) error {
 		// Swap and replace
 		c.prevBlock = c.currBlock
 		c.currBlock = block.Block
-	case lightrpc.GossipType_AggregateAndProofGossipType:
-		block := &cltypes.SignedAggregateAndProof{}
-		if err := block.UnmarshalSSZ(data.Data); err != nil {
-			return fmt.Errorf("could not unmarshall block: %s", err)
-		}
-		// TODO(#5824): figure out what do do with the Attestation.
 	case lightrpc.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
 		if err := finalityUpdate.UnmarshalSSZ(data.Data); err != nil {
