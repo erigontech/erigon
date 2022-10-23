@@ -45,7 +45,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV1 *cltypes.MetadataV2
+	MetadataV2 *cltypes.MetadataV2
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -122,14 +122,14 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV1 = &cltypes.MetadataV2{
+	s.MetadataV2 = &cltypes.MetadataV2{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
 		Syncnets:  0,
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.host, s.peers, s.metadataV1).Start()
+	handlers.NewConsensusHandlers(s.host, s.peers, s.MetadataV2).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
