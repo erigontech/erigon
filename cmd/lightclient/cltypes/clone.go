@@ -6,6 +6,10 @@ func (*SignedBeaconBlockBellatrix) Clone() communication.Packet {
 	return &SignedBeaconBlockBellatrix{}
 }
 
+func (*SignedAggregateAndProof) Clone() communication.Packet {
+	return &SignedAggregateAndProof{}
+}
+
 func (*LightClientFinalityUpdate) Clone() communication.Packet {
 	return &LightClientFinalityUpdate{}
 }

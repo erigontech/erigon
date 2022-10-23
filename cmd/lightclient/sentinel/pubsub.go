@@ -58,6 +58,7 @@ type TopicName string
 
 const (
 	BeaconBlockTopic                 TopicName = "beacon_block"
+	BeaconAggregateAndProofTopic     TopicName = "beacon_aggregate_and_proof"
 	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
 	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
@@ -72,6 +73,12 @@ type GossipTopic struct {
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
 	Typ:      &cltypes.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var BeaconAggregateAndProofSsz = GossipTopic{
+	Name:     BeaconAggregateAndProofTopic,
+	Typ:      &cltypes.SignedAggregateAndProof{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }

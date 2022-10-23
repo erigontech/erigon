@@ -29,6 +29,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 	}
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
+		sentinel.BeaconAggregateAndProofSsz,
 		sentinel.LightClientFinalityUpdateSsz,
 		sentinel.LightClientOptimisticUpdateSsz,
 	}

@@ -21,6 +21,10 @@ func DecodeGossipData(data *lightrpc.GossipData) (ssz.Unmarshaler, error) {
 		pkt := &cltypes.SignedBeaconBlockBellatrix{}
 		err := pkt.UnmarshalSSZ(data.Data)
 		return pkt, err
+	case lightrpc.GossipType_AggregateAndProofGossipType:
+		pkt := &cltypes.SignedAggregateAndProof{}
+		err := pkt.UnmarshalSSZ(data.Data)
+		return pkt, err
 	case lightrpc.GossipType_LightClientOptimisticUpdateGossipType:
 		pkt := &cltypes.LightClientOptimisticUpdate{}
 		err := pkt.UnmarshalSSZ(data.Data)
