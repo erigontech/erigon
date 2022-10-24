@@ -324,11 +324,16 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-		chainId = types.DeriveChainId(&t.V).ToBig()
-		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
-		result.V = (*hexutil.Big)(t.V.ToBig())
-		result.R = (*hexutil.Big)(t.R.ToBig())
-		result.S = (*hexutil.Big)(t.S.ToBig())
+                if (t.V == *(uint256.NewInt(27)) || t.V == *(uint256.NewInt(28))) {
+                    result.V = (*hexutil.Big)(t.V.ToBig())
+                } else {
+                    chainId = types.DeriveChainId(&t.V).ToBig()
+                    result.ChainID = (*hexutil.Big)(chainId)
+                    result.V = (*hexutil.Big)(t.V.ToBig())
+                }
+                result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+                result.R = (*hexutil.Big)(t.R.ToBig())
+                result.S = (*hexutil.Big)(t.S.ToBig())
 	case *types.AccessListTx:
 		chainId = t.ChainID.ToBig()
 		result.ChainID = (*hexutil.Big)(chainId)
