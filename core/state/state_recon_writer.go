@@ -191,6 +191,12 @@ func (rs *ReconnWork) RollbackCount() uint64 {
 	return rs.rollbackCount
 }
 
+func (rs *ReconnWork) QueueLen() int {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.queue.Len()
+}
+
 func (rs *ReconState) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
