@@ -326,7 +326,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
-			header := txTask.Block.HeaderNoCopy()
+			header := txTask.Block.Header()
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
 			}
