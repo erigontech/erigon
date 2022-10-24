@@ -347,6 +347,7 @@ loop:
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
 				Rules:        rules,
+				Header:       b.Header(),
 				Block:        b,
 				TxNum:        inputTxNum,
 				TxIndex:      txIndex,
@@ -851,6 +852,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
+					Header:       b.Header(),
 					Block:        b,
 					Rules:        rules,
 					TxNum:        inputTxNum,

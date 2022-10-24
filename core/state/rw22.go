@@ -30,6 +30,7 @@ type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
 	Rules              *params.Rules
+	Header             *types.Header
 	Block              *types.Block
 	BlockHash          common.Hash
 	Sender             *common.Address
