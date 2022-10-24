@@ -333,7 +333,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
-		header := txTask.Block.HeaderNoCopy()
+		header := txTask.Block.Header()
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
 				panic(err)
