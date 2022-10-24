@@ -23,29 +23,29 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
+	"go.uber.org/atomic"
 )
 
 type FillWorker struct {
 	txNum          uint64
-	doneCount      *atomic2.Uint64
+	doneCount      *atomic.Uint64
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
 
-	total, progress *atomic2.Uint64
+	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic2.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
 		fromKey:   fromKey,
 		toKey:     toKey,
-		total:     atomic2.NewUint64(0),
-		progress:  atomic2.NewUint64(0),
+		total:     atomic.NewUint64(0),
+		progress:  atomic.NewUint64(0),
 	}
 	return fw
 }
