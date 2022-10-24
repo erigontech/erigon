@@ -309,7 +309,6 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
-	header := txTask.Block.HeaderNoCopy()
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
@@ -327,6 +326,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
+			header := txTask.Block.HeaderNoCopy()
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
 			}
@@ -336,6 +336,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
+		header := txTask.Block.Header()
 		if rw.isPoSA {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
 		}
@@ -344,6 +345,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
+		header := txTask.Block.HeaderNoCopy()
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
 				panic(err)
@@ -354,7 +356,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(header, rw.getHeader)
+		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
 		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
