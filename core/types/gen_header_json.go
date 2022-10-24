@@ -138,7 +138,6 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		h.Nonce = *dec.Nonce
 	}
 	if dec.BaseFee != nil {
-		h.Eip1559 = true
 		h.BaseFee = (*big.Int)(dec.BaseFee)
 	}
 	return nil

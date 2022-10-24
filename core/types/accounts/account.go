@@ -84,12 +84,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	var nonceBytes int
-	if a.Nonce < 128 && a.Nonce != 0 {
-		nonceBytes = 0
-	} else {
-		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
-	}
+	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
 	structLength += uint(balanceBytes + nonceBytes + 2)
 
@@ -210,12 +205,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	var nonceBytes int
-	if a.Nonce < 128 && a.Nonce != 0 {
-		nonceBytes = 0
-	} else {
-		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
-	}
+	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes

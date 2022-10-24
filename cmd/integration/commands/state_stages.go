@@ -36,7 +36,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var stateStags = &cobra.Command{
+var stateStages = &cobra.Command{
 	Use: "state_stages",
 	Short: `Run all StateStages (which happen after senders) in loop.
 Examples: 
@@ -113,18 +113,18 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	withDataDir2(stateStags)
-	withReferenceChaindata(stateStags)
-	withUnwind(stateStags)
-	withUnwindEvery(stateStags)
-	withBlock(stateStags)
-	withIntegrityChecks(stateStags)
-	withMining(stateStags)
-	withChain(stateStags)
-	withHeimdall(stateStags)
-	withWorkers(stateStags)
+	withDataDir2(stateStages)
+	withReferenceChaindata(stateStages)
+	withUnwind(stateStages)
+	withUnwindEvery(stateStages)
+	withBlock(stateStages)
+	withIntegrityChecks(stateStages)
+	withMining(stateStages)
+	withChain(stateStages)
+	withHeimdall(stateStages)
+	withWorkers(stateStages)
 
-	rootCmd.AddCommand(stateStags)
+	rootCmd.AddCommand(stateStages)
 
 	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)

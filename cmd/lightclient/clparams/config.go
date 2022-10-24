@@ -14,12 +14,15 @@
 package clparams
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
+	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type NetworkType int
@@ -35,7 +38,7 @@ const (
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 5 * time.Second
-	RespTimeout    time.Duration = 10 * time.Second
+	RespTimeout    time.Duration = 15 * time.Second
 )
 
 var (
@@ -179,6 +182,29 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	GoerliNetwork: {
 		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
+	},
+}
+
+// Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
+var CheckpointSyncEndpoints = map[NetworkType][]string{
+	MainnetNetwork: {
+		"https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
+		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
+		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
+	},
+	GoerliNetwork: {
+		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
+	},
+	SepoliaNetwork: {
+		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -652,7 +678,33 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
-	fmt.Println(genesisConfig)
 	beaconConfig := BeaconConfigs[net]
 	return &genesisConfig, &networkConfig, &beaconConfig
+}
+
+func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig, NetworkType, error) {
+	switch net {
+	case networkname.MainnetChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
+		return genesisCfg, networkCfg, beaconCfg, MainnetNetwork, nil
+	case networkname.GoerliChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GoerliNetwork)
+		return genesisCfg, networkCfg, beaconCfg, GoerliNetwork, nil
+	case networkname.SepoliaChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
+		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
+	default:
+		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
+	}
+}
+func GetCheckpointSyncEndpoint(net NetworkType) string {
+	checkpoints, ok := CheckpointSyncEndpoints[net]
+	if !ok {
+		return ""
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
+	if err != nil {
+		panic(err)
+	}
+	return checkpoints[n.Int64()]
 }

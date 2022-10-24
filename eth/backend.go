@@ -173,10 +173,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	if config.Genesis != nil && config.Genesis.Config != nil {
-		types.SetHeaderSealFlag(config.Genesis.Config.IsHeaderWithSeal())
-	}
-
 	var currentBlock *types.Block
 
 	// Check if we have an already initialized chain and fall back to
@@ -205,7 +201,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
 
-	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
 	// Apply special hacks for BSC params
@@ -370,7 +365,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		consensusConfig = &config.Ethash
 	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */, backend.chainDB)
-	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -444,7 +439,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -475,8 +470,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				return nil, err
 			}
 
-			lc := lightclient.NewLightClient(ethBackendRPC, client)
-			go lc.Start(ctx)
+			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
+			if err != nil {
+				return nil, err
+			}
+			bs, err := lightclient.RetrieveBeaconState(ctx,
+				clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+
+			if err != nil {
+				return nil, err
+			}
+
+			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+				return nil, err
+			}
+
+			go lc.Start()
 		} else {
 			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
 		}
@@ -574,7 +583,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
 		return nil, err
 	}
 
@@ -696,7 +705,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -798,7 +807,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}
 	}()
@@ -885,7 +894,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	}
 
 	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, ethconfig.HistoryV3AggregationStep)
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
 	if err != nil {
 		return nil, nil, nil, err
 	}

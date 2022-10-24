@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -157,14 +156,16 @@ func HeadersPOS(
 	useExternalTx bool,
 	preProgress uint64,
 ) error {
-	if initialCycle {
-		// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
-		if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
-			return err
-		} else if s.BlockNumber >= execProgress {
-			return nil
+	/*
+		if initialCycle {
+			// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
+			if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			} else if s.BlockNumber >= execProgress {
+				return nil
+			}
 		}
-	}
+	*/
 
 	cfg.hd.SetPOSSync(true)
 	syncing := cfg.hd.PosStatus() != headerdownload.Idle
@@ -504,7 +505,7 @@ func handleNewPayload(
 			}
 			if success {
 				// If we downloaded the headers in time, then save them and proceed with the new header
-				verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+				saveDownloadedPoSHeaders(tx, cfg, headerInserter, true /* validate */)
 			} else {
 				return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 			}
@@ -607,7 +608,7 @@ func schedulePoSDownload(
 
 	//nolint
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	// headerCollector is closed in verifyAndSaveDownloadedPoSHeaders, thus nolint
+	// headerCollector is closed in saveDownloadedPoSHeaders, thus nolint
 
 	cfg.hd.SetHeadersCollector(headerCollector)
 
@@ -616,7 +617,7 @@ func schedulePoSDownload(
 	return true
 }
 
-func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
+func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter, validate bool) {
 	var lastValidHash common.Hash
 	var badChainError error
 	var foundPow bool
@@ -651,14 +652,16 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
 		// Validate state if possible (bodies will be retrieved through body download)
-		_, _, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, &h, nil, false)
-		if criticalError != nil {
-			return criticalError
-		}
-		if validationError != nil {
-			badChainError = validationError
-			cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
-			return nil
+		if validate {
+			_, _, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, &h, nil, false)
+			if criticalError != nil {
+				return criticalError
+			}
+			if validationError != nil {
+				badChainError = validationError
+				cfg.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+				return nil
+			}
 		}
 
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
@@ -711,7 +714,7 @@ func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, 
 			return false, fmt.Errorf("server is stopping")
 		}
 		if interrupt == engineapi.Synced && cfg.hd.HeadersCollector() != nil {
-			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+			saveDownloadedPoSHeaders(tx, cfg, headerInserter, false /* validate */)
 		}
 		if !useExternalTx {
 			return true, tx.Commit()
@@ -1073,8 +1076,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	if speed == 0 {
-		// Don't log "Wrote block ..." unless we're actually writing something
-		log.Info(fmt.Sprintf("[%s] No block headers to write in this log period", logPrefix), "block number", now, "blk/second", speed)
+		log.Info(fmt.Sprintf("[%s] No block headers to write in this log period", logPrefix), "block number", now)
 		return now
 	}
 

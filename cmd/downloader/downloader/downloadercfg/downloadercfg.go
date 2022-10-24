@@ -9,6 +9,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
@@ -50,6 +51,7 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.Seed = true
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
+	torrentConfig.ExtendedHandshakeClientVersion = "erigon: " + params.VersionWithCommit(params.GitCommit, "")
 	return torrentConfig
 }
 

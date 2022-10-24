@@ -276,7 +276,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 	if stateObject.code != nil {
 		return len(stateObject.code)
 	}
-	len, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()))
+	len, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 	}
@@ -671,7 +671,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, stateObject.data.CodeHash, stateObject.code); err != nil {
 				return err
 			}
 		}

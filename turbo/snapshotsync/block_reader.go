@@ -334,25 +334,6 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, 
 	return h, nil
 }
 
-func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
-	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
-		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return h, nil
-	}
-
-	h = rawdb.ReadHeader(tx, hash, blockHeight)
-	return h, nil
-}
-
 func (back *BlockReaderWithSnapshots) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	var baseTxnID uint64
 	var txsAmount uint32

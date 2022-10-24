@@ -15,113 +15,67 @@ package main
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"os"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
+	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
+	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
+	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
-)
-
-var (
-	defaultIpAddr  = "127.0.0.1" // Localhost
-	defaultPort    = 8080
-	defaultTcpPort = uint(9000)
+	"github.com/urfave/cli"
 )
 
 func main() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	sent, err := sentinel.New(context.Background(), &sentinel.SentinelConfig{
-		IpAddr:        defaultIpAddr,
-		Port:          defaultPort,
-		TCPPort:       defaultTcpPort,
-		GenesisConfig: genesisCfg,
-		NetworkConfig: networkCfg,
-		BeaconConfig:  beaconCfg,
-	})
-	if err != nil {
-		log.Error("error", "err", err)
-		return
-	}
-	if err := sent.Start(); err != nil {
-		log.Error("failed to start sentinel", "err", err)
-		return
-	}
-	log.Info("Sentinel started", "enr", sent.String())
-
-	gossip_topics := []sentinel.GossipTopic{
-		sentinel.BeaconBlockSsz,
-		sentinel.LightClientFinalityUpdateSsz,
-		sentinel.LightClientOptimisticUpdateSsz,
-	}
-	for _, v := range gossip_topics {
-		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
+	app := lightclientapp.MakeApp(runLightClientNode, flags.LightClientDefaultFlags)
+	if err := app.Run(os.Args); err != nil {
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("Fprintln error", "err", printErr)
 		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
-		}
-	}
-
-	logInterval := time.NewTicker(5 * time.Second)
-	sendReqInterval := time.NewTicker(1 * time.Second)
-
-	for {
-		select {
-		case <-logInterval.C:
-			sent.LogTopicPeers()
-			log.Info("[Lightclient] Networking Report", "peers", sent.GetPeersCount())
-		case pkt := <-sent.RecvGossip():
-			handleGossipPacket(pkt)
-		case <-sendReqInterval.C:
-			go func() {
-				if _, err := sent.SendPingReqV1(); err != nil {
-					log.Debug("failed to send ping request", "err", err)
-				}
-				if _, err := sent.SendMetadataReqV1(); err != nil {
-					log.Debug("failed to send metadata request", "err", err)
-				}
-			}()
-		}
+		os.Exit(1)
 	}
 }
 
-func handleGossipPacket(pkt *communication.GossipContext) error {
-	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
-	switch u := pkt.Packet.(type) {
-	case *lightrpc.SignedBeaconBlockBellatrix:
-		/*log.Info("[Gossip] beacon_block",
-			"Slot", u.Block.Slot,
-			"Signature", hex.EncodeToString(u.Signature),
-			"graffiti", string(u.Block.Body.Graffiti),
-			"eth1_blockhash", hex.EncodeToString(u.Block.Body.Eth1Data.BlockHash),
-			"stateRoot", hex.EncodeToString(u.Block.StateRoot),
-			"parentRoot", hex.EncodeToString(u.Block.ParentRoot),
-			"proposerIdx", u.Block.ProposerIndex,
-		)*/
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
-		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
-		}
-	case *lightrpc.LightClientFinalityUpdate:
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
-		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
-		}
-		log.Info("[Gossip] Got Finalty Update", "sig", utils.BytesToHex(u.SyncAggregate.SyncCommiteeSignature))
-	case *lightrpc.LightClientOptimisticUpdate:
-		err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
-		if err != nil {
-			log.Warn("[Gossip] Error Forwarding Packet", "err", err)
-		}
-	default:
+func runLightClientNode(cliCtx *cli.Context) {
+	ctx := context.Background()
+	lcCfg, err := lcCli.SetUpLightClientCfg(cliCtx)
+	if err != nil {
+		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
 	}
-	return nil
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
+	log.Info("[LightClient]", "chain", cliCtx.GlobalString(flags.LightClientChain.Name))
+	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
+	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
+		IpAddr:        lcCfg.Addr,
+		Port:          int(lcCfg.Port),
+		TCPPort:       lcCfg.ServerTcpPort,
+		GenesisConfig: lcCfg.GenesisCfg,
+		NetworkConfig: lcCfg.NetworkCfg,
+		BeaconConfig:  lcCfg.BeaconCfg,
+		NoDiscovery:   lcCfg.NoDiscovery,
+	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
+	if err != nil {
+		log.Error("Could not start sentinel", "err", err)
+	}
+	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+
+	bs, err := lightclient.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
+
+	if err != nil {
+		log.Error("[Checkpoint Sync] Failed", "reason", err)
+		return
+	}
+	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
+	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, 0, true)
+	if err != nil {
+		log.Error("Could not make Lightclient", "err", err)
+	}
+	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+		log.Error("[Bootstrap] failed to bootstrap", "err", err)
+		return
+	}
+	lc.Start()
 }

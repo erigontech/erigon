@@ -176,6 +176,7 @@ func StageLoopStep(
 	}
 	logCtx := sync.PrintTimings()
 	var tableSizes []interface{}
+	var commitTime time.Duration
 	if canRunCycleInOneTransaction {
 		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
@@ -183,7 +184,7 @@ func StageLoopStep(
 		if errTx != nil {
 			return headBlockHash, errTx
 		}
-		log.Info("Commit cycle", "in", time.Since(commitStart))
+		commitTime = time.Since(commitStart)
 	}
 	var rotx kv.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
@@ -205,6 +206,9 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
+	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
+		log.Info("Commit cycle", "in", commitTime)
+	}
 	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
 		log.Info("Timings (slower than 50ms)", logCtx...)
 		if len(tableSizes) > 0 {
@@ -247,7 +251,7 @@ func StageLoopStep(
 	return headBlockHash, nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -260,7 +264,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	}
 	defer tx.Rollback()
 
-	miningBatch := memdb.NewMemoryBatch(tx)
+	miningBatch := memdb.NewMemoryBatch(tx, tmpDir)
 	defer miningBatch.Rollback()
 
 	if err = mining.Run(nil, miningBatch, false /* firstCycle */, false /* quiet */); err != nil {
@@ -480,7 +484,8 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				dirs.Tmp,
 				nil, nil,
 			),
-			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, cfg.BatchSize, snapshots, blockReader, cfg.HistoryV3), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, cfg.BatchSize, snapshots, blockReader, cfg.HistoryV3),
+			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,

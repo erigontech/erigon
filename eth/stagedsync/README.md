@@ -181,4 +181,4 @@ This stage doesn't use a network connection.
 
 ### Stage 16: Finish
 
-This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/Readme.md), such as [`eth_blockNumber`](../../README.md).
+This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/README.md), such as [`eth_blockNumber`](../../README.md).

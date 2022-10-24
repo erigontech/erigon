@@ -8,6 +8,36 @@ import (
 )
 
 var (
+	writeMap     bool
+	writeMapOnce sync.Once
+)
+
+func WriteMap() bool {
+	writeMapOnce.Do(func() {
+		v, _ := os.LookupEnv("WRITE_MAP")
+		if v == "true" {
+			writeMap = true
+		}
+	})
+	return writeMap
+}
+
+var (
+	mdbxReaadahead     bool
+	mdbxReaadaheadOnce sync.Once
+)
+
+func MdbxReadAhead() bool {
+	mdbxReaadaheadOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_READAHEAD")
+		if v == "true" {
+			mdbxReaadahead = true
+		}
+	})
+	return mdbxReaadahead
+}
+
+var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )

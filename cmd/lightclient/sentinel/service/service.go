@@ -4,6 +4,7 @@ import (
 	"context"
 
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
@@ -26,7 +27,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *Sentin
 	}
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *lightrpc.GossipRequest, stream lightrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(_ *lightrpc.EmptyRequest, stream lightrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -48,6 +49,22 @@ func (s *SentinelServer) SubscribeGossip(_ *lightrpc.GossipRequest, stream light
 			}
 		}
 	}
+}
+
+func (s *SentinelServer) SendRequest(_ context.Context, req *lightrpc.RequestData) (*lightrpc.ResponseData, error) {
+	// Send the request and get the data if we get an answer.
+	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
+	return &lightrpc.ResponseData{
+		Data:  respData,
+		Error: foundErrReq,
+	}, err
+}
+
+func (s *SentinelServer) GetPeers(_ context.Context, _ *lightrpc.EmptyRequest) (*lightrpc.PeerCount, error) {
+	// Send the request and get the data if we get an answer.
+	return &lightrpc.PeerCount{
+		Amount: uint64(s.sentinel.GetPeersCount()),
+	}, nil
 }
 
 func (s *SentinelServer) ListenToGossip() {
@@ -75,11 +92,13 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 		return err
 	}
 	switch pkt.Packet.(type) {
-	case *lightrpc.SignedBeaconBlockBellatrix:
+	case *cltypes.SignedBeaconBlockBellatrix:
 		s.gossipNotifier.notify(lightrpc.GossipType_BeaconBlockGossipType, data)
-	case *lightrpc.LightClientFinalityUpdate:
+	case *cltypes.SignedAggregateAndProof:
+		s.gossipNotifier.notify(lightrpc.GossipType_AggregateAndProofGossipType, data)
+	case *cltypes.LightClientFinalityUpdate:
 		s.gossipNotifier.notify(lightrpc.GossipType_LightClientFinalityUpdateGossipType, data)
-	case *lightrpc.LightClientOptimisticUpdate:
+	case *cltypes.LightClientOptimisticUpdate:
 		s.gossipNotifier.notify(lightrpc.GossipType_LightClientOptimisticUpdateGossipType, data)
 	default:
 	}

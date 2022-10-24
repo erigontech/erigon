@@ -260,9 +260,13 @@ type ChainConfig struct {
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
 	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
+	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
+
+	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
+	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -326,8 +330,7 @@ type BorConfig struct {
 
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
-	BurntContract            map[string]string      `json:"burntContract"` // governance contract where the token will be sent to and burnt in london fork
-	JaipurBlock              uint64                 `json:"jaipurBlock"`   // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	JaipurBlock              uint64                 `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -363,22 +366,6 @@ func (c *BorConfig) calculateBorConfigHelper(field map[string]uint64, number uin
 	return field[keys[len(keys)-1]]
 }
 
-func (c *BorConfig) CalculateBurntContract(number uint64) string {
-	keys := make([]string, 0, len(c.BurntContract))
-	for k := range c.BurntContract {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for i := 0; i < len(keys)-1; i++ {
-		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
-		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
-		if number > valUint && number < valUintNext {
-			return c.BurntContract[keys[i]]
-		}
-	}
-	return c.BurntContract[keys[len(keys)-1]]
-}
-
 // String implements the fmt.Stringer interface.
 func (c *ChainConfig) String() string {
 	var engine interface{}
@@ -399,7 +386,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -408,6 +395,7 @@ func (c *ChainConfig) String() string {
 			c.EulerBlock,
 			c.GibbsBlock,
 			c.NanoBlock,
+			c.MoranBlock,
 			engine,
 		)
 	}
@@ -552,6 +540,14 @@ func (c *ChainConfig) IsOnGibbs(num *big.Int) bool {
 	return configNumEqual(c.GibbsBlock, num)
 }
 
+func (c *ChainConfig) IsMoran(num uint64) bool {
+	return isForked(c.MoranBlock, num)
+}
+
+func (c *ChainConfig) IsOnMoran(num *big.Int) bool {
+	return configNumEqual(c.MoranBlock, num)
+}
+
 // IsNano returns whether num is either equal to the euler fork block or greater.
 func (c *ChainConfig) IsNano(num uint64) bool {
 	return isForked(c.NanoBlock, num)
@@ -606,6 +602,10 @@ func (c *ChainConfig) IsShanghai(num uint64) bool {
 // IsCancun returns whether num is either equal to the Cancun fork block or greater.
 func (c *ChainConfig) IsCancun(num uint64) bool {
 	return isForked(c.CancunBlock, num)
+}
+
+func (c *ChainConfig) IsEip1559FeeCollector(num uint64) bool {
+	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -762,6 +762,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.NanoBlock, newcfg.NanoBlock, head) {
 		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
 	}
+	if isForkIncompatible(c.MoranBlock, newcfg.MoranBlock, head) {
+		return newCompatError("moran fork block", c.MoranBlock, newcfg.MoranBlock)
+	}
 	return nil
 }
 
@@ -830,8 +833,9 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
+	IsNano, IsMoran                                         bool
+	IsEip1559FeeCollector                                   bool
 	IsParlia, IsStarknet, IsAura                            bool
-	IsNano                                                  bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -841,21 +845,23 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		chainID = new(big.Int)
 	}
 	return &Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(num),
-		IsTangerineWhistle: c.IsTangerineWhistle(num),
-		IsSpuriousDragon:   c.IsSpuriousDragon(num),
-		IsByzantium:        c.IsByzantium(num),
-		IsConstantinople:   c.IsConstantinople(num),
-		IsPetersburg:       c.IsPetersburg(num),
-		IsIstanbul:         c.IsIstanbul(num),
-		IsBerlin:           c.IsBerlin(num),
-		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(num),
-		IsCancun:           c.IsCancun(num),
-		IsNano:             c.IsNano(num),
-		IsParlia:           c.Parlia != nil,
-		IsAura:             c.Aura != nil,
+		ChainID:               new(big.Int).Set(chainID),
+		IsHomestead:           c.IsHomestead(num),
+		IsTangerineWhistle:    c.IsTangerineWhistle(num),
+		IsSpuriousDragon:      c.IsSpuriousDragon(num),
+		IsByzantium:           c.IsByzantium(num),
+		IsConstantinople:      c.IsConstantinople(num),
+		IsPetersburg:          c.IsPetersburg(num),
+		IsIstanbul:            c.IsIstanbul(num),
+		IsBerlin:              c.IsBerlin(num),
+		IsLondon:              c.IsLondon(num),
+		IsShanghai:            c.IsShanghai(num),
+		IsCancun:              c.IsCancun(num),
+		IsNano:                c.IsNano(num),
+		IsMoran:               c.IsMoran(num),
+		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
+		IsParlia:              c.Parlia != nil,
+		IsAura:                c.Aura != nil,
 	}
 }
 

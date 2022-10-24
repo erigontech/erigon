@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -53,7 +54,6 @@ import (
 const ASSERT = false
 
 var (
-	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 	block      = flag.Int("block", 1, "specifies a block number for operation")
@@ -1171,6 +1171,16 @@ func findPrefix(chaindata string) error {
 	return nil
 }
 
+func rmSnKey(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
+		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
+		return nil
+	})
+}
+
 func findLogs(chaindata string, block uint64, blockTotal uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -1295,7 +1305,8 @@ func iterate(filename string, prefix string) error {
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
+
+	_ = logging.GetLogger("hack")
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -1416,6 +1427,8 @@ func main() {
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
+	case "rmSnKey":
+		err = rmSnKey(*chaindata)
 	}
 
 	if err != nil {

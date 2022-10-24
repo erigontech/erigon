@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package lightrpc;
 
-import "beacon_block.proto";
+option go_package = "../lightrpc";
 
-message GossipRequest {}
+message EmptyRequest {}
 
 enum GossipType {
     // Lightclient gossip
@@ -12,6 +12,9 @@ enum GossipType {
     LightClientOptimisticUpdateGossipType = 1;
     // Legacy gossip
     BeaconBlockGossipType = 2;
+    
+    // Phase0 gossip global topics.
+    AggregateAndProofGossipType = 3;
 }
 
 message GossipData {
@@ -19,6 +22,22 @@ message GossipData {
     GossipType type = 2;
 }
 
+message PeerCount {
+    uint64 amount = 1;
+}
+
+message RequestData {
+    bytes data = 1; // SSZ encoded data
+    string topic = 2;
+}
+
+message ResponseData {
+    bytes data = 1; // prefix-stripped SSZ encoded data
+    bool error = 2; // did the peer encounter an error
+}
+
 service Sentinel {
-    rpc SubscribeGossip(GossipRequest) returns (stream GossipData);
+    rpc SubscribeGossip(EmptyRequest) returns (stream GossipData);
+    rpc SendRequest(RequestData) returns (ResponseData);
+    rpc GetPeers(EmptyRequest) returns (PeerCount);
 }

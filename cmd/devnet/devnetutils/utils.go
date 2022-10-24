@@ -1,6 +1,7 @@
 package devnetutils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 )
@@ -63,4 +64,14 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	}
 
 	return enode[:i], nil
+}
+
+// ParseResponse converts any of the rpctest interfaces to a string for readability
+func ParseResponse(resp interface{}) (string, error) {
+	result, err := json.Marshal(resp)
+	if err != nil {
+		return "", fmt.Errorf("error trying to marshal response: %v", err)
+	}
+
+	return string(result), nil
 }

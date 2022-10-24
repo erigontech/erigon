@@ -176,7 +176,7 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	defer sn.seg.EnableReadAhead().DisableReadAhead()
+	defer sn.seg.EnableMadvNormal().DisableReadAhead()
 
 	var buf []byte
 	g := sn.seg.MakeGetter()
@@ -470,7 +470,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 // - RPC return Nil for historical blocks if snapshots are not open
 func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		snList, err := rawdb.ReadSnapshots(tx)
+		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
 			return err
 		}
@@ -691,7 +691,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		snList, err := rawdb.ReadSnapshots(tx)
+		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
 			return err
 		}
@@ -841,7 +841,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, sem *semaphore.Weighted) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
@@ -853,7 +853,6 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	errs := make(chan error, 1024)
 	wg := &sync.WaitGroup{}
 	ps := background.NewProgressSet()
-	sem := semaphore.NewWeighted(int64(workers))
 	startIndexingTime := time.Now()
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {
@@ -1666,8 +1665,8 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-	defer d.EnableReadAhead().DisableReadAhead()
-	defer bodiesSegment.EnableReadAhead().DisableReadAhead()
+	defer d.EnableMadvNormal().DisableReadAhead()
+	defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
 
 RETRY:
 	g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
@@ -1840,7 +1839,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	}
 	rs.LogLvl(lvl)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.EnableMadvNormal().DisableReadAhead()
 
 RETRY:
 	g := d.MakeGetter()

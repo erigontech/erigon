@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -28,6 +29,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 	}
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
+		sentinel.BeaconAggregateAndProofSsz,
 		sentinel.LightClientFinalityUpdateSsz,
 		sentinel.LightClientOptimisticUpdateSsz,
 	}
@@ -37,7 +39,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 		if err != nil {
 			log.Error("failed to start sentinel", "err", err)
 		}
-		// actually start the subscription, ala listening and sending packets to the sentinel recv channel
+		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		err = subscriber.Listen()
 		if err != nil {
 			log.Error("failed to start sentinel", "err", err)
@@ -47,9 +49,18 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 
 	server := NewSentinelServer(ctx, sent)
 	go StartServe(server, srvCfg)
-	// Wait a bit for the serving (TODO: make it better, this is ugly)
-	time.Sleep(5 * time.Second)
-
+	timeOutTimer := time.NewTimer(5 * time.Second)
+WaitingLoop:
+	for {
+		select {
+		case <-timeOutTimer.C:
+			return nil, fmt.Errorf("[Server] timeout beginning server")
+		default:
+			if _, err := server.GetPeers(ctx, &lightrpc.EmptyRequest{}); err == nil {
+				break WaitingLoop
+			}
+		}
+	}
 	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err

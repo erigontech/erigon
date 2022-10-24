@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
@@ -584,7 +582,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
-	tmpdir := filepath.Join(datadirCli, etl.TmpDirName)
+	tmpdir := datadir.New(datadirCli).Tmp
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
 	snapshots, _ := allSnapshots(db)
@@ -1148,13 +1146,14 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 			useSnapshots, _ = snap.Enabled(tx)
 			return nil
 		})
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadirCli, "snapshots"))
+		dirs := datadir.New(datadirCli)
+		dir.MustExist(dirs.SnapHistory)
 
-		aggDir := path.Join(datadirCli, "snapshots", "history")
-		dir.MustExist(aggDir)
+		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
+
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(aggDir, ethconfig.HistoryV3AggregationStep)
+		_aggSingleton, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}

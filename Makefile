@@ -18,6 +18,8 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
+CGO_CFLAGS += -O
+CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
@@ -29,7 +31,7 @@ GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -112,6 +114,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
+COMMANDS += sentinel_node
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -155,7 +158,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.49.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.50.0
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -204,7 +207,7 @@ git-submodules:
 
 
 PACKAGE_NAME          := github.com/maticnetwork/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.5
+GOLANG_CROSS_VERSION  ?= v1.18.1
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

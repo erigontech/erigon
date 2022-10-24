@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -22,7 +23,7 @@ var (
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
@@ -48,7 +49,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if chaindata == "" {
-			chaindata = filepath.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

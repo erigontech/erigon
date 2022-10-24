@@ -101,7 +101,7 @@ func DoCall(
 
 func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
 		if overflow {
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))

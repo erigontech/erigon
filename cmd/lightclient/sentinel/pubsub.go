@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
@@ -58,6 +58,7 @@ type TopicName string
 
 const (
 	BeaconBlockTopic                 TopicName = "beacon_block"
+	BeaconAggregateAndProofTopic     TopicName = "beacon_aggregate_and_proof"
 	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
 	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
@@ -71,19 +72,25 @@ type GossipTopic struct {
 
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
-	Typ:      &lightrpc.SignedBeaconBlockBellatrix{},
+	Typ:      &cltypes.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var BeaconAggregateAndProofSsz = GossipTopic{
+	Name:     BeaconAggregateAndProofTopic,
+	Typ:      &cltypes.SignedAggregateAndProof{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientFinalityUpdateSsz = GossipTopic{
 	Name:     LightClientFinalityUpdateTopic,
-	Typ:      &lightrpc.LightClientFinalityUpdate{},
+	Typ:      &cltypes.LightClientFinalityUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
 var LightClientOptimisticUpdateSsz = GossipTopic{
 	Name:     LightClientOptimisticUpdateTopic,
-	Typ:      &lightrpc.LightClientOptimisticUpdate{},
+	Typ:      &cltypes.LightClientOptimisticUpdate{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
@@ -148,6 +155,7 @@ func (s *GossipManager) Close() {
 	}
 	close(s.ch)
 }
+
 func (s *GossipManager) String() string {
 	sb := new(strings.Builder)
 	s.mu.RLock()
@@ -160,6 +168,7 @@ func (s *GossipManager) String() string {
 	s.mu.RUnlock()
 	return sb.String()
 }
+
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	sub = &GossipSubscription{
 		gossip_topic: topic,

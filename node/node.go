@@ -28,8 +28,10 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
@@ -325,7 +327,10 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
+		opts := mdbx.NewMDBX(logger).
+			WriteMergeThreshold(4 * 8192).
+			Path(dbPath).Label(label).
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
@@ -333,6 +338,14 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
 		} else {
 			opts = opts.GrowthStep(16 * datasize.MB)
+		}
+		if debug.WriteMap() {
+			opts = opts.WriteMap()
+		}
+		if debug.MdbxReadAhead() {
+			opts = opts.Flags(func(u uint) uint {
+				return u &^ mdbx2.NoReadahead
+			})
 		}
 		return opts.Open()
 	}

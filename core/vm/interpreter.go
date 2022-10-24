@@ -36,6 +36,7 @@ type Config struct {
 	TraceJumpDest bool   // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
+	StatelessExec bool   // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }

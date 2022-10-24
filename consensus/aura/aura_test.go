@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/require"
@@ -195,8 +196,9 @@ func TestRewardContract(t *testing.T) {
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
 // does not change the state root.
 func TestEmptyBlock(t *testing.T) {
-	types.SetHeaderSealFlag(true)
-	defer types.SetHeaderSealFlag(false)
+	if ethconfig.EnableHistoryV3InTest {
+		t.Skip("")
+	}
 
 	require := require.New(t)
 	genesis := core.DefaultGnosisGenesisBlock()
@@ -221,7 +223,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.NumberU64(),
 		genesisBlock.Hash(),
 		genesisBlock.UncleHash(),
-		genesisBlock.Seal(),
+		genesisBlock.Header().AuRaStep,
 	)
 
 	block := types.NewBlockWithHeader(header)

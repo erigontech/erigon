@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -24,6 +25,8 @@ type optionsCfg struct {
 	tmpdir          string
 	disabledLookups bool
 }
+
+const DumpSize = uint64(20000000000)
 
 func IncrementVerkleTree(cfg optionsCfg) error {
 	start := time.Now()
@@ -222,11 +225,13 @@ func dump(cfg optionsCfg) error {
 	}
 	defer tx.Rollback()
 	logInterval := time.NewTicker(30 * time.Second)
-	file, err := os.Create("dump.txt")
+	num := 0
+	file, err := os.Create(fmt.Sprintf("dump%d", num))
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	currWritten := uint64(0)
+
 	verkleCursor, err := tx.Cursor(kv.VerkleTrie)
 	if err != nil {
 		return err
@@ -235,19 +240,34 @@ func dump(cfg optionsCfg) error {
 		if err != nil {
 			return err
 		}
+		if len(k) != 32 {
+			continue
+		}
 		// k is the root so it will always be 32 bytes
 		if _, err := file.Write(k); err != nil {
 			return err
 		}
+		currWritten += 32
 		// Write length of RLP encoded note
 		lenNode := make([]byte, 8)
 		binary.BigEndian.PutUint64(lenNode, uint64(len(v)))
 		if _, err := file.Write(lenNode); err != nil {
 			return err
 		}
+		currWritten += 8
 		// Write Rlp encoded node
 		if _, err := file.Write(v); err != nil {
 			return err
+		}
+		currWritten += uint64(len(v))
+		if currWritten > DumpSize {
+			file.Close()
+			currWritten = 0
+			num++
+			file, err = os.Create(fmt.Sprintf("dump%d", num))
+			if err != nil {
+				return err
+			}
 		}
 		select {
 		case <-logInterval.C:
@@ -255,6 +275,7 @@ func dump(cfg optionsCfg) error {
 		default:
 		}
 	}
+	file.Close()
 	return nil
 }
 
