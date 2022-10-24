@@ -393,9 +393,9 @@ loop:
 
 				stageProgress = blockNum
 			}
-
 			inputTxNum++
 		}
+		b, header = nil, nil
 		core.BlockExecutionTimer.UpdateDuration(t)
 		syncMetrics[stages.Execution].Set(blockNum)
 
@@ -846,8 +846,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		txs := b.Transactions()
-		b = b.Copy()
-		//header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
@@ -856,6 +854,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					BlockNum:     bn,
 					Header:       b.Header(),
 					Txs:          txs,
+					Coinbase:     b.Coinbase(),
 					Uncles:       b.Uncles(),
 					Rules:        rules,
 					TxNum:        inputTxNum,
@@ -878,6 +877,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
+		b = nil
+
 		core.BlockExecutionTimer.UpdateDuration(t)
 		syncMetrics[stages.Execution].Set(blockNum)
 	}
