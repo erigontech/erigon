@@ -789,15 +789,16 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc := r.rs.Get(kv.Code, codeHash.Bytes())
+	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
+	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.Code, codeHash.Bytes())
+		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
 			return nil, err
 		}
 	}
-	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, address.Bytes())
+	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
 	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common2.Copy(enc))
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
