@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,38 +23,40 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
+	"go.uber.org/atomic"
 )
 
 type FillWorker struct {
 	txNum          uint64
-	doneCount      *atomic2.Uint64
+	doneCount      *atomic.Uint64
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
-	total          uint64
-	progress       uint64
+
+	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic2.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
 		fromKey:   fromKey,
 		toKey:     toKey,
+		total:     atomic.NewUint64(0),
+		progress:  atomic.NewUint64(0),
 	}
 	return fw
 }
 
 func (fw *FillWorker) Total() uint64 {
-	return atomic.LoadUint64(&fw.total)
+	return fw.total.Load()
 }
 func (fw *FillWorker) Bitmap() *roaring64.Bitmap { return &fw.bitmap }
 
 func (fw *FillWorker) Progress() uint64 {
-	return atomic.LoadUint64(&fw.progress)
+	return fw.progress.Load()
 }
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
@@ -63,11 +64,11 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	value := make([]byte, 1024)
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			var a accounts.Account
@@ -114,11 +115,11 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey[:20], key[:20])
@@ -138,12 +139,12 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
 
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey, key)
@@ -165,8 +166,8 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 }
 
 func (fw *FillWorker) ResetProgress() {
-	fw.total = 0
-	fw.progress = 0
+	fw.total.Store(0)
+	fw.progress.Store(0)
 }
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
@@ -174,7 +175,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -182,7 +183,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
@@ -192,7 +193,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -200,7 +201,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
@@ -210,7 +211,7 @@ func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 		fw.doneCount.Add(1)
 	}()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -218,7 +219,7 @@ func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
