@@ -312,8 +312,6 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			txTask.Block = txTask.Block.Copy()
-
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			header := txTask.Block.Header()
@@ -325,8 +323,6 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			}
 		}
 	} else if txTask.TxIndex == -1 {
-		txTask.Block = txTask.Block.Copy()
-
 		// Block initialisation
 		if rw.isPoSA {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Block.Header().Number, ibs)
