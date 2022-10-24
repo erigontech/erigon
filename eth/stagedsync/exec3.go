@@ -843,6 +843,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		txs := b.Transactions()
+		b = b.Copy()
 		//header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -864,6 +865,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					//if err != nil {
 					//	return err
 					//}
+					if sender, ok := txs[txIndex].GetSender(); ok {
+						txTask.Sender = &sender
+					}
 				}
 				workCh <- txTask
 			}
