@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
@@ -145,6 +146,20 @@ type Decompressor struct {
 //
 // Should be set before calling NewDecompression.
 var condensePatternTableBitThreshold = 9
+
+func init() {
+	v, _ := os.LookupEnv("DECOMPRESS_CONDENSITY")
+	if v != "" {
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			panic(err)
+		}
+		if i < 3 || i > 9 {
+			panic("DECOMPRESS_CONDENSITY: only numbers in range 3-9 are acceptable ")
+		}
+		condensePatternTableBitThreshold = i
+	}
+}
 
 func SetDecompressionTableCondensity(fromBitSize int) {
 	condensePatternTableBitThreshold = fromBitSize
