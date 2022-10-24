@@ -839,7 +839,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
-					Block:        b.Copy(),
+					Block:        b,
 					Rules:        rules,
 					TxNum:        inputTxNum,
 					TxIndex:      txIndex,
