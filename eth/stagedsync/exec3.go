@@ -211,7 +211,7 @@ func Exec3(ctx context.Context,
 						if err = agg.Prune(1_000); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
-						if len(resultCh) >= 128 {
+						if len(resultCh) >= workerCount*64 {
 							log.Info("tiny prune", "took", time.Since(t), "ch", len(resultCh))
 						}
 					}
