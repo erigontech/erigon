@@ -31,7 +31,9 @@ type TxTask struct {
 	BlockNum           uint64
 	Rules              *params.Rules
 	Header             *types.Header
-	Block              *types.Block
+	Txs                types.Transactions
+	Uncles             []*types.Header
+	Coinbase           common.Address
 	BlockHash          common.Hash
 	Sender             *common.Address
 	SkipAnalysis       bool

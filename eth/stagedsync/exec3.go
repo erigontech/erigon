@@ -341,6 +341,7 @@ loop:
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
+		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -348,7 +349,8 @@ loop:
 				BlockNum:     blockNum,
 				Rules:        rules,
 				Header:       b.Header(),
-				Block:        b,
+				Txs:          txs,
+				Uncles:       b.Uncles(),
 				TxNum:        inputTxNum,
 				TxIndex:      txIndex,
 				BlockHash:    b.Hash(),
@@ -853,7 +855,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				txTask := &state.TxTask{
 					BlockNum:     bn,
 					Header:       b.Header(),
-					Block:        b,
+					Txs:          txs,
+					Uncles:       b.Uncles(),
 					Rules:        rules,
 					TxNum:        inputTxNum,
 					TxIndex:      txIndex,

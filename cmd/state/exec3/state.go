@@ -118,7 +118,7 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
-	header := txTask.Block.HeaderNoCopy()
+	header := txTask.Header
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
@@ -141,7 +141,7 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -149,13 +149,13 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
 				txTask.TraceTos = map[common.Address]struct{}{}
-				txTask.TraceTos[txTask.Block.Coinbase()] = struct{}{}
-				for _, uncle := range txTask.Block.Uncles() {
+				txTask.TraceTos[txTask.Coinbase] = struct{}{}
+				for _, uncle := range txTask.Uncles {
 					txTask.TraceTos[uncle.Coinbase] = struct{}{}
 				}
 			}
