@@ -373,6 +373,5 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		rw.rs.CommitTxNum(txTask.TxNum)
 		txTask.Block = nil
 		txTask.Tx = nil
-		txTask.TxAsMessage = nil
 	}
 }
