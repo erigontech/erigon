@@ -374,6 +374,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		}
 		//fmt.Printf("commit %d\n", txNum)
 		rw.rs.CommitTxNum(txTask.TxNum)
+		txTask.Header = nil
 		txTask.Block = nil
 		txTask.Tx = nil
 	}
