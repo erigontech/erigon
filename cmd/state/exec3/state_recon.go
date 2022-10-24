@@ -356,7 +356,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
+		getHashFn := core.GetHashFn(header, rw.getHeader)
 		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
