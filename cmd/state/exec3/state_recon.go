@@ -317,7 +317,8 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			newTxs := copyTxs(txTask.Txs)
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, newTxs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
@@ -329,7 +330,9 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Txs, txTask.Uncles, syscall)
+
+		newTxs := copyTxs(txTask.Txs)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, newTxs, txTask.Uncles, syscall)
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
@@ -379,4 +382,15 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txTask.Uncles = nil
 		txTask.Tx = nil
 	}
+}
+func copyTxs(in []types.Transaction) []types.Transaction {
+	transactionsData, err := types.MarshalTransactionsBinary(in)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	newTxs, err := types.DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+	return newTxs
 }

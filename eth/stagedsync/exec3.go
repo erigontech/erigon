@@ -853,7 +853,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				txTask := &state.TxTask{
 					BlockNum:     bn,
 					Header:       b.Header(),
-					Txs:          txs,
 					Coinbase:     b.Coinbase(),
 					Uncles:       b.Uncles(),
 					Rules:        rules,
@@ -872,6 +871,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					if sender, ok := txs[txIndex].GetSender(); ok {
 						txTask.Sender = &sender
 					}
+				} else {
+					txTask.Txs = txs
 				}
 				workCh <- txTask
 			}
