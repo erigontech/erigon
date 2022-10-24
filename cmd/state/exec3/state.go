@@ -176,10 +176,16 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
 		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
-		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 		msg := txTask.TxAsMessage
-		txContext := core.NewEVMTxContext(msg)
-		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+
+		var vmenv vm.VMInterface
+		if txTask.Tx.IsStarkNet() {
+			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		} else {
+			blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			txContext := core.NewEVMTxContext(msg)
+			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		}
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)

@@ -344,19 +344,24 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 				return
 			}
 		}
-		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
-		blockContext := core.NewEVMBlockContext(txTask.Block.Header(), getHashFn, rw.engine, nil /* author */)
-		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
-		txContext := core.NewEVMTxContext(msg)
-		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+
+		var vmenv vm.VMInterface
+		if txTask.Tx.IsStarkNet() {
+			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		} else {
+			blockContext := core.NewEVMBlockContext(txTask.Block.Header(), getHashFn, rw.engine, nil /* author */)
+			txContext := core.NewEVMTxContext(msg)
+			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txHash, err))
+			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)
