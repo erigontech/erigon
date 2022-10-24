@@ -223,6 +223,15 @@ func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
 	txTask.TraceTos = nil
+
+	/*
+		txTask.ReadLists = nil
+		txTask.WriteLists = nil
+		txTask.AccountPrevs = nil
+		txTask.AccountDels = nil
+		txTask.StoragePrevs = nil
+		txTask.CodePrevs = nil
+	*/
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
