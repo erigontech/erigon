@@ -25,6 +25,18 @@ func DecodeGossipData(data *lightrpc.GossipData) (ssz.Unmarshaler, error) {
 		pkt := &cltypes.SignedAggregateAndProof{}
 		err := pkt.UnmarshalSSZ(data.Data)
 		return pkt, err
+	case lightrpc.GossipType_VoluntaryExitGossipType:
+		pkt := &cltypes.SignedVoluntaryExit{}
+		err := pkt.UnmarshalSSZ(data.Data)
+		return pkt, err
+	case lightrpc.GossipType_ProposerSlashingGossipType:
+		pkt := &cltypes.ProposerSlashing{}
+		err := pkt.UnmarshalSSZ(data.Data)
+		return pkt, err
+	case lightrpc.GossipType_AttesterSlashingGossipType:
+		pkt := &cltypes.AttesterSlashing{}
+		err := pkt.UnmarshalSSZ(data.Data)
+		return pkt, err
 	case lightrpc.GossipType_LightClientOptimisticUpdateGossipType:
 		pkt := &cltypes.LightClientOptimisticUpdate{}
 		err := pkt.UnmarshalSSZ(data.Data)

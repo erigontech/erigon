@@ -13,8 +13,11 @@ enum GossipType {
     // Legacy gossip
     BeaconBlockGossipType = 2;
     
-    // Phase0 gossip global topics.
+    // Global gossip topics.
     AggregateAndProofGossipType = 3;
+    VoluntaryExitGossipType = 4;
+    ProposerSlashingGossipType = 5;
+    AttesterSlashingGossipType = 6;
 }
 
 message GossipData {
