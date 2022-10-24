@@ -147,7 +147,7 @@ func Exec3(ctx context.Context,
 				return err
 			}
 			outputTxNum.Store(_outputTxNum)
-			outputTxNum.Add(1)
+			outputTxNum.Inc()
 			inputTxNum = outputTxNum.Load()
 		}
 	} else {
@@ -163,7 +163,7 @@ func Exec3(ctx context.Context,
 					return err
 				}
 				outputTxNum.Store(_outputTxNum)
-				outputTxNum.Add(1)
+				outputTxNum.Inc()
 				inputTxNum = outputTxNum.Load()
 			}
 			return nil
@@ -370,7 +370,7 @@ loop:
 					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
-					outputTxNum.Add(1)
+					outputTxNum.Inc()
 					outputBlockNum.Store(txTask.BlockNum)
 					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 				} else {
@@ -492,12 +492,12 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
-			outputTxNum.Add(1)
+			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
-			repeatCount.Add(1)
+			repeatCount.Inc()
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 	}

@@ -60,7 +60,7 @@ func (fw *FillWorker) Progress() uint64 {
 }
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	value := make([]byte, 1024)
@@ -109,7 +109,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
@@ -131,7 +131,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
@@ -165,7 +165,7 @@ func (fw *FillWorker) ResetProgress() {
 }
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
@@ -181,7 +181,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 }
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
@@ -197,7 +197,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 }
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
-	defer fw.doneCount.Add(1)
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
