@@ -204,6 +204,15 @@ func Exec3(ctx context.Context,
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
 					}()
+
+					// if nothing to do, then spend some time for pruning
+					if len(resultCh) == 0 {
+						//t := time.Now()
+						if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 1_000); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+						//log.Info("tiny prune", "took", time.Since(t), "ch", len(resultCh))
+					}
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
