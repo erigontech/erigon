@@ -312,6 +312,8 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
+			txTask.Block = txTask.Block.Copy()
+
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			header := txTask.Block.Header()
@@ -323,19 +325,20 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			}
 		}
 	} else if txTask.TxIndex == -1 {
+		txTask.Block = txTask.Block.Copy()
+
 		// Block initialisation
-		header := txTask.Block.Header()
 		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
+			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Block.Header().Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Block.Header(), txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
 	} else {
-		header := txTask.Block.Header()
+		txTask.Block = txTask.Block.Copy()
 		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Block.Header()); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
@@ -344,8 +347,8 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(header, rw.getHeader)
-		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
+		blockContext := core.NewEVMBlockContext(txTask.Block.Header(), getHashFn, rw.engine, nil /* author */)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)

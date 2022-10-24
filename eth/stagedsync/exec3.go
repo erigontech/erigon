@@ -851,7 +851,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					txTask.Tx = txs[txIndex]
 					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
 					if err != nil {
-						panic(err)
+						return err
 					}
 				}
 				workCh <- txTask
