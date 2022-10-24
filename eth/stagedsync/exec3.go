@@ -832,7 +832,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		txs := b.Transactions()
-		header := b.HeaderNoCopy()
+		//header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
@@ -849,10 +849,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
-					if err != nil {
-						return err
-					}
+					//txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
+					//if err != nil {
+					//	return err
+					//}
 				}
 				workCh <- txTask
 			}

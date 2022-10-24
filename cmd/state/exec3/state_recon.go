@@ -343,7 +343,11 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
-		msg := txTask.TxAsMessage
+		//msg := txTask.TxAsMessage
+		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
+		if err != nil {
+			panic(err)
+		}
 
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
