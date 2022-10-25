@@ -175,7 +175,7 @@ func Exec3(ctx context.Context,
 	commitThreshold := batchSize.Bytes() * 4
 	resultsThreshold := int64(batchSize.Bytes() * 4)
 	progress := NewProgress(block, commitThreshold)
-	logEvery := time.NewTicker(5 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
@@ -221,81 +221,82 @@ func Exec3(ctx context.Context,
 					progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
-					if sizeEstimate >= commitThreshold {
-						commitStart := time.Now()
-						log.Info("Committing...")
-						err := func() error {
-							rwsLock.Lock()
-							defer rwsLock.Unlock()
-							// Drain results (and process) channel because read sets do not carry over
-							for {
-								var drained bool
-								for !drained {
-									select {
-									case txTask := <-resultCh:
-										resultsSize.Add(txTask.ResultsSize)
-										heap.Push(&rws, txTask)
-									default:
-										drained = true
-									}
-								}
-								processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-								if rws.Len() == 0 {
-									break
-								}
-							}
-							rwsReceiveCond.Signal()
-							lock.Lock() // This is to prevent workers from starting work on any new txTask
-							defer lock.Unlock()
-							// Drain results channel because read sets do not carry over
+					if sizeEstimate < commitThreshold {
+						break
+					}
+					commitStart := time.Now()
+					log.Info("Committing...")
+					err := func() error {
+						rwsLock.Lock()
+						defer rwsLock.Unlock()
+						// Drain results (and process) channel because read sets do not carry over
+						for {
 							var drained bool
 							for !drained {
 								select {
 								case txTask := <-resultCh:
-									rs.AddWork(txTask)
+									resultsSize.Add(txTask.ResultsSize)
+									heap.Push(&rws, txTask)
 								default:
 									drained = true
 								}
 							}
-
-							// Drain results queue as well
-							for rws.Len() > 0 {
-								txTask := heap.Pop(&rws).(*state.TxTask)
-								resultsSize.Add(-txTask.ResultsSize)
-								rs.AddWork(txTask)
-								syncMetrics[stages.Execution].Set(txTask.BlockNum)
+							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
+							if rws.Len() == 0 {
+								break
 							}
-							if err := rs.Flush(tx); err != nil {
-								return err
-							}
-							tx.CollectMetrics()
-							if err := agg.Flush(); err != nil {
-								return err
-							}
-							if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
-								return err
-							}
-							//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-							if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil { // prune part of retired data, before commit
-								return err
-							}
-							if err = tx.Commit(); err != nil {
-								return err
-							}
-							if tx, err = chainDb.BeginRw(ctx); err != nil {
-								return err
-							}
-							for i := 0; i < len(reconWorkers); i++ {
-								reconWorkers[i].ResetTx(nil)
-							}
-							agg.SetTx(tx)
-							return nil
-						}()
-						if err != nil {
-							panic(err)
 						}
-						log.Info("Committed", "time", time.Since(commitStart))
+						rwsReceiveCond.Signal()
+						lock.Lock() // This is to prevent workers from starting work on any new txTask
+						defer lock.Unlock()
+						// Drain results channel because read sets do not carry over
+						var drained bool
+						for !drained {
+							select {
+							case txTask := <-resultCh:
+								rs.AddWork(txTask)
+							default:
+								drained = true
+							}
+						}
+
+						// Drain results queue as well
+						for rws.Len() > 0 {
+							txTask := heap.Pop(&rws).(*state.TxTask)
+							resultsSize.Add(-txTask.ResultsSize)
+							rs.AddWork(txTask)
+							syncMetrics[stages.Execution].Set(txTask.BlockNum)
+						}
+						if err := rs.Flush(tx); err != nil {
+							return err
+						}
+						tx.CollectMetrics()
+						if err := agg.Flush(); err != nil {
+							return err
+						}
+						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+							return err
+						}
+						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
+						if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil { // prune part of retired data, before commit
+							return err
+						}
+						if err = tx.Commit(); err != nil {
+							return err
+						}
+						if tx, err = chainDb.BeginRw(ctx); err != nil {
+							return err
+						}
+						for i := 0; i < len(reconWorkers); i++ {
+							reconWorkers[i].ResetTx(nil)
+						}
+						agg.SetTx(tx)
+						return nil
+					}()
+					if err != nil {
+						panic(err)
 					}
+					log.Info("Committed", "time", time.Since(commitStart))
 				}
 			}
 
