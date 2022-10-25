@@ -207,14 +207,14 @@ func Exec3(ctx context.Context,
 
 					// if nothing to do, then spend some time for pruning
 					if len(resultCh) == 0 {
-						//t := time.Now()
-						//if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
-						//	panic(err)
-						//}
-						//took := time.Since(t)
-						//if took > 100*time.Millisecond {
-						//	log.Info("tiny prune", "took", took, "ch", len(resultCh))
-						//}
+						t := time.Now()
+						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+						took := time.Since(t)
+						if took > 100*time.Millisecond {
+							log.Info("tiny prune", "took", took, "ch", len(resultCh))
+						}
 					}
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
