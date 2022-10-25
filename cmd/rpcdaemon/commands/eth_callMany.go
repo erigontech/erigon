@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	rpcapi "github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -34,7 +33,7 @@ type BlockOverrides struct {
 }
 
 type Bundle struct {
-	Transactions  []rpcapi.CallArgs
+	Transactions  []ethapi.CallArgs
 	BlockOverride BlockOverrides
 }
 
@@ -69,7 +68,7 @@ func blockHeaderOverride(blockCtx *vm.BlockContext, blockOverride BlockOverrides
 	}
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *rpcapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
