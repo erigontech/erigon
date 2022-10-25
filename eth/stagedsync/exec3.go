@@ -208,11 +208,11 @@ func Exec3(ctx context.Context,
 					// if nothing to do, then spend some time for pruning
 					if len(resultCh) == 0 {
 						t := time.Now()
-						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
 						took := time.Since(t)
-						if took > 200*time.Millisecond {
+						if took > 100*time.Millisecond {
 							log.Info("tiny prune", "took", took, "ch", len(resultCh))
 						}
 					}
@@ -503,9 +503,9 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.Apply(applyTx, txTask, agg); err != nil {
-				panic(fmt.Errorf("State22.Apply: %w", err))
-			}
+			//if err := rs.Apply(applyTx, txTask, agg); err != nil {
+			//	panic(fmt.Errorf("State22.Apply: %w", err))
+			//}
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
