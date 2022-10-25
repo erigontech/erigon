@@ -2,7 +2,7 @@ package tracers
 
 import (
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 // TraceConfig holds extra parameters to trace functions.

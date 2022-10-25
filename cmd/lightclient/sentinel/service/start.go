@@ -30,6 +30,9 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (l
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
 		sentinel.BeaconAggregateAndProofSsz,
+		sentinel.VoluntaryExitSsz,
+		sentinel.ProposerSlashingSsz,
+		sentinel.AttesterSlashingSsz,
 		sentinel.LightClientFinalityUpdateSsz,
 		sentinel.LightClientOptimisticUpdateSsz,
 	}
