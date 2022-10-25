@@ -182,25 +182,6 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		go func() {
-			tx, err := chainDb.BeginRo(ctx)
-			if err != nil {
-				panic(err)
-			}
-			defer tx.Rollback()
-			for outputTxNum.Load() < maxTxNum.Load() {
-				txTask := <-resultCh
-				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-				func() {
-					rwsLock.Lock()
-					defer rwsLock.Unlock()
-					resultsSize.Add(txTask.ResultsSize)
-					heap.Push(&rws, txTask)
-					processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-					rwsReceiveCond.Signal()
-				}()
-			}
-		}()
 		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -216,26 +197,26 @@ func Exec3(ctx context.Context,
 			_ = doPrune
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
-				//case txTask := <-resultCh:
-				//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-				//func() {
-				//	rwsLock.Lock()
-				//	defer rwsLock.Unlock()
-				//	resultsSize.Add(txTask.ResultsSize)
-				//	heap.Push(&rws, txTask)
-				//	processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-				//	rwsReceiveCond.Signal()
-				//}()
+				case txTask := <-resultCh:
+					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+					func() {
+						rwsLock.Lock()
+						defer rwsLock.Unlock()
+						resultsSize.Add(txTask.ResultsSize)
+						heap.Push(&rws, txTask)
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
+						rwsReceiveCond.Signal()
+					}()
 
-				/*
-					doPrune++
-					// if nothing to do, then spend some time for pruning
-					if doPrune%100 == 0 && len(resultCh) == 0 {
-						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
-							panic(err)
+					/*
+						doPrune++
+						// if nothing to do, then spend some time for pruning
+						if doPrune%100 == 0 && len(resultCh) == 0 {
+							if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
 						}
-					}
-				*/
+					*/
 
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
