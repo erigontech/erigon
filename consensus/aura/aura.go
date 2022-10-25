@@ -337,26 +337,7 @@ type AuRa struct {
 	EmptyStepsSet     *EmptyStepSet
 	EpochManager      *EpochManager // Mutex<EpochManager>,
 
-	//Validators                     ValidatorSet
-	//ValidateScoreTransition        uint64
-	//ValidateStepTransition         uint64
-	//immediateTransitions           bool
-	//blockReward                    map[uint64]*uint256.Int
-	//blockRewardContractTransitions BlockRewardContractList
-	//maximumUncleCountTransition    uint64
-	//maximumUncleCount              uint
-	//maximumEmptySteps              uint
-	////machine: EthereumMachine,
-	//// If set, enables random number contract integration. It maps the transition block to the contract address.
-	//randomnessContractAddress map[uint64]common.Address
-	//// The addresses of contracts that determine the block gas limit.
-	//blockGasLimitContractTransitions map[uint64]common.Address
-	//// Memoized gas limit overrides, by block hash.
-	//gasLimitOverrideCache *GasLimitOverride //Mutex<LruCache<H256, Option<U256>>>,
-	//// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
-	//// modifications. For details about POSDAO, see the whitepaper:
-	//// https://www.xdaichain.com/for-validators/posdao-whitepaper
-	//posdaoTransition *uint64 // Option<BlockNumber>,
+	certifier *common.Address // certifies service transactions
 }
 
 type GasLimitOverride struct {
@@ -793,10 +774,12 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-	//TODO: hardcoded boolean!!!
-	// 	let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
+	blockNum := header.Number.Uint64()
+	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
+		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	}
 
-	if header.Number.Uint64() == 1 {
+	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
 		if err != nil {
 			panic(err)
@@ -812,7 +795,7 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 	//}
 
 	// check_and_lock_block -> check_epoch_end_signal
-	epoch, err := e.GetEpoch(header.ParentHash, header.Number.Uint64()-1)
+	epoch, err := e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
 		log.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
@@ -1363,10 +1346,42 @@ func blockRewardAbi() abi.ABI {
 	return a
 }
 
+func registrarAbi() abi.ABI {
+	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
+	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
+	if err != nil {
+		panic(err)
+	}
+	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
+	if err != nil {
+		panic(err)
+	}
+	out, err := syscall(registrar, packed)
+	if err != nil {
+		panic(err)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	res, err := registrarAbi().Unpack("getAddress", out)
+	if err != nil {
+		panic(err)
+	}
+	certifier := res[0].(common.Address)
+	return &certifier
+}
+
 // An empty step message that is included in a seal, the only difference is that it doesn't include
 // the `parent_hash` in order to save space. The included signature is of the original empty step
 // message, which can be reconstructed by using the parent hash of the block in which this sealed
-// empty message is inc    luded.
+// empty message is included.
 // nolint
 type SealedEmptyStep struct {
 	signature []byte // H520
