@@ -696,7 +696,7 @@ func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics
 		if len(topics) > len(log.Topics) {
 			continue
 		}
-		var match bool
+		match := len(topics) == 0
 		for i, sub := range topics {
 			match = len(sub) == 0 // empty rule set == wildcard
 			// iterate over the subtopics and look for any match.
