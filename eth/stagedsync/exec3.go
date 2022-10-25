@@ -212,7 +212,7 @@ func Exec3(ctx context.Context,
 							panic(err)
 						}
 						took := time.Since(t)
-						if took > 30*time.Millisecond {
+						if took > 200*time.Millisecond {
 							log.Info("tiny prune", "took", took, "ch", len(resultCh))
 						}
 					}
