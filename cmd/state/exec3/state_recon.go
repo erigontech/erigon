@@ -377,14 +377,3 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		txTask.Tx = nil
 	}
 }
-func copyTxs(in []types.Transaction) []types.Transaction {
-	transactionsData, err := types.MarshalTransactionsBinary(in)
-	if err != nil {
-		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
-	}
-	newTxs, err := types.DecodeTransactions(transactionsData)
-	if err != nil {
-		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
-	}
-	return newTxs
-}
