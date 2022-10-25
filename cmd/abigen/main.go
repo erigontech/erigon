@@ -30,8 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/compiler"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/params"
+	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
@@ -98,7 +98,7 @@ var (
 )
 
 func init() {
-	app = flags.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
+	app = cli2.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		abiFlag,
 		binFlag,
