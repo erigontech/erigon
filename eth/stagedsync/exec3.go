@@ -210,14 +210,14 @@ func Exec3(ctx context.Context,
 
 					// if nothing to do, then spend some time for pruning
 					if rws.Len() < queueSize {
-						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
+						//log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
 						t := time.Now()
 						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
 						took := time.Since(t)
 						if took > 200*time.Millisecond {
-							log.Info("tiny prune", "took", took, "ch", len(resultCh))
+							//log.Info("tiny prune", "took", took, "ch", len(resultCh))
 						}
 					}
 
