@@ -193,6 +193,9 @@ func Exec3(ctx context.Context,
 			defer rs.Finish()
 			defer agg.StartWrites().FinishWrites()
 
+			fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
+			log.Info("fst", "fst", binary.BigEndian.Uint64(fst))
+
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -214,6 +217,9 @@ func Exec3(ctx context.Context,
 					}
 
 				case <-logEvery.C:
+					fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
+					log.Info("fst", "fst", binary.BigEndian.Uint64(fst))
+
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
