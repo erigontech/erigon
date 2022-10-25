@@ -282,9 +282,9 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			a.EncodeForStorage(enc1)
 		}
 		rs.put(kv.PlainState, addrBytes, enc1)
-		//if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
-		//	return err
-		//}
+		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
+			return err
+		}
 	}
 	for addrS, original := range txTask.AccountDels {
 		addr := []byte(addrS)
@@ -304,9 +304,9 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 				return err
 			}
 		}
-		//if err := agg.AddCodePrev(addr, codePrev); err != nil {
-		//	return err
-		//}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
+			return err
+		}
 		// Iterate over storage
 		cursor, err := roTx.Cursor(kv.PlainState)
 		if err != nil {
@@ -331,40 +331,40 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
 					if !bytes.Equal(k, item.key) {
 						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						//if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-						//	return false
-						//}
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+							return false
+						}
 					}
 				}
 				if e != nil {
 					return false
 				}
-				//if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-				//	return false
-				//}
+				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+					return false
+				}
 				return true
 			})
 		}
 		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			//if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-			//	return e
-			//}
+			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+				return e
+			}
 		}
 		if e != nil {
 			return e
 		}
 	}
-	//for addrS, enc0 := range txTask.AccountPrevs {
-	//	if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
-	//		return err
-	//	}
-	//}
-	//for compositeS, val := range txTask.StoragePrevs {
-	//	composite := []byte(compositeS)
-	//	if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
-	//		return err
-	//	}
-	//}
+	for addrS, enc0 := range txTask.AccountPrevs {
+		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
+			return err
+		}
+	}
+	for compositeS, val := range txTask.StoragePrevs {
+		composite := []byte(compositeS)
+		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
+			return err
+		}
+	}
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
 		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
@@ -387,9 +387,9 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 				}
 			}
 		}
-		//if err := agg.AddCodePrev(addr, codePrev); err != nil {
-		//	return err
-		//}
+		if err := agg.AddCodePrev(addr, codePrev); err != nil {
+			return err
+		}
 	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
