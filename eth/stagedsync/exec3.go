@@ -208,7 +208,7 @@ func Exec3(ctx context.Context,
 
 					// if nothing to do, then spend some time for pruning
 					if len(resultCh) == 0 {
-						fmt.Printf("a: %d , %d\n", len(resultCh), rws.Len())
+						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
 						tinyPrune++
 						if tinyPrune%100 == 0 {
 							t := time.Now()
