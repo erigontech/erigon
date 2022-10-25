@@ -295,6 +295,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	defer cursor.Close()
 	addr1 := make([]byte, 20+8)
 	search := statePair{}
+	psChanges := rs.changes[kv.PlainState]
 	for addrS, original := range txTask.AccountDels {
 		addr := []byte(addrS)
 		copy(addr1, addr)
@@ -326,7 +327,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if !bytes.HasPrefix(k, addr1) {
 			k = nil
 		}
-		psChanges := rs.changes[kv.PlainState]
 		if psChanges != nil {
 			search.key = addr1
 			psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
