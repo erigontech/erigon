@@ -341,7 +341,7 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				doPrint := !(rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold)
+				doPrint := (rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold)
 				if doPrint {
 					log.Info(fmt.Sprintf("b: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
 				}
