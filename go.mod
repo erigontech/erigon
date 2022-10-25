@@ -35,7 +35,7 @@ require (
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
-	github.com/golang-jwt/jwt/v4 v4.4.1
+	github.com/golang-jwt/jwt/v4 v4.4.2
 	github.com/golang/snappy v0.0.4
 	github.com/google/btree v1.1.2
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
@@ -85,7 +85,7 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.19.2
-	pgregory.net/rapid v0.4.7
+	pgregory.net/rapid v0.5.3
 )
 
 require (
