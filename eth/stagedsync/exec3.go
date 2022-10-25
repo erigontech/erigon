@@ -196,6 +196,7 @@ func Exec3(ctx context.Context,
 			fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
 			log.Info("fst", "fst", binary.BigEndian.Uint64(fst))
 
+			doPrune := 0
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -209,8 +210,9 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 
+					doPrune++
 					// if nothing to do, then spend some time for pruning
-					if len(resultCh) == 0 {
+					if doPrune%10 == 0 && len(resultCh) == 0 {
 						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
