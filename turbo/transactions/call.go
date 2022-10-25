@@ -13,18 +13,18 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func DoCall(
 	ctx context.Context,
-	args ethapi.CallArgs,
+	args ethapi2.CallArgs,
 	tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
-	block *types.Block, overrides *ethapi.StateOverrides,
+	block *types.Block, overrides *ethapi2.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	stateReader state.StateReader,
