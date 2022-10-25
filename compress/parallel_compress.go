@@ -238,7 +238,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl) error {
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)

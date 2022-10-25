@@ -471,6 +471,9 @@ func (a *Aggregator22) warmup(txFrom, limit uint64) {
 	if a.db == nil {
 		return
 	}
+	if limit < 10_000 {
+		return
+	}
 
 	go func() {
 		if err := a.db.View(context.Background(), func(tx kv.Tx) error {

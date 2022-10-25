@@ -334,6 +334,7 @@ type invertedIndexWriter struct {
 	index     *etl.Collector
 	indexKeys *etl.Collector
 	tmpdir    string
+	buffered  bool
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -363,7 +364,8 @@ func (ii *invertedIndexWriter) close() {
 
 func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWriter {
 	w := &invertedIndexWriter{ii: ii,
-		tmpdir: tmpdir,
+		buffered: true,
+		tmpdir:   tmpdir,
 		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		index:     etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
@@ -375,18 +377,21 @@ func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWriter {
 }
 
 func (ii *invertedIndexWriter) add(key, indexKey []byte) error {
-	//if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-	//	return err
-	//}
-	if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
-		return err
-	}
+	if ii.buffered {
+		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
+			return err
+		}
 
-	//if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-	//	return err
-	//}
-	if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
-		return err
+		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
+			return err
+		}
+	} else {
+		if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
+			return err
+		}
+		if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -882,11 +887,6 @@ func (ii *InvertedIndex) prune(txFrom, txTo, limit uint64) error {
 	defer keysCursor.Close()
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
 		return err
@@ -898,9 +898,17 @@ func (ii *InvertedIndex) prune(txFrom, txTo, limit uint64) error {
 	if limit != math.MaxUint64 && limit != 0 {
 		txTo = cmp.Min(txTo, txFrom+limit)
 	}
-	if txFrom-txTo > 10_000 {
-		log.Info("[snapshots] prune old history", "name", ii.filenameBase, "range", fmt.Sprintf("%.1fm-%.1fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	if txFrom >= txTo {
+		return nil
 	}
+	if txTo-txFrom > 10_000 {
+		log.Info("[snapshots] prune old history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	}
+	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
 	for ; err == nil && k != nil; k, v, err = keysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {

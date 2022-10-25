@@ -465,22 +465,29 @@ func (h *History) Flush() error {
 
 type historyWriter struct {
 	h                *History
+	historyVals      *etl.Collector
 	tmpdir           string
 	autoIncrementBuf []byte
 	autoIncrement    uint64
+	buffered         bool
 }
 
 func (h *historyWriter) close() {
 	if h == nil { // allow dobule-close
 		return
 	}
+	h.historyVals.Close()
 }
 
 func (h *History) newWriter(tmpdir string) *historyWriter {
 	w := &historyWriter{h: h,
 		tmpdir:           tmpdir,
 		autoIncrementBuf: make([]byte, 8),
+
+		buffered:    true,
+		historyVals: etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
 	}
+	w.historyVals.LogLvl(log.LvlTrace)
 
 	val, err := h.tx.GetOne(h.settingsTable, historyValCountKey)
 	if err != nil {
@@ -500,6 +507,10 @@ func (h *historyWriter) flush(tx kv.RwTx) error {
 	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
 		return err
 	}
+	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	h.close()
 	return nil
 }
 
@@ -543,11 +554,15 @@ func (h *historyWriter) addPrevValue(key1, key2, original []byte) error {
 		//if err := h.h.tx.Put(h.h.settingsTable, historyValCountKey, historyKey[lk:]); err != nil {
 		//	return err
 		//}
-		//if err := h.historyVals.Collect(historyKey[lk:], original); err != nil {
-		//	return err
-		//}
-		if err := h.h.tx.Put(h.h.historyValsTable, historyKey[lk:], original); err != nil {
-			return err
+
+		if h.buffered {
+			if err := h.historyVals.Collect(historyKey[lk:], original); err != nil {
+				return err
+			}
+		} else {
+			if err := h.h.tx.Put(h.h.historyValsTable, historyKey[lk:], original); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -881,16 +896,6 @@ func (h *History) prune(txFrom, txTo, limit uint64) error {
 	defer historyKeysCursor.Close()
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-	valsC, err := h.tx.RwCursor(h.historyValsTable)
-	if err != nil {
-		return err
-	}
-	defer valsC.Close()
 
 	k, v, err := historyKeysCursor.Seek(txKey[:])
 	if err != nil {
@@ -903,9 +908,23 @@ func (h *History) prune(txFrom, txTo, limit uint64) error {
 	if limit != math.MaxUint64 && limit != 0 {
 		txTo = cmp.Min(txTo, txFrom+limit)
 	}
-	if txFrom-txTo > 10_000 {
-		log.Info("[snapshots] prune old history", "name", h.filenameBase, "range", fmt.Sprintf("%.1fm-%.1fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	if txFrom >= txTo {
+		return nil
 	}
+	if txTo-txFrom > 10_000 {
+		log.Info("[snapshots] prune old history", "name", h.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
+	}
+
+	valsC, err := h.tx.RwCursor(h.historyValsTable)
+	if err != nil {
+		return err
+	}
+	defer valsC.Close()
+	idxC, err := h.tx.RwCursorDupSort(h.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
 	for ; err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {

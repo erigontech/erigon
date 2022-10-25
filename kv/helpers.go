@@ -146,3 +146,17 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 		})
 	}()
 }
+
+// FirstKey - candidate on move to kv.Tx interface
+func FirstKey(tx Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
