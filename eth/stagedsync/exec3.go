@@ -207,14 +207,14 @@ func Exec3(ctx context.Context,
 
 					// if nothing to do, then spend some time for pruning
 					if len(resultCh) == 0 {
-						//t := time.Now()
-						//if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
-						//	panic(err)
-						//}
-						//took := time.Since(t)
-						//if took > 100*time.Millisecond {
-						//	log.Info("tiny prune", "took", took, "ch", len(resultCh))
-						//}
+						t := time.Now()
+						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+						took := time.Since(t)
+						if took > 100*time.Millisecond {
+							log.Info("tiny prune", "took", took, "ch", len(resultCh))
+						}
 					}
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
@@ -331,20 +331,20 @@ loop:
 		if err != nil {
 			return err
 		}
-		if parallel {
-			func() {
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-					rwsReceiveCond.Wait()
-				}
-			}()
-		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			if parallel {
+				func() {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+						rwsReceiveCond.Wait()
+					}
+				}()
+			}
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
