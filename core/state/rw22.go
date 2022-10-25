@@ -252,6 +252,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+
 	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
