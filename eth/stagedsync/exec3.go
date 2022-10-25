@@ -357,7 +357,7 @@ loop:
 					if doPrint {
 						log.Info(fmt.Sprintf("b: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
 					}
-					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold || len(resultCh) == cap(resultCh) {
 						rwsReceiveCond.Wait()
 					}
 					if doPrint {
