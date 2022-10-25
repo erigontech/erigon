@@ -266,7 +266,6 @@ func Exec3(ctx context.Context,
 							txTask := heap.Pop(&rws).(*state.TxTask)
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
-							syncMetrics[stages.Execution].Set(txTask.BlockNum)
 						}
 						if err := rs.Flush(tx); err != nil {
 							return err
