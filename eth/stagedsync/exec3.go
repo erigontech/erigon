@@ -180,6 +180,8 @@ func Exec3(ctx context.Context,
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	agg.SetTxNum(inputTxNum)
+	log.Info("aaadnnnd??! from", "inputTxNum", inputTxNum, "outputTxNum", outputTxNum.Load())
+
 	if parallel {
 		// Go-routine gathering results from the workers
 		go func() {
