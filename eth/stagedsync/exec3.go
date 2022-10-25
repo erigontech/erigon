@@ -192,7 +192,6 @@ func Exec3(ctx context.Context,
 			defer rs.Finish()
 			defer agg.StartWrites().FinishWrites()
 
-			tinyPrune := 0
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -203,12 +202,12 @@ func Exec3(ctx context.Context,
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
 						rwsReceiveCond.Signal()
 					}()
 
 					// if nothing to do, then spend some time for pruning
 					if len(resultCh) == 0 && rws.Len() < queueSize {
+						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
 						t := time.Now()
 						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
 							panic(err)
