@@ -362,9 +362,6 @@ loop:
 					}
 				}()
 			}
-			if rws.Len() > 1_000 {
-				log.Info("add??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
-			}
 
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -398,6 +395,10 @@ loop:
 				rs.AddWork(txTask)
 			}
 			if parallel {
+				if rws.Len() > 1_000 {
+					log.Info("add??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
+				}
+
 				stageProgress = blockNum
 			} else {
 				count++
@@ -530,6 +531,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
+			log.Info("ReadsValid", "rws.Len()", rws.Len(), "(*rws)[0].TxNum", (*rws)[0].TxNum, " outputTxNum.Load()", outputTxNum.Load())
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
