@@ -287,77 +287,80 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 	}
 
-	cursor, err := roTx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-	addr1 := make([]byte, 20+8)
-	search := statePair{}
-	psChanges := rs.changes[kv.PlainState]
-	for addrS, original := range txTask.AccountDels {
-		addr := []byte(addrS)
-		copy(addr1, addr)
-		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
-
-		prev := accounts.Serialise2(original)
-		if err := agg.AddAccountPrev(addr, prev); err != nil {
+	if len(txTask.AccountDels) > 0 {
+		cursor, err := roTx.Cursor(kv.PlainState)
+		if err != nil {
 			return err
 		}
-		codeHashBytes := original.CodeHash.Bytes()
-		codePrev := rs.get(kv.Code, codeHashBytes)
-		if codePrev == nil {
-			var err error
-			codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
-			if err != nil {
+		defer cursor.Close()
+		addr1 := make([]byte, 20+8)
+		search := statePair{}
+		psChanges := rs.changes[kv.PlainState]
+		for addrS, original := range txTask.AccountDels {
+			addr := []byte(addrS)
+			copy(addr1, addr)
+			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
+
+			prev := accounts.Serialise2(original)
+			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
-		}
-		if err := agg.AddCodePrev(addr, codePrev); err != nil {
-			return err
-		}
-		// Iterate over storage
-		var k, v []byte
-		_, _ = k, v
-		var e error
-		if k, v, e = cursor.Seek(addr1); err != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, addr1) {
-			k = nil
-		}
-		if psChanges != nil {
-			search.key = addr1
-			psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
-				if !bytes.HasPrefix(item.key, addr1) {
-					return false
+			codeHashBytes := original.CodeHash.Bytes()
+			codePrev := rs.get(kv.Code, codeHashBytes)
+			if codePrev == nil {
+				var err error
+				codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
+				if err != nil {
+					return err
 				}
-				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-					if !bytes.Equal(k, item.key) {
-						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-							return false
+			}
+			if err := agg.AddCodePrev(addr, codePrev); err != nil {
+				return err
+			}
+			// Iterate over storage
+			var k, v []byte
+			_, _ = k, v
+			var e error
+			if k, v, e = cursor.Seek(addr1); err != nil {
+				return e
+			}
+			if !bytes.HasPrefix(k, addr1) {
+				k = nil
+			}
+			if psChanges != nil {
+				search.key = addr1
+				psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
+					if !bytes.HasPrefix(item.key, addr1) {
+						return false
+					}
+					for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+						if !bytes.Equal(k, item.key) {
+							// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+							if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+								return false
+							}
 						}
 					}
+					if e != nil {
+						return false
+					}
+					if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+						return false
+					}
+					return true
+				})
+			}
+			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
+				if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+					return e
 				}
-				if e != nil {
-					return false
-				}
-				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-					return false
-				}
-				return true
-			})
-		}
-		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+			}
+			if e != nil {
 				return e
 			}
 		}
-		if e != nil {
-			return e
-		}
 	}
+
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
