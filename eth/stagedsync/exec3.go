@@ -503,9 +503,9 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			//if err := rs.Apply(applyTx, txTask, agg); err != nil {
-			//	panic(fmt.Errorf("State22.Apply: %w", err))
-			//}
+			if err := rs.Apply(applyTx, txTask, agg); err != nil {
+				panic(fmt.Errorf("State22.Apply: %w", err))
+			}
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
