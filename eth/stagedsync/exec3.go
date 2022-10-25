@@ -366,7 +366,6 @@ loop:
 		}
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
