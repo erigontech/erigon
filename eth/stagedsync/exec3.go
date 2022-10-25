@@ -175,7 +175,7 @@ func Exec3(ctx context.Context,
 	commitThreshold := batchSize.Bytes() * 4
 	resultsThreshold := int64(batchSize.Bytes() * 4)
 	progress := NewProgress(block, commitThreshold)
-	logEvery := time.NewTicker(5 * time.Second)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
