@@ -536,8 +536,10 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			if txTask.TxNum%10_000 == 0 {
 				log.Info("processResultQueue: ReadsValid", "rws.Len()", rws.Len(), "(*rws)[0].TxNum", txTask.TxNum, " outputTxNum.Load()", outputTxNum.Load())
 			}
+			log.Info("processResultQueue: applied", "txTask.TxNum", txTask.TxNum, "txTask.BlockNum", txTask.BlockNum, " txTask.TxIndex", txTask.TxIndex)
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
+			log.Info("processResultQueue: rollback", "txTask.TxNum", txTask.TxNum, "txTask.BlockNum", txTask.BlockNum, " txTask.TxIndex", txTask.TxIndex)
 			rs.AddWork(txTask)
 			repeatCount.Inc()
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
