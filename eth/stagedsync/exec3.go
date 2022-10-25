@@ -351,10 +351,6 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				doPrint := (rws.Len() > queueSize || len(resultCh) == cap(resultCh))
-				if doPrint {
-					log.Info(fmt.Sprintf("b: %d/%d, %d/%d\n", rws.Len(), queueSize, len(resultCh), cap(resultCh)))
-				}
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold || len(resultCh) == cap(resultCh) {
 					rwsReceiveCond.Wait()
 				}
