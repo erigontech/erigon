@@ -397,11 +397,8 @@ loop:
 			} else if parallel {
 				rs.AddWork(txTask)
 			}
+			log.Info("add??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh), "txTask.TxNum", txTask.TxNum)
 			if parallel {
-				if rws.Len() > 1_000 {
-					log.Info("add??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
-				}
-
 				stageProgress = blockNum
 			} else {
 				count++
