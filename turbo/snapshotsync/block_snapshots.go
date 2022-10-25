@@ -841,7 +841,7 @@ func buildIdx(ctx context.Context, sn snap.FileInfo, chainID uint256.Int, tmpDir
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, sem *semaphore.Weighted) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
@@ -853,7 +853,6 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	errs := make(chan error, 1024)
 	wg := &sync.WaitGroup{}
 	ps := background.NewProgressSet()
-	sem := semaphore.NewWeighted(int64(workers))
 	startIndexingTime := time.Now()
 	go func() {
 		for _, t := range snap.AllSnapshotTypes {

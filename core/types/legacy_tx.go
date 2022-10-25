@@ -203,31 +203,19 @@ func (tx LegacyTx) EncodingSize() int {
 
 func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	payloadSize++
-	var gasPriceLen int
-	if tx.GasPrice.BitLen() >= 8 {
-		gasPriceLen = (tx.GasPrice.BitLen() + 7) / 8
-	}
-	payloadSize += gasPriceLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
 	payloadSize++
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
 	payloadSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	payloadSize += valueLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
 	payloadSize++
 	switch len(tx.Data) {
@@ -244,69 +232,12 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	}
 	// size of V
 	payloadSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	payloadSize += vLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
 	payloadSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	payloadSize += rLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	payloadSize += sLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen
-}
-
-func EncodeString(s []byte, w io.Writer, b []byte) error {
-	switch len(s) {
-	case 0:
-		b[0] = 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	case 1:
-		if s[0] >= 128 {
-			b[0] = 129
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-		}
-		if _, err := w.Write(s); err != nil {
-			return err
-		}
-	default:
-		if err := EncodeStringSizePrefix(len(s), w, b); err != nil {
-			return err
-		}
-		if _, err := w.Write(s); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func EncodeStringSizePrefix(size int, w io.Writer, b []byte) error {
-	if size >= 56 {
-		beSize := (bits.Len(uint(size)) + 7) / 8
-		binary.BigEndian.PutUint64(b[1:], uint64(size))
-		b[8-beSize] = byte(beSize) + 183
-		if _, err := w.Write(b[8-beSize : 9]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(size) + 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (tx LegacyTx) MarshalBinary(w io.Writer) error {
@@ -338,17 +269,8 @@ func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := tx.GasPrice.EncodeRLP(w); err != nil {
 		return err
 	}
-	if tx.Gas > 0 && tx.Gas < 128 {
-		b[0] = byte(tx.Gas)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		b[8-gasLen] = 128 + byte(gasLen)
-		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
 	}
 	if tx.To == nil {
 		b[0] = 128
@@ -366,7 +288,7 @@ func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := tx.Value.EncodeRLP(w); err != nil {
 		return err
 	}
-	if err := EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	if err := tx.V.EncodeRLP(w); err != nil {

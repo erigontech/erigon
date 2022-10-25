@@ -57,7 +57,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadirCli, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -68,7 +68,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := filepath.Join(datadir, "aggregator")
+	aggPath := filepath.Join(datadirCli, "aggregator")
 	h, err3 := aggregator.NewHistory(aggPath, uint64(blockTo), aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)

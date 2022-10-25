@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -68,7 +67,8 @@ type Genesis struct {
 	Mixhash    common.Hash         `json:"mixHash"`
 	Coinbase   common.Address      `json:"coinbase"`
 	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
-	SealRlp    []byte              `json:"sealRlp"`
+	AuRaStep   uint64              `json:"auRaStep"`
+	AuRaSeal   []byte              `json:"auRaSeal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -357,16 +357,6 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 	}()
 	wg.Wait()
-	decodeSeal := func(in []byte) (seal []rlp.RawValue) {
-		if len(in) == 0 {
-			return nil
-		}
-		err := rlp.Decode(bytes.NewReader(in), &seal)
-		if err != nil {
-			panic(err)
-		}
-		return seal
-	}
 
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
@@ -381,8 +371,8 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		Coinbase:   g.Coinbase,
 		Root:       root,
 		BaseFee:    g.BaseFee,
-		Seal:       decodeSeal(g.SealRlp),
-		WithSeal:   g.SealRlp != nil,
+		AuRaStep:   g.AuRaStep,
+		AuRaSeal:   g.AuRaSeal,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -391,7 +381,6 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		head.Difficulty = params.GenesisDifficulty
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
-		head.Eip1559 = true
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
@@ -611,17 +600,10 @@ func DefaultSokolGenesisBlock() *Genesis {
 	/*
 		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	*/
-	sealRlp, err := rlp.EncodeToBytes([][]byte{
-		common.FromHex(""),
-		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-	})
-	if err != nil {
-		panic(err)
-	}
 	return &Genesis{
 		Config:     params.SokolChainConfig,
 		Timestamp:  0x0,
-		SealRlp:    sealRlp,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x663BE0,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/sokol.json"),
@@ -728,22 +710,13 @@ func DefaultBorDevnetGenesisBlock() *Genesis {
 }
 
 func DefaultGnosisGenesisBlock() *Genesis {
-	sealRlp, err := rlp.EncodeToBytes([][]byte{
-		common.FromHex(""),
-		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-	})
-	if err != nil {
-		panic(err)
-	}
 	return &Genesis{
 		Config:     params.GnosisChainConfig,
-		Timestamp:  0x0, //1558348305,
-		SealRlp:    sealRlp,
+		Timestamp:  0,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
-		//Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		//Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Alloc: readPrealloc("allocs/gnosis.json"),
+		Alloc:      readPrealloc("allocs/gnosis.json"),
 	}
 }
 

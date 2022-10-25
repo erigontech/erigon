@@ -94,6 +94,14 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 	switch pkt.Packet.(type) {
 	case *cltypes.SignedBeaconBlockBellatrix:
 		s.gossipNotifier.notify(lightrpc.GossipType_BeaconBlockGossipType, data)
+	case *cltypes.SignedAggregateAndProof:
+		s.gossipNotifier.notify(lightrpc.GossipType_AggregateAndProofGossipType, data)
+	case *cltypes.SignedVoluntaryExit:
+		s.gossipNotifier.notify(lightrpc.GossipType_VoluntaryExitGossipType, data)
+	case *cltypes.ProposerSlashing:
+		s.gossipNotifier.notify(lightrpc.GossipType_ProposerSlashingGossipType, data)
+	case *cltypes.AttesterSlashing:
+		s.gossipNotifier.notify(lightrpc.GossipType_AttesterSlashingGossipType, data)
 	case *cltypes.LightClientFinalityUpdate:
 		s.gossipNotifier.notify(lightrpc.GossipType_LightClientFinalityUpdateGossipType, data)
 	case *cltypes.LightClientOptimisticUpdate:

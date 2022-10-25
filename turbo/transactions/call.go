@@ -13,18 +13,18 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func DoCall(
 	ctx context.Context,
-	args ethapi.CallArgs,
+	args ethapi2.CallArgs,
 	tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
-	block *types.Block, overrides *ethapi.StateOverrides,
+	block *types.Block, overrides *ethapi2.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	stateReader state.StateReader,
@@ -101,7 +101,7 @@ func DoCall(
 
 func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
 		if overflow {
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))

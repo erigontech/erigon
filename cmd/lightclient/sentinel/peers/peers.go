@@ -24,7 +24,7 @@ import (
 
 const (
 	maxBadPeers     = 1000 // Always cap memory consumption at 1 MB
-	DefaultMaxPeers = 200
+	DefaultMaxPeers = 33
 	MaxBadResponses = 10
 )
 

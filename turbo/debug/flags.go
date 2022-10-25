@@ -23,9 +23,9 @@ import (
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
@@ -79,7 +79,7 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	_ = logging.GetLogger("debug")
+	_ = logging.GetLoggerCmd("debug", cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -142,6 +142,8 @@ func SetupCobra(cmd *cobra.Command) error {
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
 	RaiseFdLimit()
+
+	_ = logging.GetLoggerCtx("debug", ctx)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
