@@ -221,7 +221,7 @@ func Exec3(ctx context.Context,
 						}
 						took := time.Since(t)
 						if took > 200*time.Millisecond {
-							log.Info("tiny prune", "took", took, "ch", len(resultCh))
+							//log.Info("tiny prune", "took", took, "ch", len(resultCh))
 						}
 					}
 
