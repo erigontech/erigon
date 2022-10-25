@@ -212,7 +212,7 @@ func Exec3(ctx context.Context,
 
 					doPrune++
 					// if nothing to do, then spend some time for pruning
-					if doPrune%10 == 0 && len(resultCh) == 0 {
+					if doPrune%10 == 0 && len(resultCh) == 0 && rws.Len() < queueSize {
 						t := time.Now()
 						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
 							panic(err)
