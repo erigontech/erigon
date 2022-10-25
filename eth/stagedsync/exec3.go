@@ -361,6 +361,10 @@ loop:
 					}
 				}()
 			}
+			if rws.Len() > 1_000 {
+				log.Info("add??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
+			}
+
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
