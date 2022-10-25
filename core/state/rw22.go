@@ -277,8 +277,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
 			enc1 = []byte{}
 		} else {
-			l := a.EncodingLengthForStorage()
-			enc1 = make([]byte, l)
+			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
 		}
 		rs.put(kv.PlainState, addrBytes, enc1)
