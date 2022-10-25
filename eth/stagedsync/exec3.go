@@ -208,8 +208,6 @@ func Exec3(ctx context.Context,
 
 					// if nothing to do, then spend some time for pruning
 					if rws.Len() < queueSize {
-						fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
-						log.Info("AccountHistoryKeys", "first", binary.BigEndian.Uint64(fst))
 						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
