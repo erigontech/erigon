@@ -194,6 +194,7 @@ func Exec3(ctx context.Context,
 			defer agg.StartWrites().FinishWrites()
 
 			doPrune := 0
+			_ = doPrune
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case txTask := <-resultCh:
@@ -207,13 +208,15 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 
-					doPrune++
-					// if nothing to do, then spend some time for pruning
-					if doPrune%100 == 0 && len(resultCh) == 0 {
-						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
-							panic(err)
+					/*
+						doPrune++
+						// if nothing to do, then spend some time for pruning
+						if doPrune%100 == 0 && len(resultCh) == 0 {
+							if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
 						}
-					}
+					*/
 
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
