@@ -204,6 +204,20 @@ func Exec3(ctx context.Context,
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
 					}()
+
+					// if nothing to do, then spend some time for pruning
+					if rws.Len() < queueSize {
+						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
+						t := time.Now()
+						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+						took := time.Since(t)
+						if took > 200*time.Millisecond {
+							log.Info("tiny prune", "took", took, "ch", len(resultCh))
+						}
+					}
+
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
@@ -284,19 +298,6 @@ func Exec3(ctx context.Context,
 						panic(err)
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
-				default:
-					// if nothing to do, then spend some time for pruning
-					if rws.Len() < queueSize {
-						log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
-						t := time.Now()
-						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
-							panic(err)
-						}
-						took := time.Since(t)
-						if took > 200*time.Millisecond {
-							log.Info("tiny prune", "took", took, "ch", len(resultCh))
-						}
-					}
 				}
 			}
 
