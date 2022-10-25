@@ -222,7 +222,6 @@ func Exec3(ctx context.Context,
 					*/
 
 				case <-logEvery.C:
-					log.Info("log??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
@@ -254,7 +253,6 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
-						log.Info("drain! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
 						// Drain results channel because read sets do not carry over
 						var drained bool
 						for !drained {
@@ -265,7 +263,6 @@ func Exec3(ctx context.Context,
 								drained = true
 							}
 						}
-						log.Info("drain! from2", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
 
 						// Drain results queue as well
 						for rws.Len() > 0 {
@@ -273,7 +270,6 @@ func Exec3(ctx context.Context,
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
-						log.Info("drain! from3", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
