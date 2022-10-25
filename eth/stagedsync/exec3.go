@@ -206,7 +206,7 @@ func Exec3(ctx context.Context,
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
 
-						log.Info("whyyy??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh), "blockNum", txTask.BlockNum)
+						log.Info("whyyy??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh), "blockNum", txTask.BlockNum, "txTask", txTask.TxNum, "outputTxNum", outputTxNum)
 						//if rws.Len() > 1_000 && rws.Len()%10_000 == 0 {
 						//	log.Info("whyyy??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh), "blockNum", txTask.BlockNum)
 						//}
