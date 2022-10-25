@@ -217,7 +217,9 @@ func Exec3(ctx context.Context,
 						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
-						log.Info("prune", "took", time.Since(t))
+						if time.Since(t) > 100*time.Millisecond {
+							log.Info("prune", "took", time.Since(t))
+						}
 					}
 
 				case <-logEvery.C:
