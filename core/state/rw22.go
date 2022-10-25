@@ -430,8 +430,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
-				val := list.Vals[i]
-				rs.put(table, key, val)
+				rs.put(table, key, list.Vals[i])
 			}
 		}
 	}
