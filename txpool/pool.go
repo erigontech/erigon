@@ -2055,7 +2055,9 @@ func (p *PendingPool) Worst() *metaTx { //nolint
 }
 func (p *PendingPool) PopWorst() *metaTx { //nolint
 	i := heap.Pop(p.worst).(*metaTx)
-	p.best.UnsafeRemove(i)
+	if i.bestIndex >= 0 {
+		p.best.UnsafeRemove(i)
+	}
 	return i
 }
 func (p *PendingPool) Updated(mt *metaTx) {
