@@ -236,8 +236,8 @@ func (rs *State22) AddWork(txTask *TxTask) {
 		txTask.CodePrevs = nil
 	*/
 	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
+	rs.queueLock.Unlock()
 	rs.receiveWork.Signal()
 }
 
