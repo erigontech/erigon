@@ -531,7 +531,9 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
-			log.Info("processResultQueue: ReadsValid", "rws.Len()", rws.Len(), "(*rws)[0].TxNum", txTask.TxNum, " outputTxNum.Load()", outputTxNum.Load())
+			if txTask.TxNum % 1_000 {
+				log.Info("processResultQueue: ReadsValid", "rws.Len()", rws.Len(), "(*rws)[0].TxNum", txTask.TxNum, " outputTxNum.Load()", outputTxNum.Load())
+			}
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
