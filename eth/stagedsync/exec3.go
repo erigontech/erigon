@@ -203,10 +203,11 @@ func Exec3(ctx context.Context,
 						heap.Push(&rws, txTask)
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
+
+						if rws.Len() > 1_000 {
+							log.Info("whyyy??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh), "blockNum", txTask.BlockNum)
+						}
 					}()
-					if rws.Len() > 1_000 {
-						log.Info("whyyy??! from", "rws.Len()", rws.Len(), "len(resultCh)", len(resultCh))
-					}
 
 					// if nothing to do, then spend some time for pruning
 					if rws.Len() < queueSize {
