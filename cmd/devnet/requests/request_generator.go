@@ -41,6 +41,9 @@ func post(client *http.Client, url, request string, response interface{}) error 
 		return fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 
+	fmt.Printf("======================== B from request is: %+v\n", b)
+	fmt.Printf("======================== Response from request is: %+v\n", response)
+
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return nil
 }
