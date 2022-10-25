@@ -286,6 +286,12 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
+
+	cursor, err := roTx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
 	for addrS, original := range txTask.AccountDels {
 		addr := []byte(addrS)
 		addr1 := make([]byte, len(addr)+8)
@@ -308,11 +314,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 		// Iterate over storage
-		cursor, err := roTx.Cursor(kv.PlainState)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close()
 		var k, v []byte
 		_, _ = k, v
 		var e error
