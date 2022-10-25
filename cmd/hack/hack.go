@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -43,8 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"

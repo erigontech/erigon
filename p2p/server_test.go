@@ -29,10 +29,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 	"github.com/ledgerwatch/log/v3"
 )
 
