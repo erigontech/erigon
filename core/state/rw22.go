@@ -293,11 +293,13 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		return err
 	}
 	defer cursor.Close()
+	addr1 := make([]byte, 20+8)
+	search := statePair{}
 	for addrS, original := range txTask.AccountDels {
 		addr := []byte(addrS)
-		addr1 := make([]byte, len(addr)+8)
 		copy(addr1, addr)
 		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
+
 		prev := accounts.Serialise2(original)
 		if err := agg.AddAccountPrev(addr, prev); err != nil {
 			return err
@@ -326,7 +328,8 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 		psChanges := rs.changes[kv.PlainState]
 		if psChanges != nil {
-			psChanges.AscendGreaterOrEqual(statePair{key: addr1}, func(item statePair) bool {
+			search.key = addr1
+			psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
 				if !bytes.HasPrefix(item.key, addr1) {
 					return false
 				}
@@ -367,9 +370,13 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
+
+	k := make([]byte, 20+8)
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
-		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
+		copy(k, addr)
+		binary.BigEndian.PutUint64(k[20:], incarnation)
+
 		codeHash := rs.get(kv.PlainContractCode, k)
 		if codeHash == nil {
 			var err error
