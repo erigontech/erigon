@@ -350,7 +350,7 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold || len(resultCh) > cap(resultCh)/2 {
+				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
 			}()
