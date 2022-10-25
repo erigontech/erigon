@@ -317,8 +317,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 			}
-			newTxs := copyTxs(txTask.Txs)
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, newTxs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
@@ -331,8 +330,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine)
 		}
 
-		newTxs := copyTxs(txTask.Txs)
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, newTxs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Txs, txTask.Uncles, syscall)
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
@@ -345,11 +343,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
-		//msg := txTask.TxAsMessage
-		msg, err := txTask.Tx.AsMessage(*types.MakeSigner(rw.chainConfig, txTask.BlockNum), txTask.Header.BaseFee, txTask.Rules)
-		if err != nil {
-			panic(err)
-		}
+		msg := txTask.TxAsMessage
 
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {

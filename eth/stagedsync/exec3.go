@@ -852,7 +852,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
-					Header:       b.Header(),
+					Header:       b.HeaderNoCopy(),
 					Coinbase:     b.Coinbase(),
 					Uncles:       b.Uncles(),
 					Rules:        rules,
@@ -864,10 +864,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
-					//txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
-					//if err != nil {
-					//	return err
-					//}
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), b.HeaderNoCopy().BaseFee, txTask.Rules)
+					if err != nil {
+						return err
+					}
 					if sender, ok := txs[txIndex].GetSender(); ok {
 						txTask.Sender = &sender
 					}
@@ -878,7 +878,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
-		b = nil
+		b, txs = nil, nil
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 		syncMetrics[stages.Execution].Set(blockNum)
