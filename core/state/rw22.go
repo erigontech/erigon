@@ -30,7 +30,10 @@ type TxTask struct {
 	TxNum              uint64
 	BlockNum           uint64
 	Rules              *params.Rules
-	Block              *types.Block
+	Header             *types.Header
+	Txs                types.Transactions
+	Uncles             []*types.Header
+	Coinbase           common.Address
 	BlockHash          common.Hash
 	Sender             *common.Address
 	SkipAnalysis       bool
@@ -113,11 +116,10 @@ func NewState22() *State22 {
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[statePair](32, stateItemLess)
+		t = btree.NewG[statePair](64, stateItemLess)
 		rs.changes[table] = t
 	}
-	item := statePair{key: key, val: val}
-	t.ReplaceOrInsert(item)
+	t.ReplaceOrInsert(statePair{key: key, val: val})
 	rs.sizeEstimate += PairSize + uint64(len(key)) + uint64(len(val))
 }
 
@@ -223,9 +225,18 @@ func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
 	txTask.TraceTos = nil
+
+	/*
+		txTask.ReadLists = nil
+		txTask.WriteLists = nil
+		txTask.AccountPrevs = nil
+		txTask.AccountDels = nil
+		txTask.StoragePrevs = nil
+		txTask.CodePrevs = nil
+	*/
 	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, txTask)
+	rs.queueLock.Unlock()
 	rs.receiveWork.Signal()
 }
 
@@ -240,6 +251,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+
 	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
@@ -265,8 +277,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
 			enc1 = []byte{}
 		} else {
-			l := a.EncodingLengthForStorage()
-			enc1 = make([]byte, l)
+			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
 		}
 		rs.put(kv.PlainState, addrBytes, enc1)
@@ -274,73 +285,81 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
-	for addrS, original := range txTask.AccountDels {
-		addr := []byte(addrS)
-		addr1 := make([]byte, len(addr)+8)
-		copy(addr1, addr)
-		binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
-		prev := accounts.Serialise2(original)
-		if err := agg.AddAccountPrev(addr, prev); err != nil {
-			return err
-		}
-		codeHashBytes := original.CodeHash.Bytes()
-		codePrev := rs.get(kv.Code, codeHashBytes)
-		if codePrev == nil {
-			var err error
-			codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
-			if err != nil {
-				return err
-			}
-		}
-		if err := agg.AddCodePrev(addr, codePrev); err != nil {
-			return err
-		}
-		// Iterate over storage
+
+	if len(txTask.AccountDels) > 0 {
 		cursor, err := roTx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
 		defer cursor.Close()
-		var k, v []byte
-		var e error
-		if k, v, e = cursor.Seek(addr1); err != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, addr1) {
-			k = nil
-		}
+		addr1 := make([]byte, 20+8)
+		search := statePair{}
 		psChanges := rs.changes[kv.PlainState]
-		if psChanges != nil {
-			psChanges.AscendGreaterOrEqual(statePair{key: addr1}, func(item statePair) bool {
-				if !bytes.HasPrefix(item.key, addr1) {
-					return false
+		for addrS, original := range txTask.AccountDels {
+			addr := []byte(addrS)
+			copy(addr1, addr)
+			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
+
+			prev := accounts.Serialise2(original)
+			if err := agg.AddAccountPrev(addr, prev); err != nil {
+				return err
+			}
+			codeHashBytes := original.CodeHash.Bytes()
+			codePrev := rs.get(kv.Code, codeHashBytes)
+			if codePrev == nil {
+				var err error
+				codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
+				if err != nil {
+					return err
 				}
-				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
-					if !bytes.Equal(k, item.key) {
-						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-							return false
+			}
+			if err := agg.AddCodePrev(addr, codePrev); err != nil {
+				return err
+			}
+			// Iterate over storage
+			var k, v []byte
+			_, _ = k, v
+			var e error
+			if k, v, e = cursor.Seek(addr1); err != nil {
+				return e
+			}
+			if !bytes.HasPrefix(k, addr1) {
+				k = nil
+			}
+			if psChanges != nil {
+				search.key = addr1
+				psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
+					if !bytes.HasPrefix(item.key, addr1) {
+						return false
+					}
+					for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, item.key) <= 0; k, v, e = cursor.Next() {
+						if !bytes.Equal(k, item.key) {
+							// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+							if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+								return false
+							}
 						}
 					}
+					if e != nil {
+						return false
+					}
+					if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
+						return false
+					}
+					return true
+				})
+			}
+			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
+				if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+					return e
 				}
-				if e != nil {
-					return false
-				}
-				if e = agg.AddStoragePrev(addr, item.key[28:], item.val); e != nil {
-					return false
-				}
-				return true
-			})
-		}
-		for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+			}
+			if e != nil {
 				return e
 			}
 		}
-		if e != nil {
-			return e
-		}
 	}
+
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
@@ -352,9 +371,13 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
+
+	k := make([]byte, 20+8)
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
-		k := dbutils.PlainGenerateStoragePrefix(addr, incarnation)
+		copy(k, addr)
+		binary.BigEndian.PutUint64(k[20:], incarnation)
+
 		codeHash := rs.get(kv.PlainContractCode, k)
 		if codeHash == nil {
 			var err error
@@ -408,8 +431,7 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
-				val := list.Vals[i]
-				rs.put(table, key, val)
+				rs.put(table, key, list.Vals[i])
 			}
 		}
 	}
@@ -789,15 +811,16 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc := r.rs.Get(kv.Code, codeHash.Bytes())
+	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
+	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.Code, codeHash.Bytes())
+		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
 			return nil, err
 		}
 	}
-	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, address.Bytes())
+	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
 	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common2.Copy(enc))
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
