@@ -348,23 +348,24 @@ loop:
 		header := b.HeaderNoCopy()
 		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		if parallel {
+			func() {
+				rwsLock.Lock()
+				defer rwsLock.Unlock()
+				doPrint := (rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold)
+				if doPrint {
+					log.Info(fmt.Sprintf("b: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
+				}
+				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold || len(resultCh) == cap(resultCh) {
+					rwsReceiveCond.Wait()
+				}
+				if doPrint {
+					log.Info(fmt.Sprintf("c: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
+				}
+			}()
+		}
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-			if parallel {
-				func() {
-					rwsLock.Lock()
-					defer rwsLock.Unlock()
-					doPrint := (rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold)
-					if doPrint {
-						log.Info(fmt.Sprintf("b: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
-					}
-					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold || len(resultCh) == cap(resultCh) {
-						rwsReceiveCond.Wait()
-					}
-					if doPrint {
-						log.Info(fmt.Sprintf("c: %d>%d, %d>%d, %d>%d\n", rws.Len(), queueSize, resultsSize.Load()/1024/1024, resultsThreshold/1024/1024, rs.SizeEstimate()/1024/1024, commitThreshold/1024/1024))
-					}
-				}()
-			}
 
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
