@@ -206,20 +206,13 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 
-					/*
-						// if nothing to do, then spend some time for pruning
-						if rws.Len() < queueSize {
-							//log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
-							t := time.Now()
-							if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-							took := time.Since(t)
-							if took > 200*time.Millisecond {
-								//log.Info("tiny prune", "took", took, "ch", len(resultCh))
-							}
+					// if nothing to do, then spend some time for pruning
+					if rws.Len() < queueSize {
+						//log.Info("a", "len(resultCh)", len(resultCh), "rws.Len()", rws.Len())
+						if err = agg.Prune(10); err != nil { // prune part of retired data, before commit
+							panic(err)
 						}
-					*/
+					}
 
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
