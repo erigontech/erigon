@@ -391,30 +391,30 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		//	return err
 		//}
 	}
-	//if txTask.TraceFroms != nil {
-	//	for addr := range txTask.TraceFroms {
-	//		if err := agg.AddTraceFrom(addr[:]); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-	//if txTask.TraceTos != nil {
-	//	for addr := range txTask.TraceTos {
-	//		if err := agg.AddTraceTo(addr[:]); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-	//for _, log := range txTask.Logs {
-	//	if err := agg.AddLogAddr(log.Address[:]); err != nil {
-	//		return fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
-	//	}
-	//	for _, topic := range log.Topics {
-	//		if err := agg.AddLogTopic(topic[:]); err != nil {
-	//			return fmt.Errorf("adding event log for topic %x: %w", topic, err)
-	//		}
-	//	}
-	//}
+	if txTask.TraceFroms != nil {
+		for addr := range txTask.TraceFroms {
+			if err := agg.AddTraceFrom(addr[:]); err != nil {
+				return err
+			}
+		}
+	}
+	if txTask.TraceTos != nil {
+		for addr := range txTask.TraceTos {
+			if err := agg.AddTraceTo(addr[:]); err != nil {
+				return err
+			}
+		}
+	}
+	for _, log := range txTask.Logs {
+		if err := agg.AddLogAddr(log.Address[:]); err != nil {
+			return fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+		}
+		for _, topic := range log.Topics {
+			if err := agg.AddLogTopic(topic[:]); err != nil {
+				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
+			}
+		}
+	}
 	if err := agg.FinishTx(); err != nil {
 		return err
 	}
