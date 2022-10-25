@@ -116,11 +116,10 @@ func NewState22() *State22 {
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[statePair](32, stateItemLess)
+		t = btree.NewG[statePair](64, stateItemLess)
 		rs.changes[table] = t
 	}
-	item := statePair{key: key, val: val}
-	t.ReplaceOrInsert(item)
+	t.ReplaceOrInsert(statePair{key: key, val: val})
 	rs.sizeEstimate += PairSize + uint64(len(key)) + uint64(len(val))
 }
 
