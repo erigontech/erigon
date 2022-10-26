@@ -22,7 +22,6 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 	app := cli2.NewApp(params.GitCommit, "", "erigon experimental cli")
 	app.Action = action
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
-	//app.Flags = append(cliFlags, logging.LogVerbosityFlag) // adding the log console verbosity flag to the cliFlags
 	app.Before = func(ctx *cli.Context) error {
 		return debug.Setup(ctx)
 	}
