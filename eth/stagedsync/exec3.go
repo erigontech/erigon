@@ -50,7 +50,7 @@ type Progress struct {
 	commitThreshold    uint64
 }
 
-func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -73,6 +73,7 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSiz
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
+		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	//var txNums []string
@@ -245,7 +246,8 @@ func Exec3(ctx context.Context,
 				//					}()
 				//
 				case <-logEvery.C:
-					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+					stepsInDB := idxStepsInDB(tx)
+					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate < commitThreshold {
@@ -328,14 +330,6 @@ func Exec3(ctx context.Context,
 				case <-pruneEvery.C:
 					if err = agg.Prune(10_000); err != nil { // prune part of retired data, before commit
 						panic(err)
-					}
-					fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
-					lst, _ := kv.LastKey(tx, kv.AccountHistoryKeys)
-					if len(fst) > 0 && len(lst) > 0 {
-						fstTxNum := binary.BigEndian.Uint64(fst)
-						lstTxNum := binary.BigEndian.Uint64(lst)
-
-						log.Info(fmt.Sprintf("idx steps in db : %.2f", float64(lstTxNum-fstTxNum)/float64(ethconfig.HistoryV3AggregationStep)))
 					}
 				}
 			}
@@ -1116,4 +1110,16 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 	return nil
+}
+
+func idxStepsInDB(tx kv.Tx) float64 {
+	fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
+	lst, _ := kv.LastKey(tx, kv.AccountHistoryKeys)
+	if len(fst) > 0 && len(lst) > 0 {
+		fstTxNum := binary.BigEndian.Uint64(fst)
+		lstTxNum := binary.BigEndian.Uint64(lst)
+
+		return float64(lstTxNum-fstTxNum) / float64(ethconfig.HistoryV3AggregationStep)
+	}
+	return 0
 }
