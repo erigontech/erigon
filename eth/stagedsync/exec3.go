@@ -179,7 +179,7 @@ func Exec3(ctx context.Context,
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(100 * time.Millisecond)
+	pruneEvery := time.NewTicker(time.Second)
 	defer pruneEvery.Stop()
 	retireEvery := time.NewTicker(time.Second)
 	defer retireEvery.Stop()
@@ -345,9 +345,13 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
-					if err = agg.Prune(1_000); err != nil { // prune part of retired data, before commit
-						panic(err)
-					}
+					func() {
+						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
+						defer cancel()
+						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+					}()
 				}
 			}
 
@@ -469,7 +473,7 @@ loop:
 			}
 			if !useExternalTx {
 				applyTx.CollectMetrics()
-				if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 10); err != nil {
+				if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 					return err
 				}
 				if err := applyTx.Commit(); err != nil {
