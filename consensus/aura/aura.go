@@ -1215,6 +1215,27 @@ func (c *AuRa) SealHash(header *types.Header) common.Hash {
 	return clique.SealHash(header)
 }
 
+// See https://openethereum.github.io/Permissioning.html#gas-price
+func (c *AuRa) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	if c.certifier == nil {
+		return false
+	}
+	packed, err := certifierAbi().Pack("certified", sender)
+	if err != nil {
+		panic(err)
+	}
+	out, err := syscall(*c.certifier, packed)
+	if err != nil {
+		panic(err)
+	}
+	res, err := certifierAbi().Unpack("certified", out)
+	if err != nil {
+		panic(err)
+	}
+	certified := res[0].(bool)
+	return certified
+}
+
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *AuRa) Close() error {
 	libcommon.SafeClose(c.exitCh)
@@ -1340,6 +1361,14 @@ func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCal
 
 func blockRewardAbi() abi.ABI {
 	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+func certifierAbi() abi.ABI {
+	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
 	if err != nil {
 		panic(err)
 	}
