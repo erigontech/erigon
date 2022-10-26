@@ -177,6 +177,8 @@ func Exec3(ctx context.Context,
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	pruneEvery := time.NewTicker(time.Second)
+	defer pruneEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	agg.SetTxNum(inputTxNum)
@@ -239,16 +241,6 @@ func Exec3(ctx context.Context,
 				//						rwsReceiveCond.Signal()
 				//					}()
 				//
-				/*
-					doPrune++
-					// if nothing to do, then spend some time for pruning
-					if doPrune%100 == 0 && len(resultCh) == 0 {
-						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
-							panic(err)
-						}
-					}
-				*/
-
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
 					sizeEstimate := rs.SizeEstimate()
@@ -333,6 +325,10 @@ func Exec3(ctx context.Context,
 						panic(err)
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
+				case <-pruneEvery.C:
+					if err = agg.Prune(1_000); err != nil { // prune part of retired data, before commit
+						panic(err)
+					}
 				}
 			}
 
