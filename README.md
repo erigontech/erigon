@@ -13,6 +13,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
     + [Getting Started](#getting-started)
+    + [Logging](#logging)
     + [Testnets](#testnets)
     + [Mining](#mining)
     + [Windows](#windows)
@@ -52,7 +53,7 @@ System Requirements
   200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Ethereum Mainnet Full node (
   see `--prune*` flags): 400Gb (April 2022).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022)..
+* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
 * BSC Archive: 7TB. BSC Full: 1TB.
 
@@ -61,7 +62,11 @@ System Requirements
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
-RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
+RAM: >=16GB, 64-bit architecture.
+
+[Golang version >= 1.18](https://golang.org/doc/install).
+
+GCC 10+.
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -99,7 +104,35 @@ Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
 
-Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile)
+Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Logging
+
+_Flags:_ 
+
+  - `verbosity`
+  - `log.console.verbosity` (overriding alias for `verbosity`)
+  - `log.json`
+  - `log.console.json` (alias for `log.json`)
+  - `log.dir.path`
+  - `log.dir.verbosity`
+  - `log.dir.json`
+
+
+In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an int value specifying the highest output log level:
+
+```
+  LvlCrit = 0
+  LvlError = 1
+  LvlWarn = 2
+  LvlInfo = 3
+  LvlDebug = 4
+  LvlTrace = 5
+```
+
+To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. 'debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
+
+Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk output `--log.dir.json`.
 
 ### Modularity
 

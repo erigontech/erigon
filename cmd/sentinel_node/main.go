@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
@@ -45,7 +47,7 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", lcCfg)
-	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sent, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),
 		TCPPort:       lcCfg.ServerTcpPort,
@@ -56,8 +58,27 @@ func runSentinelNode(cliCtx *cli.Context) {
 	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
+		return
 	}
-
+	subscription, err := sent.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
+	if err != nil {
+		log.Error("Could not start sentinel", "err", err)
+		return
+	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
-	<-ctx.Done()
+	for {
+		data, err := subscription.Recv()
+		if err != nil {
+			return
+		}
+		if data.Type != lightrpc.GossipType_AggregateAndProofGossipType {
+			continue
+		}
+		block := &cltypes.SignedAggregateAndProof{}
+		if err := block.UnmarshalSSZ(data.Data); err != nil {
+			log.Error("Error", "err", err)
+			continue
+		}
+		log.Info("Received", "msg", block)
+	}
 }

@@ -49,6 +49,7 @@ func (c *ChainTipSubscriber) StartLoop() {
 	for {
 		data, err := stream.Recv()
 		if err != nil {
+
 			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
 			continue
 		}

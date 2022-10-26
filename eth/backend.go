@@ -173,10 +173,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	if config.Genesis != nil && config.Genesis.Config != nil {
-		types.SetHeaderSealFlag(config.Genesis.Config.IsHeaderWithSeal())
-	}
-
 	var currentBlock *types.Block
 
 	// Check if we have an already initialized chain and fall back to
@@ -205,7 +201,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
 
-	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
 	// Apply special hacks for BSC params
@@ -475,7 +470,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				return nil, err
 			}
 
-			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, false)
+			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
 			if err != nil {
 				return nil, err
 			}

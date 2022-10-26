@@ -80,3 +80,4 @@ docker-compose.*.yml
 coverage.out
 
 dist
+__debug_bin

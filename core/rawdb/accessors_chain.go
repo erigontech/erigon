@@ -947,7 +947,13 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 			return fmt.Errorf("receipt unmarshal failed:  %w", err)
 		}
 
-		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
+		txIndex := int(binary.BigEndian.Uint32(k[8:]))
+
+		// only return logs from real txs (not from block's stateSyncReceipt)
+		if txIndex < len(receipts) {
+			receipts[txIndex].Logs = logs
+		}
+
 		return nil
 	}); err != nil {
 		log.Error("logs fetching failed", "err", err)
@@ -1262,20 +1268,6 @@ func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	}
 	defer c.Close()
 	k, _, err := c.Last()
-	if err != nil {
-		return nil, err
-	}
-	return k, nil
-}
-
-// FirstKey - candidate on move to kv.Tx interface
-func FirstKey(tx kv.Tx, table string) ([]byte, error) {
-	c, err := tx.Cursor(table)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	k, _, err := c.First()
 	if err != nil {
 		return nil, err
 	}

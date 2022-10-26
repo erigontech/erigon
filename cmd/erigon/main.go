@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli"
 	"gopkg.in/yaml.v2"
@@ -19,6 +19,7 @@ import (
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func main() {
@@ -43,7 +44,8 @@ func main() {
 }
 
 func runErigon(cliCtx *cli.Context) {
-	logger := log.New()
+	logger := logging.GetLoggerCtx("erigon", cliCtx)
+
 	// initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 

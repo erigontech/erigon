@@ -51,7 +51,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	return logs, nil
 }
 
-// GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
+// GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
@@ -129,6 +129,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return erigonLogs, nil
 	}
 
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, v := range crit.Addresses {
+		addrMap[v] = struct{}{}
+	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
@@ -148,7 +152,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
+			filtered := filterLogs(logs, addrMap, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
 			}

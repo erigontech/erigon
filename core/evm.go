@@ -39,7 +39,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 		beneficiary = *author
 	}
 	var baseFee uint256.Int
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
 		if overflow {
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
