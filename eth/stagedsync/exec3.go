@@ -182,21 +182,14 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		// Go-routine gathering results from the workers
-		go func() {
-			tx, err := chainDb.BeginRw(ctx)
-			if err != nil {
-				panic(err)
-			}
+		doThings := func(ctx context.Context) {
+			tx, _ := chainDb.BeginRo(ctx)
 			defer tx.Rollback()
-			agg.SetTx(tx)
-			defer rs.Finish()
-			defer agg.StartWrites().FinishWrites()
 
-			doPrune := 0
-			_ = doPrune
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
+				case <-ctx.Done():
+					return
 				case txTask := <-resultCh:
 					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					func() {
@@ -208,15 +201,49 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 
-					/*
-						doPrune++
-						// if nothing to do, then spend some time for pruning
-						if doPrune%100 == 0 && len(resultCh) == 0 {
-							if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
+				}
+			}
+		}
+
+		// Go-routine gathering results from the workers
+		go func() {
+			tx, err := chainDb.BeginRw(ctx)
+			if err != nil {
+				panic(err)
+			}
+			defer tx.Rollback()
+			agg.SetTx(tx)
+			defer rs.Finish()
+			defer agg.StartWrites().FinishWrites()
+
+			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
+			go doThings(applyCtx)
+			defer cancelApplyCtx()
+
+			doPrune := 0
+			_ = doPrune
+			for outputTxNum.Load() < maxTxNum.Load() {
+				select {
+				//case txTask := <-resultCh:
+				///					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+				//					func() {
+				//						rwsLock.Lock()
+				//						defer rwsLock.Unlock()
+				//						resultsSize.Add(txTask.ResultsSize)
+				//						heap.Push(&rws, txTask)
+				//						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
+				//						rwsReceiveCond.Signal()
+				//					}()
+				//
+				/*
+					doPrune++
+					// if nothing to do, then spend some time for pruning
+					if doPrune%100 == 0 && len(resultCh) == 0 {
+						if err = agg.Prune(100); err != nil { // prune part of retired data, before commit
+							panic(err)
 						}
-					*/
+					}
+				*/
 
 				case <-logEvery.C:
 					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
@@ -284,6 +311,12 @@ func Exec3(ctx context.Context,
 						if err = tx.Commit(); err != nil {
 							return err
 						}
+
+						cancelApplyCtx()
+						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						go doThings(applyCtx)
+						defer cancelApplyCtx()
+
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
