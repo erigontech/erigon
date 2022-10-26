@@ -882,7 +882,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
-		b, txs = nil, nil
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 		syncMetrics[stages.Execution].Set(blockNum)
