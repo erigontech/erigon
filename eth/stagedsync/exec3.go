@@ -183,7 +183,10 @@ func Exec3(ctx context.Context,
 
 	if parallel {
 		doThings := func(ctx context.Context) {
-			tx, _ := chainDb.BeginRo(ctx)
+			tx, err := chainDb.BeginRo(ctx)
+			if err != nil {
+				panic(err)
+			}
 			defer tx.Rollback()
 
 			for outputTxNum.Load() < maxTxNum.Load() {
@@ -212,8 +215,9 @@ func Exec3(ctx context.Context,
 				panic(err)
 			}
 			defer tx.Rollback()
-			agg.SetTx(tx)
 			defer rs.Finish()
+
+			agg.SetTx(tx)
 			defer agg.StartWrites().FinishWrites()
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
