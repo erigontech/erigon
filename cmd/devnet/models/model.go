@@ -30,6 +30,8 @@ const (
 	VerbosityArg = "--verbosity"
 	// ConsoleVerbosityArg is the log.console.verbosity flag
 	ConsoleVerbosityArg = "--log.console.verbosity"
+	// LogDirArg is the log.dir.path flag
+	LogDirArg = "--log.dir.path"
 	// Mine is the mine flag
 	Mine = "--mine"
 	// NoDiscover is the nodiscover flag
@@ -51,6 +53,8 @@ const (
 	VerbosityParam = "0"
 	// ConsoleVerbosityParam is the verbosity parameter for the console logs
 	ConsoleVerbosityParam = "0"
+	// LogDirParam is the log directory parameter for logging to disk
+	LogDirParam = "./cmd/devnet/debug_logs"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
