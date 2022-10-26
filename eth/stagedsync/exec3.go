@@ -178,7 +178,7 @@ func Exec3(ctx context.Context,
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(time.Second)
+	pruneEvery := time.NewTicker(100 * time.Millisecond)
 	defer pruneEvery.Stop()
 	retireEvery := time.NewTicker(time.Second)
 	defer retireEvery.Stop()
@@ -250,8 +250,6 @@ func Exec3(ctx context.Context,
 			defer cancelRetireCtx()
 			go retireLoop(retireCtx)
 
-			doPrune := 0
-			_ = doPrune
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				//case txTask := <-resultCh:
@@ -350,7 +348,7 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
-					if err = agg.Prune(10_000); err != nil { // prune part of retired data, before commit
+					if err = agg.Prune(1_000); err != nil { // prune part of retired data, before commit
 						panic(err)
 					}
 				}
