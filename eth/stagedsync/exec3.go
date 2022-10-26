@@ -180,12 +180,14 @@ func Exec3(ctx context.Context,
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(time.Second)
 	defer pruneEvery.Stop()
+	retireEvery := time.NewTicker(time.Second)
+	defer retireEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		doThings := func(ctx context.Context) {
+		applyLoop := func(ctx context.Context) {
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -210,6 +212,25 @@ func Exec3(ctx context.Context,
 			}
 		}
 
+		retireLoop := func(ctx context.Context) {
+			tx, err := chainDb.BeginRo(ctx)
+			if err != nil {
+				panic(err)
+			}
+			defer tx.Rollback()
+			for outputTxNum.Load() < maxTxNum.Load() {
+				select {
+				case <-ctx.Done():
+					return
+				case <-retireEvery.C:
+					if err := agg.RetireData(tx); err != nil {
+						panic(err)
+					}
+				}
+			}
+
+		}
+
 		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -224,7 +245,11 @@ func Exec3(ctx context.Context,
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
-			go doThings(applyCtx)
+			go applyLoop(applyCtx)
+
+			retireCtx, cancelRetireCtx := context.WithCancel(ctx)
+			defer cancelRetireCtx()
+			go retireLoop(retireCtx)
 
 			doPrune := 0
 			_ = doPrune
@@ -307,7 +332,10 @@ func Exec3(ctx context.Context,
 						}
 
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						go doThings(applyCtx)
+						go applyLoop(applyCtx)
+
+						retireCtx, cancelRetireCtx = context.WithCancel(ctx)
+						go retireLoop(retireCtx)
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
@@ -324,10 +352,6 @@ func Exec3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
 					if err = agg.Prune(10_000); err != nil { // prune part of retired data, before commit
-						panic(err)
-					}
-
-					if err := agg.RetireData(tx); err != nil {
 						panic(err)
 					}
 				}
