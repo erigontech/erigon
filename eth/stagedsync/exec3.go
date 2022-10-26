@@ -327,7 +327,7 @@ func Exec3(ctx context.Context,
 						panic(err)
 					}
 
-					if err := agg.FinishTx(tx); err != nil {
+					if err := agg.RetireData(tx); err != nil {
 						panic(err)
 					}
 				}
@@ -421,7 +421,7 @@ loop:
 					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
-					if err := agg.FinishTx(applyTx); err != nil {
+					if err := agg.RetireData(applyTx); err != nil {
 						panic(fmt.Errorf("agg.FinishTx: %w", err))
 					}
 
