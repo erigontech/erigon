@@ -222,9 +222,9 @@ func (rs *State22) queuePush(t *TxTask) {
 }
 
 func (rs *State22) txDoneIncrement() {
-	rs.lock.RLock()
+	rs.lock.Lock()
 	rs.txsDone++
-	rs.lock.RUnlock()
+	rs.lock.Unlock()
 }
 
 func (rs *State22) AddWork(txTask *TxTask) {

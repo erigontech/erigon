@@ -228,7 +228,6 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
-
 		}
 
 		// Go-routine gathering results from the workers
