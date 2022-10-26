@@ -206,6 +206,9 @@ func Exec3(ctx context.Context,
 						rwsReceiveCond.Signal()
 					}()
 
+					if err := agg.FinishTx(tx); err != nil {
+						panic(err)
+					}
 				}
 			}
 		}
@@ -420,6 +423,10 @@ loop:
 					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
+					if err := agg.FinishTx(applyTx); err != nil {
+						panic(fmt.Errorf("agg.FinishTx: %w", err))
+					}
+
 					outputTxNum.Inc()
 					outputBlockNum.Store(txTask.BlockNum)
 					//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
