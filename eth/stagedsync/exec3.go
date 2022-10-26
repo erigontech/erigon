@@ -246,8 +246,7 @@ func Exec3(ctx context.Context,
 				//					}()
 				//
 				case <-logEvery.C:
-					stepsInDB := idxStepsInDB(tx)
-					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					sizeEstimate := rs.SizeEstimate()
 					//prevTriggerCount = triggerCount
 					if sizeEstimate < commitThreshold {
@@ -475,7 +474,7 @@ loop:
 		select {
 		case <-logEvery.C:
 			if !parallel {
-				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh)
+				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
 			}
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
