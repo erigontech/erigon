@@ -217,8 +217,8 @@ func Exec3(ctx context.Context,
 			defer agg.StartWrites().FinishWrites()
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
-			go doThings(applyCtx)
 			defer cancelApplyCtx()
+			go doThings(applyCtx)
 
 			doPrune := 0
 			_ = doPrune
@@ -314,8 +314,8 @@ func Exec3(ctx context.Context,
 
 						cancelApplyCtx()
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						go doThings(applyCtx)
 						defer cancelApplyCtx()
+						go doThings(applyCtx)
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
