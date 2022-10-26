@@ -427,9 +427,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			}
 		}
 	}
-	if err := agg.FinishTx(roTx); err != nil {
-		return err
-	}
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
