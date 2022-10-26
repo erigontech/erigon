@@ -31,7 +31,7 @@ func ClearDevDB() {
 func DeleteLogs() {
 	fmt.Printf("\nRemoving old logs to create new ones...\nBefore re-running the devnet tool, make sure to copy out old logs if you need them!!!\n\n")
 
-	cmd := exec.Command("rm", "-rf", models.LogDirParam)
+	cmd := exec.Command("rm", "-rf", models.LogDirParam) //nolint
 	err := cmd.Run()
 	if err != nil {
 		fmt.Println("Error occurred removing log node_1")
