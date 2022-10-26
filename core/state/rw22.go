@@ -196,13 +196,11 @@ func (rs *State22) RegisterSender(txTask *TxTask) bool {
 }
 
 func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
-		heap.Push(&rs.queue, triggered)
+		rs.queuePush(triggered)
 		rs.receiveWork.Signal()
 		count++
 		delete(rs.triggers, txNum)
@@ -213,8 +211,20 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txsDone++
+	rs.txDoneIncrement()
 	return count
+}
+
+func (rs *State22) queuePush(t *TxTask) {
+	rs.queueLock.Lock()
+	heap.Push(&rs.queue, t)
+	rs.queueLock.Unlock()
+}
+
+func (rs *State22) txDoneIncrement() {
+	rs.lock.RLock()
+	rs.txsDone++
+	rs.lock.RUnlock()
 }
 
 func (rs *State22) AddWork(txTask *TxTask) {
