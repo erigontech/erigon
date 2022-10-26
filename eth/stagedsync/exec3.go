@@ -335,7 +335,7 @@ func Exec3(ctx context.Context,
 						fstTxNum := binary.BigEndian.Uint64(fst)
 						lstTxNum := binary.BigEndian.Uint64(lst)
 
-						log.Info("idx steps in db : %.2f\n", float64(lstTxNum-fstTxNum)/float64(ethconfig.HistoryV3AggregationStep))
+						log.Info(fmt.Sprintf("idx steps in db : %.2f", float64(lstTxNum-fstTxNum)/float64(ethconfig.HistoryV3AggregationStep)))
 					}
 				}
 			}
