@@ -304,9 +304,6 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						if err = agg.Prune(ethconfig.HistoryV3AggregationStep / 20); err != nil { // prune part of retired data, before commit
-							return err
-						}
 						if err = tx.Commit(); err != nil {
 							return err
 						}
@@ -329,8 +326,16 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
-					if err = agg.Prune(1_000); err != nil { // prune part of retired data, before commit
+					if err = agg.Prune(10_000); err != nil { // prune part of retired data, before commit
 						panic(err)
+					}
+					fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
+					lst, _ := kv.LastKey(tx, kv.AccountHistoryKeys)
+					if len(fst) > 0 && len(lst) > 0 {
+						fstTxNum := binary.BigEndian.Uint64(fst)
+						lstTxNum := binary.BigEndian.Uint64(lst)
+
+						log.Info("idx steps in db : %.2f\n", float64(lstTxNum-fstTxNum)/float64(ethconfig.HistoryV3AggregationStep))
 					}
 				}
 			}
