@@ -189,7 +189,6 @@ func Exec3(ctx context.Context,
 
 	if parallel {
 		applyLoop := func(ctx context.Context) {
-			defer func(t time.Time) { fmt.Printf("apply exec3.go:191: %s, %s\n", time.Since(t), dbg.Stack()) }(time.Now())
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
