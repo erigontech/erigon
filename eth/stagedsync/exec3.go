@@ -16,6 +16,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -188,6 +189,7 @@ func Exec3(ctx context.Context,
 
 	if parallel {
 		applyLoop := func(ctx context.Context) {
+			defer func(t time.Time) { fmt.Printf("apply exec3.go:191: %s, %s\n", time.Since(t), dbg.Stack()) }(time.Now())
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -213,17 +215,13 @@ func Exec3(ctx context.Context,
 		}
 
 		retireLoop := func(ctx context.Context) {
-			tx, err := chainDb.BeginRo(ctx)
-			if err != nil {
-				panic(err)
-			}
-			defer tx.Rollback()
+			defer func(t time.Time) { fmt.Printf("retire exec3.go:216: %s, %s\n", time.Since(t), dbg.Stack()) }(time.Now())
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case <-ctx.Done():
 					return
 				case <-retireEvery.C:
-					if err := agg.RetireData(tx); err != nil {
+					if err := agg.BuildFilesInBackground(chainDb); err != nil {
 						panic(err)
 					}
 				}
@@ -334,9 +332,6 @@ func Exec3(ctx context.Context,
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 						go applyLoop(applyCtx)
 
-						retireCtx, cancelRetireCtx = context.WithCancel(ctx)
-						go retireLoop(retireCtx)
-
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
@@ -445,9 +440,6 @@ loop:
 					if err := rs.Apply(reconWorkers[0].Tx(), txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
-					if err := agg.RetireData(applyTx); err != nil {
-						panic(fmt.Errorf("agg.FinishTx: %w", err))
-					}
 
 					outputTxNum.Inc()
 					outputBlockNum.Store(txTask.BlockNum)
@@ -492,6 +484,10 @@ loop:
 				reconWorkers[0].ResetTx(applyTx)
 				log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
 			}
+		}
+
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
+			panic(fmt.Errorf("agg.FinishTx: %w", err))
 		}
 
 		// Check for interrupts
