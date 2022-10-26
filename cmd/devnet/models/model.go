@@ -28,6 +28,8 @@ const (
 	DevPeriodArg = "--dev.period"
 	// VerbosityArg is the verbosity flag
 	VerbosityArg = "--verbosity"
+	// ConsoleVerbosityArg is the log.console.verbosity flag
+	ConsoleVerbosityArg = "--log.console.verbosity"
 	// Mine is the mine flag
 	Mine = "--mine"
 	// NoDiscover is the nodiscover flag
@@ -47,6 +49,8 @@ const (
 	DevPeriodParam = "0"
 	// VerbosityParam is the verbosity parameter
 	VerbosityParam = "0"
+	// ConsoleVerbosityParam is the verbosity parameter for the console logs
+	ConsoleVerbosityParam = "0"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
@@ -66,7 +70,7 @@ const (
 	// hexPrivateKey is the hex value for the private key
 	hexPrivateKey = "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48"
 	// DevAddress is the developer address for sending
-	DevAddress = "67b1d87101671b127f5f8714789C7192f7ad340e"
+	DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"
 
 	// NonContractTx is the transaction type for sending ether
 	NonContractTx TransactionType = "non-contract"
@@ -81,6 +85,8 @@ const (
 	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
+	// TxpoolContent represents the txpool_content method
+	TxpoolContent RPCMethod = "txpool_content"
 )
 
 var (

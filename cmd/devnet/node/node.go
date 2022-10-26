@@ -112,22 +112,24 @@ func miningNodeArgs() []string {
 	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
-	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	//verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
 	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, "admin,eth,erigon,web3,net,debug,trace,txpool,parity")
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, devPeriod, verbosity}
+	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, devPeriod, consoleVerbosity}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
 func nonMiningNodeArgs(nodeNumber int, enode string) []string {
 	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
-	verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	//verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
 	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, verbosity}
+	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity}
 }
 
 // getEnode returns the enode of the mining node

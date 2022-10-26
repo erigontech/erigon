@@ -25,7 +25,8 @@ func GetTransactionCount(reqId int, address common.Address, blockNum models.Bloc
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
-	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
+	reqStr := reqGen.getTransactionCount(address, blockNum)
+	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqStr, &b); res.Err != nil {
 		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 

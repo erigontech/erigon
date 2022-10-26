@@ -32,6 +32,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 
 	b, err := io.ReadAll(r.Body)
+	//fmt.Printf("B MESSAGE: %s\n", string(b))
 	if err != nil {
 		return fmt.Errorf("failed to readAll from body: %s", err)
 	}
@@ -40,9 +41,6 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal response: %s", err)
 	}
-
-	fmt.Printf("======================== B from request is: %+v\n", b)
-	fmt.Printf("======================== Response from request is: %+v\n", response)
 
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return nil
@@ -71,28 +69,28 @@ func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, respon
 }
 
 func (req *RequestGenerator) getAdminNodeInfo() string {
-	const template = `{"jsonrpc":"2.0","method":"admin_nodeInfo","id":%d}`
-	return fmt.Sprintf(template, req.reqID)
+	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
+	return fmt.Sprintf(template, models.AdminNodeInfo, req.reqID)
 }
 
 func (req *RequestGenerator) getBalance(address common.Address, blockNum models.BlockNumber) string {
-	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x","%v"],"id":%d}`
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
 }
 
 func (req *RequestGenerator) getTransactionCount(address common.Address, blockNum models.BlockNumber) string {
-	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x","%v"],"id":%d}`
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetTransactionCount, address, blockNum, req.reqID)
 }
 
 func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
-	const template = `{"jsonrpc":"2.0","method":%v,"params":["0x%x"],"id":%d}`
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHSendRawTransaction, signedTx, req.reqID)
 }
 
 func (req *RequestGenerator) txpoolContent() string {
-	const template = `{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":%d}`
-	return fmt.Sprintf(template, req.reqID)
+	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
+	return fmt.Sprintf(template, models.TxpoolContent, req.reqID)
 }
 
 func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {

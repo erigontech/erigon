@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -13,11 +14,11 @@ const (
 	sendValue        uint64 = 10000
 )
 
-func callSendTx(value uint64, fromAddr, toAddr string) {
-	fmt.Printf("Sending %d ETH from %q to %q...\n", value, fromAddr, toAddr)
+func callSendTx(value uint64, toAddr, fromAddr string) {
+	fmt.Printf("Sending %d ETH to %q from %q...\n", value, toAddr, fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId)
+	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(fromAddr))
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return

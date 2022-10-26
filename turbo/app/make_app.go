@@ -2,6 +2,8 @@
 package app
 
 import (
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -9,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/urfave/cli"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -23,7 +25,7 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 
 	// TODO: Ask Max if can add the verbosity flag to the debug flags list? so extra append is not needed
-	//app.Flags = append(cliFlags, logging.LogVerbosityFlag) // adding the verbosity flag to the cliFlags
+	app.Flags = append(cliFlags, logging.LogVerbosityFlag) // adding the verbosity flag to the cliFlags
 	app.Before = func(ctx *cli.Context) error {
 		return debug.Setup(ctx)
 	}

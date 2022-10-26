@@ -21,7 +21,7 @@ func ExecuteAllMethods() {
 	callTxPoolContent()
 
 	// send a token from the dev address to the recipient address
-	callSendTx(sendValue, models.DevAddress, recipientAddress)
+	callSendTx(sendValue, recipientAddress, models.DevAddress)
 	fmt.Println()
 
 	// confirm that the txpool has this transaction in the queue
