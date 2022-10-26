@@ -294,8 +294,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			for _, log := range filtered {
 				log.TxIndex = txIndex
 			}
-			for _, log := range filtered {
-				blockLogs = append(blockLogs, log)
+			for i := len(filtered) - 1; i >= 0; i-- {
+				blockLogs = append(blockLogs, filtered[i])
 				count++
 				if count == logCount {
 					return nil
@@ -347,6 +347,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog.Index = log.Index
 			erigonLog.Removed = log.Removed
 			erigonLogs = append(erigonLogs, erigonLog)
+		}
+
+		if count == logCount {
+			return erigonLogs, nil
 		}
 	}
 	return erigonLogs, nil
