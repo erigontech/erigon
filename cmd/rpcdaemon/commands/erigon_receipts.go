@@ -214,6 +214,144 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	return erigonLogs, nil
 }
 
+// GetLatestLogs implements erigon_getLatestLogs.
+// Return specific number of logs matching a give filter objects by descend.
+func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logCount uint64) (types.ErigonLogs, error) {
+	if logCount == 0 {
+		logCount = 1
+	}
+	erigonLogs := types.ErigonLogs{}
+	tx, beginErr := api.db.BeginRo(ctx)
+	if beginErr != nil {
+		return erigonLogs, beginErr
+	}
+	defer tx.Rollback()
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	blockNumbers := bitmapdb.NewBitmap()
+	defer bitmapdb.ReturnToPool(blockNumbers)
+	blockNumbers.AddRange(0, latest)
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
+	if err != nil {
+		return nil, err
+	}
+	if topicsBitmap != nil {
+		blockNumbers.And(topicsBitmap)
+	}
+
+	rx := make([]*roaring.Bitmap, len(crit.Addresses))
+	for idx, addr := range crit.Addresses {
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(0), uint32(latest))
+		if err != nil {
+			return nil, err
+		}
+		rx[idx] = m
+	}
+	addrBitmap := roaring.FastOr(rx...)
+
+	if len(rx) > 0 {
+		blockNumbers.And(addrBitmap)
+	}
+
+	if blockNumbers.GetCardinality() == 0 {
+		return erigonLogs, nil
+	}
+
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, v := range crit.Addresses {
+		addrMap[v] = struct{}{}
+	}
+
+	// latest logs that match the filter crit
+	iter := blockNumbers.ReverseIterator()
+	var count uint64
+	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		blockNumber := uint64(iter.Next())
+		var logIndex uint
+		var txIndex uint
+		var blockLogs []*types.Log
+		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
+			var logs types.Logs
+			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+			}
+			for _, log := range logs {
+				log.Index = logIndex
+				logIndex++
+			}
+			filtered := filterLogs(logs, addrMap, crit.Topics)
+			if len(filtered) == 0 {
+				return nil
+			}
+			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
+			for _, log := range filtered {
+				log.TxIndex = txIndex
+			}
+			for _, log := range filtered {
+				blockLogs = append(blockLogs, log)
+				count++
+				if count == logCount {
+					return nil
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return erigonLogs, err
+		}
+		if len(blockLogs) == 0 {
+			continue
+		}
+
+		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
+			return nil, fmt.Errorf("block header not found: %d", blockNumber)
+		}
+		timestamp := header.Time
+
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		if body == nil {
+			return nil, fmt.Errorf("block not found %d", blockNumber)
+		}
+		for _, log := range blockLogs {
+			erigonLog := &types.ErigonLog{}
+			erigonLog.BlockNumber = blockNumber
+			erigonLog.BlockHash = blockHash
+			if log.TxIndex == uint(len(body.Transactions)) {
+				erigonLog.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+			} else {
+				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+			}
+			erigonLog.Timestamp = timestamp
+			erigonLog.Address = log.Address
+			erigonLog.Topics = log.Topics
+			erigonLog.Data = log.Data
+			erigonLog.Index = log.Index
+			erigonLog.Removed = log.Removed
+			erigonLogs = append(erigonLogs, erigonLog)
+		}
+	}
+	return erigonLogs, nil
+}
+
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
 // func (api *ErigonImpl) GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error) {
 // 	tx, err := api.db.Begin(ctx, false)
