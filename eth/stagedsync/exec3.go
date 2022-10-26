@@ -118,7 +118,7 @@ func Exec3(ctx context.Context,
 	var resultsSize = atomic2.NewInt64(0)
 	var lock sync.RWMutex
 	var rws state.TxTaskQueue
-	var rwsLock sync.Mutex
+	var rwsLock sync.RWMutex
 
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
@@ -264,7 +264,10 @@ func Exec3(ctx context.Context,
 				//					}()
 				//
 				case <-logEvery.C:
+					rwsLock.RLock()
 					rwsLen := rws.Len()
+					rwsLock.RUnlock()
+
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					//prevTriggerCount = triggerCount
 					if rs.SizeEstimate() < commitThreshold {
