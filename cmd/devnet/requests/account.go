@@ -13,8 +13,7 @@ func GetBalance(reqId int, address common.Address, blockNum models.BlockNumber) 
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
-	reqStr := reqGen.getBalance(address, blockNum)
-	if res := reqGen.Erigon(models.ETHGetBalance, reqStr, &b); res.Err != nil {
+	if res := reqGen.Erigon(models.ETHGetBalance, reqGen.getBalance(address, blockNum), &b); res.Err != nil {
 		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 

@@ -32,7 +32,6 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 
 	b, err := io.ReadAll(r.Body)
-	//fmt.Printf("B MESSAGE: %s\n", string(b))
 	if err != nil {
 		return fmt.Errorf("failed to readAll from body: %s", err)
 	}
