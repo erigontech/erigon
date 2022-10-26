@@ -542,14 +542,16 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 
 func (rs *State22) DoneCount() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.txsDone
+	r := rs.txsDone
+	rs.lock.RUnlock()
+	return r
 }
 
 func (rs *State22) SizeEstimate() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.sizeEstimate
+	r := rs.sizeEstimate
+	rs.lock.RUnlock()
+	return r
 }
 
 func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {

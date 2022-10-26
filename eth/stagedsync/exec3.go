@@ -206,10 +206,6 @@ func Exec3(ctx context.Context,
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
 						rwsReceiveCond.Signal()
 					}()
-
-					if err := agg.FinishTx(tx); err != nil {
-						panic(err)
-					}
 				}
 			}
 		}
@@ -252,6 +248,7 @@ func Exec3(ctx context.Context,
 					if sizeEstimate < commitThreshold {
 						break
 					}
+					cancelApplyCtx()
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -309,7 +306,6 @@ func Exec3(ctx context.Context,
 							return err
 						}
 
-						cancelApplyCtx()
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 						go doThings(applyCtx)
 
@@ -328,6 +324,10 @@ func Exec3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
 					if err = agg.Prune(10_000); err != nil { // prune part of retired data, before commit
+						panic(err)
+					}
+
+					if err := agg.FinishTx(tx); err != nil {
 						panic(err)
 					}
 				}
