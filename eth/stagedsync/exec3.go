@@ -318,7 +318,6 @@ func Exec3(ctx context.Context,
 
 						cancelApplyCtx()
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						defer cancelApplyCtx()
 						go doThings(applyCtx)
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
