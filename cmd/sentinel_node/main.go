@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
@@ -92,17 +93,25 @@ func debugGossip(ctx context.Context, s lightrpc.SentinelClient) {
 
 // Debug function to recieve raw packets on the req/resp domain.s
 func debugReqResp(ctx context.Context, s lightrpc.SentinelClient) {
-	message, err := s.SendRequest(ctx, &lightrpc.RequestData{
-		Topic: handlers.LightClientFinalityUpdateV1,
-	})
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-	if message.Error {
-		log.Error("received error", "err", string(message.Data))
-		return
-	}
+	newReqTicker := time.NewTicker(100 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+		case <-newReqTicker.C:
+			go func() {
+				message, err := s.SendRequest(ctx, &lightrpc.RequestData{
+					Topic: handlers.LightClientFinalityUpdateV1,
+				})
+				if err != nil {
+					return
+				}
+				if message.Error {
+					log.Error("received error", "err", string(message.Data))
+					return
+				}
 
-	log.Info("Finality update response received: %b", message.Data)
+				log.Info("Finality update response received", "data", message.Data)
+			}()
+		}
+	}
 }
