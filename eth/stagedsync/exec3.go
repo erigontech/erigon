@@ -350,7 +350,7 @@ func Exec3(ctx context.Context,
 						t := time.Now()
 						for time.Since(t) < time.Second {
 							agg.EndTxNumMinimax()
-							if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(pruneCtx, 10_000); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
