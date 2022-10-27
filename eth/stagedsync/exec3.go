@@ -237,17 +237,6 @@ func Exec3(ctx context.Context,
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
-				//case txTask := <-resultCh:
-				///					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-				//					func() {
-				//						rwsLock.Lock()
-				//						defer rwsLock.Unlock()
-				//						resultsSize.Add(txTask.ResultsSize)
-				//						heap.Push(&rws, txTask)
-				//						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-				//						rwsReceiveCond.Signal()
-				//					}()
-				//
 				case <-logEvery.C:
 					rwsLock.RLock()
 					rwsLen := rws.Len()
@@ -371,6 +360,12 @@ func Exec3(ctx context.Context,
 	if !parallel {
 		defer agg.StartWrites().FinishWrites()
 	}
+
+	if block < blockReader.(WithSnapshots).Snapshots().BlocksAvailable() {
+		agg.KeepInDB(0)
+	}
+
+	defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 
 	var b *types.Block
 	var blockNum uint64
