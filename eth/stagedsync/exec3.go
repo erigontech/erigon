@@ -16,7 +16,6 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -181,8 +180,8 @@ func Exec3(ctx context.Context,
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(time.Second)
 	defer pruneEvery.Stop()
-	retireEvery := time.NewTicker(5 * time.Second)
-	defer retireEvery.Stop()
+	//retireEvery := time.NewTicker(5 * time.Second)
+	//defer retireEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	agg.SetTxNum(inputTxNum)
@@ -210,7 +209,6 @@ func Exec3(ctx context.Context,
 				case <-ctx.Done():
 					return
 				case txTask := <-resultCh:
-					//fmt.Printf("Saved %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 					func() {
 						rwsLock.Lock()
 						defer rwsLock.Unlock()
@@ -223,19 +221,18 @@ func Exec3(ctx context.Context,
 			}
 		}
 
-		retireLoop := func(ctx context.Context) {
-			defer func(t time.Time) { fmt.Printf("retire exec3.go:216: %s, %s\n", time.Since(t), dbg.Stack()) }(time.Now())
-			for outputTxNum.Load() < maxTxNum.Load() {
-				select {
-				case <-ctx.Done():
-					return
-				case <-retireEvery.C:
-					if err := agg.BuildFilesInBackground(chainDb); err != nil {
-						panic(err)
-					}
-				}
-			}
-		}
+		//retireLoop := func(ctx context.Context) {
+		//	for outputTxNum.Load() < maxTxNum.Load() {
+		//		select {
+		//		case <-ctx.Done():
+		//			return
+		//		case <-retireEvery.C:
+		//			if err := agg.BuildFilesInBackground(chainDb); err != nil {
+		//				panic(err)
+		//			}
+		//		}
+		//	}
+		//}
 
 		// Go-routine gathering results from the workers
 		go func() {
@@ -253,9 +250,9 @@ func Exec3(ctx context.Context,
 			defer cancelApplyCtx()
 			go applyLoop(applyCtx)
 
-			retireCtx, cancelRetireCtx := context.WithCancel(ctx)
-			defer cancelRetireCtx()
-			go retireLoop(retireCtx)
+			//retireCtx, cancelRetireCtx := context.WithCancel(ctx)
+			//defer cancelRetireCtx()
+			//go retireLoop(retireCtx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -507,10 +504,6 @@ loop:
 			}
 		}
 
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			panic(fmt.Errorf("agg.FinishTx: %w", err))
-		}
-
 		// Check for interrupts
 		select {
 		case <-logEvery.C:
@@ -522,6 +515,10 @@ loop:
 			maxTxNum.Store(inputTxNum)
 			break loop
 		default:
+		}
+
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
+			panic(fmt.Errorf("agg.FinishTx: %w", err))
 		}
 	}
 	if parallel {
