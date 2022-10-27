@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
@@ -47,7 +48,7 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", lcCfg)
-	sent, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),
 		TCPPort:       lcCfg.ServerTcpPort,
@@ -60,12 +61,18 @@ func runSentinelNode(cliCtx *cli.Context) {
 		log.Error("Could not start sentinel", "err", err)
 		return
 	}
-	subscription, err := sent.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
+	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+
+	log.Info("Sending test request for LightClientFinalityUpdateV1")
+	debugReqResp(ctx, s)
+}
+
+func debugGossip(ctx context.Context, s lightrpc.SentinelClient) {
+	subscription, err := s.SubscribeGossip(ctx, &lightrpc.EmptyRequest{})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 		return
 	}
-	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 	for {
 		data, err := subscription.Recv()
 		if err != nil {
@@ -81,4 +88,21 @@ func runSentinelNode(cliCtx *cli.Context) {
 		}
 		log.Info("Received", "msg", block)
 	}
+}
+
+// Debug function to recieve raw packets on the req/resp domain.s
+func debugReqResp(ctx context.Context, s lightrpc.SentinelClient) {
+	message, err := s.SendRequest(ctx, &lightrpc.RequestData{
+		Topic: handlers.LightClientFinalityUpdateV1,
+	})
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+	if message.Error {
+		log.Error("received error", "err", string(message.Data))
+		return
+	}
+
+	log.Info("Finality update response received: %b", message.Data)
 }
