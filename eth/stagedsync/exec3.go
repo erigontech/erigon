@@ -349,6 +349,7 @@ func Exec3(ctx context.Context,
 					defer cancel()
 					t := time.Now()
 					for time.Since(t) < time.Second {
+						agg.EndTxNumMinimax()
 						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
@@ -1135,8 +1136,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 }
 
 func idxStepsInDB(tx kv.Tx) float64 {
-	fst, _ := kv.FirstKey(tx, kv.AccountHistoryKeys)
-	lst, _ := kv.LastKey(tx, kv.AccountHistoryKeys)
+	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
+	lst, _ := kv.LastKey(tx, kv.TracesToKeys)
 	if len(fst) > 0 && len(lst) > 0 {
 		fstTxNum := binary.BigEndian.Uint64(fst)
 		lstTxNum := binary.BigEndian.Uint64(lst)
