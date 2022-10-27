@@ -180,8 +180,6 @@ func Exec3(ctx context.Context,
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(time.Second)
 	defer pruneEvery.Stop()
-	//retireEvery := time.NewTicker(5 * time.Second)
-	//defer retireEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
 	agg.SetTxNum(inputTxNum)
@@ -221,19 +219,6 @@ func Exec3(ctx context.Context,
 			}
 		}
 
-		//retireLoop := func(ctx context.Context) {
-		//	for outputTxNum.Load() < maxTxNum.Load() {
-		//		select {
-		//		case <-ctx.Done():
-		//			return
-		//		case <-retireEvery.C:
-		//			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-		//				panic(err)
-		//			}
-		//		}
-		//	}
-		//}
-
 		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -249,10 +234,6 @@ func Exec3(ctx context.Context,
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			go applyLoop(applyCtx)
-
-			//retireCtx, cancelRetireCtx := context.WithCancel(ctx)
-			//defer cancelRetireCtx()
-			//go retireLoop(retireCtx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -518,7 +499,7 @@ loop:
 		}
 
 		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			panic(fmt.Errorf("agg.FinishTx: %w", err))
+			return err
 		}
 	}
 	if parallel {
