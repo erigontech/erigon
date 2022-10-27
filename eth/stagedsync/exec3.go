@@ -345,10 +345,10 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
+					pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
+					defer cancel()
 					t := time.Now()
 					for time.Since(t) < time.Second {
-						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
-						defer cancel()
 						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
