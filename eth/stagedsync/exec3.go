@@ -349,6 +349,7 @@ func Exec3(ctx context.Context,
 					if agg.CanPrune(tx) {
 						t := time.Now()
 						for time.Since(t) < time.Second {
+							log.Debug("do prune")
 							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
