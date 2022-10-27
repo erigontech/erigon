@@ -189,6 +189,7 @@ func Exec3(ctx context.Context,
 
 	if parallel {
 		if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+			agg.SetTx(tx)
 			if err = agg.Prune(ctx, agg.EndTxNumMinimax()); err != nil { // prune part of retired data, before commit
 				panic(err)
 			}
