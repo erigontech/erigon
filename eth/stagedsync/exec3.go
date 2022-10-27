@@ -347,14 +347,11 @@ func Exec3(ctx context.Context,
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						lst, _ := kv.FirstKey(tx, kv.TracesToKeys)
-						if len(lst) > 0 {
-							log.Info(fmt.Sprintf("b: %d > %d", binary.BigEndian.Uint64(lst), agg.EndTxNumMinimax()))
-						}
 						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
 						t := time.Now()
 						for time.Since(t) < time.Second {
 							if len(lst) > 0 {
-								log.Info(fmt.Sprintf("c: %d > %d", binary.BigEndian.Uint64(lst), agg.EndTxNumMinimax()))
+								log.Info(fmt.Sprintf("c: %d > %d", binary.BigEndian.Uint64(lst)/1000, agg.EndTxNumMinimax()/1000))
 							}
 							agg.EndTxNumMinimax()
 							if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
