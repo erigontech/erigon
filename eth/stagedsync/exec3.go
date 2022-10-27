@@ -364,7 +364,6 @@ func Exec3(ctx context.Context,
 	if block < blockReader.(WithSnapshots).Snapshots().BlocksAvailable() {
 		agg.KeepInDB(0)
 	}
-
 	defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 
 	var b *types.Block
