@@ -56,7 +56,7 @@ func main() {
 	fmt.Printf("Hex Packet: %x\n", fullPacket[:])
 
 	// We are reading a test finality upodate object.
-	result := &cltypes.LightClientBootstrap{}
+	result := &cltypes.LightClientFinalityUpdate{}
 	ln := result.SizeSSZ() // size = 24896
 
 	r := bytes.NewReader(fullPacket)
@@ -67,7 +67,16 @@ func main() {
 	_, err := io.ReadFull(sr, decompressed)
 	if err != nil {
 		fmt.Printf("unable to decompress data: %v\n", err)
+		return
 	}
+
+	err = result.UnmarshalSSZ(decompressed)
+	if err != nil {
+		fmt.Printf("unable to unmarshall data: %v\n", err)
+		return
+	}
+
+	fmt.Printf("decoded object: %+v\n", result)
 }
 
 /*
