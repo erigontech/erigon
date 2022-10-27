@@ -345,6 +345,7 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
+					log.Debug("can prune", "can", agg.CanPrune(tx))
 					if agg.CanPrune(tx) {
 						t := time.Now()
 						for time.Since(t) < time.Second {
