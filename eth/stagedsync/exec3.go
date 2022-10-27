@@ -346,15 +346,13 @@ func Exec3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
-						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
 						t := time.Now()
 						for time.Since(t) < time.Second {
 							agg.EndTxNumMinimax()
-							if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
-						cancel()
 					}
 				}
 			}
