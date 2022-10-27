@@ -181,7 +181,7 @@ func Exec3(ctx context.Context,
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(time.Second)
 	defer pruneEvery.Stop()
-	retireEvery := time.NewTicker(time.Second)
+	retireEvery := time.NewTicker(5 * time.Second)
 	defer retireEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
