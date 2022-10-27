@@ -476,6 +476,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
+		true, // isFree
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
