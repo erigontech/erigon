@@ -216,6 +216,8 @@ func (c AggCollation) Close() {
 }
 
 func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggCollation, error) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	var ac AggCollation
 	var err error
 	closeColl := true
@@ -224,28 +226,28 @@ func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggC
 			ac.Close()
 		}
 	}()
-	if ac.accounts, err = a.accounts.collate(step, txFrom, txTo, roTx); err != nil {
+	if ac.accounts, err = a.accounts.collate(step, txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.storage, err = a.storage.collate(step, txFrom, txTo, roTx); err != nil {
+	if ac.storage, err = a.storage.collate(step, txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.code, err = a.code.collate(step, txFrom, txTo, roTx); err != nil {
+	if ac.code, err = a.code.collate(step, txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.commitment, err = a.commitment.collate(step, txFrom, txTo, roTx); err != nil {
+	if ac.commitment, err = a.commitment.collate(step, txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, roTx); err != nil {
+	if ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.logTopics, err = a.logTopics.collate(txFrom, txTo, roTx); err != nil {
+	if ac.logTopics, err = a.logTopics.collate(txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, roTx); err != nil {
+	if ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, roTx); err != nil {
+	if ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, roTx, logEvery); err != nil {
 		return AggCollation{}, err
 	}
 	closeColl = false
@@ -367,28 +369,31 @@ func (a *Aggregator) integrateFiles(sf AggStaticFiles, txNumFrom, txNumTo uint64
 }
 
 func (a *Aggregator) prune(step uint64, txFrom, txTo, limit uint64) error {
-	if err := a.accounts.prune(step, txFrom, txTo, limit); err != nil {
+	ctx := context.TODO()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	if err := a.accounts.prune(step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.storage.prune(step, txFrom, txTo, limit); err != nil {
+	if err := a.storage.prune(step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.code.prune(step, txFrom, txTo, limit); err != nil {
+	if err := a.code.prune(step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.commitment.prune(step, txFrom, txTo, limit); err != nil {
+	if err := a.commitment.prune(step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.logAddrs.prune(txFrom, txTo, limit); err != nil {
+	if err := a.logAddrs.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.logTopics.prune(txFrom, txTo, limit); err != nil {
+	if err := a.logTopics.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.tracesFrom.prune(txFrom, txTo, limit); err != nil {
+	if err := a.tracesFrom.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := a.tracesTo.prune(txFrom, txTo, limit); err != nil {
+	if err := a.tracesTo.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
 	return nil

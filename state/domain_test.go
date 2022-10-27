@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
@@ -64,6 +65,8 @@ func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 }
 
 func TestCollationBuild(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
 	ctx := context.Background()
 
@@ -96,7 +99,7 @@ func TestCollationBuild(t *testing.T) {
 	defer roTx.Rollback()
 	d.SetTx(tx)
 
-	c, err := d.collate(0, 0, 7, roTx)
+	c, err := d.collate(0, 0, 7, roTx, logEvery)
 	require.NoError(t, err)
 	require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
 	require.Equal(t, 2, c.valuesCount)
@@ -167,6 +170,8 @@ func TestIterationBasic(t *testing.T) {
 }
 
 func TestAfterPrune(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
 	ctx := context.Background()
 
@@ -210,7 +215,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	c, err := d.collate(0, 0, 16, roTx)
+	c, err := d.collate(0, 0, 16, roTx, logEvery)
 	require.NoError(t, err)
 
 	sf, err := d.buildFiles(ctx, 0, c)
@@ -231,7 +236,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("value2.2"), v)
 
-	err = d.prune(0, 0, 16, math.MaxUint64)
+	err = d.prune(0, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -346,6 +351,8 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 }
 
 func TestHistory(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, d, txs := filledDomain(t)
 	ctx := context.Background()
 	var tx kv.RwTx
@@ -360,7 +367,7 @@ func TestHistory(t *testing.T) {
 		func() {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
-			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
+			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx, logEvery)
 			roTx.Rollback()
 			require.NoError(t, err)
 			sf, err := d.buildFiles(ctx, step, c)
@@ -369,7 +376,7 @@ func TestHistory(t *testing.T) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -380,6 +387,8 @@ func TestHistory(t *testing.T) {
 }
 
 func TestIterationMultistep(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, d := testDbAndDomain(t, 5 /* prefixLen */)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
@@ -433,7 +442,7 @@ func TestIterationMultistep(t *testing.T) {
 		func() {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
-			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
+			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx, logEvery)
 			roTx.Rollback()
 			require.NoError(t, err)
 			sf, err := d.buildFiles(ctx, step, c)
@@ -442,7 +451,7 @@ func TestIterationMultistep(t *testing.T) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -467,6 +476,8 @@ func TestIterationMultistep(t *testing.T) {
 
 func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	ctx := context.Background()
 	var tx kv.RwTx
 	defer func() {
@@ -480,7 +491,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
-			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
+			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx, logEvery)
 			require.NoError(t, err)
 			roTx.Rollback()
 			sf, err := d.buildFiles(ctx, step, c)
@@ -489,7 +500,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			d.SetTx(tx)
-			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -511,17 +522,19 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	ctx := context.Background()
 	txFrom, txTo := (step)*d.aggregationStep, (step+1)*d.aggregationStep
 
-	c, err := d.collate(step, txFrom, txTo, d.tx)
+	c, err := d.collate(step, txFrom, txTo, d.tx, logEvery)
 	require.NoError(t, err)
 
 	sf, err := d.buildFiles(ctx, step, c)
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
-	err = d.prune(step, txFrom, txTo, math.MaxUint64)
+	err = d.prune(step, txFrom, txTo, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
 	var r DomainRanges

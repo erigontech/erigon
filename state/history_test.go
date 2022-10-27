@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -58,6 +59,8 @@ func testDbAndHistory(tb testing.TB) (string, kv.RwDB, *History) {
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	require := require.New(t)
 	_, db, h := testDbAndHistory(t)
 	ctx := context.Background()
@@ -97,7 +100,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 	require.NoError(err)
 	defer roTx.Rollback()
 
-	c, err := h.collate(0, 0, 8, roTx)
+	c, err := h.collate(0, 0, 8, roTx, logEvery)
 	require.NoError(err)
 	require.True(strings.HasSuffix(c.historyPath, "hist.0-1.v"))
 	require.Equal(6, c.historyCount)
@@ -161,6 +164,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 }
 
 func TestHistoryAfterPrune(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, h := testDbAndHistory(t)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
@@ -203,7 +208,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	c, err := h.collate(0, 0, 16, roTx)
+	c, err := h.collate(0, 0, 16, roTx, logEvery)
 	require.NoError(t, err)
 
 	sf, err := h.buildFiles(ctx, 0, c)
@@ -216,7 +221,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 	h.integrateFiles(sf, 0, 16)
 
-	err = h.prune(0, 16, math.MaxUint64)
+	err = h.prune(ctx, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -314,6 +319,8 @@ func checkHistoryHistory(t *testing.T, db kv.RwDB, h *History, txs uint64) {
 }
 
 func TestHistoryHistory(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, h, txs := filledHistory(t)
 	ctx := context.Background()
 	var tx kv.RwTx
@@ -327,7 +334,7 @@ func TestHistoryHistory(t *testing.T) {
 		func() {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
-			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, roTx)
+			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, roTx, logEvery)
 			roTx.Rollback()
 			require.NoError(t, err)
 			sf, err := h.buildFiles(ctx, step, c)
@@ -336,7 +343,7 @@ func TestHistoryHistory(t *testing.T) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			h.SetTx(tx)
-			err = h.prune(step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64)
+			err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -348,6 +355,8 @@ func TestHistoryHistory(t *testing.T) {
 
 func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	tb.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	ctx := context.Background()
 	var tx kv.RwTx
 	defer func() {
@@ -361,7 +370,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(tb, err)
 			defer roTx.Rollback()
-			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, roTx)
+			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, roTx, logEvery)
 			require.NoError(tb, err)
 			roTx.Rollback()
 			sf, err := h.buildFiles(ctx, step, c)
@@ -370,7 +379,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(tb, err)
 			h.SetTx(tx)
-			err = h.prune(step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64)
+			err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(tb, err)
 			err = tx.Commit()
 			require.NoError(tb, err)

@@ -24,6 +24,7 @@ import (
 	"os"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -55,6 +56,8 @@ func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, ii := testDbAndInvertedIndex(t)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
@@ -87,7 +90,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(0, 7, roTx)
+	bs, err := ii.collate(0, 7, roTx, logEvery)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(bs))
 	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
@@ -125,6 +128,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, ii := testDbAndInvertedIndex(t)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
@@ -161,7 +166,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(0, 16, roTx)
+	bs, err := ii.collate(0, 16, roTx, logEvery)
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs)
@@ -174,7 +179,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	ii.integrateFiles(sf, 0, 16)
 
-	err = ii.prune(0, 16, math.MaxUint64)
+	err = ii.prune(ctx, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -278,6 +283,8 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	ctx := context.Background()
 	// Leave the last 2 aggregation steps un-collated
 	var tx kv.RwTx
@@ -292,7 +299,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
-			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
+			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
 			require.NoError(t, err)
 			roTx.Rollback()
 			sf, err := ii.buildFiles(ctx, step, bs)
@@ -301,7 +308,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			ii.SetTx(tx)
-			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
+			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -323,6 +330,8 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	_, db, ii, txs := filledInvIndex(t)
 	ctx := context.Background()
 	var tx kv.RwTx
@@ -337,7 +346,7 @@ func TestInvIndexRanges(t *testing.T) {
 		func() {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
-			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
+			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
 			roTx.Rollback()
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs)
@@ -346,7 +355,7 @@ func TestInvIndexRanges(t *testing.T) {
 			tx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
 			ii.SetTx(tx)
-			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
+			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)

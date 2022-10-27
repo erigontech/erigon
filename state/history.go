@@ -29,10 +29,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
@@ -583,9 +585,12 @@ func (c HistoryCollation) Close() {
 	if c.historyComp != nil {
 		c.historyComp.Close()
 	}
+	for _, b := range c.indexBitmaps {
+		bitmapdb.ReturnToPool64(b)
+	}
 }
 
-func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (HistoryCollation, error) {
 	var historyComp *compress.Compressor
 	var err error
 	closeComp := true
@@ -597,7 +602,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlDebug); err != nil {
+	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlTrace); err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
@@ -618,10 +623,16 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		var bitmap *roaring64.Bitmap
 		var ok bool
 		if bitmap, ok = indexBitmaps[string(v[:len(v)-8])]; !ok {
-			bitmap = roaring64.New()
+			bitmap = bitmapdb.NewBitmap64()
 			indexBitmaps[string(v[:len(v)-8])] = bitmap
 		}
 		bitmap.Add(txNum)
+		select {
+		case <-logEvery.C:
+			log.Info("[snapshots] collate history", "name", h.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txNum)/1_000_000, float64(txTo)/1_000_000))
+			bitmap.RunOptimize()
+		default:
+		}
 	}
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
@@ -888,7 +899,13 @@ func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
 	return nil
 }
 
-func (h *History) prune(txFrom, txTo, limit uint64) error {
+func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -910,9 +927,6 @@ func (h *History) prune(txFrom, txTo, limit uint64) error {
 	}
 	if txFrom >= txTo {
 		return nil
-	}
-	if txTo-txFrom > 10_000 {
-		log.Info("[snapshots] prune old history", "name", h.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txFrom)/1_000_000, float64(txTo)/1_000_000))
 	}
 
 	valsC, err := h.tx.RwCursor(h.historyValsTable)
@@ -939,6 +953,11 @@ func (h *History) prune(txFrom, txTo, limit uint64) error {
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = historyKeysCursor.DeleteCurrent(); err != nil {
 			return err
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("[snapshots] prune history", "name", h.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txNum)/1_000_000, float64(txTo)/1_000_000))
+		default:
 		}
 	}
 	if err != nil {

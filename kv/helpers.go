@@ -160,3 +160,17 @@ func FirstKey(tx Tx, table string) ([]byte, error) {
 	}
 	return k, nil
 }
+
+// LastKey - candidate on move to kv.Tx interface
+func LastKey(tx Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.Last()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
