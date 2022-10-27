@@ -324,7 +324,7 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/20); err != nil { // prune part of retired data, before commit
+						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/50); err != nil { // prune part of retired data, before commit
 							return err
 						}
 						if err = tx.Commit(); err != nil {
