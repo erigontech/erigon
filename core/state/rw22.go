@@ -269,7 +269,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
 			if err != nil {
-				panic(err)
 				return err
 			}
 		}
@@ -298,7 +297,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 	if len(txTask.AccountDels) > 0 {
 		cursor, err := roTx.Cursor(kv.PlainState)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		defer cursor.Close()
