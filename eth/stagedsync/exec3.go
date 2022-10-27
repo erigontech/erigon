@@ -346,6 +346,10 @@ func Exec3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
+						lst, _ := kv.LastKey(tx, kv.TracesToKeys)
+						if len(lst) > 0 {
+							log.Info(fmt.Sprintf("b: %d > %d", binary.BigEndian.Uint64(lst), agg.EndTxNumMinimax()))
+						}
 						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
 						t := time.Now()
 						for time.Since(t) < time.Second {
@@ -355,6 +359,12 @@ func Exec3(ctx context.Context,
 							}
 						}
 						cancel()
+					} else {
+						lst, _ := kv.LastKey(tx, kv.TracesToKeys)
+						if len(lst) > 0 {
+							log.Info(fmt.Sprintf("a: %d > %d", binary.BigEndian.Uint64(lst), agg.EndTxNumMinimax()))
+						}
+
 					}
 				}
 			}
