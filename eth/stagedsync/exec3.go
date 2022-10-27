@@ -349,7 +349,7 @@ func Exec3(ctx context.Context,
 						lst, _ := kv.FirstKey(tx, kv.TracesToKeys)
 						pruneCtx, cancel := context.WithTimeout(ctx, time.Second)
 						t := time.Now()
-						for time.Since(t) >= time.Second {
+						for time.Since(t) < time.Second {
 							if len(lst) > 0 {
 								log.Info(fmt.Sprintf("b: %d > %d", binary.BigEndian.Uint64(lst), agg.EndTxNumMinimax()))
 							}
