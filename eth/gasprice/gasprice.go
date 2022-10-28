@@ -264,6 +264,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		if err == nil && sender != block.Coinbase() {
 			heap.Push(s, tip)
                         count = count + 1
+                        // verify if reached max samples(limit) for current block
 			if count  >= limit {
 				break
 			}
