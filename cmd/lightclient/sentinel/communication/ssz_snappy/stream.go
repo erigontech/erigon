@@ -27,8 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-var expectedForkDigest = [4]byte{74, 38, 197, 139}
-
 type StreamCodec struct {
 	s  network.Stream
 	sr *snappy.Reader
@@ -153,14 +151,10 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 
 func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	forkDigest := make([]byte, 4)
+	// TODO(issues/5884): assert the fork digest matches the expectation for
+	// a specific configuration.
 	if _, err := r.Read(forkDigest); err != nil {
 		return err
-	}
-
-	// Assert fork digest is correct.
-	digestDiffer := bytes.Compare(forkDigest, expectedForkDigest[:])
-	if digestDiffer != 0 {
-		return fmt.Errorf("fork digest does not match: want %x, got %x", expectedForkDigest, forkDigest)
 	}
 
 	// Read varint for length of message.
