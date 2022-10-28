@@ -191,6 +191,8 @@ func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	return nil, nil
 }
 
+// EIP-3860: Limit and meter initcode
+// https://eips.ethereum.org/EIPS/eip-3860
 func enable3860(jt *JumpTable) {
 	createOp := *jt[CREATE]
 	createOp.dynamicGas = gasCreateEip3860
