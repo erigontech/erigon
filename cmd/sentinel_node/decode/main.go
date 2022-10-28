@@ -96,7 +96,7 @@ var (
 )
 
 func decodeTestResponses(msg []byte, result cltypes.ObjectSSZ, prefixBytes uint8) {
-	fmt.Printf("Hex Packet: %x\n", msg[:])
+	fmt.Printf("Hex Packet: %x\n", msg)
 
 	// Get the size of the object.
 	ln := result.SizeSSZ()
