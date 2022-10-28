@@ -680,7 +680,7 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 	return txn, buf, nil
 }
 
-func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, bufOut []byte, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
@@ -702,7 +702,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
 		if err != nil {
-			return
+			return txn, blockNum, txnID, buf, err
 		}
 
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
@@ -712,10 +712,10 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return
+			return txn, blockNum, txnID, buf, nil
 		}
 	}
-	return
+	return txn, blockNum, txnID, buf, nil
 }
 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
@@ -798,10 +798,13 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 		return *n, true, nil
 	}
 
+	buf := get()
+	defer put(buf)
+
 	var txn types.Transaction
 	var blockNum uint64
 	if err := back.sn.Txs.View(func(segments []*TxnSegment) error {
-		txn, blockNum, _, err = back.txnByHash(txnHash, segments, nil)
+		txn, blockNum, _, buf, err = back.txnByHash(txnHash, segments, buf)
 		if err != nil {
 			return err
 		}
