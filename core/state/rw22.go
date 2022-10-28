@@ -196,13 +196,11 @@ func (rs *State22) RegisterSender(txTask *TxTask) bool {
 }
 
 func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
-		heap.Push(&rs.queue, triggered)
+		rs.queuePush(triggered)
 		rs.receiveWork.Signal()
 		count++
 		delete(rs.triggers, txNum)
@@ -213,8 +211,20 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txsDone++
+	rs.txDoneIncrement()
 	return count
+}
+
+func (rs *State22) queuePush(t *TxTask) {
+	rs.queueLock.Lock()
+	heap.Push(&rs.queue, t)
+	rs.queueLock.Unlock()
+}
+
+func (rs *State22) txDoneIncrement() {
+	rs.lock.Lock()
+	rs.txsDone++
+	rs.lock.Unlock()
 }
 
 func (rs *State22) AddWork(txTask *TxTask) {
@@ -234,9 +244,7 @@ func (rs *State22) AddWork(txTask *TxTask) {
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, txTask)
-	rs.queueLock.Unlock()
+	rs.queuePush(txTask)
 	rs.receiveWork.Signal()
 }
 
@@ -425,9 +433,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			}
 		}
 	}
-	if err := agg.FinishTx(); err != nil {
-		return err
-	}
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
@@ -535,14 +540,16 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 
 func (rs *State22) DoneCount() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.txsDone
+	r := rs.txsDone
+	rs.lock.RUnlock()
+	return r
 }
 
 func (rs *State22) SizeEstimate() uint64 {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.sizeEstimate
+	r := rs.sizeEstimate
+	rs.lock.RUnlock()
+	return r
 }
 
 func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {

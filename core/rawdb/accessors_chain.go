@@ -1864,5 +1864,8 @@ func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(encoded) == 0 {
+		return verkle.New(), nil
+	}
 	return verkle.ParseNode(encoded, 0, root[:])
 }
