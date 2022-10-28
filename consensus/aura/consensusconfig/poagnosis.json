@@ -26,5 +26,6 @@
   "randomnessContractAddress": {
     "9186425": "0x5870b0527DeDB1cFBD9534343Feda1a41Ce47766"
   },
-  "posdaoTransition": 9186425
+  "posdaoTransition": 9186425,
+  "registrar": "0x6B53721D4f2Fb9514B85f5C49b197D857e36Cf03"
 }

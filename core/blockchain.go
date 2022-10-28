@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	BlockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
@@ -80,7 +80,7 @@ func ExecuteBlockEphemerallyForBSC(
 	chainReader consensus.ChainHeaderReader,
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -230,7 +230,7 @@ func ExecuteBlockEphemerally(
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -341,7 +341,7 @@ func ExecuteBlockEphemerallyBor(
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -476,6 +476,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
+		true, // isFree
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment

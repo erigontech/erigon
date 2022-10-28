@@ -124,7 +124,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	wg.Wait()
 	close(out)
 	// Get root
-	root, err := rawdb.ReadVerkleRoot(tx, from)
+	root, err := rawdb.ReadVerkleRoot(vTx, from)
 	if err != nil {
 		return common.Hash{}, err
 	}

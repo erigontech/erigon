@@ -216,9 +216,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	blockFrom, blockTo := s.PruneProgress, uint64(0)
 
+	var pruneBor bool
+
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+		pruneBor = true
 	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
 	}
@@ -227,7 +230,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
-		if cfg.isBor {
+		if cfg.isBor && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}

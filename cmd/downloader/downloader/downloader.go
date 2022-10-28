@@ -208,6 +208,7 @@ func (d *Downloader) verify() error {
 		wg.Add(1)
 		go func(t *torrent.Torrent) {
 			defer wg.Done()
+			<-t.GotInfo()
 			for i := 0; i < t.NumPieces(); i++ {
 				j.Inc()
 				t.Piece(i).VerifyData()
