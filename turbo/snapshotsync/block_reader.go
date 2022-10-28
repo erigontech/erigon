@@ -18,6 +18,28 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+const (
+	minSize = 64      // 64 is a CPU cache line size
+	maxSize = 1 << 25 // 32Mb
+)
+
+var bufPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 0, minSize)
+	},
+}
+
+func get() []byte {
+	buf := bufPool.Get().([]byte)
+	buf = buf[:0]
+	return buf
+}
+func put(buf []byte) {
+	if len(buf) < maxSize {
+		bufPool.Put(buf)
+	}
+}
+
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 }
@@ -389,19 +411,6 @@ func (back *BlockReaderWithSnapshots) BodyWithTransactions(ctx context.Context, 
 	}
 	return body, nil
 }
-
-var bufPool = sync.Pool{
-	New: func() any {
-		return make([]byte, 0, 16)
-	},
-}
-
-func get() []byte {
-	buf := bufPool.Get().([]byte)
-	buf = buf[:0]
-	return buf
-}
-func put(buf []byte) { bufPool.Put(buf) }
 
 func (back *BlockReaderWithSnapshots) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := back.BodyWithTransactions(ctx, tx, hash, blockHeight)
