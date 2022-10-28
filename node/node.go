@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
@@ -339,7 +340,12 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		if debug.WriteMap() {
-			opts = opts.WriteMap()
+			opts = opts.WriteMap().WriteMergeThreshold(1 * 8192)
+		}
+		if debug.MdbxReadAhead() {
+			opts = opts.Flags(func(u uint) uint {
+				return u &^ mdbx2.NoReadahead
+			})
 		}
 		return opts.Open()
 	}

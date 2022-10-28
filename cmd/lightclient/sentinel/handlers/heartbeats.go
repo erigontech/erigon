@@ -18,32 +18,38 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 )
 
-// type safe handlers which all have access to the original stream & decompressed data
-// ping handler
-func pingHandler(ctx *communication.StreamContext, dat *cltypes.Ping) error {
-	// since packets are just structs, they can be resent with no issue
-	return ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
+// Type safe handlers which all have access to the original stream & decompressed data.
+// Since packets are just structs, they can be resent with no issue
+
+func (c *ConsensusHandlers) pingHandler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
+	return ctx.Codec.WritePacket(&cltypes.Ping{
+		Id: c.metadata.SeqNumber,
+	}, SuccessfulResponsePrefix)
+}
+
+func (c *ConsensusHandlers) goodbyeHandler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
+	// From the spec, these are the valid goodbye numbers. Start with just
+	// sending 1, but we should think about when the others need to be sent.
+	// 1: Client shut down.
+	// 2: Irrelevant network.
+	// 3: Fault/error.
+	return ctx.Codec.WritePacket(&cltypes.Ping{
+		Id: 1,
+	}, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
-	// since packets are just structs, they can be resent with no issue
 	return ctx.Codec.WritePacket(&cltypes.MetadataV1{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
-	}, SuccessfullResponsePrefix)
+	}, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) metadataV2Handler(ctx *communication.StreamContext, _ *communication.EmptyPacket) error {
-	// since packets are just structs, they can be resent with no issue
-	return ctx.Codec.WritePacket(c.metadata, SuccessfullResponsePrefix)
-}
-
-// does nothing
-func nilHandler(ctx *communication.StreamContext, dat *communication.EmptyPacket) error {
-	return nil
+	return ctx.Codec.WritePacket(c.metadata, SuccessfulResponsePrefix)
 }
 
 // TODO: Actually respond with proper status
-func statusHandler(ctx *communication.StreamContext, dat *cltypes.Status) error {
-	return ctx.Codec.WritePacket(dat, SuccessfullResponsePrefix)
+func (c *ConsensusHandlers) statusHandler(ctx *communication.StreamContext, dat *cltypes.Status) error {
+	return ctx.Codec.WritePacket(dat, SuccessfulResponsePrefix)
 }

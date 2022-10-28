@@ -58,6 +58,10 @@ type TopicName string
 
 const (
 	BeaconBlockTopic                 TopicName = "beacon_block"
+	BeaconAggregateAndProofTopic     TopicName = "beacon_aggregate_and_proof"
+	VoluntaryExitTopic               TopicName = "voluntary_exit"
+	ProposerSlashingTopic            TopicName = "proposer_slashing"
+	AttesterSlashingTopic            TopicName = "attester_slashing"
 	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
 	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
 )
@@ -72,6 +76,30 @@ type GossipTopic struct {
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
 	Typ:      &cltypes.SignedBeaconBlockBellatrix{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var BeaconAggregateAndProofSsz = GossipTopic{
+	Name:     BeaconAggregateAndProofTopic,
+	Typ:      &cltypes.SignedAggregateAndProof{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var VoluntaryExitSsz = GossipTopic{
+	Name:     VoluntaryExitTopic,
+	Typ:      &cltypes.SignedVoluntaryExit{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var ProposerSlashingSsz = GossipTopic{
+	Name:     ProposerSlashingTopic,
+	Typ:      &cltypes.ProposerSlashing{},
+	Codec:    ssz_snappy.NewGossipCodec,
+	CodecStr: "ssz_snappy",
+}
+var AttesterSlashingSsz = GossipTopic{
+	Name:     AttesterSlashingTopic,
+	Typ:      &cltypes.AttesterSlashing{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }

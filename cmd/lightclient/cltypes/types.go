@@ -293,6 +293,21 @@ type Checkpoint struct {
 	Root  [32]byte `ssz-size:"32"`
 }
 
+/*
+ * AggregateAndProof contains the index of the aggregator, the attestation
+ * to be aggregated and the BLS signature of the attestation.
+ */
+type AggregateAndProof struct {
+	AggregatorIndex uint64
+	Aggregate       Attestation
+	SelectionProof  [96]byte `ssz-size:"96"`
+}
+
+type SignedAggregateAndProof struct {
+	Message   AggregateAndProof
+	Signature [96]byte `ssz-size:"96"`
+}
+
 // BeaconState is used to create the initial store through checkpoint sync.
 // we only use FinalizedCheckpoint field.
 type BeaconState struct {
