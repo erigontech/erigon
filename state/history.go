@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -51,11 +52,13 @@ import (
 type History struct {
 	*InvertedIndex
 	files            *btree.BTreeG[*filesItem]
-	w                *historyWriter
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	settingsTable    string
 	workers          int
 	compressVals     bool
+
+	wal     *historyWAL
+	walLock sync.RWMutex
 }
 
 func NewHistory(
@@ -437,35 +440,51 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, coun
 	return nil
 }
 
-func (h *History) AddPrevValue(key1, key2, original []byte) error {
-	return h.w.addPrevValue(key1, key2, original)
+func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
+	h.walLock.RLock() // read-lock for reading fielw `w` and writing into it, write-lock for setting new `w`
+	err = h.wal.addPrevValue(key1, key2, original)
+	h.walLock.RUnlock()
+	return err
 }
-
 func (h *History) StartWrites(tmpdir string) {
 	h.InvertedIndex.StartWrites(tmpdir)
-	h.w = h.newWriter(tmpdir)
+	h.walLock.Lock()
+	defer h.walLock.Unlock()
+	h.wal = h.newWriter(tmpdir)
 }
 func (h *History) FinishWrites() {
 	h.InvertedIndex.FinishWrites()
-	h.w.close()
-	h.w = nil
+	h.walLock.Lock()
+	defer h.walLock.Unlock()
+	h.wal.close()
+	h.wal = nil
 }
 
-func (h *History) Flush() error {
-	if err := h.InvertedIndex.Flush(); err != nil {
+func (h *History) Rotate() historyFlusher {
+	h.walLock.Lock()
+	defer h.walLock.Unlock()
+	w := h.wal
+	h.wal = h.newWriter(h.wal.tmpdir)
+	h.wal.autoIncrement = w.autoIncrement
+	return historyFlusher{w, h.InvertedIndex.Rotate()}
+}
+
+type historyFlusher struct {
+	h *historyWAL
+	i *invertedIndexWAL
+}
+
+func (f historyFlusher) Flush(tx kv.RwTx) error {
+	if err := f.i.Flush(tx); err != nil {
 		return err
 	}
-	if h.w == nil {
-		return nil
-	}
-	if err := h.w.flush(h.tx); err != nil {
+	if err := f.h.flush(tx); err != nil {
 		return err
 	}
-	h.w = h.newWriter(h.w.tmpdir)
 	return nil
 }
 
-type historyWriter struct {
+type historyWAL struct {
 	h                *History
 	historyVals      *etl.Collector
 	tmpdir           string
@@ -474,15 +493,15 @@ type historyWriter struct {
 	buffered         bool
 }
 
-func (h *historyWriter) close() {
+func (h *historyWAL) close() {
 	if h == nil { // allow dobule-close
 		return
 	}
 	h.historyVals.Close()
 }
 
-func (h *History) newWriter(tmpdir string) *historyWriter {
-	w := &historyWriter{h: h,
+func (h *History) newWriter(tmpdir string) *historyWAL {
+	w := &historyWAL{h: h,
 		tmpdir:           tmpdir,
 		autoIncrementBuf: make([]byte, 8),
 
@@ -504,7 +523,7 @@ func (h *History) newWriter(tmpdir string) *historyWriter {
 	return w
 }
 
-func (h *historyWriter) flush(tx kv.RwTx) error {
+func (h *historyWAL) flush(tx kv.RwTx) error {
 	binary.BigEndian.PutUint64(h.autoIncrementBuf, h.autoIncrement)
 	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
 		return err
@@ -516,7 +535,7 @@ func (h *historyWriter) flush(tx kv.RwTx) error {
 	return nil
 }
 
-func (h *historyWriter) addPrevValue(key1, key2, original []byte) error {
+func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	/*
 		lk := len(key1) + len(key2)
 		historyKey := make([]byte, lk+8)

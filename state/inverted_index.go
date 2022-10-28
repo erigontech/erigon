@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -49,7 +50,6 @@ import (
 type InvertedIndex struct {
 	tx              kv.RwTx
 	files           *btree.BTreeG[*filesItem]
-	w               *invertedIndexWriter
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
 	dir             string // Directory where static files are created
@@ -59,6 +59,9 @@ type InvertedIndex struct {
 	txNum           uint64
 	workers         int
 	txNumBytes      [8]byte
+
+	wal     *invertedIndexWAL
+	walLock sync.RWMutex
 }
 
 func NewInvertedIndex(
@@ -306,32 +309,40 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
 }
 
-func (ii *InvertedIndex) add(key, indexKey []byte) error {
-	return ii.w.add(key, indexKey)
+func (ii *InvertedIndex) add(key, indexKey []byte) (err error) {
+	ii.walLock.RLock()
+	err = ii.wal.add(key, indexKey)
+	ii.walLock.RUnlock()
+	return err
 }
 
 func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.add(key, key)
 }
 
-func (ii *InvertedIndex) StartWrites(tmpdir string) { ii.w = ii.newWriter(tmpdir) }
+func (ii *InvertedIndex) StartWrites(tmpdir string) {
+	ii.walLock.Lock()
+	defer ii.walLock.Unlock()
+	ii.wal = ii.newWriter(tmpdir)
+}
 func (ii *InvertedIndex) FinishWrites() {
-	ii.w.close()
-	ii.w = nil
+	ii.walLock.Lock()
+	defer ii.walLock.Unlock()
+	ii.wal.close()
+	ii.wal = nil
 }
 
-func (ii *InvertedIndex) Flush() error {
-	if ii.w == nil {
-		return nil
+func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
+	ii.walLock.Lock()
+	defer ii.walLock.Unlock()
+	wal := ii.wal
+	if wal != nil {
+		ii.wal = ii.newWriter(ii.wal.tmpdir)
 	}
-	if err := ii.w.flush(ii.tx); err != nil {
-		return err
-	}
-	ii.w = ii.newWriter(ii.w.tmpdir)
-	return nil
+	return wal
 }
 
-type invertedIndexWriter struct {
+type invertedIndexWAL struct {
 	ii        *InvertedIndex
 	index     *etl.Collector
 	indexKeys *etl.Collector
@@ -345,7 +356,7 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (ii *invertedIndexWriter) flush(tx kv.RwTx) error {
+func (ii *invertedIndexWAL) Flush(tx kv.RwTx) error {
 	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -356,7 +367,7 @@ func (ii *invertedIndexWriter) flush(tx kv.RwTx) error {
 	return nil
 }
 
-func (ii *invertedIndexWriter) close() {
+func (ii *invertedIndexWAL) close() {
 	if ii == nil {
 		return
 	}
@@ -364,8 +375,8 @@ func (ii *invertedIndexWriter) close() {
 	ii.indexKeys.Close()
 }
 
-func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWriter {
-	w := &invertedIndexWriter{ii: ii,
+func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWAL {
+	w := &invertedIndexWAL{ii: ii,
 		buffered: true,
 		tmpdir:   tmpdir,
 		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
@@ -378,7 +389,7 @@ func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWriter {
 	return w
 }
 
-func (ii *invertedIndexWriter) add(key, indexKey []byte) error {
+func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.buffered {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err

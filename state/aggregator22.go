@@ -260,11 +260,12 @@ func (c Agg22Collation) Close() {
 	}
 }
 
-func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo uint64, db kv.RoDB) (Agg22Collation, error) {
+func (a *Aggregator22) buildFiles2(ctx context.Context, step uint64, txFrom, txTo uint64, db kv.RoDB) (Agg22StaticFiles, error) {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
-	defer func(t time.Time) { log.Info(fmt.Sprintf("[snapshot] collate took: %s\n", time.Since(t))) }(time.Now())
-	log.Info(fmt.Sprintf("[snapshot] collate start: %d-%d", step, step+1))
+	defer func(t time.Time) { log.Info(fmt.Sprintf("[snapshot] build took: %s\n", time.Since(t))) }(time.Now())
+	log.Info(fmt.Sprintf("[snapshot] build start: %d-%d", step, step+1))
+	var sf Agg22StaticFiles
 	var ac Agg22Collation
 	closeColl := true
 	defer func() {
@@ -284,6 +285,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 		}); err != nil {
 			errCh <- err
 		}
+
+		if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
+			errCh <- err
+		}
 	}()
 
 	go func() {
@@ -293,6 +298,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 			ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
 			return err
 		}); err != nil {
+			errCh <- err
+		}
+
+		if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
 			errCh <- err
 		}
 	}()
@@ -305,6 +314,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 		}); err != nil {
 			errCh <- err
 		}
+
+		if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
+			errCh <- err
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -313,6 +326,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 			ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, tx, logEvery)
 			return err
 		}); err != nil {
+			errCh <- err
+		}
+
+		if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
 			errCh <- err
 		}
 	}()
@@ -325,6 +342,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 		}); err != nil {
 			errCh <- err
 		}
+
+		if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
+			errCh <- err
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -335,6 +356,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 		}); err != nil {
 			errCh <- err
 		}
+
+		if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
+			errCh <- err
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -343,6 +368,10 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 			ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, tx, logEvery)
 			return err
 		}); err != nil {
+			errCh <- err
+		}
+
+		if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
 			errCh <- err
 		}
 	}()
@@ -359,7 +388,7 @@ func (a *Aggregator22) collate(ctx context.Context, step uint64, txFrom, txTo ui
 	if lastError == nil {
 		closeColl = false
 	}
-	return ac, lastError
+	return sf, lastError
 }
 
 type Agg22StaticFiles struct {
@@ -384,22 +413,8 @@ func (sf Agg22StaticFiles) Close() {
 
 func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, db kv.RoDB) (err error) {
 	closeAll := true
-
-	var collation Agg22Collation
-	// collate - making read-transaction as short as possible
-	// all future steps (build, compress, merge files) are slow
-	collation, err = a.collate(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep, db)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeAll {
-			collation.Close()
-		}
-	}()
-
 	log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
-	sf, err := a.buildFiles(ctx, step, collation)
+	sf, err := a.buildFiles2(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep, db)
 	if err != nil {
 		return err
 	}
@@ -441,82 +456,6 @@ func (a *Aggregator22) Merge(ctx context.Context) error {
 	}
 	closeAll = false
 	return nil
-}
-
-func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, collation Agg22Collation) (Agg22StaticFiles, error) {
-	var sf Agg22StaticFiles
-	closeFiles := true
-	defer func() {
-		if closeFiles {
-			sf.Close()
-		}
-	}()
-	var wg sync.WaitGroup
-	wg.Add(7)
-	errCh := make(chan error, 7)
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.accounts, err = a.accounts.buildFiles(ctx, step, collation.accounts); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.storage, err = a.storage.buildFiles(ctx, step, collation.storage); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.code, err = a.code.buildFiles(ctx, step, collation.code); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, collation.logAddrs); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, collation.logTopics); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, collation.tracesFrom); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, collation.tracesTo); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-	var lastError error
-	for err := range errCh {
-		if err != nil {
-			lastError = err
-		}
-	}
-	if lastError == nil {
-		closeFiles = false
-	}
-	return sf, lastError
 }
 
 func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo uint64) {
@@ -627,28 +566,25 @@ func (a *Aggregator22) FinishWrites() {
 	a.tracesTo.FinishWrites()
 }
 
-func (a *Aggregator22) Flush() error {
+type flusher interface {
+	Flush(tx kv.RwTx) error
+}
+
+func (a *Aggregator22) Flush(tx kv.RwTx) error {
+	flushers := []flusher{
+		a.accounts.Rotate(),
+		a.storage.Rotate(),
+		a.code.Rotate(),
+		a.logAddrs.Rotate(),
+		a.logTopics.Rotate(),
+		a.tracesFrom.Rotate(),
+		a.tracesTo.Rotate(),
+	}
 	defer func(t time.Time) { log.Info("[snapshots] hitory flush", "took", time.Since(t)) }(time.Now())
-	if err := a.accounts.Flush(); err != nil {
-		return err
-	}
-	if err := a.storage.Flush(); err != nil {
-		return err
-	}
-	if err := a.code.Flush(); err != nil {
-		return err
-	}
-	if err := a.logAddrs.Flush(); err != nil {
-		return err
-	}
-	if err := a.logTopics.Flush(); err != nil {
-		return err
-	}
-	if err := a.tracesFrom.Flush(); err != nil {
-		return err
-	}
-	if err := a.tracesTo.Flush(); err != nil {
-		return err
+	for _, f := range flushers {
+		if err := f.Flush(tx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1033,7 +969,7 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 	if !hasData {
 		return nil
 	}
-	log.Info("have data", "step", step, "lastStepInDB", lastStepInDB, "lstInDb", lstInDb, "a.maxTxNum", a.maxTxNum.Load())
+
 	a.working.Store(true)
 	go func() {
 		defer a.working.Store(false)

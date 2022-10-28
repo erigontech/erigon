@@ -89,7 +89,7 @@ func TestCollationBuild(t *testing.T) {
 	err = d.Put([]byte("key1"), nil, []byte("value1.2"))
 	require.NoError(t, err)
 
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestAfterPrune(t *testing.T) {
 	err = d.Put([]byte("key2"), nil, []byte("value2.2"))
 	require.NoError(t, err)
 
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -295,7 +295,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
-			err = d.Flush()
+			err = d.Rotate().Flush(tx)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -304,7 +304,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			d.SetTx(tx)
 		}
 	}
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -432,7 +432,7 @@ func TestIterationMultistep(t *testing.T) {
 	err = d.Delete([]byte("addr2"), []byte("loc1"))
 	require.NoError(t, err)
 
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -609,7 +609,7 @@ func TestDelete(t *testing.T) {
 		}
 		require.NoError(t, err)
 	}
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -673,7 +673,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 			dat[fmt.Sprintf("%d", keyNum)][txNum] = true
 		}
 		if txNum%d.aggregationStep == 0 {
-			err = d.Flush()
+			err = d.Rotate().Flush(tx)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -791,7 +791,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 				continue
 			}
 			step--
-			err = d.Flush()
+			err = d.Rotate().Flush(tx)
 			require.NoError(t, err)
 
 			collateAndMergeOnce(t, d, step)
@@ -803,7 +803,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			d.SetTx(tx)
 		}
 	}
-	err = d.Flush()
+	err = d.Rotate().Flush(tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)

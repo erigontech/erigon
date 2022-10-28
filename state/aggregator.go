@@ -1291,27 +1291,21 @@ func (a *Aggregator) FinishWrites() {
 
 // Flush - must be called before Collate, if you did some writes
 func (a *Aggregator) Flush() error {
+	// TODO: Add support of commitment!
+	flushers := []flusher{
+		a.accounts.Rotate(),
+		a.storage.Rotate(),
+		a.code.Rotate(),
+		a.logAddrs.Rotate(),
+		a.logTopics.Rotate(),
+		a.tracesFrom.Rotate(),
+		a.tracesTo.Rotate(),
+	}
 	defer func(t time.Time) { log.Info("[snapshots] hitory flush", "took", time.Since(t)) }(time.Now())
-	if err := a.accounts.Flush(); err != nil {
-		return err
-	}
-	if err := a.storage.Flush(); err != nil {
-		return err
-	}
-	if err := a.code.Flush(); err != nil {
-		return err
-	}
-	if err := a.logAddrs.Flush(); err != nil {
-		return err
-	}
-	if err := a.logTopics.Flush(); err != nil {
-		return err
-	}
-	if err := a.tracesFrom.Flush(); err != nil {
-		return err
-	}
-	if err := a.tracesTo.Flush(); err != nil {
-		return err
+	for _, f := range flushers {
+		if err := f.Flush(a.rwTx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
