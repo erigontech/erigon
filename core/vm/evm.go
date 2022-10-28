@@ -450,15 +450,6 @@ func (c *codeAndHash) Hash() common.Hash {
 	return c.hash
 }
 
-func (vmConfig *Config) HasEip3860() bool {
-	for _, eip := range vmConfig.ExtraEips {
-		if eip == 3860 {
-			return true
-		}
-	}
-	return false
-}
-
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, calltype CallType) ([]byte, common.Address, uint64, error) {
 	var ret []byte
@@ -494,7 +485,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, 0, err
 	}
 	// Check whether the init code size has been exceeded.
-	if evm.Config.HasEip3860() && len(codeAndHash.code) > params.MaxInitCodeSize {
+	if evm.chainRules.IsShanghai && len(codeAndHash.code) > params.MaxInitCodeSize {
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Create a new account on the state
