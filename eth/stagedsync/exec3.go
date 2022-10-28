@@ -245,7 +245,7 @@ func Exec3(ctx context.Context,
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					//prevTriggerCount = triggerCount
 					if rs.SizeEstimate() < commitThreshold {
-						if err := agg.Flush(); err != nil {
+						if err := agg.Flush(tx); err != nil {
 							panic(err)
 						}
 						break
@@ -297,7 +297,7 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						tx.CollectMetrics()
-						if err := agg.Flush(); err != nil {
+						if err := agg.Flush(tx); err != nil {
 							return err
 						}
 						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
@@ -458,7 +458,7 @@ loop:
 			if err := rs.Flush(applyTx); err != nil {
 				return err
 			}
-			if err := agg.Flush(); err != nil {
+			if err := agg.Flush(applyTx); err != nil {
 				return err
 			}
 			if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -505,7 +505,7 @@ loop:
 			if err = rs.Flush(tx); err != nil {
 				return err
 			}
-			if err = agg.Flush(); err != nil {
+			if err = agg.Flush(tx); err != nil {
 				return err
 			}
 			if err = execStage.Update(tx, stageProgress); err != nil {
@@ -519,7 +519,7 @@ loop:
 		if err = rs.Flush(applyTx); err != nil {
 			return err
 		}
-		if err = agg.Flush(); err != nil {
+		if err = agg.Flush(applyTx); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -867,7 +867,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = agg.Flush(); err != nil {
+							if err = agg.Flush(tx); err != nil {
 								return err
 							}
 							return nil
