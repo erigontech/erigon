@@ -41,7 +41,7 @@ func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
 	if newMemSize > 0x1FFFFFFFE0 {
 		return 0, ErrGasUintOverflow
 	}
-	newMemSizeWords := toWordSize(newMemSize)
+	newMemSizeWords := ToWordSize(newMemSize)
 	newMemSize = newMemSizeWords * 32
 
 	if newMemSize > uint64(mem.Len()) {
@@ -78,7 +78,7 @@ func memoryCopierGas(stackpos int) gasFunc {
 			return 0, ErrGasUintOverflow
 		}
 
-		if words, overflow = math.SafeMul(toWordSize(words), params.CopyGas); overflow {
+		if words, overflow = math.SafeMul(ToWordSize(words), params.CopyGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
 
@@ -261,7 +261,7 @@ func gasKeccak256(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory,
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if wordGas, overflow = math.SafeMul(toWordSize(wordGas), params.Keccak256WordGas); overflow {
+	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
@@ -295,7 +295,7 @@ func gasCreate2(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if wordGas, overflow = math.SafeMul(toWordSize(wordGas), params.Keccak256WordGas); overflow {
+	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
@@ -313,7 +313,7 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	lenWords := toWordSize(len)
+	lenWords := ToWordSize(len)
 	initCodeWordGas, overflow := math.SafeMul(lenWords, params.InitCodeWordGas)
 	if overflow {
 		return 0, ErrGasUintOverflow
@@ -333,7 +333,7 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	lenWords := toWordSize(len)
+	lenWords := ToWordSize(len)
 	hashingWordGas, overflow := math.SafeMul(lenWords, params.Keccak256WordGas)
 	if overflow {
 		return 0, ErrGasUintOverflow
