@@ -134,3 +134,21 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client ligh
 	//err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
 	return ssz_snappy.DecodeLightClientUpdate(message.Data)
 }
+
+func SendConsensusClientMetadataV1(ctx context.Context, client lightrpc.SentinelClient) (*cltypes.MetadataV1, error) {
+	message, err := client.SendRequest(ctx, &lightrpc.RequestData{
+		Topic: handlers.MetadataProtocolV1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if message.Error {
+		return nil, fmt.Errorf("message response contains error: %s", message.String())
+	}
+	response := &cltypes.MetadataV1{}
+	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
