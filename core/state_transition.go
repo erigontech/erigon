@@ -129,7 +129,7 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -140,9 +140,9 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 
 	// Auxiliary variables for overflow protection
 	var product, overflow uint64
-
+	dataLen := uint64(len(data))
 	// Bump the required gas by the amount of transactional data
-	if len(data) > 0 {
+	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
 		var nz uint64
 		for _, byt := range data {
@@ -165,7 +165,7 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 			return 0, ErrGasUintOverflow
 		}
 
-		z := uint64(len(data)) - nz
+		z := dataLen - nz
 		overflow, product = bits.Mul64(z, params.TxDataZeroGas)
 		if overflow != 0 {
 			return 0, ErrGasUintOverflow
@@ -173,6 +173,18 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		gas, overflow = bits.Add64(gas, product, 0)
 		if overflow != 0 {
 			return 0, ErrGasUintOverflow
+		}
+
+		if isContractCreation && isEIP3860 {
+			lenWords := vm.ToWordSize(dataLen)
+			overflow, product = bits.Mul64(lenWords, params.InitCodeWordGas)
+			if overflow != 0 {
+				return 0, ErrGasUintOverflow
+			}
+			gas, overflow = bits.Add64(gas, product, 0)
+			if overflow != 0 {
+				return 0, ErrGasUintOverflow
+			}
 		}
 	}
 	if accessList != nil {
@@ -391,7 +403,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
 	}
