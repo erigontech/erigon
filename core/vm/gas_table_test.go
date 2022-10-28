@@ -133,26 +133,26 @@ var createGasTests = []struct {
 func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
+		_, tx := memdb.NewTestTx(t)
 
-		statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-		statedb.CreateAccount(address)
-		statedb.SetCode(address, hexutil.MustDecode(tt.code))
-		statedb.Finalise(true)
+		s := state.New(state.NewPlainStateReader(tx))
+		s.CreateAccount(address, true)
+		s.SetCode(address, hexutil.MustDecode(tt.code))
+		_ = s.CommitBlock(params.AllEthashProtocolChanges.Rules(0), state.NewPlainStateWriter(tx, tx, 0))
 
 		vmctx := BlockContext{
-			CanTransfer: func(StateDB, common.Address, *big.Int) bool { return true },
-			Transfer:    func(StateDB, common.Address, common.Address, *big.Int) {},
-			BlockNumber: big.NewInt(0),
+			CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
+			Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
 		}
 		config := Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, config)
+		vmenv := NewEVM(vmctx, TxContext{}, s, params.AllEthashProtocolChanges, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, startGas, new(big.Int))
+		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
