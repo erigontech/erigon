@@ -342,15 +342,16 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
-
-			//if err := rs.Flush(tx); err != nil {
-			//	panic(err)
-			//}
-			//tx.CollectMetrics()
-			//if err := agg.Flush(); err != nil {
-			//	panic(err)
-			//}
-			//if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			if err = rs.Flush(tx); err != nil {
+				panic(err)
+			}
+			if err = agg.Flush(tx); err != nil {
+				panic(err)
+			}
+			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+				panic(err)
+			}
+			//if err = execStage.Update(tx, stageProgress); err != nil {
 			//	panic(err)
 			//}
 			//  TODO: why here is no flush?
@@ -501,20 +502,6 @@ loop:
 	}
 	if parallel {
 		wg.Wait()
-		if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
-			if err = rs.Flush(tx); err != nil {
-				return err
-			}
-			if err = agg.Flush(tx); err != nil {
-				return err
-			}
-			if err = execStage.Update(tx, stageProgress); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
 			return err
