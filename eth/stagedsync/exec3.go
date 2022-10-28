@@ -173,8 +173,8 @@ func Exec3(ctx context.Context,
 		}
 	}
 
-	commitThreshold := batchSize.Bytes() * 4
-	resultsThreshold := int64(batchSize.Bytes() * 4)
+	commitThreshold := batchSize.Bytes()
+	resultsThreshold := int64(batchSize.Bytes())
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -245,6 +245,9 @@ func Exec3(ctx context.Context,
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					//prevTriggerCount = triggerCount
 					if rs.SizeEstimate() < commitThreshold {
+						if err := agg.Flush(tx); err != nil {
+							panic(err)
+						}
 						break
 					}
 					cancelApplyCtx()
@@ -294,7 +297,7 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						tx.CollectMetrics()
-						if err := agg.Flush(); err != nil {
+						if err := agg.Flush(tx); err != nil {
 							return err
 						}
 						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
@@ -330,7 +333,7 @@ func Exec3(ctx context.Context,
 					log.Debug("can prune", "can", agg.CanPrune(tx))
 					if agg.CanPrune(tx) {
 						t := time.Now()
-						for time.Since(t) < time.Second {
+						for time.Since(t) < 2*time.Second {
 							log.Debug("do prune")
 							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
 								panic(err)
@@ -339,15 +342,16 @@ func Exec3(ctx context.Context,
 					}
 				}
 			}
-
-			//if err := rs.Flush(tx); err != nil {
-			//	panic(err)
-			//}
-			//tx.CollectMetrics()
-			//if err := agg.Flush(); err != nil {
-			//	panic(err)
-			//}
-			//if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			if err = rs.Flush(tx); err != nil {
+				panic(err)
+			}
+			if err = agg.Flush(tx); err != nil {
+				panic(err)
+			}
+			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+				panic(err)
+			}
+			//if err = execStage.Update(tx, stageProgress); err != nil {
 			//	panic(err)
 			//}
 			//  TODO: why here is no flush?
@@ -455,7 +459,7 @@ loop:
 			if err := rs.Flush(applyTx); err != nil {
 				return err
 			}
-			if err := agg.Flush(); err != nil {
+			if err := agg.Flush(applyTx); err != nil {
 				return err
 			}
 			if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -498,25 +502,11 @@ loop:
 	}
 	if parallel {
 		wg.Wait()
-		if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
-			if err = rs.Flush(tx); err != nil {
-				return err
-			}
-			if err = agg.Flush(); err != nil {
-				return err
-			}
-			if err = execStage.Update(tx, stageProgress); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
 			return err
 		}
-		if err = agg.Flush(); err != nil {
+		if err = agg.Flush(applyTx); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
@@ -820,7 +810,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].Run()
 	}
-	commitThreshold := batchSize.Bytes() * 4
+	commitThreshold := batchSize.Bytes()
 	prevCount := uint64(0)
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
@@ -864,7 +854,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = agg.Flush(); err != nil {
+							if err = agg.Flush(tx); err != nil {
 								return err
 							}
 							return nil
