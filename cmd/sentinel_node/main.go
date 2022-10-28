@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
@@ -40,6 +41,12 @@ func main() {
 			log.Warn("Fprintln error", "err", printErr)
 		}
 		os.Exit(1)
+	}
+}
+
+func constructBodyFreeRequest(t string) *lightrpc.RequestData {
+	return &lightrpc.RequestData{
+		Topic: t,
 	}
 }
 
@@ -64,12 +71,18 @@ func runSentinelNode(cliCtx *cli.Context) {
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 
+	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
+	if err != nil {
+		log.Error("Could not compute fork digeest", "err", err)
+		return
+	}
+	log.Info("Fork digest", "data", digest)
+
 	log.Info("Sending test request")
-	sendRequest(ctx, s, &lightrpc.RequestData{
-		// Topic: handlers.LightClientFinalityUpdateV1,
-		// Topic: handlers.MetadataProtocolV1,
-		Topic: handlers.MetadataProtocolV2,
-	})
+	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
+	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
+	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
+	sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
 }
 
 func debugGossip(ctx context.Context, s lightrpc.SentinelClient) {

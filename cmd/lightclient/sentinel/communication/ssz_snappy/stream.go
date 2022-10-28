@@ -27,6 +27,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
+var expectedForkDigest = [4]byte{74, 38, 197, 139}
+
 type StreamCodec struct {
 	s  network.Stream
 	sr *snappy.Reader
@@ -160,22 +162,38 @@ func getPrefixFromResponseType(val cltypes.ObjectSSZ) []byte {
 }
 
 func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
-	ln := val.SizeSSZ()
-	if _, err := r.Read(getPrefixFromResponseType(val)); err != nil {
+	forkDigest := make([]byte, 4)
+	if _, err := r.Read(forkDigest); err != nil {
 		return err
 	}
 
-	sr := snappy.NewReader(r)
-	raw := make([]byte, ln)
-	_, err := io.ReadFull(sr, raw)
+	// Assert fork digest is correct.
+	digestDiffer := bytes.Compare(forkDigest, expectedForkDigest[:])
+	if digestDiffer != 0 {
+		return fmt.Errorf("fork digest does not match: want %x, got %x", expectedForkDigest, forkDigest)
+	}
 
+	// Read varint for length of message.
+	encodedLn, err := readUvarint(r)
 	if err != nil {
-		return fmt.Errorf("readPacket: %w", err)
+		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+	}
+	expectedLn := val.SizeSSZ()
+	if encodedLn != uint64(expectedLn) {
+		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", expectedLn, encodedLn)
+	}
+
+	sr := snappy.NewReader(r)
+	raw := make([]byte, expectedLn)
+	if _, err := io.ReadFull(sr, raw); err != nil {
+		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
 	err = val.UnmarshalSSZ(raw)
-
-	return err
+	if err != nil {
+		return fmt.Errorf("enable to unmarshall message: %v", err)
+	}
+	return nil
 }
 
 func readUvarint(r io.Reader) (x uint64, err error) {
