@@ -3,9 +3,9 @@ package lightclient
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 
 	blst "github.com/supranational/blst/bindings/go"
