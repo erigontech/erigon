@@ -195,7 +195,9 @@ func Exec3(ctx context.Context,
 			return err
 		}
 
+		applyWg := sync.WaitGroup{}
 		applyLoop := func(ctx context.Context) {
+			defer applyWg.Done()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -233,6 +235,7 @@ func Exec3(ctx context.Context,
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
+			applyWg.Add(1)
 			go applyLoop(applyCtx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
@@ -251,6 +254,7 @@ func Exec3(ctx context.Context,
 						break
 					}
 					cancelApplyCtx()
+					applyWg.Wait()
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -314,6 +318,7 @@ func Exec3(ctx context.Context,
 						}
 
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						applyWg.Add(1)
 						go applyLoop(applyCtx)
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
