@@ -185,15 +185,15 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
-			if err = agg.Prune(ctx, agg.EndTxNumMinimax()); err != nil { // prune part of retired data, before commit
-				panic(err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+		//if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+		//	agg.SetTx(tx)
+		//	if err = agg.Prune(ctx, agg.EndTxNumMinimax()); err != nil { // prune part of retired data, before commit
+		//		panic(err)
+		//	}
+		//	return nil
+		//}); err != nil {
+		//	return err
+		//}
 
 		applyWg := sync.WaitGroup{}
 		applyLoop := func(ctx context.Context) {
