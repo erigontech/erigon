@@ -316,12 +316,12 @@ func Exec3(ctx context.Context,
 						if err = tx.Commit(); err != nil {
 							return err
 						}
+						for i := 0; i < len(reconWorkers); i++ {
+							reconWorkers[i].ResetTx(nil)
+						}
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
-						}
-						for i := 0; i < len(reconWorkers); i++ {
-							reconWorkers[i].ResetTx(nil)
 						}
 						agg.SetTx(tx)
 
