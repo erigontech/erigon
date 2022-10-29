@@ -849,9 +849,7 @@ func (d *Domain) deleteFiles(valuesOuts, indexOuts, historyOuts []*filesItem) er
 			return err
 		}
 		idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, out.startTxNum/d.aggregationStep, out.endTxNum/d.aggregationStep))
-		if err := os.Remove(idxPath); err != nil {
-			return err
-		}
+		_ = os.Remove(idxPath) // may not exist
 	}
 	return nil
 }
@@ -863,9 +861,7 @@ func (ii *InvertedIndex) deleteFiles(outs []*filesItem) error {
 			return err
 		}
 		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, out.startTxNum/ii.aggregationStep, out.endTxNum/ii.aggregationStep))
-		if err := os.Remove(idxPath); err != nil {
-			return err
-		}
+		_ = os.Remove(idxPath) // may not exist
 	}
 	return nil
 }
@@ -880,9 +876,7 @@ func (h *History) deleteFiles(indexOuts, historyOuts []*filesItem) error {
 			return err
 		}
 		idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, out.startTxNum/h.aggregationStep, out.endTxNum/h.aggregationStep))
-		if err := os.Remove(idxPath); err != nil {
-			return err
-		}
+		_ = os.Remove(idxPath) // may not exist
 	}
 	return nil
 }
