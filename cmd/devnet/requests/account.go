@@ -12,7 +12,7 @@ func GetBalance(reqId int, address common.Address, blockNum string) (uint64, err
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
-	if res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b); res.Err != nil {
+	if res := reqGen.Erigon("eth_getBalance", reqGen.GetBalance(address, blockNum), &b); res.Err != nil {
 		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 

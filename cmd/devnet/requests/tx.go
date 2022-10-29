@@ -11,7 +11,7 @@ func TxpoolContent(reqId int) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthTxPool
 
-	if res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b); res.Err != nil {
+	if res := reqGen.Erigon("txpool_content", reqGen.TxpoolContent(), &b); res.Err != nil {
 		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
