@@ -315,7 +315,12 @@ func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (idx *Index) DisableReadAhead() { _ = mmap.MadviseRandom(idx.mmapHandle1) }
+func (idx *Index) DisableReadAhead() {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return
+	}
+	_ = mmap.MadviseRandom(idx.mmapHandle1)
+}
 func (idx *Index) EnableReadAhead() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx

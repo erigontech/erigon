@@ -489,6 +489,7 @@ type historyWAL struct {
 	historyVals      *etl.Collector
 	tmpdir           string
 	autoIncrementBuf []byte
+	historyKey       []byte
 	autoIncrement    uint64
 	buffered         bool
 }
@@ -504,6 +505,7 @@ func (h *History) newWriter(tmpdir string) *historyWAL {
 	w := &historyWAL{h: h,
 		tmpdir:           tmpdir,
 		autoIncrementBuf: make([]byte, 8),
+		historyKey:       make([]byte, 0, 128),
 
 		buffered:    true,
 		historyVals: etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
@@ -564,7 +566,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	*/
 
 	lk := len(key1) + len(key2)
-	historyKey := make([]byte, lk+8)
+	historyKey := h.historyKey[:lk+8]
 	copy(historyKey, key1)
 	if len(key2) > 0 {
 		copy(historyKey[len(key1):], key2)
@@ -585,6 +587,8 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 				return err
 			}
 		}
+	} else {
+		binary.BigEndian.PutUint64(historyKey[lk:], 0)
 	}
 
 	if err := h.h.InvertedIndex.add(historyKey, historyKey[:lk]); err != nil {

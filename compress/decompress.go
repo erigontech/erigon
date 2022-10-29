@@ -382,7 +382,12 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (d *Decompressor) DisableReadAhead() { _ = mmap.MadviseRandom(d.mmapHandle1) }
+func (d *Decompressor) DisableReadAhead() {
+	if d == nil || d.mmapHandle1 == nil {
+		return
+	}
+	_ = mmap.MadviseRandom(d.mmapHandle1)
+}
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
