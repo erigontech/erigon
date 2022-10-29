@@ -108,15 +108,15 @@ func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot,
 	return responsePacket, err
 }
 
-func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client lightrpc.SentinelClient) (*cltypes.LightClientUpdate, error) {
+func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, count uint64, client lightrpc.SentinelClient) ([]*cltypes.LightClientUpdate, error) {
 	// This is approximately one day worth of data, we dont need to receive more than 1.
 	req := &cltypes.LightClientUpdatesByRangeRequest{
 		Period: period,
-		Count:  1,
+		Count:  count - 1,
 	}
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ssz_snappy writer: %w", err)
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
@@ -125,12 +125,12 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client ligh
 		Topic: handlers.LightClientUpdatesByRangeV1,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SendRequest: %w", err)
 	}
 	if message.Error {
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	//err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
-	return ssz_snappy.DecodeLightClientUpdate(message.Data)
+	// err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
+	return ssz_snappy.DecodeLightClientRangeUpdate(message.Data)
 }

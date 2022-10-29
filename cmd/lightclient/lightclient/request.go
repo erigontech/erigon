@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (l *LightClient) FetchUpdate(ctx context.Context, period uint64) (*cltypes.LightClientUpdate, error) {
+func (l *LightClient) FetchUpdate(ctx context.Context, period uint64, count uint64) ([]*cltypes.LightClientUpdate, error) {
 	log.Info("[Lightclient] Fetching Sync Committee Period", "period", period)
 	retryInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryInterval.Stop()
@@ -32,21 +32,22 @@ func (l *LightClient) FetchUpdate(ctx context.Context, period uint64) (*cltypes.
 		case <-retryInterval.C:
 			// Async request
 			go func() {
-				update, err := rpc.SendLightClientUpdatesReqV1(ctx, period, l.sentinel)
+				updates, err := rpc.SendLightClientUpdatesReqV1(ctx, period, count, l.sentinel)
 				if err != nil {
+					log.Warn("oops", "err", err)
 					log.Trace("[Checkpoint Sync] could not retrieve bootstrap", "err", err)
 					return
 				}
-				if update == nil {
+				if updates == nil {
 					return
 				}
 
-				store.Store(update)
+				store.Store(updates)
 			}()
 		case <-ctx.Done():
 			return nil, fmt.Errorf("context cancelled")
 		}
 	}
-	return store.Load().(*cltypes.LightClientUpdate), nil
+	return store.Load().([]*cltypes.LightClientUpdate), nil
 
 }

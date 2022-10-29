@@ -16,6 +16,7 @@ package lightclient
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -84,25 +85,27 @@ func (l *LightClient) Start() {
 		// if finalized period == optimistic period and the next sync committee is unknown,
 		// fetch the corresponding lightclient update for this cycle
 		case finalizedPeriod == optimisticPeriod && l.store.nextSyncCommittee == nil:
-			update, err := l.FetchUpdate(l.ctx, finalizedPeriod)
+			update, err := l.FetchUpdate(l.ctx, finalizedPeriod, 1)
 			if err != nil {
 				log.Error("[LightClient] Could not fetch lightclient update", "reason", err)
 			} else {
-				updates = append(updates, update)
+				fmt.Println("UPDATE", update)
+				updates = append(updates, update...)
 			}
 		// Clause 4 (ii):
 		// When finalized_period + 1 < current_period, the light client fetches a LightClientUpdate
 		// for each sync committee period in range [finalized_period + 1, current_period)
 		case finalizedPeriod+1 < currentPeriod:
-			for period := finalizedPeriod + 1; period < currentPeriod; period++ {
-				update, err := l.FetchUpdate(l.ctx, period)
-				if err != nil {
-					log.Error("[LightClient] Could not fetch lightclient update, truncating sync session...",
-						"period", period, "reason", err)
-					break
-				} else {
-					updates = append(updates, update)
-				}
+			count := currentPeriod - finalizedPeriod
+			period := finalizedPeriod + 1
+			log.Info("COUNT", "count", count)
+			rangeUpdates, err := l.FetchUpdate(l.ctx, period, count)
+			if err != nil {
+				log.Error("[LightClient] Could not fetch lightclient update, truncating sync session...",
+					"period", period, "reason", err)
+			} else {
+				log.Info("Done", "count", count, "gotBack", len(rangeUpdates))
+				updates = append(updates, rangeUpdates...)
 			}
 		// Clause 4 (iii):
 		// When finalized_period + 1 >= current_period, the light client keeps observing LightClientFinalityUpdate and LightClientOptimisticUpdate.

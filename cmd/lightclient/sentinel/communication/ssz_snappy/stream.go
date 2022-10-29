@@ -198,6 +198,38 @@ func readUvarint(r io.Reader) (x uint64, err error) {
 	return 0, nil
 }
 
+func DecodeLightClientRangeUpdate(data []byte) ([]*cltypes.LightClientUpdate, error) {
+	updateSize := (&cltypes.LightClientUpdate{}).SizeSSZ()
+	initialPoint := 7
+	r := bytes.NewReader(data[initialPoint:])
+	sr := snappy.NewReader(r)
+
+	amountOfUpdates := len(data[initialPoint:]) / updateSize
+	fmt.Println("Amount of updates", amountOfUpdates)
+	var lightclientUpdates []*cltypes.LightClientUpdate
+
+	for i := 0; i < amountOfUpdates; i++ {
+		resp := &cltypes.LightClientUpdate{}
+		raw := make([]byte, updateSize)
+
+		if _, err := sr.Read(raw); err != nil {
+			return nil, fmt.Errorf("readPacket: %w", err)
+		}
+
+		if err := resp.UnmarshalSSZ(raw); err != nil {
+			return nil, fmt.Errorf("unmarshalling: %w", err)
+		}
+
+		lightclientUpdates = append(lightclientUpdates, resp)
+		initialPoint += updateSize
+
+		r.Reset(data[initialPoint:])
+		sr.Reset(r)
+	}
+
+	return lightclientUpdates, nil
+}
+
 func DecodeLightClientUpdate(data []byte) (*cltypes.LightClientUpdate, error) {
 	resp := &cltypes.LightClientUpdate{}
 	singleLen := resp.SizeSSZ()
