@@ -269,6 +269,9 @@ func (h *History) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles 
 				panic("must not happen")
 			}
 		}
+		if r.index && len(indexFiles) != len(historyFiles) {
+			log.Warn("something wrong with files for merge", "idx", fmt.Sprintf("%+v", indexFiles), "hist", fmt.Sprintf("%+v", historyFiles))
+		}
 	}
 	return
 }
