@@ -109,7 +109,7 @@ func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.Str
 		Protocol: d.s.Protocol(),
 	}
 	if val, ok := p.(ssz.Unmarshaler); ok {
-		ln, err := readUvarint(d.s)
+		ln, _, err := readUvarint(d.s)
 		if err != nil {
 			return c, err
 		}
@@ -158,7 +158,7 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	}
 
 	// Read varint for length of message.
-	encodedLn, err := readUvarint(r)
+	encodedLn, _, err := readUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
@@ -180,41 +180,94 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	return nil
 }
 
-func readUvarint(r io.Reader) (x uint64, err error) {
+func readUvarint(r io.Reader) (x, n uint64, err error) {
 	currByte := make([]byte, 1)
 	for shift := uint(0); shift < 64; shift += 7 {
 		_, err := r.Read(currByte)
+		n++
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		b := uint64(currByte[0])
 		x |= (b & 0x7F) << shift
 		if (b & 0x80) == 0 {
-			return x, nil
+			return x, n, nil
 		}
 	}
 
 	// The number is too large to represent in a 64-bit value.
-	return 0, nil
+	return 0, n, nil
 }
 
-func DecodeLightClientUpdate(data []byte) (*cltypes.LightClientUpdate, error) {
-	resp := &cltypes.LightClientUpdate{}
-	singleLen := resp.SizeSSZ()
-	r := bytes.NewReader(data[7:])
+func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
+	objSize := list[0].SizeSSZ()
+
+	r := bytes.NewReader(data)
+	forkDigest := make([]byte, 4)
+	// TODO(issues/5884): assert the fork digest matches the expectation for
+	// a specific configuration.
+	if _, err := r.Read(forkDigest); err != nil {
+		return err
+	}
+
+	// Read varint for length of message.
+	encodedLn, bytesCount, err := readUvarint(r)
+	if err != nil {
+		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+	}
+	pos := 4 + bytesCount
+	if encodedLn != uint64(objSize) || len(list) != int(count) {
+		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
+	}
 
 	sr := snappy.NewReader(r)
-	raw := make([]byte, singleLen)
+	for i := 0; i < int(count); i++ {
+		var n int
+		raw := make([]byte, objSize)
+		if n, err = sr.Read(raw); err != nil {
+			return fmt.Errorf("readPacket: %w", err)
+		}
+		pos += uint64(n)
 
-	_, err := sr.Read(raw)
-	if err != nil {
-		return nil, fmt.Errorf("readPacket: %w", err)
+		if err := list[i].UnmarshalSSZ(raw); err != nil {
+			return fmt.Errorf("unmarshalling: %w", err)
+		}
+		r.Reset(data[pos:])
+		sr.Reset(r)
 	}
 
-	err = resp.UnmarshalSSZ(raw)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return nil
 }
+
+/*
+	updateSize := (&cltypes.LightClientUpdate{}).SizeSSZ()
+	initialPoint := 7
+	r := bytes.NewReader(data[initialPoint:])
+	sr := snappy.NewReader(r)
+
+	amountOfUpdates := len(data[initialPoint:]) / updateSize
+	fmt.Println("Amount of updates", amountOfUpdates)
+	var lightclientUpdates []*cltypes.LightClientUpdate
+
+	for i := 0; i < amountOfUpdates; i++ {
+		resp := &cltypes.LightClientUpdate{}
+		raw := make([]byte, updateSize)
+
+		if _, err := sr.Read(raw); err != nil {
+			return nil, fmt.Errorf("readPacket: %w", err)
+		}
+
+		if err := resp.UnmarshalSSZ(raw); err != nil {
+			return nil, fmt.Errorf("unmarshalling: %w", err)
+		}
+
+		lightclientUpdates = append(lightclientUpdates, resp)
+		initialPoint += updateSize
+
+		r.Reset(data[initialPoint:])
+		sr.Reset(r)
+	}
+
+	return lightclientUpdates, nil
+}
+*/
