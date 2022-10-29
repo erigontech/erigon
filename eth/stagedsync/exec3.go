@@ -396,7 +396,7 @@ loop:
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
 				Rules:        rules,
-				Header:       b.Header(),
+				Header:       header,
 				Txs:          txs,
 				Uncles:       b.Uncles(),
 				TxNum:        inputTxNum,
@@ -650,7 +650,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
 		Flags(func(u uint) uint {
-			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.Exclusive | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap | mdbx.NoSubdir
+			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
 		WriteMergeThreshold(8192).
 		PageSize(uint64(16 * datasize.KB)).
@@ -919,7 +919,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
-		syncMetrics[stages.Execution].Set(blockNum)
+		syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()
