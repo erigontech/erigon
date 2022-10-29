@@ -849,9 +849,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = agg.Flush(tx); err != nil {
-								return err
-							}
+							//if err = agg.Flush(tx); err != nil {
+							//	return err
+							//}
 							return nil
 						}); err != nil {
 							return err
