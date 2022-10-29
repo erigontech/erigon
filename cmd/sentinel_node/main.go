@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -23,12 +24,15 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
+	"github.com/ledgerwatch/erigon/common"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/urfave/cli"
+	"go.uber.org/zap/buffer"
 
 	"github.com/ledgerwatch/log/v3"
 )
@@ -48,6 +52,19 @@ func constructBodyFreeRequest(t string) *lightrpc.RequestData {
 	return &lightrpc.RequestData{
 		Topic: t,
 	}
+}
+
+func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*lightrpc.RequestData, error) {
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
+		return nil, fmt.Errorf("unable to encode request body: %v", err)
+	}
+
+	data := common.CopyBytes(buffer.Bytes())
+	return &lightrpc.RequestData{
+		Data:  data,
+		Topic: t,
+	}, nil
 }
 
 func runSentinelNode(cliCtx *cli.Context) {
@@ -82,7 +99,17 @@ func runSentinelNode(cliCtx *cli.Context) {
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
-	sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+
+	lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+		Period: 604,
+		Count:  1,
+	}
+	req, err := constructRequest(handlers.LightClientUpdatesByRangeV1, lcUpdateReq)
+	if err != nil {
+		log.Error("could not construct request", "err", err)
+	}
+	sendRequest(ctx, s, req)
 }
 
 func debugGossip(ctx context.Context, s lightrpc.SentinelClient) {
@@ -126,6 +153,7 @@ func sendRequest(ctx context.Context, s lightrpc.SentinelClient, req *lightrpc.R
 				}
 
 				log.Info("Non-error response received", "data", message.Data)
+				log.Info("Hex representation", "data", hex.EncodeToString(message.Data))
 			}()
 		}
 	}

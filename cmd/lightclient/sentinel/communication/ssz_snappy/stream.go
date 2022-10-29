@@ -15,7 +15,6 @@ package ssz_snappy
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -196,25 +195,4 @@ func readUvarint(r io.Reader) (x uint64, err error) {
 
 	// The number is too large to represent in a 64-bit value.
 	return 0, nil
-}
-
-func DecodeLightClientUpdate(data []byte) (*cltypes.LightClientUpdate, error) {
-	resp := &cltypes.LightClientUpdate{}
-	singleLen := resp.SizeSSZ()
-	r := bytes.NewReader(data[7:])
-
-	sr := snappy.NewReader(r)
-	raw := make([]byte, singleLen)
-
-	_, err := sr.Read(raw)
-	if err != nil {
-		return nil, fmt.Errorf("readPacket: %w", err)
-	}
-
-	err = resp.UnmarshalSSZ(raw)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
 }
