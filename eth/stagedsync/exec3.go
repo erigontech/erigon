@@ -185,17 +185,9 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
-			if err = agg.Prune(ctx, agg.EndTxNumMinimax()); err != nil { // prune part of retired data, before commit
-				panic(err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-
+		applyWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 		applyLoop := func(ctx context.Context) {
+			defer applyWg.Done()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -233,6 +225,7 @@ func Exec3(ctx context.Context,
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
+			applyWg.Add(1)
 			go applyLoop(applyCtx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
@@ -243,7 +236,6 @@ func Exec3(ctx context.Context,
 					rwsLock.RUnlock()
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
-					//prevTriggerCount = triggerCount
 					if rs.SizeEstimate() < commitThreshold {
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
@@ -251,6 +243,7 @@ func Exec3(ctx context.Context,
 						break
 					}
 					cancelApplyCtx()
+					applyWg.Wait()
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -312,17 +305,19 @@ func Exec3(ctx context.Context,
 						if err = tx.Commit(); err != nil {
 							return err
 						}
-
-						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						go applyLoop(applyCtx)
+						for i := 0; i < len(reconWorkers); i++ {
+							reconWorkers[i].ResetTx(nil)
+						}
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
-						for i := 0; i < len(reconWorkers); i++ {
-							reconWorkers[i].ResetTx(nil)
-						}
 						agg.SetTx(tx)
+
+						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						applyWg.Add(1)
+						go applyLoop(applyCtx)
+
 						return nil
 					}()
 					if err != nil {
