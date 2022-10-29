@@ -317,10 +317,6 @@ func Exec3(ctx context.Context,
 							return err
 						}
 
-						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						applyWg.Add(1)
-						go applyLoop(applyCtx)
-
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
@@ -328,6 +324,11 @@ func Exec3(ctx context.Context,
 							reconWorkers[i].ResetTx(nil)
 						}
 						agg.SetTx(tx)
+
+						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						applyWg.Add(1)
+						go applyLoop(applyCtx)
+
 						return nil
 					}()
 					if err != nil {
