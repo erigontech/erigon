@@ -574,6 +574,7 @@ func (mf MergedFiles) Close() {
 }
 
 func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, r Ranges, maxSpan uint64) (MergedFiles, error) {
+	defer func(t time.Time) { log.Info("[snapshots] merge", "took", time.Since(t)) }(time.Now())
 	var mf MergedFiles
 	closeFiles := true
 	defer func() {
