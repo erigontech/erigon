@@ -761,7 +761,7 @@ func (ii *InvertedIndex) collate(txFrom, txTo uint64, roTx kv.Tx, logEvery *time
 
 		select {
 		case <-logEvery.C:
-			log.Info("[snapshots] collate history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txNum)/1_000_000, float64(txTo)/1_000_000))
+			log.Info("[snapshots] collate history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 			bitmap.RunOptimize()
 		default:
 		}
@@ -947,7 +947,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 		}
 		select {
 		case <-logEvery.C:
-			log.Info("[snapshots] prune history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2fm-%.2fm", float64(txNum)/1_000_000, float64(txTo)/1_000_000))
+			log.Info("[snapshots] prune history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 		default:
 		}
 	}
