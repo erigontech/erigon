@@ -236,7 +236,6 @@ func Exec3(ctx context.Context,
 					rwsLock.RUnlock()
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
-					//prevTriggerCount = triggerCount
 					if rs.SizeEstimate() < commitThreshold {
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
