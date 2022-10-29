@@ -149,33 +149,35 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return err
 }
 
-func getPrefixFromResponseType(val cltypes.ObjectSSZ) []byte {
-	if _, ok := val.(*cltypes.LightClientBootstrap); ok {
-		return make([]byte, 7)
-	}
-	if val.SizeSSZ() <= 16 {
-		return []byte{0x08}
-	}
-	return []byte{0x4a, 0x26, 0xc5, 0x8b, 0xc8, 0x04}
-}
-
 func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
-	ln := val.SizeSSZ()
-	if _, err := r.Read(getPrefixFromResponseType(val)); err != nil {
+	forkDigest := make([]byte, 4)
+	// TODO(issues/5884): assert the fork digest matches the expectation for
+	// a specific configuration.
+	if _, err := r.Read(forkDigest); err != nil {
 		return err
 	}
 
-	sr := snappy.NewReader(r)
-	raw := make([]byte, ln)
-	_, err := io.ReadFull(sr, raw)
-
+	// Read varint for length of message.
+	encodedLn, err := readUvarint(r)
 	if err != nil {
-		return fmt.Errorf("readPacket: %w", err)
+		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+	}
+	expectedLn := val.SizeSSZ()
+	if encodedLn != uint64(expectedLn) {
+		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", expectedLn, encodedLn)
+	}
+
+	sr := snappy.NewReader(r)
+	raw := make([]byte, expectedLn)
+	if _, err := io.ReadFull(sr, raw); err != nil {
+		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
 	err = val.UnmarshalSSZ(raw)
-
-	return err
+	if err != nil {
+		return fmt.Errorf("enable to unmarshall message: %v", err)
+	}
+	return nil
 }
 
 func readUvarint(r io.Reader) (x uint64, err error) {
