@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -22,14 +23,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
-
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
+	"github.com/ledgerwatch/erigon/common"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/urfave/cli"
+	"go.uber.org/zap/buffer"
 
 	"github.com/ledgerwatch/log/v3"
 )
@@ -49,6 +52,19 @@ func constructBodyFreeRequest(t string) *consensusrpc.RequestData {
 	return &consensusrpc.RequestData{
 		Topic: t,
 	}
+}
+
+func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*consensusrpc.RequestData, error) {
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
+		return nil, fmt.Errorf("unable to encode request body: %v", err)
+	}
+
+	data := common.CopyBytes(buffer.Bytes())
+	return &consensusrpc.RequestData{
+		Data:  data,
+		Topic: t,
+	}, nil
 }
 
 func runSentinelNode(cliCtx *cli.Context) {
@@ -83,7 +99,17 @@ func runSentinelNode(cliCtx *cli.Context) {
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
-	sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+
+	lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+		Period: 604,
+		Count:  1,
+	}
+	req, err := constructRequest(handlers.LightClientUpdatesByRangeV1, lcUpdateReq)
+	if err != nil {
+		log.Error("could not construct request", "err", err)
+	}
+	sendRequest(ctx, s, req)
 }
 
 func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
@@ -127,6 +153,7 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 				}
 
 				log.Info("Non-error response received", "data", message.Data)
+				log.Info("Hex representation", "data", hex.EncodeToString(message.Data))
 			}()
 		}
 	}

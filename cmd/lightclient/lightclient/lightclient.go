@@ -120,7 +120,8 @@ func (l *LightClient) Start() {
 			err := l.processLightClientUpdate(update)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
-				continue
+				updates = []*cltypes.LightClientUpdate{}
+				break
 			}
 		}
 		// log new validated segment

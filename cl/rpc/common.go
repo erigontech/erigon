@@ -65,8 +65,10 @@ func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client consensusrpc.
 		return nil, nil
 	}
 
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
-	return responsePacket, err
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
 }
 
 func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client consensusrpc.SentinelClient) (*cltypes.LightClientOptimisticUpdate, error) {
@@ -83,8 +85,10 @@ func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client consensusr
 		return nil, nil
 	}
 
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
-	return responsePacket, err
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
 }
 
 func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot, client consensusrpc.SentinelClient) (*cltypes.LightClientBootstrap, error) {
@@ -105,8 +109,10 @@ func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot,
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
-	return responsePacket, err
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
 }
 
 func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client consensusrpc.SentinelClient) (*cltypes.LightClientUpdate, error) {
@@ -120,6 +126,8 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 		return nil, err
 	}
 
+	responsePacket := &cltypes.LightClientUpdate{}
+
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
 		Data:  data,
@@ -132,6 +140,8 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	//err = ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket)
-	return ssz_snappy.DecodeLightClientUpdate(message.Data)
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
 }
