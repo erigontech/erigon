@@ -187,6 +187,9 @@ func Exec3(ctx context.Context,
 	if parallel {
 		applyWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 		applyLoop := func(ctx context.Context) {
+			log.Info("[exec] applyLoop: start")
+			defer log.Info("[exec] applyLoop: end")
+
 			defer applyWg.Done()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
@@ -247,8 +250,11 @@ func Exec3(ctx context.Context,
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
+						log.Info("[exec] commit: start")
+						defer log.Info("[exec] commit: end")
 						rwsLock.Lock()
 						defer rwsLock.Unlock()
+						log.Info("[exec] commit: process last")
 						// Drain results (and process) channel because read sets do not carry over
 						for {
 							var drained bool
@@ -267,8 +273,10 @@ func Exec3(ctx context.Context,
 							}
 						}
 						rwsReceiveCond.Signal()
+						log.Info("[exec] commit: drain")
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
+						log.Info("[exec] commit: drain2")
 						// Drain results channel because read sets do not carry over
 						var drained bool
 						for !drained {
@@ -286,6 +294,7 @@ func Exec3(ctx context.Context,
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
+						log.Info("[exec] commit: flush")
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
@@ -297,18 +306,20 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						if idxStepsInDB(tx) > 3 {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
-								return err
-							}
-						}
+						//if idxStepsInDB(tx) > 3 {
+						//if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+						//	return err
+						//}
+						//}
+						log.Info("[exec] commit: commit")
 						if err = tx.Commit(); err != nil {
 							return err
 						}
+						log.Info("[exec] commit: reset.ro.tx")
 						for i := 0; i < len(reconWorkers); i++ {
 							reconWorkers[i].ResetTx(nil)
 						}
-
+						log.Info("[exec] commit: begin.rw")
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
@@ -316,6 +327,7 @@ func Exec3(ctx context.Context,
 
 						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 						applyWg.Add(1)
+						log.Info("[exec] commit: run.applyLoop")
 						go applyLoop(applyCtx)
 
 						return nil
