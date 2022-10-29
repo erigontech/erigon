@@ -431,32 +431,46 @@ func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, 
 	return nil
 }
 
-func (a *Aggregator22) Merge(ctx context.Context) error {
+func (a *Aggregator22) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	closeAll := true
 	maxSpan := uint64(32) * a.aggregationStep
-	for r := a.findMergeRange(a.maxTxNum.Load(), maxSpan); r.any(); r = a.findMergeRange(a.maxTxNum.Load(), maxSpan) {
-		outs := a.staticFilesInRange(r)
-		defer func() {
-			if closeAll {
-				outs.Close()
-			}
-		}()
-		in, err := a.mergeFiles(ctx, outs, r, maxSpan)
+	r := a.findMergeRange(a.maxTxNum.Load(), maxSpan)
+	if !r.any() {
+		return false, nil
+	}
+
+	outs := a.staticFilesInRange(r)
+	defer func() {
+		if closeAll {
+			outs.Close()
+		}
+	}()
+	in, err := a.mergeFiles(ctx, outs, r, maxSpan)
+	if err != nil {
+		return true, err
+	}
+	defer func() {
+		if closeAll {
+			in.Close()
+		}
+	}()
+	a.integrateMergedFiles(outs, in)
+	if err = a.deleteFiles(outs); err != nil {
+		return true, err
+	}
+	closeAll = false
+	return true, nil
+}
+func (a *Aggregator22) MergeLoop(ctx context.Context) error {
+	for {
+		somethingMerged, err := a.mergeLoopStep(ctx)
 		if err != nil {
 			return err
 		}
-		defer func() {
-			if closeAll {
-				in.Close()
-			}
-		}()
-		a.integrateMergedFiles(outs, in)
-		if err = a.deleteFiles(outs); err != nil {
-			return err
+		if !somethingMerged {
+			return nil
 		}
 	}
-	closeAll = false
-	return nil
 }
 
 func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo uint64) {
@@ -964,9 +978,9 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 	a.working.Store(true)
 	go func() {
 		defer a.working.Store(false)
-		// trying to create as much small step files as possible:
+		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
-		// - to reduce amount of data in db as early as possible
+		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep {
 			if err := a.buildFilesInBackground(context.Background(), step, db); err != nil {
@@ -975,7 +989,10 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 			}
 			step++
 		}
-		if err := a.Merge(context.Background()); err != nil {
+		// trying to create as much small-step-files as possible:
+		// - this is reason why run only 1 merge round at a time
+		// - to remove old data from db as early as possible
+		if _, err := a.mergeLoopStep(context.Background()); err != nil {
 			log.Warn("merge", "err", err)
 		}
 	}()
