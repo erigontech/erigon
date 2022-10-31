@@ -38,3 +38,46 @@ func TestUniqueIDFromEnode(t *testing.T) {
 		}
 	}
 }
+
+func TestParseResponse(t *testing.T) {
+	type Person struct {
+		Name string
+		Age  int
+	}
+
+	testCases := []struct {
+		input    interface{}
+		expected string
+	}{
+		{
+			Person{
+				Name: "Leonard",
+				Age:  10,
+			},
+			`{"Name":"Leonard","Age":10}`,
+		},
+		{
+			struct {
+				Person struct {
+					Name string
+					Age  int
+				}
+				WorkID string
+			}{
+				Person: Person{
+					Name: "Uzi",
+					Age:  23,
+				},
+				WorkID: "123456",
+			},
+			`{"Person":{"Name":"Uzi","Age":23},"WorkID":"123456"}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		got, _ := ParseResponse(testCase.input)
+		if got != testCase.expected {
+			t.Errorf("expected: %v, got %v", testCase.expected, got)
+		}
+	}
+}

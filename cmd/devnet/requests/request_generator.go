@@ -67,12 +67,12 @@ func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, respon
 	return req.call(models.ErigonUrl, string(method), body, response)
 }
 
-func (req *RequestGenerator) getAdminNodeInfo() string {
+func (req *RequestGenerator) GetAdminNodeInfo() string {
 	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
 	return fmt.Sprintf(template, models.AdminNodeInfo, req.reqID)
 }
 
-func (req *RequestGenerator) getBalance(address common.Address, blockNum models.BlockNumber) string {
+func (req *RequestGenerator) GetBalance(address common.Address, blockNum models.BlockNumber) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
 }
@@ -87,7 +87,7 @@ func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
 	return fmt.Sprintf(template, models.ETHSendRawTransaction, signedTx, req.reqID)
 }
 
-func (req *RequestGenerator) txpoolContent() string {
+func (req *RequestGenerator) TxpoolContent() string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
 	return fmt.Sprintf(template, models.TxpoolContent, req.reqID)
 }

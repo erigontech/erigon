@@ -3,7 +3,7 @@ package lightclient
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
 type LightClientStore struct {

@@ -150,7 +150,7 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 				if err != nil {
 					panic(err)
 				}
-				if err := agg.Flush(); err != nil {
+				if err := agg.Flush(tx); err != nil {
 					panic(err)
 				}
 			}

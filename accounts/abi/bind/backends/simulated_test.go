@@ -64,7 +64,7 @@ func TestSimulatedBackend(t *testing.T) {
 	// generate a transaction and confirm you can retrieve it
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, key)
 
@@ -126,12 +126,12 @@ func TestNewSimulatedBackend(t *testing.T) {
 	expectedBal := uint256.NewInt(10000000000)
 	sim := simTestBackend(t, testAddr)
 
-	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
+	if sim.m.ChainConfig != params.TestChainConfig {
+		t.Errorf("expected sim config to equal params.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
 
-	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
+	if sim.m.ChainConfig != params.TestChainConfig {
+		t.Errorf("expected sim blockchain config to equal params.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
 	tx, err1 := sim.DB().BeginRo(context.Background())
 	if err1 != nil {
@@ -175,7 +175,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	// Create tx and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -298,7 +298,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -339,7 +339,7 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -373,7 +373,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -681,7 +681,7 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -736,7 +736,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -791,7 +791,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
@@ -843,7 +843,7 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
