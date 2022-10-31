@@ -301,11 +301,11 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						//if idxStepsInDB(tx) > 4 {
-						//	if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
-						//		return err
-						//	}
-						//}
+						if idxStepsInDB(tx) > 4 {
+							if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
+								return err
+							}
+						}
 						if err = tx.Commit(); err != nil {
 							return err
 						}
