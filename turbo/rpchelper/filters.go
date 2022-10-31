@@ -439,7 +439,7 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	}
 
 	addresses, topics := ff.logsSubs.getAggMaps()
-
+	
 	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
