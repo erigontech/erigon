@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -64,23 +63,33 @@ func (req *RequestGenerator) call(target string, method, body string, response i
 	}
 }
 
-func (req *RequestGenerator) Erigon(method, body string, response interface{}) rpctest.CallResult {
-	return req.call(models.ErigonUrl, method, body, response)
+func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, response interface{}) rpctest.CallResult {
+	return req.call(models.ErigonUrl, string(method), body, response)
 }
 
 func (req *RequestGenerator) GetAdminNodeInfo() string {
-	const template = `{"jsonrpc":"2.0","method":"admin_nodeInfo","id":%d}`
-	return fmt.Sprintf(template, req.reqID)
+	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
+	return fmt.Sprintf(template, models.AdminNodeInfo, req.reqID)
 }
 
-func (req *RequestGenerator) GetBalance(address common.Address, blockNum string) string {
-	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x","%v"],"id":%d}`
-	return fmt.Sprintf(template, address, blockNum, req.reqID)
+func (req *RequestGenerator) GetBalance(address common.Address, blockNum models.BlockNumber) string {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) GetTransactionCount(address common.Address, blockNum models.BlockNumber) string {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHGetTransactionCount, address, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) SendRawTransaction(signedTx []byte) string {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
+	return fmt.Sprintf(template, models.ETHSendRawTransaction, signedTx, req.reqID)
 }
 
 func (req *RequestGenerator) TxpoolContent() string {
-	const template = `{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":%d}`
-	return fmt.Sprintf(template, req.reqID)
+	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
+	return fmt.Sprintf(template, models.TxpoolContent, req.reqID)
 }
 
 func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
