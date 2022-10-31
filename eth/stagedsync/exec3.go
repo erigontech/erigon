@@ -381,17 +381,17 @@ loop:
 		header := b.HeaderNoCopy()
 		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		if parallel {
-			func() {
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-					rwsReceiveCond.Wait()
-				}
-			}()
-		}
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			if parallel {
+				func() {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+						rwsReceiveCond.Wait()
+					}
+				}()
+			}
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
