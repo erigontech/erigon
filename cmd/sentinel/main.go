@@ -101,11 +101,17 @@ func runSentinelNode(cliCtx *cli.Context) {
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
 
-	lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
-		Period: 604,
-		Count:  1,
+	// lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+	// 	Period: 604,
+	// 	Count:  1,
+	// }
+
+	blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
+		StartSlot: 100000, // arbitrary slot (currently at ~5030000)
+		Count:     2,      // just need two blocks to verify correctness.
+		Step:      1,      // deprecated, must be set to 1.
 	}
-	req, err := constructRequest(handlers.LightClientUpdatesByRangeV1, lcUpdateReq)
+	req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV1, blocksByRangeReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
 	}

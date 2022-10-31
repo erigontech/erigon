@@ -44,13 +44,13 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *cltypes.
 		metadata: metadata,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, c.pingHandler),
-		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.statusHandler),
-		protocol.ID(MetadataProtocolV1):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
-		protocol.ID(MetadataProtocolV2):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
-		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
-		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
+		protocol.ID(PingProtocolV1):                curryStreamHandler(ssz_snappy.NewStreamCodec, c.pingHandler),
+		protocol.ID(GoodbyeProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
+		protocol.ID(StatusProtocolV1):              curryStreamHandler(ssz_snappy.NewStreamCodec, c.statusHandler),
+		protocol.ID(MetadataProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
+		protocol.ID(MetadataProtocolV2):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
+		protocol.ID(BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
+		protocol.ID(BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
 	return c
 }
