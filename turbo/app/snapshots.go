@@ -392,7 +392,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
-	if err = agg.MergeLoop(ctx); err != nil {
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
 
