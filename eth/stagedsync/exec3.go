@@ -334,11 +334,6 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
-					log.Info("prune every tick")
-					if err := agg.BuildFilesInBackground(chainDb); err != nil {
-						panic(err)
-					}
-					log.Info("prune every tick2")
 					if agg.CanPrune(tx) {
 						log.Info("prune every tick3")
 						pruneCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -503,10 +498,8 @@ loop:
 		default:
 		}
 
-		if !parallel {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				panic(err)
-			}
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
+			return err
 		}
 	}
 	if parallel {
