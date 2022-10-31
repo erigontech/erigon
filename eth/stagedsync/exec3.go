@@ -176,7 +176,7 @@ func Exec3(ctx context.Context,
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
 	progress := NewProgress(block, commitThreshold)
-	logEvery := time.NewTicker(10 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(3100 * time.Millisecond)
 	defer pruneEvery.Stop()
