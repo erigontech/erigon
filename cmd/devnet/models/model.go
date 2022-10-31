@@ -70,6 +70,10 @@ const (
 
 	// Latest is the parameter for the latest block
 	Latest BlockNumber = "latest"
+	// Earliest is the parameter for the earliest block
+	Earliest BlockNumber = "earliest"
+	// Pending is the parameter for the pending block
+	Pending BlockNumber = "pending"
 
 	// hexPrivateKey is the hex value for the private key
 	hexPrivateKey = "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48"

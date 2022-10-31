@@ -77,12 +77,12 @@ func (req *RequestGenerator) GetBalance(address common.Address, blockNum models.
 	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
 }
 
-func (req *RequestGenerator) getTransactionCount(address common.Address, blockNum models.BlockNumber) string {
+func (req *RequestGenerator) GetTransactionCount(address common.Address, blockNum models.BlockNumber) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetTransactionCount, address, blockNum, req.reqID)
 }
 
-func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
+func (req *RequestGenerator) SendRawTransaction(signedTx []byte) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHSendRawTransaction, signedTx, req.reqID)
 }

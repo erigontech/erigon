@@ -26,7 +26,7 @@ func GetTransactionCount(reqId int, address common.Address, blockNum models.Bloc
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
-	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
+	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.GetTransactionCount(address, blockNum), &b); res.Err != nil {
 		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 
@@ -46,7 +46,7 @@ func SendTransaction(reqId int, signedTx *types.Transaction) (*common.Hash, erro
 		return nil, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if res := reqGen.Erigon(models.ETHSendRawTransaction, reqGen.sendRawTransaction(buf.Bytes()), &b); res.Err != nil {
+	if res := reqGen.Erigon(models.ETHSendRawTransaction, reqGen.SendRawTransaction(buf.Bytes()), &b); res.Err != nil {
 		return nil, fmt.Errorf("could not make to request to eth_sendRawTransaction: %v", res.Err)
 	}
 
