@@ -287,44 +287,18 @@ var (
 )
 
 func gasCreate2(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	gas, err := memoryGasCost(mem, memorySize)
-	if err != nil {
-		return 0, err
-	}
-	wordGas, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
-		return 0, ErrGasUintOverflow
-	}
-	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
-	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
-	return gas, nil
+	return gasCreateImplementation(stack, mem, memorySize, params.Keccak256WordGas)
 }
 
 func gasCreateEip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	gas, err := memoryGasCost(mem, memorySize)
-	if err != nil {
-		return 0, err
-	}
-	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
-		return 0, ErrGasUintOverflow
-	}
-	lenWords := ToWordSize(len)
-	initCodeWordGas, overflow := math.SafeMul(lenWords, params.InitCodeWordGas)
-	if overflow {
-		return 0, ErrGasUintOverflow
-	}
-	if gas, overflow = math.SafeAdd(gas, initCodeWordGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
-	return gas, nil
+	return gasCreateImplementation(stack, mem, memorySize, params.InitCodeWordGas)
 }
 
 func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return gasCreateImplementation(stack, mem, memorySize, params.Keccak256WordGas+params.InitCodeWordGas)
+}
+
+func gasCreateImplementation(stack *stack.Stack, mem *Memory, memorySize uint64, wordCost uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -333,19 +307,13 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	lenWords := ToWordSize(len)
-	hashingWordGas, overflow := math.SafeMul(lenWords, params.Keccak256WordGas)
+	numWords := ToWordSize(len)
+	wordGas, overflow := math.SafeMul(numWords, wordCost)
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if gas, overflow = math.SafeAdd(gas, hashingWordGas); overflow {
-		return 0, ErrGasUintOverflow
-	}
-	initCodeWordGas, overflow := math.SafeMul(lenWords, params.InitCodeWordGas)
+	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
-		return 0, ErrGasUintOverflow
-	}
-	if gas, overflow = math.SafeAdd(gas, initCodeWordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
