@@ -178,7 +178,7 @@ func Exec3(ctx context.Context,
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(3100 * time.Millisecond)
+	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
