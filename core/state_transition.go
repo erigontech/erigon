@@ -18,11 +18,11 @@ package core
 
 import (
 	"fmt"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -138,8 +138,6 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		gas = params.TxGas
 	}
 
-	// Auxiliary variables for overflow protection
-	var product, overflow uint64
 	dataLen := uint64(len(data))
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
@@ -156,53 +154,53 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 			nonZeroGas = params.TxDataNonZeroGasEIP2028
 		}
 
-		overflow, product = bits.Mul64(nz, nonZeroGas)
-		if overflow != 0 {
+		product, overflow := math.SafeMul(nz, nonZeroGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
 		z := dataLen - nz
-		overflow, product = bits.Mul64(z, params.TxDataZeroGas)
-		if overflow != 0 {
+		product, overflow = math.SafeMul(z, params.TxDataZeroGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
 		if isContractCreation && isEIP3860 {
 			numWords := vm.ToWordSize(dataLen)
-			overflow, product = bits.Mul64(numWords, params.InitCodeWordGas)
-			if overflow != 0 {
+			product, overflow = math.SafeMul(numWords, params.InitCodeWordGas)
+			if overflow {
 				return 0, ErrGasUintOverflow
 			}
-			gas, overflow = bits.Add64(gas, product, 0)
-			if overflow != 0 {
+			gas, overflow = math.SafeAdd(gas, product)
+			if overflow {
 				return 0, ErrGasUintOverflow
 			}
 		}
 	}
 	if accessList != nil {
-		overflow, product = bits.Mul64(uint64(len(accessList)), params.TxAccessListAddressGas)
-		if overflow != 0 {
+		product, overflow := math.SafeMul(uint64(len(accessList)), params.TxAccessListAddressGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
-		overflow, product = bits.Mul64(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
-		if overflow != 0 {
+		product, overflow = math.SafeMul(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 	}
