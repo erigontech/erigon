@@ -185,10 +185,10 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		chainDb.Update(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
-			return agg.Prune(ctx, ethconfig.HistoryV3AggregationStep)
-		})
+		//chainDb.Update(ctx, func(tx kv.RwTx) error {
+		//	agg.SetTx(tx)
+		//	return agg.Prune(ctx, ethconfig.HistoryV3AggregationStep)
+		//})
 		applyWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 		applyLoop := func(ctx context.Context) {
 			defer applyWg.Done()
