@@ -484,6 +484,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
 	}
+	// Check whether the init code size has been exceeded.
+	if evm.chainRules.IsShanghai && len(codeAndHash.code) > params.MaxInitCodeSize {
+		return nil, address, gas, ErrMaxInitCodeSizeExceeded
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)

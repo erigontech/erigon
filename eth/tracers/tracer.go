@@ -600,7 +600,8 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	// Compute intrinsic gas
 	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
 	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
-	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+	isShanghai := env.ChainConfig().IsShanghai(env.Context().BlockNumber)
+	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul, isShanghai)
 	if err != nil {
 		return
 	}

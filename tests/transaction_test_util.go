@@ -71,7 +71,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		sender := msg.From()
 
 		// Intrinsic gas
-		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul)
+		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 		if err != nil {
 			return nil, nil, 0, err
 		}
