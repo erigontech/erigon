@@ -112,8 +112,8 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 }
 
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
 	for _, filter := range a.logsFilters {
 		if filter.allAddrs == 0 {
 			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(eventLog.Address)]
