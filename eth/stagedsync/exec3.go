@@ -241,6 +241,7 @@ func Exec3(ctx context.Context,
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					if rs.SizeEstimate() < commitThreshold {
+						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
 						}
