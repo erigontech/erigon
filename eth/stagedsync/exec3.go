@@ -336,7 +336,7 @@ func Exec3(ctx context.Context,
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						log.Info("prune every tick3")
-						pruneCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+						pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
 							panic(err)
 						}
