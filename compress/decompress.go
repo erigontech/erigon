@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -372,6 +373,10 @@ func (d *Decompressor) Close() error {
 }
 
 func (d *Decompressor) FilePath() string { return d.compressedFile }
+func (d *Decompressor) FileName() string {
+	_, fName := filepath.Split(d.compressedFile)
+	return fName
+}
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {

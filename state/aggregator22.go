@@ -425,7 +425,6 @@ func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, 
 		}
 	}()
 	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	log.Info("[snapshots] history build done", "step", fmt.Sprintf("%d-%d", step, step+1))
 
 	closeAll = false
 	return nil

@@ -147,11 +147,13 @@ func OpenIndex(indexFile string) (*Index, error) {
 	return idx, nil
 }
 
-func (idx *Index) Size() int64 {
-	return idx.size
-}
-
+func (idx *Index) Size() int64        { return idx.size }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
+func (idx *Index) FilePath() string   { return idx.indexFile }
+func (idx *Index) FileName() string {
+	_, fName := filepath.Split(idx.indexFile)
+	return fName
+}
 
 func (idx *Index) Close() error {
 	if idx == nil {

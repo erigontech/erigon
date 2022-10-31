@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -270,7 +271,16 @@ func (h *History) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles 
 			}
 		}
 		if r.index && len(indexFiles) != len(historyFiles) {
-			log.Warn("something wrong with files for merge", "idx", fmt.Sprintf("%+v", indexFiles), "hist", fmt.Sprintf("%+v", historyFiles))
+			var sIdx, sHist []string
+			for _, f := range indexFiles {
+				_, fName := filepath.Split(f.index.FilePath())
+				sIdx = append(sIdx, fmt.Sprintf("%+v", fName))
+			}
+			for _, f := range historyFiles {
+				_, fName := filepath.Split(f.decompressor.FilePath())
+				sHist = append(sHist, fmt.Sprintf("%+v", fName))
+			}
+			log.Warn("something wrong with files for merge", "idx", strings.Join(sIdx, ","), "hist", strings.Join(sHist, ","))
 		}
 	}
 	return
