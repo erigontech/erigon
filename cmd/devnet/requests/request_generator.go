@@ -3,11 +3,12 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"

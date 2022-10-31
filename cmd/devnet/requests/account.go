@@ -3,9 +3,10 @@ package requests
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
-	"strconv"
 )
 
 func GetBalance(reqId int, address common.Address, blockNum string) (uint64, error) {

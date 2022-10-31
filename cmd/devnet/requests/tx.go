@@ -2,6 +2,7 @@ package requests
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
