@@ -1,9 +1,10 @@
 package rpctest
 
 import (
+	"testing"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {

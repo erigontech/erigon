@@ -2,6 +2,7 @@ package requests
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/p2p"
 )
