@@ -178,7 +178,7 @@ func Exec3(ctx context.Context,
 	progress := NewProgress(block, commitThreshold)
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(1100 * time.Millisecond)
+	pruneEvery := time.NewTicker(3100 * time.Millisecond)
 	defer pruneEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
@@ -337,7 +337,7 @@ func Exec3(ctx context.Context,
 					if agg.CanPrune(tx) {
 						t := time.Now()
 						i := 0
-						for time.Since(t) < time.Second {
+						for time.Since(t) < 2*time.Second {
 							i++
 							if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
 								panic(err)
