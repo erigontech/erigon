@@ -53,15 +53,25 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSu
 }
 
 func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
-	if filter, ok := a.logsFilters[filterId]; ok {
-		a.subtractLogFilters(filter)
-		close(filter.sender)
-		delete(a.logsFilters, filterId)
-		return true
+	a.logsFilterLock.RLock()
+	filter, ok := a.logsFilters[filterId]
+	a.logsFilterLock.RUnlock()
+	if !ok {
+		return false
 	}
-	return false
+
+	for {
+		select {
+		case <-filter.sender:
+		default:
+			a.logsFilterLock.Lock()
+			defer a.logsFilterLock.Unlock()
+			a.subtractLogFilters(filter)
+			close(filter.sender)
+			delete(a.logsFilters, filterId)
+			return true
+		}
+	}
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
