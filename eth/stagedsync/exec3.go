@@ -500,6 +500,11 @@ loop:
 		default:
 		}
 
+		if !parallel {
+			if err := agg.BuildFilesInBackground(chainDb); err != nil {
+				panic(err)
+			}
+		}
 	}
 	if parallel {
 		wg.Wait()
