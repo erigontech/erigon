@@ -45,7 +45,7 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 	return numbers
 }
 
-func TestCallTraceOneByOne(t *testing.T) {
+func TestCallTraceOTestEthCallToPrunedBlockneByOne(t *testing.T) {
 	if ethconfig.EnableHistoryV3InTest {
 		t.Skip("history.v3 doesn't store receipts in db")
 	}
