@@ -241,7 +241,6 @@ func Exec3(ctx context.Context,
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					if rs.SizeEstimate() < commitThreshold {
-						log.Info("non-commit flush")
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
 						}
