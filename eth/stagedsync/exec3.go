@@ -334,6 +334,9 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
+					if err := agg.BuildFilesInBackground(chainDb); err != nil {
+						panic(err)
+					}
 					if agg.CanPrune(tx) {
 						pruneCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
@@ -497,9 +500,6 @@ loop:
 		default:
 		}
 
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
-		}
 	}
 	if parallel {
 		wg.Wait()
