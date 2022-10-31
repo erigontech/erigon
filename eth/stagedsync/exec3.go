@@ -334,10 +334,13 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
+					log.Info("prune every tick")
 					if err := agg.BuildFilesInBackground(chainDb); err != nil {
 						panic(err)
 					}
+					log.Info("prune every tick2")
 					if agg.CanPrune(tx) {
+						log.Info("prune every tick3")
 						pruneCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 						if err = agg.Prune(pruneCtx, 1_000); err != nil { // prune part of retired data, before commit
 							panic(err)
