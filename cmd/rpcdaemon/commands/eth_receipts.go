@@ -327,10 +327,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		return logs, nil
 	}
 	var lastBlockNum uint64
-	var lastBlockHash common.Hash
-	var lastHeader *types.Header
-	var lastSigner *types.Signer
-	var lastRules *params.Rules
+	var blockHash common.Hash
+	var header *types.Header
+	var signer *types.Signer
+	var rules *params.Rules
+	var skipAnalysis bool
 	stateReader := state.NewHistoryReader22(ac)
 	stateReader.SetTx(tx)
 	//stateReader.SetTrace(true)
@@ -344,34 +345,48 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
+
+	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
+	var blockNum uint64
+	var ok bool
 	for iter.HasNext() {
 		txNum := iter.Next()
-		// Find block number
-		ok, blockNum, err := rawdb.TxNums.FindBlockNum(tx, txNum)
-		if err != nil {
-			return nil, err
+
+		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
+
+		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
+			// Find block number
+			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !ok {
 			return nil, nil
 		}
+
+		// if block number changed, calculate all related field
 		if blockNum > lastBlockNum {
-			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
 			lastBlockNum = blockNum
-			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum)
-			lastRules = chainConfig.Rules(blockNum)
-		}
-		var startTxNum uint64
-		if blockNum > 0 {
-			startTxNum, err = rawdb.TxNums.Min(tx, blockNum) // end is an inclusive bound
+			blockHash = header.Hash()
+			signer = types.MakeSigner(chainConfig, blockNum)
+			rules = chainConfig.Rules(blockNum)
+			skipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+
+			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		txIndex := int(txNum) - int(startTxNum) - 1
+		txIndex := int(txNum) - int(minTxNumInBlock) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
@@ -382,17 +397,17 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		}
 		stateReader.SetTxNum(txNum)
 		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
 		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, api._blockReader)
-		vmConfig := vm.Config{SkipAnalysis: core.SkipAnalysis(chainConfig, blockNum)}
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
+		vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
 		ibs := state.New(stateReader)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, txIndex)
+		ibs.Prepare(txHash, blockHash, txIndex)
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d", err, blockNum, txNum)
@@ -406,11 +421,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		filtered := filterLogs(rawLogs, addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
-			log.BlockHash = lastBlockHash
+			log.BlockHash = blockHash
 			log.TxHash = txHash
 		}
 		logs = append(logs, filtered...)
 	}
+
 	//stats := api._agg.GetAndResetStats()
 	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil

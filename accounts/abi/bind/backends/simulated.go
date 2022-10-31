@@ -107,7 +107,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(alloc, params.AllEthashProtocolChanges, gasLimit)
+	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(func() {
 		b.m.DB.Close()
 	})
