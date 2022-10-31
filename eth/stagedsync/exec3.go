@@ -64,8 +64,8 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSiz
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
-		"blk", fmt.Sprintf("%d=%.2f", outputBlockNum, float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
-		"input blk", atomic.LoadUint64(&inputBlockNum),
+		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
+		"inBlk", atomic.LoadUint64(&inputBlockNum),
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
