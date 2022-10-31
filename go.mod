@@ -3,8 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/gballet/go-verkle v0.0.0-20220829125900-a702d458d33c
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221024025924-48ff56eead80
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221027083835-ba838a7a07ee
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221025023844-6e716b9e651c
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -33,6 +32,7 @@ require (
 	github.com/emirpasic/gods v1.18.1
 	github.com/ferranbt/fastssz v0.1.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
+	github.com/gballet/go-verkle v0.0.0-20220829125900-a702d458d33c
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.2
@@ -66,7 +66,7 @@ require (
 	github.com/supranational/blst v0.3.10
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
-	github.com/torquem-ch/mdbx-go v0.26.1
+	github.com/torquem-ch/mdbx-go v0.26.2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.9

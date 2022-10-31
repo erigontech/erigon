@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -31,7 +30,7 @@ type ConsensusHandlers struct {
 	metadata *cltypes.MetadataV2
 }
 
-const SuccessfullResponsePrefix = 0x00
+const SuccessfulResponsePrefix = 0x00
 
 var NoRequestHandlers = map[string]bool{
 	MetadataProtocolV1:          true,
@@ -46,23 +45,15 @@ func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *cltypes.
 		metadata: metadata,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
-		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, pingHandler),
-		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, statusHandler),
+		protocol.ID(PingProtocolV1):               curryStreamHandler(ssz_snappy.NewStreamCodec, c.pingHandler),
+		protocol.ID(GoodbyeProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
+		protocol.ID(StatusProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.statusHandler),
 		protocol.ID(MetadataProtocolV1):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
 		protocol.ID(MetadataProtocolV2):           curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
 		protocol.ID(BeaconBlockByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(BeaconBlockByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
 	return c
-}
-
-func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
-	log.Info("Got block by range handler call")
-}
-
-func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
-	log.Info("Got beacon block by root handler call")
 }
 
 func (c *ConsensusHandlers) Start() {

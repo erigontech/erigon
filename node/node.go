@@ -340,7 +340,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		if debug.WriteMap() {
-			opts = opts.WriteMap()
+			opts = opts.WriteMap().WriteMergeThreshold(1 * 8192)
 		}
 		if debug.MdbxReadAhead() {
 			opts = opts.Flags(func(u uint) uint {

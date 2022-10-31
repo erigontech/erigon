@@ -132,6 +132,9 @@ type Engine interface {
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
+
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
