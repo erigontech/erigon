@@ -176,8 +176,8 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		}
 
 		if isContractCreation && isEIP3860 {
-			lenWords := vm.ToWordSize(dataLen)
-			overflow, product = bits.Mul64(lenWords, params.InitCodeWordGas)
+			numWords := vm.ToWordSize(dataLen)
+			overflow, product = bits.Mul64(numWords, params.InitCodeWordGas)
 			if overflow != 0 {
 				return 0, ErrGasUintOverflow
 			}
