@@ -102,33 +102,33 @@ func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts
 	return reader.ReadAccountData(address)
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, txnIndex uint64, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
 	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err
 	}
-	var stateReader state.StateReader
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-		stateReader = state.NewCachedReader2(cacheView, tx)
-	} else {
-		if historyV3 {
-			aggCtx := agg.MakeContext()
-			aggCtx.SetTx(tx)
-			r := state.NewHistoryReader22(aggCtx)
-			r.SetTx(tx)
-			minTxNum, err := rawdb.TxNums.Min(tx, blockNumber+1)
-			if err != nil {
-				return nil, err
-			}
-			r.SetTxNum(minTxNum)
-			stateReader = r
-		} else {
-			stateReader = state.NewPlainState(tx, blockNumber+1)
-		}
+		return state.NewCachedReader2(cacheView, tx), nil
 	}
-	return stateReader, nil
+	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, agg, historyV3)
+}
+
+func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state2.Aggregator22, historyV3 bool) (state.StateReader, error) {
+	if !historyV3 {
+		return state.NewPlainState(tx, blockNumber), nil
+	}
+	aggCtx := agg.MakeContext()
+	aggCtx.SetTx(tx)
+	r := state.NewHistoryReader22(aggCtx)
+	r.SetTx(tx)
+	minTxNum, err := rawdb.TxNums.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	r.SetTxNum(minTxNum + txnIndex)
+	return r, nil
 }

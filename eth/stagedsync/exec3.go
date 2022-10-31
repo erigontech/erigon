@@ -50,7 +50,7 @@ type Progress struct {
 	commitThreshold    uint64
 }
 
-func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
@@ -64,7 +64,7 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSiz
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
-		"at blk", outputBlockNum,
+		"blk", fmt.Sprintf("%d=%.2f", outputBlockNum, float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"input blk", atomic.LoadUint64(&inputBlockNum),
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
@@ -185,17 +185,13 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	if parallel {
-		if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
-			if err = agg.Prune(ctx, agg.EndTxNumMinimax()); err != nil { // prune part of retired data, before commit
-				panic(err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-
+		//chainDb.Update(ctx, func(tx kv.RwTx) error {
+		//	agg.SetTx(tx)
+		//	return agg.Prune(ctx, ethconfig.HistoryV3AggregationStep)
+		//})
+		applyWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 		applyLoop := func(ctx context.Context) {
+			defer applyWg.Done()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -233,6 +229,7 @@ func Exec3(ctx context.Context,
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
+			applyWg.Add(1)
 			go applyLoop(applyCtx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
@@ -242,15 +239,16 @@ func Exec3(ctx context.Context,
 					rwsLen := rws.Len()
 					rwsLock.RUnlock()
 
-					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
-					//prevTriggerCount = triggerCount
+					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					if rs.SizeEstimate() < commitThreshold {
+						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
 						}
 						break
 					}
 					cancelApplyCtx()
+					applyWg.Wait()
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -304,25 +302,32 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						if idxStepsInDB(tx) > 3 {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+						stepsInDB := idxStepsInDB(tx)
+						if stepsInDB > 3 {
+							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
+							//	return err
+							//}
+						} else if stepsInDB > 10 { // too much steps in db will slow-down everything: flush and prune
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
 								return err
 							}
 						}
 						if err = tx.Commit(); err != nil {
 							return err
 						}
-
-						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						go applyLoop(applyCtx)
+						for i := 0; i < len(reconWorkers); i++ {
+							reconWorkers[i].ResetTx(nil)
+						}
 
 						if tx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
-						for i := 0; i < len(reconWorkers); i++ {
-							reconWorkers[i].ResetTx(nil)
-						}
 						agg.SetTx(tx)
+
+						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						applyWg.Add(1)
+						go applyLoop(applyCtx)
+
 						return nil
 					}()
 					if err != nil {
@@ -386,22 +391,22 @@ loop:
 		header := b.HeaderNoCopy()
 		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		if parallel {
-			func() {
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
-					rwsReceiveCond.Wait()
-				}
-			}()
-		}
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+			if parallel {
+				func() {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+						rwsReceiveCond.Wait()
+					}
+				}()
+			}
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
 				Rules:        rules,
-				Header:       b.Header(),
+				Header:       header,
 				Txs:          txs,
 				Uncles:       b.Uncles(),
 				TxNum:        inputTxNum,
@@ -487,7 +492,7 @@ loop:
 		select {
 		case <-logEvery.C:
 			if !parallel {
-				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
+				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
 			}
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
@@ -655,7 +660,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
 	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
 		Flags(func(u uint) uint {
-			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.Exclusive | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap | mdbx.NoSubdir
+			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
 		WriteMergeThreshold(8192).
 		PageSize(uint64(16 * datasize.KB)).
@@ -854,9 +859,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							if err = rs.Flush(tx); err != nil {
 								return err
 							}
-							if err = agg.Flush(tx); err != nil {
-								return err
-							}
+							//if err = agg.Flush(tx); err != nil {
+							//	return err
+							//}
 							return nil
 						}); err != nil {
 							return err
@@ -924,7 +929,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
-		syncMetrics[stages.Execution].Set(blockNum)
+		syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()

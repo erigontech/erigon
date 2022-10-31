@@ -356,11 +356,17 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainState(tx, 1))
+	agg := m.HistoryV3Components()
+
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, agg, m.HistoryV3)
+	assert.NoError(t, err)
+	st := state.New(stateReader)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
 
-	st = state.New(state.NewPlainState(tx, 2))
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, agg, m.HistoryV3)
+	assert.NoError(t, err)
+	st = state.New(stateReader)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
 

@@ -20,10 +20,10 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -39,14 +39,14 @@ type LightClient struct {
 	verbose           bool
 	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
-	sentinel          lightrpc.SentinelClient
+	sentinel          consensusrpc.SentinelClient
 	execution         remote.ETHBACKENDServer
 	store             *LightClientStore
 	lastValidated     *cltypes.LightClientUpdate
 }
 
 func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient,
+	execution remote.ETHBACKENDServer, sentinel consensusrpc.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
 	return &LightClient{
@@ -114,11 +114,14 @@ func (l *LightClient) Start() {
 				updates = append(updates, newUpdate)
 			}
 		}
+
 		// Push updates
 		for _, update := range updates {
 			err := l.processLightClientUpdate(update)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
+				updates = []*cltypes.LightClientUpdate{}
+				break
 			}
 		}
 		// log new validated segment
@@ -169,7 +172,7 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &lightrpc.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(l.ctx, &consensusrpc.EmptyRequest{})
 			if err != nil {
 				log.Warn("could not read peers", "err", err)
 				continue

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -19,12 +19,12 @@ type ChainTipSubscriber struct {
 
 	lastUpdate *cltypes.LightClientUpdate
 	started    bool
-	sentinel   lightrpc.SentinelClient
+	sentinel   consensusrpc.SentinelClient
 
 	mu sync.Mutex
 }
 
-func NewChainTipSubscriber(ctx context.Context, sentinel lightrpc.SentinelClient) *ChainTipSubscriber {
+func NewChainTipSubscriber(ctx context.Context, sentinel consensusrpc.SentinelClient) *ChainTipSubscriber {
 	return &ChainTipSubscriber{
 		ctx:      ctx,
 		started:  false,
@@ -39,7 +39,7 @@ func (c *ChainTipSubscriber) StartLoop() {
 	}
 	log.Info("[LightClient Gossip] Started Gossip")
 	c.started = true
-	stream, err := c.sentinel.SubscribeGossip(c.ctx, &lightrpc.EmptyRequest{})
+	stream, err := c.sentinel.SubscribeGossip(c.ctx, &consensusrpc.EmptyRequest{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
 		return
@@ -60,11 +60,11 @@ func (c *ChainTipSubscriber) StartLoop() {
 	}
 }
 
-func (c *ChainTipSubscriber) handleGossipData(data *lightrpc.GossipData) error {
+func (c *ChainTipSubscriber) handleGossipData(data *consensusrpc.GossipData) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch data.Type {
-	case lightrpc.GossipType_BeaconBlockGossipType:
+	case consensusrpc.GossipType_BeaconBlockGossipType:
 		block := &cltypes.SignedBeaconBlockBellatrix{}
 		if err := block.UnmarshalSSZ(data.Data); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
@@ -76,7 +76,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *lightrpc.GossipData) error {
 		// Swap and replace
 		c.prevBlock = c.currBlock
 		c.currBlock = block.Block
-	case lightrpc.GossipType_LightClientFinalityUpdateGossipType:
+	case consensusrpc.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
 		if err := finalityUpdate.UnmarshalSSZ(data.Data); err != nil {
 			return fmt.Errorf("could not unmarshall finality update: %s", err)
@@ -90,7 +90,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *lightrpc.GossipData) error {
 			SyncAggregate:           finalityUpdate.SyncAggregate,
 			SignatureSlot:           finalityUpdate.SignatureSlot,
 		}
-	case lightrpc.GossipType_LightClientOptimisticUpdateGossipType:
+	case consensusrpc.GossipType_LightClientOptimisticUpdateGossipType:
 		if c.lastUpdate != nil && c.lastUpdate.IsFinalityUpdate() {
 			// We already have a finality update, we can skip this one
 			return nil
