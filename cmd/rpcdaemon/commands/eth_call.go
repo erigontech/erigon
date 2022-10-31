@@ -327,7 +327,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber+1)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._agg, api.historyV3(tx))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	header := block.Header()

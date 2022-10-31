@@ -190,20 +190,15 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
-	var stateReader state.StateReader
-	if latest {
-		cacheView, err := api.stateCache.View(ctx, dbtx)
-		if err != nil {
-			return err
-		}
-		stateReader = state.NewCachedReader2(cacheView, dbtx)
-	} else {
-		stateReader = state.NewPlainState(dbtx, blockNumber+1)
+
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg)
+	if err != nil {
+		return err
 	}
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {
