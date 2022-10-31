@@ -335,7 +335,6 @@ func Exec3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
-						log.Info("prune every tick3")
 						t := time.Now()
 						for time.Since(t) < 2*time.Second {
 							if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
