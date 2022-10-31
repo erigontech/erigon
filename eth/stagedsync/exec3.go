@@ -343,7 +343,7 @@ func Exec3(ctx context.Context,
 								panic(err)
 							}
 						}
-						log.Info("prune iterations", "i", i)
+						log.Info("prune iterations", "i", i, "took", time.Since(t))
 					}
 				}
 			}
