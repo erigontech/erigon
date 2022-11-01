@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+        "github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -312,7 +313,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
 	// because the return value of ChainId is zero for those transactions.
-	var chainId *big.Int
+        chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
@@ -324,27 +325,25 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-                if (t.V == *(uint256.NewInt(27)) || t.V == *(uint256.NewInt(28))) {
-                    result.V = (*hexutil.Big)(t.V.ToBig())
-                } else {
-                    chainId = types.DeriveChainId(&t.V).ToBig()
-                    result.ChainID = (*hexutil.Big)(chainId)
-                    result.V = (*hexutil.Big)(t.V.ToBig())
+                chainId = types.DeriveChainId(&t.V)
+                if (!chainId.Eq(u256.Num0)) {
+                    result.ChainID = (*hexutil.Big)(chainId.ToBig())
                 }
                 result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+                result.V = (*hexutil.Big)(t.V.ToBig())
                 result.R = (*hexutil.Big)(t.R.ToBig())
                 result.S = (*hexutil.Big)(t.S.ToBig())
 	case *types.AccessListTx:
-		chainId = t.ChainID.ToBig()
-		result.ChainID = (*hexutil.Big)(chainId)
+                chainId.Set(t.ChainID)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
-		chainId = t.ChainID.ToBig()
-		result.ChainID = (*hexutil.Big)(chainId)
+                chainId.Set(t.ChainID)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
@@ -360,7 +359,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 			result.GasPrice = nil
 		}
 	}
-	signer := types.LatestSignerForChainID(chainId)
+	signer := types.LatestSignerForChainID(chainId.ToBig())
 	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
