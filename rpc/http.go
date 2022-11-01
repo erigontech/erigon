@@ -263,17 +263,12 @@ func validateRequest(r *http.Request) (int, error) {
 	if r.Method == http.MethodPut || r.Method == http.MethodDelete {
 		return http.StatusMethodNotAllowed, errors.New("method not allowed")
 	}
-
-	// allow get requests
-	if r.Method == http.MethodGet {
-		return 0, nil
-	}
 	if r.ContentLength > maxRequestContentLength {
 		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
-	// Allow OPTIONS (regardless of content-type)
-	if r.Method == http.MethodOptions {
+	// Allow OPTIONS and GET (regardless of content-type)
+	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
 		return 0, nil
 	}
 	// Check content-type
