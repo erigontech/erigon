@@ -604,34 +604,46 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf uint64) (bo
 	if p.lastSeenBlock.Load() < onTopOf {
 		return false, nil // Too early
 	}
-	p.lock.RLock()
-	defer p.lock.RUnlock()
 
 	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
-
-	best := p.pending.best
 	j := 0
-	for i := 0; j < int(n) && i < len(best.ms); i++ {
-		mt := best.ms[i]
-		if mt.Tx.Gas >= p.blockGasLimit.Load() {
-			// Skip transactions with very large gas limit
-			continue
+	var toRemove []*metaTx
+
+	success, err := func() (bool, error) {
+		p.lock.RLock()
+		defer p.lock.RUnlock()
+
+		best := p.pending.best
+		for i := 0; j < int(n) && i < len(best.ms); i++ {
+			mt := best.ms[i]
+			if mt.Tx.Gas >= p.blockGasLimit.Load() {
+				// Skip transactions with very large gas limit
+				continue
+			}
+			rlpTx, sender, isLocal, err := p.getRlpLocked(tx, mt.Tx.IDHash[:])
+			if err != nil {
+				return false, err
+			}
+			if len(rlpTx) == 0 {
+				toRemove = append(toRemove, mt)
+				continue
+			}
+			txs.Txs[j] = rlpTx
+			copy(txs.Senders.At(j), sender)
+			txs.IsLocal[j] = isLocal
+			j++
 		}
-		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, mt.Tx.IDHash[:])
-		if err != nil {
-			return false, err
-		}
-		if len(rlpTx) == 0 {
-			p.pending.Remove(mt)
-			continue
-		}
-		txs.Txs[j] = rlpTx
-		copy(txs.Senders.At(j), sender)
-		txs.IsLocal[j] = isLocal
-		j++
-	}
+		return true, nil
+	}()
 	txs.Resize(uint(j))
-	return true, nil
+	if len(toRemove) > 0 {
+		p.lock.Lock()
+		defer p.lock.Unlock()
+		for _, mt := range toRemove {
+			p.pending.Remove(mt)
+		}
+	}
+	return success, err
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
