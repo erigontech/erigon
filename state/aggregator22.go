@@ -973,16 +973,18 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 
 	toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
-	// check if db has enough data (maybe we didn't commit them yet)
-	lastInDB := lastIdInDB(db, a.accounts.indexKeysTable)
-	hasData = lastInDB >= toTxNum
-	if !hasData {
-		return nil
-	}
 
 	a.working.Store(true)
 	go func() {
 		defer a.working.Store(false)
+
+		// check if db has enough data (maybe we didn't commit them yet)
+		lastInDB := lastIdInDB(db, a.accounts.indexKeysTable)
+		hasData = lastInDB >= toTxNum
+		if !hasData {
+			return
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
