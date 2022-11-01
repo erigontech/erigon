@@ -307,10 +307,13 @@ func Exec3(ctx context.Context,
 							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
 							//	return err
 							//}
-						} else if stepsInDB > 10 { // too much steps in db will slow-down everything: flush and prune
+						} else if stepsInDB > 6 { // too much steps in db will slow-down everything: flush and prune
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
+							t := time.Now()
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
 								return err
 							}
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
 						}
 						if err = tx.Commit(); err != nil {
 							return err
