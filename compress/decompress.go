@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
@@ -134,6 +135,7 @@ type Decompressor struct {
 	data            []byte // slice of correct size for the decompressor to work with
 	wordsStart      uint64 // Offset of whether the superstrings actually start
 	size            int64
+	modTime         time.Time
 	wordsCount      uint64
 	emptyWordsCount uint64
 }
@@ -190,6 +192,7 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	if d.size < 32 {
 		return nil, fmt.Errorf("compressed file is too short: %d", d.size)
 	}
+	d.modTime = stat.ModTime()
 	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
@@ -360,6 +363,10 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 
 func (d *Decompressor) Size() int64 {
 	return d.size
+}
+
+func (d *Decompressor) ModTime() time.Time {
+	return d.modTime
 }
 
 func (d *Decompressor) Close() error {
