@@ -212,13 +212,14 @@ func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := readUvarint(r)
+	fmt.Printf("*** encoded=%d, bytes count%d, obj size=%d\n", encodedLn, bytesCount, objSize)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	pos := 4 + bytesCount
-	if encodedLn != uint64(objSize) || len(list) != int(count) {
-		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
-	}
+	// if encodedLn != uint64(objSize) || len(list) != int(count) {
+	// 	return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
+	// }
 
 	sr := snappy.NewReader(r)
 	for i := 0; i < int(count); i++ {

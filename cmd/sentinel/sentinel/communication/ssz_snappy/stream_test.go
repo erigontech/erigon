@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,34 @@ func TestDecodeAndReadSuccess(t *testing.T) {
 			}
 			r := bytes.NewReader(data)
 			require.NoError(t, DecodeAndRead(r, tc.output))
+		})
+	}
+}
+
+func TestDecodeLizSSZ(t *testing.T) {
+	b, err := os.ReadFile("beacon_blocks_by_range.txt")
+	if err != nil {
+		t.Errorf("Unable to read file: %v", err)
+	}
+	beaconBlocksByRangeResponse := string(b)
+	tests := map[string]struct {
+		raw    string // hex encoded.
+		count  uint64
+		output []cltypes.ObjectSSZ
+	}{
+		"beaconBlocksByRangeResponse": {
+			raw:    beaconBlocksByRangeResponse,
+			count:  2,
+			output: []cltypes.ObjectSSZ{&cltypes.SignedBeaconBlockBellatrix{}, &cltypes.SignedBeaconBlockBellatrix{}},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			data, err := hex.DecodeString(tc.raw)
+			if err != nil {
+				t.Errorf("Unable to decode string: %v", err)
+			}
+			require.NoError(t, DecodeListSSZ(data, tc.count, tc.output))
 		})
 	}
 }
