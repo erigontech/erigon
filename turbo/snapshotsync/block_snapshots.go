@@ -119,6 +119,11 @@ func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
+	if sn.idxHeaderHash.ModTime().Before(sn.seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.idxHeaderHash.Close()
+		sn.idxHeaderHash = nil
+	}
 	return nil
 }
 
@@ -171,6 +176,11 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.idxBodyNumber.ModTime().Before(sn.seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.idxBodyNumber.Close()
+		sn.idxBodyNumber = nil
 	}
 	return nil
 }
@@ -231,11 +241,21 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
+	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.IdxTxnHash.Close()
+		sn.IdxTxnHash = nil
+	}
 
 	fileName = snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions2Block.String())
 	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.IdxTxnHash2BlockNum.Close()
+		sn.IdxTxnHash2BlockNum = nil
 	}
 	return nil
 }
@@ -1223,13 +1243,22 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 func hasIdxFile(sn *snap.FileInfo) bool {
+	stat, err := os.Stat(sn.Path)
+	if err != nil {
+		return false
+	}
 	dir, _ := filepath.Split(sn.Path)
 	fName := snap.IdxFileName(sn.From, sn.To, sn.T.String())
+	var result bool = true
 	switch sn.T {
 	case snap.Headers:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
+		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			result = false
 		}
 		_ = idx.Close()
 	case snap.Bodies:
@@ -1237,11 +1266,19 @@ func hasIdxFile(sn *snap.FileInfo) bool {
 		if err != nil {
 			return false
 		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			result = false
+		}
 		_ = idx.Close()
 	case snap.Transactions:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
+		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			result = false
 		}
 		_ = idx.Close()
 
@@ -1250,9 +1287,13 @@ func hasIdxFile(sn *snap.FileInfo) bool {
 		if err != nil {
 			return false
 		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			result = false
+		}
 		_ = idx.Close()
 	}
-	return true
+	return result
 }
 
 // DumpTxs - [from, to)
