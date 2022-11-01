@@ -56,6 +56,7 @@ type Aggregator22 struct {
 	keepInDB         uint64
 	maxTxNum         atomic.Uint64
 	working          atomic.Bool
+	workingMerge     atomic.Bool
 	warmupWorking    atomic.Bool
 }
 
@@ -430,7 +431,7 @@ func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, 
 	return nil
 }
 
-func (a *Aggregator22) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
+func (a *Aggregator22) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
 	closeAll := true
 	maxSpan := uint64(32) * a.aggregationStep
 	r := a.findMergeRange(a.maxTxNum.Load(), maxSpan)
@@ -444,7 +445,7 @@ func (a *Aggregator22) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 			outs.Close()
 		}
 	}()
-	in, err := a.mergeFiles(ctx, outs, r, maxSpan)
+	in, err := a.mergeFiles(ctx, outs, r, maxSpan, workers)
 	if err != nil {
 		return true, err
 	}
@@ -460,9 +461,9 @@ func (a *Aggregator22) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 	closeAll = false
 	return true, nil
 }
-func (a *Aggregator22) MergeLoop(ctx context.Context) error {
+func (a *Aggregator22) MergeLoop(ctx context.Context, workers int) error {
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx)
+		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
 			return err
 		}
@@ -606,17 +607,21 @@ func (a *Aggregator22) Flush(tx kv.RwTx) error {
 func (a *Aggregator22) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
 func (a *Aggregator22) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
-	if len(fst) > 0 {
+	fst2, _ := kv.FirstKey(tx, kv.StorageHistoryKeys)
+	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		if fstInDb < a.maxTxNum.Load() {
-			return fstInDb
-		}
+		fstInDb2 := binary.BigEndian.Uint64(fst2)
+		return cmp.Min(fstInDb, fstInDb2)
 	}
 	return math2.MaxUint64
 }
 func (a *Aggregator22) Prune(ctx context.Context, limit uint64) error {
 	a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
-	defer func(t time.Time) { log.Debug(fmt.Sprintf("prune took: %s\n", time.Since(t))) }(time.Now())
+	//defer func(t time.Time) {
+	//	if time.Since(t) > 150*time.Millisecond {
+	//		log.Debug(fmt.Sprintf("prune took: %s\n", time.Since(t)))
+	//	}
+	//}(time.Now())
 	return a.prune(ctx, 0, a.maxTxNum.Load(), limit)
 }
 
@@ -829,7 +834,7 @@ func (mf MergedFiles22) Close() {
 	}
 }
 
-func (a *Aggregator22) mergeFiles(ctx context.Context, files SelectedStaticFiles22, r Ranges22, maxSpan uint64) (MergedFiles22, error) {
+func (a *Aggregator22) mergeFiles(ctx context.Context, files SelectedStaticFiles22, r Ranges22, maxSpan uint64, workers int) (MergedFiles22, error) {
 	var mf MergedFiles22
 	closeFiles := true
 	defer func() {
@@ -837,76 +842,76 @@ func (a *Aggregator22) mergeFiles(ctx context.Context, files SelectedStaticFiles
 			mf.Close()
 		}
 	}()
-	var wg sync.WaitGroup
-	wg.Add(7)
+	//var wg sync.WaitGroup
+	//wg.Add(7)
 	errCh := make(chan error, 7)
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.accounts.any() {
-			if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, maxSpan); err != nil {
-				errCh <- err
-			}
+	//go func() {
+	//	defer wg.Done()
+	var err error
+	if r.accounts.any() {
+		if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.storage.any() {
-			if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.storage.any() {
+		if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.code.any() {
-			if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.code.any() {
+		if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.logAddrs {
-			if mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.logAddrs {
+		if mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.logTopics {
-			if mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.logTopics {
+		if mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.tracesFrom {
-			if mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.tracesFrom {
+		if mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if r.tracesTo {
-			if mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, maxSpan); err != nil {
-				errCh <- err
-			}
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if r.tracesTo {
+		if mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers); err != nil {
+			errCh <- err
 		}
-	}()
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
+	}
+	//}()
+	//go func() {
+	//	wg.Wait()
+	close(errCh)
+	//}()
 	var lastError error
 	for err := range errCh {
 		lastError = err
@@ -960,6 +965,7 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
+
 	step := a.maxTxNum.Load() / a.aggregationStep
 	if a.working.Load() {
 		return nil
@@ -988,12 +994,17 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 			}
 			step++
 		}
-		// trying to create as much small-step-files as possible:
-		// - this is reason why run only 1 merge round at a time
-		// - to remove old data from db as early as possible
-		if _, err := a.mergeLoopStep(context.Background()); err != nil {
-			log.Warn("merge", "err", err)
+
+		if a.workingMerge.Load() {
+			return
 		}
+		defer a.workingMerge.Store(true)
+		go func() {
+			defer a.workingMerge.Store(false)
+			if err := a.MergeLoop(context.Background(), 1); err != nil {
+				log.Warn("merge", "err", err)
+			}
+		}()
 	}()
 
 	//if err := a.prune(0, a.maxTxNum.Load(), a.aggregationStep); err != nil {
@@ -1254,8 +1265,7 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 		}
 		return nil
 	}); err != nil {
-		_ = err
-		//return err
+		log.Warn("lastIdInDB", "err", err)
 	}
 	return lstInDb
 }

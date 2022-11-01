@@ -298,7 +298,7 @@ func (mf RMergedFiles) Close() {
 	}
 }
 
-func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFiles, r RRanges, maxSpan uint64) (RMergedFiles, error) {
+func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFiles, r RRanges, workers int) (RMergedFiles, error) {
 	var mf RMergedFiles
 	closeFiles := true
 	defer func() {
@@ -313,7 +313,7 @@ func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFile
 		defer wg.Done()
 		var err error
 		if r.accounts {
-			if mf.accounts, err = ri.accounts.mergeFiles(ctx, files.accounts, r.accountsStartTxNum, r.accountsEndTxNum, maxSpan); err != nil {
+			if mf.accounts, err = ri.accounts.mergeFiles(ctx, files.accounts, r.accountsStartTxNum, r.accountsEndTxNum, workers); err != nil {
 				errCh <- err
 			}
 		}
@@ -322,7 +322,7 @@ func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFile
 		defer wg.Done()
 		var err error
 		if r.storage {
-			if mf.storage, err = ri.storage.mergeFiles(ctx, files.storage, r.storageStartTxNum, r.storageEndTxNum, maxSpan); err != nil {
+			if mf.storage, err = ri.storage.mergeFiles(ctx, files.storage, r.storageStartTxNum, r.storageEndTxNum, workers); err != nil {
 				errCh <- err
 			}
 		}
@@ -331,7 +331,7 @@ func (ri *ReadIndices) mergeFiles(ctx context.Context, files RSelectedStaticFile
 		defer wg.Done()
 		var err error
 		if r.code {
-			if mf.code, err = ri.code.mergeFiles(ctx, files.code, r.codeStartTxNum, r.codeEndTxNum, maxSpan); err != nil {
+			if mf.code, err = ri.code.mergeFiles(ctx, files.code, r.codeStartTxNum, r.codeEndTxNum, workers); err != nil {
 				errCh <- err
 			}
 		}
@@ -429,7 +429,7 @@ func (ri *ReadIndices) FinishTx() error {
 				outs.Close()
 			}
 		}()
-		in, err := ri.mergeFiles(context.Background(), outs, r, maxSpan)
+		in, err := ri.mergeFiles(context.Background(), outs, r, 1)
 		if err != nil {
 			return err
 		}
