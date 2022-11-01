@@ -246,12 +246,10 @@ func Exec3(ctx context.Context,
 						// also better do it now - instead of before Commit() - because Commit does block execution
 						stepsInDB := idxStepsInDB(tx)
 						if stepsInDB > 4 {
-							log.Info("force-prune: stepsInDB>4", "stepsInDB", stepsInDB)
 							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/32); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/20); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
-							log.Info("force-prune: stepsInDB>4", "stepsInDB", stepsInDB, "took", time.Since(t))
 							if time.Since(t) > 10*time.Second {
 								break // allready spent much time on this cycle
 							}
