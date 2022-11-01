@@ -74,7 +74,7 @@ type ErigonLogs []*ErigonLog
 type Logs []*Log
 
 func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash) Logs {
-	topicMap := map[int]map[common.Hash]struct{}{}
+	topicMap := make(map[int]map[common.Hash]struct{}, 7)
 
 	//populate topic map
 	for idx, v := range topics {
