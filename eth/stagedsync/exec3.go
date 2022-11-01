@@ -244,7 +244,8 @@ func Exec3(ctx context.Context,
 						// too much steps in db will slow-down everything: flush and prune
 						// it means better spend time for pruning, before flushing more data to db
 						// also better do it now - instead of before Commit() - because Commit does block execution
-						if idxStepsInDB(tx) > 6 {
+						stepsInDB := idxStepsInDB(tx)
+						if stepsInDB > 6 {
 							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
 							t := time.Now()
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
