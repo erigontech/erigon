@@ -37,6 +37,7 @@ type Config struct {
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
 	StatelessExec bool   // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState  bool   // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
