@@ -336,14 +336,11 @@ func Exec3(ctx context.Context,
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						t := time.Now()
-						i := 0
 						for time.Since(t) < 2*time.Second {
-							i++
 							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
-						log.Info("prune iterations", "i", i, "took", time.Since(t))
 					}
 				}
 			}
