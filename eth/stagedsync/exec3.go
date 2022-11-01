@@ -248,7 +248,7 @@ func Exec3(ctx context.Context,
 						if stepsInDB > 4 {
 							log.Info("force-prune: stepsInDB>4", "stepsInDB", stepsInDB)
 							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/20); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/32); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 							log.Info("force-prune: stepsInDB>4", "stepsInDB", stepsInDB, "took", time.Since(t))
