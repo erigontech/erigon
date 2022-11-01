@@ -64,8 +64,8 @@ func (p *Progress) Log(logPrefix string, rs *state.State22, rwsLen int, queueSiz
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
 		//"workers", workerCount,
-		"blk", fmt.Sprintf("%d=%.2f", outputBlockNum, float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
-		"input blk", atomic.LoadUint64(&inputBlockNum),
+		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
+		"inBlk", atomic.LoadUint64(&inputBlockNum),
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
@@ -176,9 +176,9 @@ func Exec3(ctx context.Context,
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
 	progress := NewProgress(block, commitThreshold)
-	logEvery := time.NewTicker(10 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	pruneEvery := time.NewTicker(time.Second)
+	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 	heap.Init(&rws)
@@ -335,11 +335,9 @@ func Exec3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart))
 				case <-pruneEvery.C:
-					log.Debug("can prune", "can", agg.CanPrune(tx))
 					if agg.CanPrune(tx) {
 						t := time.Now()
 						for time.Since(t) < 2*time.Second {
-							log.Debug("do prune")
 							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
@@ -488,12 +486,16 @@ loop:
 			}
 		}
 
+		if !parallel {
+			select {
+			case <-logEvery.C:
+				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
+			default:
+			}
+		}
+
 		// Check for interrupts
 		select {
-		case <-logEvery.C:
-			if !parallel {
-				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
-			}
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)
