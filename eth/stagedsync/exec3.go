@@ -295,6 +295,21 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						tx.CollectMetrics()
+
+						// prune before agg.Flush is faster
+						stepsInDB := idxStepsInDB(tx)
+						if stepsInDB > 6 { // too much steps in db will slow-down everything: flush and prune
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
+							t := time.Now()
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
+								return err
+							}
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
+						} else if stepsInDB > 3 {
+							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
+							//	return err
+							//}
+						}
 						if err := agg.Flush(tx); err != nil {
 							return err
 						}
@@ -302,19 +317,6 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						stepsInDB := idxStepsInDB(tx)
-						if stepsInDB > 3 {
-							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
-							//	return err
-							//}
-						} else if stepsInDB > 6 { // too much steps in db will slow-down everything: flush and prune
-							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
-							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
-								return err
-							}
-							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
-						}
 						if err = tx.Commit(); err != nil {
 							return err
 						}
