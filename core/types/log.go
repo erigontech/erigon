@@ -73,6 +73,49 @@ type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash) Logs {
+	topicMap := map[int]map[common.Hash]struct{}{}
+
+	//populate topic map
+	for idx, v := range topics {
+		for _, vv := range v {
+			if _, ok := topicMap[idx]; !ok {
+				topicMap[idx] = map[common.Hash]struct{}{}
+			}
+			topicMap[idx][vv] = struct{}{}
+		}
+	}
+
+	o := make(Logs, 0, len(logs))
+	for _, v := range logs {
+		// check address if addrMap is not empty
+		if len(addrMap) != 0 {
+			if _, ok := addrMap[v.Address]; !ok {
+				// not there? skip this log
+				continue
+			}
+		}
+		// if match no topics, then match all
+		found := true
+		if len(topicMap) != 0 {
+			found = false
+		}
+		// otherwise, try to find at least one match. if we do, then append, else exit
+		for idx, topic := range v.Topics {
+			if k, ok := topicMap[idx]; ok && len(k) > 0 {
+				if _, ok := k[topic]; ok {
+					found = true
+					break
+				}
+			}
+		}
+		if found {
+			o = append(o, v)
+		}
+	}
+	return o
+}
+
 type logMarshaling struct {
 	Data        hexutil.Bytes
 	BlockNumber hexutil.Uint64

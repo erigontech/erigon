@@ -187,7 +187,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := filterLogs(logs, addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
 			}
@@ -418,7 +418,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			log.Index = logIndex
 			logIndex++
 		}
-		filtered := filterLogs(rawLogs, addrMap, crit.Topics)
+		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash
@@ -687,41 +687,6 @@ Logs:
 					break
 				}
 			}
-			if !match {
-				continue Logs
-			}
-		}
-		result = append(result, log)
-	}
-	return result
-}
-
-func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics [][]common.Hash) []*types.Log {
-	result := make(types.Logs, 0, len(logs))
-	// populate a set of addresses
-Logs:
-	for _, log := range logs {
-		// empty address list means no filter
-		if len(addresses) > 0 {
-			// this is basically the includes function but done with a map
-			if _, ok := addresses[log.Address]; !ok {
-				continue
-			}
-		}
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(log.Topics) {
-			continue
-		}
-		for i, sub := range topics {
-			match := len(sub) == 0 // empty rule set == wildcard
-			// iterate over the subtopics and look for any match.
-			for _, topic := range sub {
-				if log.Topics[i] == topic {
-					match = true
-					break
-				}
-			}
-			// there was no match, so this log is invalid.
 			if !match {
 				continue Logs
 			}
