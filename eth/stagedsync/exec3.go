@@ -252,7 +252,7 @@ func Exec3(ctx context.Context,
 								panic(err)
 							}
 							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
-							break // already spent much time,
+							break // allready spent much time on this cycle
 						}
 
 						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
