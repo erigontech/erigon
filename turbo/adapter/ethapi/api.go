@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+        "github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -385,7 +386,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
 	// because the return value of ChainId is zero for those transactions.
-	chainId := uint256.NewInt(0)
+        chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
@@ -397,14 +398,12 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-                if (t.V == *(uint256.NewInt(27)) || t.V == *(uint256.NewInt(28))) {
-                    result.V = (*hexutil.Big)(t.V.ToBig())
-                } else {
-                    chainId = types.DeriveChainId(&t.V)
+                chainId = types.DeriveChainId(&t.V)
+                if (!chainId.Eq(u256.Num0)) {
                     result.ChainID = (*hexutil.Big)(chainId.ToBig())
-                    result.V = (*hexutil.Big)(t.V.ToBig())
-                }
+                } 
                 result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
+                result.V = (*hexutil.Big)(t.V.ToBig())
                 result.R = (*hexutil.Big)(t.R.ToBig())
                 result.S = (*hexutil.Big)(t.S.ToBig())
 	case *types.AccessListTx:
