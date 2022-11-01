@@ -484,6 +484,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
 	}
+	// Check whether the init code size has been exceeded.
+	if evm.chainRules.IsShanghai && len(codeAndHash.code) > params.MaxInitCodeSize {
+		return nil, address, gas, ErrMaxInitCodeSizeExceeded
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -553,7 +557,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *uint2
 
 // Create2 creates a new contract using code as deployment code.
 //
-// The different between Create2 with Create is Create2 uses sha3(0xff ++ msg.sender ++ salt ++ sha3(init_code))[12:]
+// The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {

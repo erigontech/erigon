@@ -1,6 +1,6 @@
 package lightclient
 
-import "github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+import "github.com/ledgerwatch/erigon/cl/utils"
 
 // PowerOf2 returns an integer that is the provided
 // exponent of 2. Can only return powers of 2 till 63,

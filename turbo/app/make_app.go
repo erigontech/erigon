@@ -2,6 +2,8 @@
 package app
 
 import (
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -9,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/urfave/cli"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).

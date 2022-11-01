@@ -18,11 +18,11 @@ package core
 
 import (
 	"fmt"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -129,7 +129,7 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -138,11 +138,9 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		gas = params.TxGas
 	}
 
-	// Auxiliary variables for overflow protection
-	var product, overflow uint64
-
+	dataLen := uint64(len(data))
 	// Bump the required gas by the amount of transactional data
-	if len(data) > 0 {
+	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
 		var nz uint64
 		for _, byt := range data {
@@ -156,41 +154,53 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 			nonZeroGas = params.TxDataNonZeroGasEIP2028
 		}
 
-		overflow, product = bits.Mul64(nz, nonZeroGas)
-		if overflow != 0 {
+		product, overflow := math.SafeMul(nz, nonZeroGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
-		z := uint64(len(data)) - nz
-		overflow, product = bits.Mul64(z, params.TxDataZeroGas)
-		if overflow != 0 {
+		z := dataLen - nz
+		product, overflow = math.SafeMul(z, params.TxDataZeroGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
+		}
+
+		if isContractCreation && isEIP3860 {
+			numWords := vm.ToWordSize(dataLen)
+			product, overflow = math.SafeMul(numWords, params.InitCodeWordGas)
+			if overflow {
+				return 0, ErrGasUintOverflow
+			}
+			gas, overflow = math.SafeAdd(gas, product)
+			if overflow {
+				return 0, ErrGasUintOverflow
+			}
 		}
 	}
 	if accessList != nil {
-		overflow, product = bits.Mul64(uint64(len(accessList)), params.TxAccessListAddressGas)
-		if overflow != 0 {
+		product, overflow := math.SafeMul(uint64(len(accessList)), params.TxAccessListAddressGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 
-		overflow, product = bits.Mul64(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
-		if overflow != 0 {
+		product, overflow = math.SafeMul(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
-		gas, overflow = bits.Add64(gas, product, 0)
-		if overflow != 0 {
+		gas, overflow = math.SafeAdd(gas, product)
+		if overflow {
 			return 0, ErrGasUintOverflow
 		}
 	}
@@ -391,7 +401,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
 	}
@@ -406,6 +416,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		if !msg.Value().IsZero() && !st.evm.Context().CanTransfer(st.state, msg.From(), msg.Value()) {
 			bailout = true
 		}
+	}
+
+	// Check whether the init code size has been exceeded.
+	if rules.IsShanghai && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Set up the initial access list.

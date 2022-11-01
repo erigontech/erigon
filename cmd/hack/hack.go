@@ -1321,7 +1321,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+		if err := http.ListenAndServe("localhost:6960", nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
