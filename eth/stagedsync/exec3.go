@@ -250,7 +250,6 @@ func Exec3(ctx context.Context,
 						stepsInDB := idxStepsInDB(tx)
 						ExecStepsInDB.Set(uint64(stepsInDB * 100))
 						if stepsInDB > 4 {
-
 							t := time.Now()
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 								panic(err)
