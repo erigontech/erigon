@@ -241,6 +241,20 @@ func Exec3(ctx context.Context,
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					if rs.SizeEstimate() < commitThreshold {
+						// too much steps in db will slow-down everything: flush and prune
+						// it means better spend time for pruning, before flushing more data to db
+						// also better do it now - instead of before Commit() - because Commit does block execution
+						stepsInDB := idxStepsInDB(tx)
+						if stepsInDB > 4 {
+							t := time.Now()
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/32); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
+							if time.Since(t) > 10*time.Second {
+								break // allready spent much time on this cycle
+							}
+						}
+
 						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
@@ -295,6 +309,7 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						tx.CollectMetrics()
+
 						if err := agg.Flush(tx); err != nil {
 							return err
 						}
@@ -302,16 +317,6 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-						stepsInDB := idxStepsInDB(tx)
-						if stepsInDB > 3 {
-							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
-							//	return err
-							//}
-						} else if stepsInDB > 10 { // too much steps in db will slow-down everything: flush and prune
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
-								return err
-							}
-						}
 						if err = tx.Commit(); err != nil {
 							return err
 						}
