@@ -241,6 +241,16 @@ func Exec3(ctx context.Context,
 
 					progress.Log(execStage.LogPrefix(), rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(tx))
 					if rs.SizeEstimate() < commitThreshold {
+						// prune before agg.Flush is faster
+						stepsInDB := idxStepsInDB(tx)
+						if stepsInDB > 6 { // too much steps in db will slow-down everything: flush and prune
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
+							t := time.Now()
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
+							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
+						}
 						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
 						if err := agg.Flush(tx); err != nil {
 							panic(err)
@@ -296,20 +306,6 @@ func Exec3(ctx context.Context,
 						}
 						tx.CollectMetrics()
 
-						// prune before agg.Flush is faster
-						stepsInDB := idxStepsInDB(tx)
-						if stepsInDB > 6 { // too much steps in db will slow-down everything: flush and prune
-							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB)
-							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
-								return err
-							}
-							log.Info("force-prune: stepsInDB>6", "stepsInDB", stepsInDB, "took", time.Since(t))
-						} else if stepsInDB > 3 {
-							//if err = agg.Prune(ctx, 10_000); err != nil { // prune part of retired data, before commit
-							//	return err
-							//}
-						}
 						if err := agg.Flush(tx); err != nil {
 							return err
 						}
