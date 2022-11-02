@@ -50,7 +50,7 @@ func decodeTestResponses(data string, result cltypes.ObjectSSZ, prefixBytes uint
 
 	// Get the size of the object.
 	ln := result.SizeSSZ()
-	fmt.Printf("size: %d\n", ln)
+	fmt.Printf("size: %d, length of string: %d\n", ln, len(msg))
 
 	// Read first six bytes.
 	r := bytes.NewReader(msg)
