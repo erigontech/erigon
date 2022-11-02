@@ -145,30 +145,41 @@ func TestDecodeAndReadSuccess(t *testing.T) {
 	}
 }
 
-func TestDecodeLizSSZ(t *testing.T) {
+func TestDecodeLizSSZBeaconBlock(t *testing.T) {
+	// Get file read.
 	b, err := os.ReadFile("beacon_blocks_by_range.txt")
 	if err != nil {
 		t.Errorf("Unable to read file: %v", err)
 	}
 	beaconBlocksByRangeResponse := string(b)
-	tests := map[string]struct {
-		raw    string // hex encoded.
-		count  uint64
-		output []cltypes.ObjectSSZ
-	}{
-		"beaconBlocksByRangeResponse": {
-			raw:    beaconBlocksByRangeResponse,
-			count:  2,
-			output: []cltypes.ObjectSSZ{&cltypes.SignedBeaconBlockBellatrix{}, &cltypes.SignedBeaconBlockBellatrix{}},
-		},
+	raw := beaconBlocksByRangeResponse
+	data, err := hex.DecodeString(raw)
+	if err != nil {
+		t.Errorf("Unable to decode string: %v", err)
 	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			data, err := hex.DecodeString(tc.raw)
-			if err != nil {
-				t.Errorf("Unable to decode string: %v", err)
-			}
-			require.NoError(t, DecodeListSSZ(data, tc.count, tc.output))
-		})
+
+	// Call DecodeListSSZ.
+	output := []cltypes.ObjectSSZ{&cltypes.SignedBeaconBlockBellatrix{}}
+	require.NoError(t, DecodeListSSZBeaconBlock(data, 1, output))
+
+	// Type assert on the output block.
+	outBlock := output[0].(*cltypes.SignedBeaconBlockBellatrix)
+
+	// See https://beaconcha.in/slot/5000000 for target data.
+	// Confirm block contents are correct.
+	slot := outBlock.Block.Slot
+	wantSlot := 5000000
+	if slot != uint64(wantSlot) {
+		t.Errorf("Unexpected slot number: want %d, got %d", wantSlot, slot)
+	}
+	bn := outBlock.Block.Body.ExecutionPayload.BlockNumber
+	wantBn := uint64(15835292)
+	if bn != wantBn {
+		t.Errorf("Unexpected block number: want %d, got %d", wantBn, bn)
+	}
+	pi := outBlock.Block.ProposerIndex
+	wantPi := 101643
+	if pi != 101643 {
+		t.Errorf("Unexpected proposer index: want %d, got %d", wantPi, pi)
 	}
 }

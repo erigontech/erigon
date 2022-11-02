@@ -108,8 +108,8 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: 5000000, // arbitrary slot (currently at ~5030000)
-		Count:     2,       // just need two blocks to verify correctness.
-		Step:      1,       // deprecated, must be set to 1.
+		Count:     1,
+		Step:      1, // deprecated, must be set to 1.
 	}
 	req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
 	if err != nil {

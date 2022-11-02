@@ -199,6 +199,35 @@ func readUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
+func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
+	r := bytes.NewReader(data)
+	forkDigest := make([]byte, 4)
+	// TODO(issues/5884): assert the fork digest matches the expectation for
+	// a specific configuration.
+	if _, err := r.Read(forkDigest); err != nil {
+		return err
+	}
+
+	// Read varint for length of message.
+	encodedLn, _, err := readUvarint(r)
+	if err != nil {
+		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+	}
+
+	sr := snappy.NewReader(r)
+	for i := 0; i < int(count); i++ {
+		raw := make([]byte, encodedLn)
+		if _, err = sr.Read(raw); err != nil {
+			return fmt.Errorf("readPacket: %w", err)
+		}
+
+		if err := list[i].UnmarshalSSZ(raw); err != nil {
+			return fmt.Errorf("unmarshalling: %w", err)
+		}
+	}
+	return nil
+}
+
 func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 	objSize := list[0].SizeSSZ()
 
@@ -212,14 +241,13 @@ func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := readUvarint(r)
-	fmt.Printf("*** encoded=%d, bytes count%d, obj size=%d\n", encodedLn, bytesCount, objSize)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	pos := 4 + bytesCount
-	// if encodedLn != uint64(objSize) || len(list) != int(count) {
-	// 	return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
-	// }
+	if encodedLn != uint64(objSize) || len(list) != int(count) {
+		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
+	}
 
 	sr := snappy.NewReader(r)
 	for i := 0; i < int(count); i++ {
