@@ -254,7 +254,7 @@ func Exec3(ctx context.Context,
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
-							if time.Since(t) > 10*time.Second && rs.SizeEstimate() < commitThreshold/2 {
+							if time.Since(t) > 10*time.Second && rs.SizeEstimate() < uint64(float64(commitThreshold)/1.3) {
 								break // allready spent much time on this cycle
 							}
 						}
