@@ -158,7 +158,7 @@ func TestDecodeLizSSZBeaconBlock(t *testing.T) {
 		t.Errorf("Unable to decode string: %v", err)
 	}
 
-	// Call DecodeListSSZ.
+	// Call DecodeListSSZBeaconBlock.
 	output := []cltypes.ObjectSSZ{&cltypes.SignedBeaconBlockBellatrix{}}
 	require.NoError(t, DecodeListSSZBeaconBlock(data, 1, output))
 
