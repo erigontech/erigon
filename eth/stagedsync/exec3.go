@@ -271,6 +271,7 @@ func Exec3(ctx context.Context,
 					cancelApplyCtx()
 					applyWg.Wait()
 
+					var t1, t2 time.Duration
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -313,9 +314,12 @@ func Exec3(ctx context.Context,
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
+						t1 = time.Since(commitStart)
+						tt := time.Now()
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
+						t2 = time.Since(tt)
 						tx.CollectMetrics()
 
 						if err := agg.Flush(tx); err != nil {
@@ -346,7 +350,7 @@ func Exec3(ctx context.Context,
 					if err != nil {
 						panic(err)
 					}
-					log.Info("Committed", "time", time.Since(commitStart))
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2)
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						t := time.Now()
