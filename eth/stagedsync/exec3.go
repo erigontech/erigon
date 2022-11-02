@@ -259,6 +259,10 @@ func Exec3(ctx context.Context,
 								rs.SizeEstimate() > uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
 								break
 							}
+						} else if stepsInDB > 7 {
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
 						}
 
 						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
