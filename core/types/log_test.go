@@ -133,3 +133,100 @@ func checkError(t *testing.T, testname string, got, want error) bool {
 	}
 	return false
 }
+
+func TestFilterLogsTopics(t *testing.T) {
+	var (
+		A common.Hash = [32]byte{1}
+		B common.Hash = [32]byte{2}
+		C common.Hash = [32]byte{3}
+		D common.Hash = [32]byte{4}
+		E common.Hash = [32]byte{5}
+		F common.Hash = [32]byte{6}
+
+		a1 common.Address = [20]byte{1}
+		a2 common.Address = [20]byte{2}
+		a3 common.Address = [20]byte{3}
+		a4 common.Address = [20]byte{4}
+		a5 common.Address = [20]byte{5}
+		a6 common.Address = [20]byte{6}
+	)
+
+	type filterLogTest struct {
+		input  Logs
+		filter [][]common.Hash
+		want   []common.Address
+	}
+	var basicSet = Logs{
+		{
+			Address: a1,
+			Topics:  []common.Hash{F, F, F, F, F, B, B},
+		},
+		{
+			Address: a2,
+			Topics:  []common.Hash{A, B, F, F, F, A, B},
+		},
+		{
+			Address: a3,
+			Topics:  []common.Hash{B, A},
+		},
+		{
+			Address: a4,
+			Topics:  []common.Hash{C, D, A, D, E},
+		},
+		{
+			Address: a5,
+			Topics:  []common.Hash{C, B, C, A, E},
+		},
+		{
+			Address: a6,
+			Topics:  []common.Hash{F, F, F, D},
+		},
+	}
+	var filterLogTests = map[string]filterLogTest{
+		"no topics, should return all topics": {
+			input:  basicSet,
+			filter: nil,
+			want:   []common.Address{a1, a2, a3, a4, a5, a6},
+		},
+		"filter for hash A in slot 0 should only be a2": {
+			input:  basicSet,
+			filter: [][]common.Hash{{A}},
+			want:   []common.Address{a2},
+		},
+		"filter for hash B in slot 0 should be a2 and a5": {
+			input:  basicSet,
+			filter: [][]common.Hash{{}, {B}},
+			want:   []common.Address{a2, a5},
+		},
+		"filter for hash C in slot 0 and hash B in slot 1 should be a2, a4, and a5": {
+			input:  basicSet,
+			filter: [][]common.Hash{{C}, {B}},
+			want:   []common.Address{a2, a4, a5},
+		},
+		"filter for hashes [A,B] in slot 3 and hashes [C, D] in slot 4 should be a4 and a6": {
+			input:  basicSet,
+			filter: [][]common.Hash{{}, {}, {A, B}, {C, D}},
+			want:   []common.Address{a4, a6},
+		},
+		`filter for hashes
+		[E] in slot 0, [E, C] in slot 1, [E, B] in slot 2, [E, C, B] in slot3, [B] in slot 5, and [A] in slot 6
+		should be a1 only`: {
+			input:  basicSet,
+			filter: [][]common.Hash{{E}, {E, C}, {E, B}, {E, C, B}, {}, {B}, {A}},
+			want:   []common.Address{a1},
+		},
+	}
+	for name, v := range filterLogTests {
+		ares := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter))
+		if !reflect.DeepEqual(ares, v.want) {
+			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
+		}
+	}
+}
+
+func testFLExtractAddress(xs Logs) (o []common.Address) {
+	for _, v := range xs {
+		o = append(o, v.Address)
+	}
+	return
+}
