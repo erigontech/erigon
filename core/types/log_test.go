@@ -185,7 +185,12 @@ func TestFilterLogsTopics(t *testing.T) {
 	var filterLogTests = map[string]filterLogTest{
 		"no topics, should return all topics": {
 			input:  basicSet,
-			filter: nil,
+			filter: [][]common.Hash{},
+			want:   []common.Address{a1, a2, a3, a4, a5, a6},
+		},
+		"no topics, should return all topics, for empty nested topics": {
+			input:  basicSet,
+			filter: [][]common.Hash{{}, {}, {}},
 			want:   []common.Address{a1, a2, a3, a4, a5, a6},
 		},
 		"filter for hash A in slot 0 should only be a2": {
