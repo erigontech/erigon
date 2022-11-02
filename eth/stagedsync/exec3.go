@@ -256,7 +256,7 @@ func Exec3(ctx context.Context,
 							}
 
 							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
-								rs.SizeEstimate() < uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
+								rs.SizeEstimate() < uint64(float64(commitThreshold)*0.7) { // batch is 80%-full - means commit soon, time to flush indices
 								break
 							}
 						}
@@ -266,10 +266,6 @@ func Exec3(ctx context.Context,
 							panic(err)
 						}
 						break
-					}
-					// do some work before stop execution, to reduce stop-time
-					if err := agg.Flush(tx); err != nil {
-						panic(err)
 					}
 
 					cancelApplyCtx()
