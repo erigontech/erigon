@@ -208,9 +208,9 @@ func TestFilterLogsTopics(t *testing.T) {
 			filter: [][]common.Hash{{C}, {B}},
 			want:   []common.Address{a2, a4, a5},
 		},
-		"filter for hashes [A,B] in slot 3 and hashes [C, D] in slot 4 should be a4 and a6": {
+		"filter for hashes [B,B,B...,A] in slot 3 and hashes [D, C] in slot 4 should be a4 and a6": {
 			input:  basicSet,
-			filter: [][]common.Hash{{}, {}, {A, B}, {C, D}},
+			filter: [][]common.Hash{{}, {}, {B, B, B, B, B, B, B, B, B, B, B, A, B}, {D, C}},
 			want:   []common.Address{a4, a6},
 		},
 		`filter for hashes
