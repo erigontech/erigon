@@ -255,7 +255,7 @@ func Exec3(ctx context.Context,
 								panic(err)
 							}
 
-							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle
+							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
 								rs.SizeEstimate() < uint64(float64(commitThreshold)/1.3) { // but if commit soon, flush indices
 								break
 							}
