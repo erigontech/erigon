@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -37,6 +38,8 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	atomic2 "go.uber.org/atomic"
 )
+
+var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold}
@@ -245,13 +248,16 @@ func Exec3(ctx context.Context,
 						// it means better spend time for pruning, before flushing more data to db
 						// also better do it now - instead of before Commit() - because Commit does block execution
 						stepsInDB := idxStepsInDB(tx)
-						if stepsInDB > 4 {
+						ExecStepsInDB.Set(uint64(stepsInDB * 100))
+						if stepsInDB > 2 {
 							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/32); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
-							if time.Since(t) > 10*time.Second {
-								break // allready spent much time on this cycle
+
+							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
+								rs.SizeEstimate() < uint64(float64(commitThreshold)*0.7) { // batch is 80%-full - means commit soon, time to flush indices
+								break
 							}
 						}
 
@@ -261,8 +267,11 @@ func Exec3(ctx context.Context,
 						}
 						break
 					}
+
 					cancelApplyCtx()
 					applyWg.Wait()
+
+					var t1, t2 time.Duration
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -305,9 +314,12 @@ func Exec3(ctx context.Context,
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
+						t1 = time.Since(commitStart)
+						tt := time.Now()
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
+						t2 = time.Since(tt)
 						tx.CollectMetrics()
 
 						if err := agg.Flush(tx); err != nil {
@@ -338,7 +350,7 @@ func Exec3(ctx context.Context,
 					if err != nil {
 						panic(err)
 					}
-					log.Info("Committed", "time", time.Since(commitStart))
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2)
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						t := time.Now()
@@ -473,11 +485,11 @@ loop:
 			if err = execStage.Update(applyTx, stageProgress); err != nil {
 				return err
 			}
+			applyTx.CollectMetrics()
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				applyTx.CollectMetrics()
-				if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
-					return err
-				}
 				if err := applyTx.Commit(); err != nil {
 					return err
 				}
