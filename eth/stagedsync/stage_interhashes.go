@@ -537,7 +537,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			copy(compositeKey, k[:32])
 			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
 			copy(compositeKey[40:], k[32:])
-			fmt.Printf("retain: %x, %t\n", compositeKey, len(v) == 0)
 			rl.AddKeyWithMarker(compositeKey, len(v) == 0)
 			return nil
 		}
@@ -549,7 +548,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		}
 	} else {
 		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			fmt.Printf("retain: %x, %t\n", k, len(v) == 0)
 			rl.AddKeyWithMarker(k, len(v) == 0)
 			return nil
 		}

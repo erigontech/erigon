@@ -485,11 +485,11 @@ loop:
 			if err = execStage.Update(applyTx, stageProgress); err != nil {
 				return err
 			}
+			applyTx.CollectMetrics()
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				applyTx.CollectMetrics()
-				if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
-					return err
-				}
 				if err := applyTx.Commit(); err != nil {
 					return err
 				}
