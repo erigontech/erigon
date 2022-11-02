@@ -147,15 +147,18 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
-		var err error
+		c, err := rwTx.RwCursor(table)
+		if err != nil {
+			return err
+		}
 		t.Ascend(func(item statePair) bool {
 			if len(item.val) == 0 {
-				if err = rwTx.Delete(table, item.key); err != nil {
+				if err = c.Delete(item.key); err != nil {
 					return false
 				}
 				//fmt.Printf("Flush [%x]=>\n", ks)
 			} else {
-				if err = rwTx.Put(table, item.key, item.val); err != nil {
+				if err = c.Put(item.key, item.val); err != nil {
 					return false
 				}
 				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)

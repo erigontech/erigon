@@ -101,11 +101,17 @@ func runSentinelNode(cliCtx *cli.Context) {
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
 	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
 
-	lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
-		Period: 604,
-		Count:  1,
+	// lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+	// 	Period: 604,
+	// 	Count:  1,
+	// }
+
+	blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
+		StartSlot: 5000000, // arbitrary slot (currently at ~5030000)
+		Count:     1,
+		Step:      1, // deprecated, must be set to 1.
 	}
-	req, err := constructRequest(handlers.LightClientUpdatesByRangeV1, lcUpdateReq)
+	req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
 	}
@@ -153,6 +159,14 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 				}
 
 				log.Info("Non-error response received", "data", message.Data)
+				f, err := os.Create("out")
+				if err != nil {
+					panic(fmt.Sprintf("unable to open file: %v\n", err))
+				}
+				_, err = f.WriteString(hex.EncodeToString(message.Data))
+				if err != nil {
+					panic(fmt.Sprintf("unable to write to file: %v\n", err))
+				}
 				log.Info("Hex representation", "data", hex.EncodeToString(message.Data))
 			}()
 		}

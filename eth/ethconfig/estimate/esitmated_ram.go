@@ -12,8 +12,8 @@ type estimatedRamPerWorker datasize.ByteSize
 
 // Workers - return max workers amount based on total Memory/CPU's and estimated RAM per worker
 func (r estimatedRamPerWorker) Workers() int {
-	// 80% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM
-	totalMemory := memory.TotalMemory() / 5 * 4
+	// 50% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM
+	totalMemory := memory.TotalMemory() / 2
 
 	maxWorkersForGivenMemory := totalMemory / uint64(r)
 	maxWorkersForGivenCPU := runtime.NumCPU() - 1 // reserve 1 cpu for "work-producer thread", also IO software on machine in cloud-providers using 1 CPU

@@ -44,6 +44,15 @@ type LightClientUpdatesByRangeRequest struct {
 }
 
 /*
+ * BeaconBlocksByRangeRequest is the request for getting a range of blocks.
+ */
+type BeaconBlocksByRangeRequest struct {
+	StartSlot uint64
+	Count     uint64
+	Step      uint64 // Deprecated, must be set to 1
+}
+
+/*
  * Status is a P2P Message we exchange when connecting to a new Peer.
  * It contains network information about the other peer and if mismatching we drop it.
  */
