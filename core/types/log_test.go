@@ -135,6 +135,7 @@ func checkError(t *testing.T, testname string, got, want error) bool {
 }
 
 func TestFilterLogsTopics(t *testing.T) {
+	// hashes and addresses to make test more readable
 	var (
 		A common.Hash = [32]byte{1}
 		B common.Hash = [32]byte{2}
@@ -152,9 +153,9 @@ func TestFilterLogsTopics(t *testing.T) {
 	)
 
 	type filterLogTest struct {
-		input  Logs
-		filter [][]common.Hash
-		want   []common.Address
+		input  Logs             // logs, each with an address and slice of topics
+		filter [][]common.Hash  // the topic filter we want to use
+		want   []common.Address // slice of addresses that should pass the filter
 	}
 	var basicSet = Logs{
 		{
@@ -208,7 +209,7 @@ func TestFilterLogsTopics(t *testing.T) {
 			filter: [][]common.Hash{{C}, {B}},
 			want:   []common.Address{a2, a4, a5},
 		},
-		"filter for hashes [B,B,B...,A] in slot 3 and hashes [D, C] in slot 4 should be a4 and a6": {
+		"filter for hashes [B,B,B...,A,B] in slot 3 and hashes [D, C] in slot 4 should be a4 and a6": {
 			input:  basicSet,
 			filter: [][]common.Hash{{}, {}, {B, B, B, B, B, B, B, B, B, B, B, A, B}, {D, C}},
 			want:   []common.Address{a4, a6},
