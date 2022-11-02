@@ -515,7 +515,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) error {
 			if len(k) == 32 {
-				fmt.Printf("retain: %x, %t\n", k, len(v) == 0)
 				rl.AddKeyWithMarker(k, len(v) == 0)
 				return nil
 			}
