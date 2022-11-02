@@ -259,7 +259,7 @@ func Exec3(ctx context.Context,
 								rs.SizeEstimate() > uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
 								break
 							}
-						} else if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
+						} else if stepsInDB > 7 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
