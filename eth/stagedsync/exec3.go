@@ -267,7 +267,7 @@ func Exec3(ctx context.Context,
 						}
 						break
 					}
-					// do some work before stop execution
+					// do some work before stop execution, to reduce stop-time
 					if err := agg.Flush(tx); err != nil {
 						panic(err)
 					}
