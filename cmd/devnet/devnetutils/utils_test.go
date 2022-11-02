@@ -1,6 +1,11 @@
 package devnetutils
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestUniqueIDFromEnode(t *testing.T) {
 	testCases := []struct {
@@ -33,9 +38,7 @@ func TestUniqueIDFromEnode(t *testing.T) {
 		if !testCase.shouldError && err != nil {
 			t.Errorf("expected no error, got %s", err)
 		}
-		if got != testCase.expectedRes {
-			t.Errorf("expected %s, got %s", testCase.expectedRes, got)
-		}
+		require.EqualValues(t, got, testCase.expectedRes)
 	}
 }
 
@@ -76,8 +79,67 @@ func TestParseResponse(t *testing.T) {
 
 	for _, testCase := range testCases {
 		got, _ := ParseResponse(testCase.input)
-		if got != testCase.expected {
-			t.Errorf("expected: %v, got %v", testCase.expected, got)
+		require.EqualValues(t, testCase.expected, got)
+	}
+}
+
+func TestNamespaceAndSubMethodFromMethod(t *testing.T) {
+	expectedError := fmt.Errorf("invalid string to split")
+
+	testCases := []struct {
+		method            string
+		expectedNamespace string
+		expectedSubMethod string
+		shouldError       bool
+		expectedError     error
+	}{
+		{
+			"eth_logs",
+			"eth",
+			"logs",
+			false,
+			nil,
+		},
+		{
+			"ethNewHeads",
+			"",
+			"",
+			true,
+			expectedError,
+		},
+		{
+			"",
+			"",
+			"",
+			true,
+			expectedError,
+		},
+	}
+
+	for _, testCase := range testCases {
+		namespace, subMethod, err := NamespaceAndSubMethodFromMethod(testCase.method)
+		require.EqualValues(t, testCase.expectedNamespace, namespace)
+		require.EqualValues(t, testCase.expectedSubMethod, subMethod)
+		require.EqualValues(t, testCase.expectedError, err)
+		if testCase.shouldError {
+			require.Errorf(t, testCase.expectedError, expectedError.Error())
 		}
+	}
+}
+
+func TestHexToInt(t *testing.T) {
+	testCases := []struct {
+		hexStr   string
+		expected uint64
+	}{
+		{"0x0", 0},
+		{"0x32424", 205860},
+		{"0x200", 512},
+		{"0x39", 57},
+	}
+
+	for _, testCase := range testCases {
+		got := HexToInt(testCase.hexStr)
+		require.EqualValues(t, testCase.expected, got)
 	}
 }
