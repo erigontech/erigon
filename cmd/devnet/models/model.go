@@ -117,23 +117,14 @@ var (
 
 // Responses for the rpc calls
 type (
-	// TxpoolContextResponse is the response for calls made to txpool_content
-	TxpoolContextResponse map[string]interface{}
-
 	// AdminNodeInfoResponse is the response for calls made to admin_nodeInfo
 	AdminNodeInfoResponse struct {
 		rpctest.CommonResponse
 		Result p2p.NodeInfo `json:"result"`
 	}
-
-	//content := map[string]map[string]map[string]*RPCTransaction{
-	//	"pending": make(map[string]map[string]*RPCTransaction),
-	//	"baseFee": make(map[string]map[string]*RPCTransaction),
-	//	"queued":  make(map[string]map[string]*RPCTransaction),
-	//}
 )
 
-// Block represents a block
+// Block represents a simple block for queries
 type Block struct {
 	Number       *hexutil.Big
 	Transactions []common.Hash

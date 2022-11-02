@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
@@ -10,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"time"
 )
 
 const gasPrice = 912345678

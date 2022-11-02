@@ -12,6 +12,7 @@ import (
 
 var subscriptionChan = make(chan interface{})
 
+// SearchBlockForTransactionHash looks for the given hash in the latest black using the eth_newHeads method
 func SearchBlockForTransactionHash(hash common.Hash) (uint64, error) {
 	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "")
 	if err != nil {
@@ -45,11 +46,11 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 }
 
 func subscribeToNewHeads(client *rpc.Client, hash common.Hash) (uint64, error) {
-	sub, err := subscribe(client, string(models.ETHNewHeads)) // TODO: put eth_newHeads in models
+	sub, err := subscribe(client, string(models.ETHNewHeads))
 	if err != nil {
 		return uint64(0), fmt.Errorf("error subscribing to newHeads: %v", err)
 	}
-	defer unSubscribe(sub)
+	defer unsubscribe(sub)
 
 	var (
 		blockCount int
@@ -79,7 +80,8 @@ mark:
 	return blockN, nil
 }
 
-func unSubscribe(sub *rpc.ClientSubscription) {
+// unsubscribe closes the client subscription and empties the global subscription channel
+func unsubscribe(sub *rpc.ClientSubscription) {
 	sub.Unsubscribe()
 	for len(subscriptionChan) > 0 {
 		<-subscriptionChan
