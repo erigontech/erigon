@@ -95,18 +95,22 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 				continue
 			}
 		}
+
+		// If the to filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(v.Topics) {
+			continue
+		}
 		// if match no topics, then match all
 		found := true
-		if len(topicMap) != 0 {
-			found = false
-		}
-		// otherwise, try to find at least one match. if we do, then append, else exit
-		for idx, topic := range v.Topics {
-			if k, ok := topicMap[idx]; ok && len(k) > 0 {
-				if _, ok := k[topic]; ok {
-					found = true
-					break
-				}
+		for idx, topicSet := range topicMap {
+			// if the topicSet is empty, match all as wildcard
+			if len(topicSet) == 0 {
+				continue
+			}
+			// the topicSet isnt empty, so the topic must be included.
+			if _, ok := topicSet[v.Topics[idx]]; !ok {
+				found = false
+				break
 			}
 		}
 		if found {
@@ -114,6 +118,40 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 		}
 	}
 	return o
+}
+func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
+	result := make(Logs, 0, len(logs))
+	// populate a set of addresses
+Logs:
+	for _, log := range logs {
+		// empty address list means no filter
+		if len(addresses) > 0 {
+			// this is basically the includes function but done with a map
+			if _, ok := addresses[log.Address]; !ok {
+				continue
+			}
+		}
+		// If the to filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(log.Topics) {
+			continue
+		}
+		for i, sub := range topics {
+			match := len(sub) == 0 // empty rule set == wildcard
+			// iterate over the subtopics and look for any match.
+			for _, topic := range sub {
+				if log.Topics[i] == topic {
+					match = true
+					break
+				}
+			}
+			// there was no match, so this log is invalid.
+			if !match {
+				continue Logs
+			}
+		}
+		result = append(result, log)
+	}
+	return result
 }
 
 type logMarshaling struct {
