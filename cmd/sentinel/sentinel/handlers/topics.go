@@ -27,8 +27,8 @@ const MetadataTopic = "/metadata"
 const PingTopic = "/ping"
 const StatusTopic = "/status"
 const GoodbyeTopic = "/goodbye"
-const BeaconBlockByRangeTopic = "/beacon_block_by_range"
-const BeaconBlockByRootTopic = "/beacon_block_by_root"
+const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
+const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
 const LightClientFinalityUpdateTopic = "/light_client_finality_update"
 const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
 const LightClientBootstrapTopic = "/light_client_bootstrap"
@@ -44,8 +44,10 @@ var (
 
 	StatusProtocolV1 = ProtocolPrefix + StatusTopic + Schema1 + EncodingProtocol
 
-	BeaconBlockByRangeProtocolV1  = ProtocolPrefix + BeaconBlockByRangeTopic + Schema1 + EncodingProtocol
-	BeaconBlockByRootProtocolV1   = ProtocolPrefix + BeaconBlockByRootTopic + Schema1 + EncodingProtocol
+	BeaconBlocksByRangeProtocolV1 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema1 + EncodingProtocol
+	BeaconBlocksByRangeProtocolV2 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema2 + EncodingProtocol
+
+	BeaconBlocksByRootProtocolV1  = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
 	LightClientOptimisticUpdateV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientBootstrapV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
