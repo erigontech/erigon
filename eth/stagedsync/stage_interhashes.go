@@ -532,7 +532,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 					return nil
 				}
 			}
-			compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+			compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
 			copy(compositeKey, k[:32])
 			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
 			copy(compositeKey[40:], k[32:])
