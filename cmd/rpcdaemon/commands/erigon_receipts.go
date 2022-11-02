@@ -233,7 +233,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(0, latest)
+	blockNumbers.AddRange(0, latest+1)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
 	if err != nil {
 		return nil, err
@@ -291,8 +291,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil
 			}
 			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
-			for _, log := range filtered {
-				log.TxIndex = txIndex
+			for i := range filtered {
+				filtered[i].TxIndex = txIndex
 			}
 			for i := len(filtered) - 1; i >= 0; i-- {
 				blockLogs = append(blockLogs, filtered[i])
