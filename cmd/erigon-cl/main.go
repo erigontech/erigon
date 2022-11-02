@@ -18,6 +18,7 @@ func main() {
 	if err != nil {
 		log.Error("Error opening database", "err", err)
 	}
+	defer db.Close()
 	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
 
 	state, err := clcore.RetrieveBeaconState(ctx, uri)
@@ -27,11 +28,12 @@ func main() {
 		return
 	}
 	tx, err := db.BeginRw(ctx)
-
 	if err != nil {
 		log.Error("[DB] Failed", "reason", err)
 		return
 	}
+	defer tx.Rollback()
+
 	if err := cldb.WriteBeaconState(tx, state); err != nil {
 		log.Error("[DB] Failed", "reason", err)
 		return

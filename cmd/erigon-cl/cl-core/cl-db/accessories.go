@@ -11,11 +11,11 @@ import (
 
 func EncodeSlot(n uint64) []byte {
 	ret := make([]byte, 4)
-	binary.BigEndian.PutUint32(ret[:], uint32(n))
+	binary.BigEndian.PutUint32(ret, uint32(n))
 	return ret
 }
 
-// TODO: make personalized mdbx table for beacon state
+// WriteBeaconState writes beacon state for specific block to database.
 func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
 	if err != nil {
@@ -24,12 +24,12 @@ func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconState) error {
 
 	fmt.Printf("Bytes written in state: %d bytes\n", len(data)+4)
 
-	return tx.Put(kv.Headers, EncodeSlot(state.Slot), data)
+	return tx.Put(kv.BeaconState, EncodeSlot(state.Slot), data)
 }
 
-// TODO: make personalized mdbx table for beacon state
+// ReadBeaconState reads beacon state for specific block from database.
 func ReadBeaconState(tx kv.Getter, slot uint64) (*cltypes.BeaconState, error) {
-	data, err := tx.GetOne(kv.Headers, EncodeSlot(slot))
+	data, err := tx.GetOne(kv.BeaconState, EncodeSlot(slot))
 	if err != nil {
 		return nil, err
 	}
