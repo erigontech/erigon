@@ -100,8 +100,9 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 		if len(topics) > len(v.Topics) {
 			continue
 		}
-		// if match no topics, then match all
+		// the default state is to include the log
 		found := true
+		// if there are no topics provided, then match all
 		for idx, topicSet := range topicMap {
 			// if the topicSet is empty, match all as wildcard
 			if len(topicSet) == 0 {
@@ -109,6 +110,7 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 			}
 			// the topicSet isnt empty, so the topic must be included.
 			if _, ok := topicSet[v.Topics[idx]]; !ok {
+				// the topic wasn't found, so we should skip this log
 				found = false
 				break
 			}
