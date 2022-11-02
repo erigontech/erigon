@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -163,7 +162,6 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
-	var m runtime.MemStats
 
 	h := &Heap{comparator: args.Comparator}
 	heap.Init(h)
@@ -231,8 +229,6 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			common.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
 		}
 

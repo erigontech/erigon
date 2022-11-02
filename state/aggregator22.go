@@ -275,112 +275,112 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 			ac.Close()
 		}
 	}()
-	var wg sync.WaitGroup
-	wg.Add(7)
+	//var wg sync.WaitGroup
+	//wg.Add(7)
 	errCh := make(chan error, 7)
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	//go func() {
+	//	defer wg.Done()
+	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
-			errCh <- err
-		}
-	}()
+	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
+		errCh <- err
+	}
+	//}()
+	//
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.code, err = a.code.collate(step, txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.code, err = a.code.collate(step, txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.logTopics, err = a.logTopics.collate(txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.logTopics, err = a.logTopics.collate(txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
+	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	defer wg.Done()
+	//	var err error
+	if err = db.View(ctx, func(tx kv.Tx) error {
+		ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, tx, logEvery)
+		return err
+	}); err != nil {
+		errCh <- err
+	}
 
-		if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		if err = db.View(ctx, func(tx kv.Tx) error {
-			ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, tx, logEvery)
-			return err
-		}); err != nil {
-			errCh <- err
-		}
-
-		if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
-			errCh <- err
-		}
-	}()
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
+	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
+		errCh <- err
+	}
+	//}()
+	//go func() {
+	//	wg.Wait()
+	close(errCh)
+	//}()
 	var lastError error
 	for err := range errCh {
 		if err != nil {
@@ -595,7 +595,7 @@ func (a *Aggregator22) Flush(tx kv.RwTx) error {
 		a.tracesFrom.Rotate(),
 		a.tracesTo.Rotate(),
 	}
-	defer func(t time.Time) { log.Debug("[snapshots] hitory flush", "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
 		if err := f.Flush(tx); err != nil {
 			return err

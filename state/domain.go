@@ -811,7 +811,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
-	rs.LogLvl(log.LvlDebug)
+	rs.LogLvl(log.LvlTrace)
 	defer d.EnableMadvNormal().DisableReadAhead()
 
 	word := make([]byte, 0, 256)

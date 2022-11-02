@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -119,7 +118,6 @@ func extractBucketIntoFiles(
 ) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	var m runtime.MemStats
 
 	c, err := db.Cursor(bucket)
 	if err != nil {
@@ -143,8 +141,6 @@ func extractBucketIntoFiles(
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			common.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) >= 0 {

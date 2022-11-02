@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -65,13 +63,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 
 	defer func() {
 		b.Reset() // run it after buf.flush and file.sync
-		var m runtime.MemStats
-		if lvl >= log.LvlInfo {
-			common.ReadMemStats(&m)
-		}
-		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix),
-			"name", bufferFile.Name(),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", bufferFile.Name())
 	}()
 
 	if err = b.Write(w); err != nil {
