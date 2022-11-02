@@ -515,6 +515,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) error {
 			if len(k) == 32 {
+				fmt.Printf("retain: %x, %t\n", k, len(v) == 0)
 				rl.AddKeyWithMarker(k, len(v) == 0)
 				return nil
 			}
@@ -532,7 +533,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 					return nil
 				}
 			}
-			compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+			compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
 			copy(compositeKey, k[:32])
 			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
 			copy(compositeKey[40:], k[32:])
