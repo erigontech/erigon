@@ -251,12 +251,12 @@ func Exec3(ctx context.Context,
 						ExecStepsInDB.Set(uint64(stepsInDB * 100))
 						if stepsInDB > 2 {
 							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/5); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 
 							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
-								rs.SizeEstimate() > uint64(float64(commitThreshold)*0.7) { // batch is 80%-full - means commit soon, time to flush indices
+								rs.SizeEstimate() > uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
 								break
 							}
 						}
