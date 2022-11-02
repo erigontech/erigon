@@ -179,7 +179,7 @@ func TestDecodeLizSSZBeaconBlock(t *testing.T) {
 	}
 	pi := outBlock.Block.ProposerIndex
 	wantPi := 101643
-	if pi != 101643 {
+	if pi != uint64(wantPi) {
 		t.Errorf("Unexpected proposer index: want %d, got %d", wantPi, pi)
 	}
 }
