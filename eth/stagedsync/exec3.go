@@ -271,6 +271,7 @@ func Exec3(ctx context.Context,
 					if err := agg.Flush(tx); err != nil {
 						panic(err)
 					}
+
 					cancelApplyCtx()
 					applyWg.Wait()
 
