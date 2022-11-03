@@ -3,6 +3,8 @@ package models
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
 )
@@ -15,6 +17,8 @@ type (
 
 	// RPCMethod is the type for rpc methods used
 	RPCMethod string
+	// SubMethod is the type for sub methods used in subscriptions
+	SubMethod string
 )
 
 const (
@@ -26,8 +30,6 @@ const (
 	ChainArg = "--chain"
 	// DevPeriodArg is the dev.period flag
 	DevPeriodArg = "--dev.period"
-	// VerbosityArg is the verbosity flag
-	VerbosityArg = "--verbosity"
 	// ConsoleVerbosityArg is the log.console.verbosity flag
 	ConsoleVerbosityArg = "--log.console.verbosity"
 	// LogDirArg is the log.dir.path flag
@@ -42,6 +44,8 @@ const (
 	StaticPeersArg = "--staticpeers"
 	// HttpApiArg is the http.api flag
 	HttpApiArg = "--http.api"
+	// WSArg is the --ws flag for rpcdaemon
+	WSArg = "--ws"
 
 	// DataDirParam is the datadir parameter
 	DataDirParam = "./dev"
@@ -49,8 +53,6 @@ const (
 	ChainParam = "dev"
 	// DevPeriodParam is the dev.period parameter
 	DevPeriodParam = "0"
-	// VerbosityParam is the verbosity parameter
-	VerbosityParam = "0"
 	// ConsoleVerbosityParam is the verbosity parameter for the console logs
 	ConsoleVerbosityParam = "0"
 	// LogDirParam is the log directory parameter for logging to disk
@@ -59,14 +61,20 @@ const (
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
 	PrivateApiParamNoMine = "localhost:9091"
+	// HttpApiParam is the http.api default parameter for rpcdaemon
+	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity"
+	//// WSParam is the ws default parameter for rpcdaemon
+	//WSParam = ""
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
-	// ErigonLogFilePrefix is the default file prefix for logging erigon node info and errors
-	ErigonLogFilePrefix = "erigon_node_"
+	// Localhost is the default localhost endpoint for web socket attachments
+	Localhost = "127.0.0.1:8545"
 
 	// ReqId is the request id for each request
 	ReqId = 0
+	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
+	MaxNumberOfBlockChecks = 1
 
 	// Latest is the parameter for the latest block
 	Latest BlockNumber = "latest"
@@ -91,10 +99,15 @@ const (
 	ETHGetBalance RPCMethod = "eth_getBalance"
 	// ETHSendRawTransaction represents the eth_sendRawTransaction method
 	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
+	// ETHGetBlockByNumber represents the eth_getBlockByNumber method
+	ETHGetBlockByNumber RPCMethod = "eth_getBlockByNumber"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod = "txpool_content"
+
+	// ETHNewHeads represents the eth_newHeads sub method
+	ETHNewHeads SubMethod = "eth_newHeads"
 )
 
 var (
@@ -102,9 +115,19 @@ var (
 	DevSignedPrivateKey, _ = crypto.HexToECDSA(hexPrivateKey)
 )
 
-type AdminNodeInfoResponse struct {
-	rpctest.CommonResponse
-	Result p2p.NodeInfo `json:"result"`
+// Responses for the rpc calls
+type (
+	// AdminNodeInfoResponse is the response for calls made to admin_nodeInfo
+	AdminNodeInfoResponse struct {
+		rpctest.CommonResponse
+		Result p2p.NodeInfo `json:"result"`
+	}
+)
+
+// Block represents a simple block for queries
+type Block struct {
+	Number       *hexutil.Big
+	Transactions []common.Hash
 }
 
 // ParameterFromArgument merges the argument and parameter and returns a flag input string

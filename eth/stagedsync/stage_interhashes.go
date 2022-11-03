@@ -349,16 +349,20 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		for it.HasNext() {
 			k, v = it.Next(k[:0], v[:0])
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-			value, err := p.tx.GetOne(kv.PlainState, k[:20])
+			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
 			incarnation := uint64(1)
-			if len(value) != 0 {
-				oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+			if len(enc) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(enc)
 				incarnation = oldInc
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			value, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err

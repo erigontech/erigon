@@ -2,7 +2,6 @@ package cldb
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -21,8 +20,6 @@ func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconState) error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("Bytes written in state: %d bytes\n", len(data)+4)
 
 	return tx.Put(kv.BeaconState, EncodeSlot(state.Slot), data)
 }

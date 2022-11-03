@@ -49,7 +49,7 @@ func Start(wg *sync.WaitGroup) {
 
 // StartNode starts an erigon node on the dev chain
 func StartNode(wg *sync.WaitGroup, args []string) {
-	fmt.Printf("Running node %d with flags ==> %v\n", nodeNumber, args)
+	fmt.Printf("\nRunning node %d with flags ==> %v\n", nodeNumber, args)
 
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
@@ -80,15 +80,6 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 func runNode(ctx *cli.Context) {
 	logger := log.New()
 
-	//handler, err := log.FileHandler(models.ErigonLogFilePrefix+fmt.Sprintf("%d", nodeNumber), log.LogfmtFormat(), 1<<27) // 128Mb
-	//if err != nil {
-	//	log.Error("Issue setting up log file handler", "err", err)
-	//	return
-	//}
-	//
-	//logger.SetHandler(handler)
-	//log.SetRootHandler(handler)
-
 	// Initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
@@ -113,12 +104,12 @@ func miningNodeArgs() []string {
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
-	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, "admin,eth,erigon,web3,net,debug,trace,txpool,parity")
-	//verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
+	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, models.HttpApiParam)
+	ws := models.WSArg
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_1")
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, devPeriod, consoleVerbosity, logDir}
+	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, logDir}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
@@ -127,7 +118,6 @@ func nonMiningNodeArgs(nodeNumber int, enode string) []string {
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
 	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
-	//verbosity, _ := models.ParameterFromArgument(models.VerbosityArg, models.VerbosityParam)
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_2")
 
