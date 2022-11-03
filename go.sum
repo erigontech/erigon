@@ -58,6 +58,10 @@ github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxv
 github.com/kr/logfmt v0.0.0-20140226030751-b84e30acd515/go.mod h1:+0opPa2QZZtGFBFZlji/RkVcI2GknAs/DXo4wKdlNEc=
 github.com/ledgerwatch/interfaces v0.0.0-20220914022748-0bc2888c95ce h1:aVpsbLbJKmuJT5Hh+4X2t/yaqbWQfS3J3kAuHI2TtUo=
 github.com/ledgerwatch/interfaces v0.0.0-20220914022748-0bc2888c95ce/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
+github.com/ledgerwatch/interfaces v0.0.0-20221103124126-5c404021ea28 h1:FINI/hUiaS1ADVRNexHiONF7qFNlnLQjIGAl6vb8L7o=
+github.com/ledgerwatch/interfaces v0.0.0-20221103124126-5c404021ea28/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
+github.com/ledgerwatch/interfaces v0.0.0-20221103124133-1aa5ef72f52e h1:VvOUJL8s+XoQWYOoeIIiJGjcyMqR0OqqN4rfifb18so=
+github.com/ledgerwatch/interfaces v0.0.0-20221103124133-1aa5ef72f52e/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
 github.com/ledgerwatch/log/v3 v3.6.0 h1:JBUSK1epPyutUrz7KYDTcJtQLEHnehECRpKbM1ugy5M=
 github.com/ledgerwatch/log/v3 v3.6.0/go.mod h1:L+Sp+ma/h205EdCjviZECjGEvYUYEyXSdiuHNZzg+xQ=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
