@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -73,7 +73,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 
 	var acc accounts.Account
-	bm := roaring64.NewBitmap()
+	bm := bitmapdb.NewBitmap64()
+	defer bitmapdb.ReturnToPool64(bm)
 	prevShardMaxBl := uint64(0)
 	for {
 		_, err := bm.ReadFrom(bytes.NewReader(v))
