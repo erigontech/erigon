@@ -3,8 +3,11 @@ package devnetutils
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"os/exec"
+	"strconv"
+	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
@@ -75,4 +78,20 @@ func ParseResponse(resp interface{}) (string, error) {
 	}
 
 	return string(result), nil
+}
+
+// HexToInt converts a hexadecimal string to uint64
+func HexToInt(hexStr string) uint64 {
+	cleaned := strings.ReplaceAll(hexStr, "0x", "") // remove the 0x prefix
+	result, _ := strconv.ParseUint(cleaned, 16, 64)
+	return result
+}
+
+// NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
+func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
+	parts := strings.SplitN(method, "_", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid string to split")
+	}
+	return parts[0], parts[1], nil
 }

@@ -152,7 +152,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := filterLogs(logs, addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
 			}
