@@ -201,29 +201,38 @@ func readUvarint(r io.Reader) (x, n uint64, err error) {
 
 func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 	r := bytes.NewReader(data)
-	forkDigest := make([]byte, 4)
-	// TODO(issues/5884): assert the fork digest matches the expectation for
-	// a specific configuration.
-	if _, err := r.Read(forkDigest); err != nil {
-		return err
-	}
-
-	// Read varint for length of message.
-	encodedLn, _, err := readUvarint(r)
-	if err != nil {
-		return fmt.Errorf("unable to read varint from message prefix: %v", err)
-	}
-
-	sr := snappy.NewReader(r)
 	for i := 0; i < int(count); i++ {
+		forkDigest := make([]byte, 4)
+		// TODO(issues/5884): assert the fork digest matches the expectation for
+		// a specific configuration.
+		if _, err := r.Read(forkDigest); err != nil {
+			return err
+		}
+
+		// Read varint for length of message.
+		encodedLn, _, err := readUvarint(r)
+		if err != nil {
+			return fmt.Errorf("unable to read varint from message prefix: %v", err)
+		}
+
+		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
-		if _, err = sr.Read(raw); err != nil {
-			return fmt.Errorf("readPacket: %w", err)
+		sr := snappy.NewReader(r)
+		bytesRead := 0
+		for bytesRead < int(encodedLn) {
+			n, err := sr.Read(raw[bytesRead:])
+			if err != nil {
+				return fmt.Errorf("Read error: %w", err)
+			}
+			bytesRead += n
 		}
 
 		if err := list[i].UnmarshalSSZ(raw); err != nil {
 			return fmt.Errorf("unmarshalling: %w", err)
 		}
+
+		// TODO(issues/5884): figure out why there is this extra byte.
+		r.ReadByte()
 	}
 	return nil
 }
@@ -267,36 +276,3 @@ func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 
 	return nil
 }
-
-/*
-	updateSize := (&cltypes.LightClientUpdate{}).SizeSSZ()
-	initialPoint := 7
-	r := bytes.NewReader(data[initialPoint:])
-	sr := snappy.NewReader(r)
-
-	amountOfUpdates := len(data[initialPoint:]) / updateSize
-	fmt.Println("Amount of updates", amountOfUpdates)
-	var lightclientUpdates []*cltypes.LightClientUpdate
-
-	for i := 0; i < amountOfUpdates; i++ {
-		resp := &cltypes.LightClientUpdate{}
-		raw := make([]byte, updateSize)
-
-		if _, err := sr.Read(raw); err != nil {
-			return nil, fmt.Errorf("readPacket: %w", err)
-		}
-
-		if err := resp.UnmarshalSSZ(raw); err != nil {
-			return nil, fmt.Errorf("unmarshalling: %w", err)
-		}
-
-		lightclientUpdates = append(lightclientUpdates, resp)
-		initialPoint += updateSize
-
-		r.Reset(data[initialPoint:])
-		sr.Reset(r)
-	}
-
-	return lightclientUpdates, nil
-}
-*/

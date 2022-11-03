@@ -107,8 +107,8 @@ func runSentinelNode(cliCtx *cli.Context) {
 	// }
 
 	blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
-		StartSlot: 5000000, // arbitrary slot (currently at ~5030000)
-		Count:     1,
+		StartSlot: 5000005, // arbitrary slot (currently at ~5030000)
+		Count:     3,
 		Step:      1, // deprecated, must be set to 1.
 	}
 	req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
@@ -168,6 +168,7 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 					panic(fmt.Sprintf("unable to write to file: %v\n", err))
 				}
 				log.Info("Hex representation", "data", hex.EncodeToString(message.Data))
+				f.Close()
 			}()
 		}
 	}
