@@ -6,6 +6,9 @@ ARCH = $(shell uname -m)
 
 ifeq ($(OS),Darwin)
 PROTOC_OS := osx
+ifeq ($(ARCH),arm64)
+ARCH = aarch_64
+endif
 endif
 ifeq ($(OS),Linux)
 PROTOC_OS = linux
