@@ -114,6 +114,9 @@ func (sn *HeaderSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error
 }
 func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Headers.String())
 	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
@@ -172,6 +175,9 @@ func (sn *BodySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 
 func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Bodies.String())
 	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
@@ -236,6 +242,9 @@ func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 }
 func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.Seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
@@ -735,6 +744,9 @@ func (s *RoSnapshots) Close() {
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
 Loop1:
 	for i, sn := range s.Headers.segments {
+		if sn.seg == nil {
+			continue Loop1
+		}
 		_, name := filepath.Split(sn.seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
@@ -746,6 +758,9 @@ Loop1:
 	}
 Loop2:
 	for i, sn := range s.Bodies.segments {
+		if sn.seg == nil {
+			continue Loop2
+		}
 		_, name := filepath.Split(sn.seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
@@ -757,6 +772,9 @@ Loop2:
 	}
 Loop3:
 	for i, sn := range s.Txs.segments {
+		if sn.Seg == nil {
+			continue Loop3
+		}
 		_, name := filepath.Split(sn.Seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
