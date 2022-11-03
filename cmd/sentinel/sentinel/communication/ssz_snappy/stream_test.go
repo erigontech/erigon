@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +142,44 @@ func TestDecodeAndReadSuccess(t *testing.T) {
 			r := bytes.NewReader(data)
 			require.NoError(t, DecodeAndRead(r, tc.output))
 		})
+	}
+}
+
+func TestDecodeLizSSZBeaconBlock(t *testing.T) {
+	// Get file read.
+	b, err := os.ReadFile("beacon_blocks_by_range.txt")
+	if err != nil {
+		t.Errorf("Unable to read file: %v", err)
+	}
+	beaconBlocksByRangeResponse := string(b)
+	raw := beaconBlocksByRangeResponse
+	data, err := hex.DecodeString(raw)
+	if err != nil {
+		t.Errorf("Unable to decode string: %v", err)
+	}
+
+	// Call DecodeListSSZBeaconBlock.
+	output := []cltypes.ObjectSSZ{&cltypes.SignedBeaconBlockBellatrix{}}
+	require.NoError(t, DecodeListSSZBeaconBlock(data, 1, output))
+
+	// Type assert on the output block.
+	outBlock := output[0].(*cltypes.SignedBeaconBlockBellatrix)
+
+	// See https://beaconcha.in/slot/5000000 for target data.
+	// Confirm block contents are correct.
+	slot := outBlock.Block.Slot
+	wantSlot := 5000000
+	if slot != uint64(wantSlot) {
+		t.Errorf("Unexpected slot number: want %d, got %d", wantSlot, slot)
+	}
+	bn := outBlock.Block.Body.ExecutionPayload.BlockNumber
+	wantBn := uint64(15835292)
+	if bn != wantBn {
+		t.Errorf("Unexpected block number: want %d, got %d", wantBn, bn)
+	}
+	pi := outBlock.Block.ProposerIndex
+	wantPi := 101643
+	if pi != uint64(wantPi) {
+		t.Errorf("Unexpected proposer index: want %d, got %d", wantPi, pi)
 	}
 }
