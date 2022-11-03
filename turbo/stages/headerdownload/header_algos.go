@@ -426,6 +426,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
+	// TODO: [pos-downloader-tweaks] - we could reduce this number, or config it
 	timeout = anchor.timeouts >= 10
 	if timeout {
 		log.Warn("[Downloader] Timeout", "requestId", hd.requestId, "peerID", common.Bytes2Hex(anchor.peerID[:]))

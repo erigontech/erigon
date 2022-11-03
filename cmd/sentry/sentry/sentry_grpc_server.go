@@ -705,23 +705,30 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 	return foundPeerInfo, maxPermits > 0
 }
 
-func (ss *GrpcServer) findBestPeerWithPermit() (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
+func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool) {
+	// Choose peer(s) that we can send this request to, with maximum number of permits
 	var maxBlock uint64
 	now := time.Now()
+	foundPeers := make([]*PeerInfo, 0)
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if maxBlock == 0 || peerInfo.Height() > maxBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 			if deadlines < maxPermitsPerPeer {
 				maxBlock = peerInfo.Height()
-				foundPeerInfo = peerInfo
+				foundPeers = append([]*PeerInfo{peerInfo}, foundPeers...)
 			}
 		}
 		return true
 	})
-	return foundPeerInfo, foundPeerInfo != nil
+
+	peers := len(foundPeers)
+	if peers < peerCount {
+		return foundPeers, true
+	}
+
+	// return the count number of peers ordered by highest block (i.e. best first)
+	return foundPeers[:peerCount], peers > 0
 }
 
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
@@ -737,11 +744,12 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 	} else {
-		// If peer with specified minBlock is not found, send to best peer with permits
-		peerInfo, found = ss.findBestPeerWithPermit()
+		peerInfos, found := ss.findBestPeersWithPermit(int(inreq.PeerCount))
 		if found {
-			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+			for _, peerInfo := range peerInfos {
+				ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+				reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
+			}
 		}
 	}
 	return reply, nil
