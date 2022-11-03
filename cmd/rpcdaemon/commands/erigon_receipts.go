@@ -180,11 +180,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		}
 		timestamp := header.Time
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-
+		blockHash := header.Hash()
 		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 		if err != nil {
 			return nil, err
@@ -319,10 +315,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		}
 		timestamp := header.Time
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
-		if err != nil {
-			return nil, err
-		}
+		blockHash := header.Hash()
 
 		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 		if err != nil {
