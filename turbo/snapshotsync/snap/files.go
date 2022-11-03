@@ -3,7 +3,6 @@ package snap
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -139,7 +138,6 @@ const Erigon2MinSegmentSize = 1_000
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	_         fs.FileInfo
 	Version   uint8
 	From, To  uint64
 	Path, Ext string
