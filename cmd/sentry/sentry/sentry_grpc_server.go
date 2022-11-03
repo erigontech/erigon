@@ -747,7 +747,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		peerInfos, found := ss.findBestPeersWithPermit(int(inreq.PeerCount))
 		if found {
 			for _, peerInfo := range peerInfos {
-				ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+				ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
 				reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 			}
 		}
