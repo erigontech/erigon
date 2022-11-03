@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -319,11 +321,17 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	}
 	dbEmpty := len(snInDB) == 0
 	var missingSnapshots []snapshotsync.Range
+	var existingFiles []snap.FileInfo
 	if !dbEmpty {
-		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
+		existingFiles, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
 			return err
 		}
+	}
+	existingFilesMap := map[string]struct{}{}
+	for _, existingFile := range existingFiles {
+		_, fname := filepath.Split(existingFile.Path)
+		existingFilesMap[fname] = struct{}{}
 	}
 	if len(missingSnapshots) > 0 {
 		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
@@ -335,7 +343,9 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
+			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+		}
 	}
 	if cfg.historyV3 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
