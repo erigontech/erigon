@@ -724,7 +724,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool)
 
 	peers := len(foundPeers)
 	if peers < peerCount {
-		return foundPeers, true
+		return foundPeers, peers > 0
 	}
 
 	// return the count number of peers ordered by highest block (i.e. best first)
