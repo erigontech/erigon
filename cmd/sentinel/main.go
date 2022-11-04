@@ -48,6 +48,12 @@ func main() {
 	}
 }
 
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func constructBodyFreeRequest(t string) *consensusrpc.RequestData {
 	return &consensusrpc.RequestData{
 		Topic: t,
@@ -96,22 +102,38 @@ func runSentinelNode(cliCtx *cli.Context) {
 	log.Info("Fork digest", "data", digest)
 
 	log.Info("Sending test request")
-	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
-	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
-	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
-	// sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+	/*
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
 
-	// lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
-	// 	Period: 604,
-	// 	Count:  1,
-	// }
+		lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+			Period: 604,
+			Count:  1,
+		}
 
-	blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
-		StartSlot: 5000005, // arbitrary slot (currently at ~5030000)
-		Count:     3,
-		Step:      1, // deprecated, must be set to 1.
-	}
-	req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
+		blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
+			StartSlot: 5000005, // arbitrary slot (currently at ~5030000)
+			Count:     3,
+			Step:      1, // deprecated, must be set to 1.
+		}
+	*/
+
+	roots := make([][32]byte, 3)
+	rawRoot1, err := hex.DecodeString("57dd8e0ee7ed614283fbf80ca19229752839d4a4e232148efd128e85edee9b12")
+	check(err)
+	rawRoot2, err := hex.DecodeString("1d527f21e17897198752838431821558d1b9864654bcaf476232da55458ed5ce")
+	check(err)
+	rawRoot3, err := hex.DecodeString("830eab2e3de70cc7ebc80b6c950ebb2a7946d8a6e3bb653f8b6dafd6a402d49b")
+	check(err)
+
+	copy(roots[0][:], rawRoot1)
+	copy(roots[1][:], rawRoot2)
+	copy(roots[2][:], rawRoot3)
+
+	var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
+	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
 	}

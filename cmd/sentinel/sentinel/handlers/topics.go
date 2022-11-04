@@ -47,7 +47,9 @@ var (
 	BeaconBlocksByRangeProtocolV1 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRangeProtocolV2 = ProtocolPrefix + BeaconBlocksByRangeTopic + Schema2 + EncodingProtocol
 
-	BeaconBlocksByRootProtocolV1  = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
+	BeaconBlocksByRootProtocolV1 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
+	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
+
 	LightClientFinalityUpdateV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
 	LightClientOptimisticUpdateV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientBootstrapV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
