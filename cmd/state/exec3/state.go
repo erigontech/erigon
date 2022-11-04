@@ -311,7 +311,7 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 			w.ResetTx(nil)
 		}
 	}
-	if workerCount > 0 {
+	if workerCount > 1 {
 		wg.Add(workerCount)
 		for i := 0; i < workerCount; i++ {
 			go reconWorkers[i].Run()
