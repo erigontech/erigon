@@ -480,6 +480,9 @@ loop:
 		if rs.SizeEstimate() >= commitThreshold {
 			commitStart := time.Now()
 			log.Info("Committing...")
+			if err = agg.Prune(ctx, 10*ethconfig.HistoryV3AggregationStep); err != nil {
+				return err
+			}
 			if err := rs.Flush(applyTx); err != nil {
 				return err
 			}
@@ -490,9 +493,6 @@ loop:
 				return err
 			}
 			applyTx.CollectMetrics()
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
-				return err
-			}
 			if !useExternalTx {
 				if err := applyTx.Commit(); err != nil {
 					return err
