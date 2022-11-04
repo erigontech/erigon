@@ -487,12 +487,21 @@ func TestChainTxReorgs(t *testing.T) {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, txn := range txs {
-		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
-			t.Errorf("add %d: expected tx to be found", i)
+		if m.HistoryV3 {
+			_, found, err := br.TxnLookup(m.Ctx, tx, txn.Hash())
+			require.NoError(t, err)
+			require.True(t, found)
+		} else {
+			if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
+				t.Errorf("add %d: expected tx to be found", i)
+			}
 		}
+
 		if m.HistoryV3 {
 			// m.HistoryV3 doesn't store
 		} else {
