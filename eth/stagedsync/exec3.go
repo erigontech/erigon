@@ -420,7 +420,9 @@ loop:
 				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
+				if rws.Len() > 100 {
+					log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
+				}
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
