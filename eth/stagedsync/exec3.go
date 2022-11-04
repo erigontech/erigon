@@ -414,11 +414,11 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				fmt.Printf("alex before: %d / %d\n", rws.Len(), queueSize)
+				log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
-				fmt.Printf("alex after: %d / %d\n", rws.Len(), queueSize)
+				log.Warn(fmt.Sprintf("alex after: %d / %d\n", rws.Len(), queueSize))
 			}()
 		}
 
