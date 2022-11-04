@@ -201,6 +201,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 		{
 			ID:          stages.TxLookup,
 			Description: "Generate tx lookup index",
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
 				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
 			},
