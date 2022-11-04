@@ -961,7 +961,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
-		//syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()
