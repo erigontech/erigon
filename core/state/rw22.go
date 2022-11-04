@@ -120,9 +120,9 @@ func (rs *State22) put(table string, key, val []byte) {
 		rs.changes[table] = t
 	}
 	old, ok := t.ReplaceOrInsert(statePair{key: key, val: val})
-	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += 2 * (uint64(len(key)) + uint64(len(val)))
 	if ok {
-		rs.sizeEstimate -= uint64(len(old.key)) + uint64(len(old.val))
+		rs.sizeEstimate -= 2 * (uint64(len(old.key)) + uint64(len(old.val)))
 	}
 }
 
