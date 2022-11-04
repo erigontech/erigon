@@ -412,11 +412,15 @@ loop:
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		if parallel {
 			func() {
+				rwsLock.RLock()
+				needWait := rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
+				rwsLock.RUnlock()
+				if !needWait {
+					return
+				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				if rws.Len() > 8*queueSize {
-					log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
-				}
+				log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
