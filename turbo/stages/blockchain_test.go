@@ -492,15 +492,9 @@ func TestChainTxReorgs(t *testing.T) {
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, txn := range txs {
-		if m.HistoryV3 {
-			_, found, err := br.TxnLookup(m.Ctx, tx, txn.Hash())
-			require.NoError(t, err)
-			require.True(t, found)
-		} else {
-			if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
-				t.Errorf("add %d: expected tx to be found", i)
-			}
-		}
+		_, found, err := br.TxnLookup(m.Ctx, tx, txn.Hash())
+		require.NoError(t, err)
+		require.True(t, found)
 
 		if m.HistoryV3 {
 			// m.HistoryV3 doesn't store
@@ -798,6 +792,8 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+
 	if pm.TxIndex.Enabled() {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
 		require.NoError(err)
@@ -809,22 +805,11 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	} else {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
 		require.NoError(err)
-		br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 		for _, txn := range b.Transactions() {
-			if m.HistoryV3 {
-				foundBlockNum, found, err := br.TxnLookup(context.Background(), tx, txn.Hash())
-				require.NoError(err)
-				if found {
-					require.Equal(uint64(1), foundBlockNum)
-				}
-			} else {
-				found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
-				require.NoError(err)
-				if found == nil {
-					require.NotNil(found)
-				}
-				require.Equal(uint64(1), *found)
-			}
+			foundBlockNum, found, err := br.TxnLookup(context.Background(), tx, txn.Hash())
+			require.NoError(err)
+			require.True(found)
+			require.Equal(uint64(1), foundBlockNum)
 		}
 	}
 	/*
