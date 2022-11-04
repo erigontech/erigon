@@ -237,7 +237,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	workersCount := cfg.workersCount
 	//workersCount := 2
 	if !initialCycle {
-		workersCount = 1
+		workersCount = 0
 	}
 	cfg.agg.SetWorkers(cmp.Max(1, runtime.NumCPU()/2))
 

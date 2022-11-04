@@ -137,5 +137,5 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "workers", 1, "")
+	cmd.Flags().Uint64Var(&workers, "workers", 0, "")
 }

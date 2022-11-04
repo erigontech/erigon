@@ -100,7 +100,7 @@ func Exec3(ctx context.Context,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
 ) (err error) {
-	parallel := workerCount > 1
+	parallel := workerCount > 0
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
