@@ -483,9 +483,10 @@ loop:
 			}
 			inputTxNum++
 		}
-		b, header = nil, nil
 		core.BlockExecutionTimer.UpdateDuration(t)
-		syncMetrics[stages.Execution].Set(blockNum)
+		if !parallel {
+			syncMetrics[stages.Execution].Set(blockNum)
+		}
 
 		if rs.SizeEstimate() >= commitThreshold {
 			commitStart := time.Now()
@@ -591,6 +592,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
+			syncMetrics[stages.Execution].Set(txTask.BlockNum)
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
@@ -963,7 +965,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
-		syncMetrics[stages.Execution].Set(bn)
+		//syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()
