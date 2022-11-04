@@ -214,5 +214,75 @@ func TestDecodeLizSSZBeaconBlock(t *testing.T) {
 			}
 		})
 	}
+}
 
+// Target data can be seen at https://beaconcha.in/slot/5057727.
+func TestDecodeLizSSZBeaconBlockByRoot(t *testing.T) {
+	tests := map[string]struct {
+		filename  string // hex encoded.
+		count     int
+		wantSlots []uint64
+		wantBns   []uint64
+		wantPis   []uint64
+	}{
+		"one_block": {
+			filename:  "beacon_blocks_by_root_1.txt",
+			count:     1,
+			wantSlots: []uint64{5057727},
+			wantBns:   []uint64{15892658},
+			wantPis:   []uint64{279520},
+		},
+		"three_blocks": {
+			filename:  "beacon_blocks_by_root_3.txt",
+			count:     3,
+			wantSlots: []uint64{5058007, 5058008, 5058009},
+			wantBns:   []uint64{15892935, 15892936, 15892937},
+			wantPis:   []uint64{50609, 442781, 383217},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Read file.
+			b, err := os.ReadFile(tc.filename)
+			if err != nil {
+				t.Errorf("Unable to read file: %v", err)
+			}
+			beaconBlocksByRangeResponse := string(b)
+			raw := beaconBlocksByRangeResponse
+			data, err := hex.DecodeString(raw)
+			if err != nil {
+				t.Errorf("Unable to decode string: %v", err)
+			}
+
+			// Prepare output slice.
+			output := []cltypes.ObjectSSZ{}
+			for i := 0; i < tc.count; i++ {
+				output = append(output, &cltypes.SignedBeaconBlockBellatrix{})
+			}
+
+			// Call DecodeListSSZBeaconBlock.
+			require.NoError(t, DecodeListSSZBeaconBlock(data, uint64(tc.count), output))
+
+			// Check decoded contents
+			for i := 0; i < tc.count; i++ {
+				// Type assert on the output block.
+				outBlock := output[i].(*cltypes.SignedBeaconBlockBellatrix)
+
+				slot := outBlock.Block.Slot
+				if slot != tc.wantSlots[i] {
+					t.Errorf("Unexpected slot number: want %d, got %d", tc.wantSlots[i], slot)
+				}
+
+				bn := outBlock.Block.Body.ExecutionPayload.BlockNumber
+				if bn != tc.wantBns[i] {
+					t.Errorf("Unexpected block number: want %d, got %d", tc.wantBns[i], bn)
+				}
+
+				pi := outBlock.Block.ProposerIndex
+				if pi != tc.wantPis[i] {
+					t.Errorf("Unexpected proposer index: want %d, got %d", tc.wantPis[i], pi)
+				}
+			}
+		})
+	}
 }
