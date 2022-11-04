@@ -414,7 +414,7 @@ loop:
 			func() {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				if rws.Len() > 2*queueSize {
+				if rws.Len() > 8*queueSize {
 					log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
 				}
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
