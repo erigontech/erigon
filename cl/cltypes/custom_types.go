@@ -10,7 +10,15 @@ const (
 	maxRequestBlocks = 1024
 )
 
-// BeaconBlocksByRootReq specifies the blocks by root request type.
+// source: https://github.com/prysmaticlabs/prysm/blob/bb0929507227b2e543b67aaf43d3ffd36c62b8fc/beacon-chain/p2p/types/types.go
+//
+// We need a custom type for the BeaconBlocksByRootRequest because the generated
+// code injects an offset that is used to indicate the count of objects in the
+// slice, which is not included in the spec.
+//
+// See https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beaconblocksbyroot
+
+// BeaconBlocksByRootRequest specifies the blocks by root request type.
 type BeaconBlocksByRootRequest [][rootLength]byte
 
 // Just to satisfy the ObjectSSZ interface.
