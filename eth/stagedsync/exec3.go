@@ -413,6 +413,10 @@ loop:
 		if parallel {
 			func() {
 				rwsLock.RLock()
+				l := rws.Len()
+				if l > 100 {
+					log.Warn(fmt.Sprintf("alex before: %d / %d\n", l, queueSize))
+				}
 				needWait := rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
 				rwsLock.RUnlock()
 				if !needWait {
@@ -420,9 +424,6 @@ loop:
 				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				if rws.Len() > 100 {
-					log.Warn(fmt.Sprintf("alex before: %d / %d\n", rws.Len(), queueSize))
-				}
 				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					rwsReceiveCond.Wait()
 				}
