@@ -869,7 +869,9 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap)
 	var err error
-	allSnapshots.OptimisticalyReopenFolder()
+	if !snConfig.NoDownloader {
+		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
+	}
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 	if !snConfig.NoDownloader {

@@ -314,7 +314,11 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 		}
 		return nil
 	}
-
+	// Original intent of snInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
+	// Then, we would insist to only download such files, and no others (whitelist)
+	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
+	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
+	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
 	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
 	if err != nil {
 		return err
