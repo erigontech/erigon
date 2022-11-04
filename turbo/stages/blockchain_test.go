@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -799,13 +800,22 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	} else {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
 		require.NoError(err)
+		br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 		for _, txn := range b.Transactions() {
-			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
-			require.NoError(err)
-			if found == nil {
-				require.NotNil(found)
+			if m.HistoryV3 {
+				foundBlockNum, found, err := br.TxnLookup(context.Background(), tx, txn.Hash())
+				require.NoError(err)
+				if found {
+					require.Equal(uint64(1), foundBlockNum)
+				}
+			} else {
+				found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+				require.NoError(err)
+				if found == nil {
+					require.NotNil(found)
+				}
+				require.Equal(uint64(1), *found)
 			}
-			require.Equal(uint64(1), *found)
 		}
 	}
 	/*
