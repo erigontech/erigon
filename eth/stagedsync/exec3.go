@@ -510,7 +510,9 @@ loop:
 		if !parallel {
 			select {
 			case <-logEvery.C:
-				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, idxStepsInDB(applyTx))
+				stepsInDB := idxStepsInDB(applyTx)
+				ExecStepsInDB.Set(uint64(stepsInDB * 100))
+				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 			default:
 			}
 		}
