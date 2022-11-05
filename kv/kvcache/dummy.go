@@ -35,11 +35,14 @@ func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
 func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
 func (c *DummyCache) Evict() int                             { return 0 }
 func (c *DummyCache) Len() int                               { return 0 }
-func (c *DummyCache) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
+func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return tx.GetOne(kv.PlainState, k)
 }
-func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
+func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	return tx.GetOne(kv.Code, k)
+}
+func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheValidationResult, error) {
+	return &CacheValidationResult{Enabled: false}, nil
 }
 
 type DummyView struct {

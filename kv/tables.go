@@ -447,6 +447,7 @@ var (
 	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
 	CurrentBodiesSnapshotHash   = []byte("CurrentBodiesSnapshotHash")
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
+	PlainStateVersion           = []byte("PlainStateVersion")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.

@@ -25,17 +25,17 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkName(b *testing.B) {
@@ -98,16 +98,12 @@ func TestNonceFromAddress(t *testing.T) {
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
-	var txID uint64
-	_ = coreDB.View(ctx, func(tx kv.Tx) error {
-		txID = tx.ViewID()
-		return nil
-	})
+	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		DatabaseViewID:      txID,
+		DatabaseViewID:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -222,16 +218,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
-	var txID uint64
-	_ = coreDB.View(ctx, func(tx kv.Tx) error {
-		txID = tx.ViewID()
-		return nil
-	})
+	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		DatabaseViewID:      txID,
+		DatabaseViewID:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -343,16 +335,12 @@ func TestReverseNonces(t *testing.T) {
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
-	var txID uint64
-	_ = coreDB.View(ctx, func(tx kv.Tx) error {
-		txID = tx.ViewID()
-		return nil
-	})
+	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		DatabaseViewID:      txID,
+		DatabaseViewID:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -471,16 +459,12 @@ func TestTxPoke(t *testing.T) {
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
-	var txID uint64
-	_ = coreDB.View(ctx, func(tx kv.Tx) error {
-		txID = tx.ViewID()
-		return nil
-	})
+	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		DatabaseViewID:      txID,
+		DatabaseViewID:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{

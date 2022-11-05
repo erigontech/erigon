@@ -17,28 +17,30 @@ package kvcache
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEvictionInUnexpectedOrder(t *testing.T) {
 	// Order: View - 2, OnNewBlock - 2, View - 5, View - 6, OnNewBlock - 3, OnNewBlock - 4, View - 5, OnNewBlock - 5, OnNewBlock - 100
 	require := require.New(t)
 	cfg := DefaultCoherentConfig
-	cfg.KeysLimit = 3
+	cfg.CacheSize = 3
 	cfg.NewBlockWait = 0
 	c := New(cfg)
 	c.selectOrCreateRoot(2)
 	require.Equal(1, len(c.roots))
-	require.Equal(0, int(c.latestViewID))
+	require.Equal(0, int(c.latestStateVersionID))
 	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
@@ -46,7 +48,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 
 	c.advanceRoot(2)
 	require.Equal(1, len(c.roots))
-	require.Equal(2, int(c.latestViewID))
+	require.Equal(2, int(c.latestStateVersionID))
 	require.True(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
@@ -54,7 +56,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 
 	c.selectOrCreateRoot(5)
 	require.Equal(2, len(c.roots))
-	require.Equal(2, int(c.latestViewID))
+	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
 	c.add([]byte{2}, nil, c.roots[5], 5) // not added to evict list
@@ -64,32 +66,32 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 
 	c.selectOrCreateRoot(6)
 	require.Equal(3, len(c.roots))
-	require.Equal(2, int(c.latestViewID))
+	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
 	c.advanceRoot(3)
 	require.Equal(4, len(c.roots))
-	require.Equal(3, int(c.latestViewID))
+	require.Equal(3, int(c.latestStateVersionID))
 	require.True(c.roots[3].isCanonical)
 
 	c.advanceRoot(4)
 	require.Equal(5, len(c.roots))
-	require.Equal(4, int(c.latestViewID))
+	require.Equal(4, int(c.latestStateVersionID))
 	require.True(c.roots[4].isCanonical)
 
 	c.selectOrCreateRoot(5)
 	require.Equal(5, len(c.roots))
-	require.Equal(4, int(c.latestViewID))
+	require.Equal(4, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
 	c.advanceRoot(5)
 	require.Equal(5, len(c.roots))
-	require.Equal(5, int(c.latestViewID))
+	require.Equal(5, int(c.latestStateVersionID))
 	require.True(c.roots[5].isCanonical)
 
 	c.advanceRoot(100)
 	require.Equal(6, len(c.roots))
-	require.Equal(100, int(c.latestViewID))
+	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
 
 	//c.add([]byte{1}, nil, c.roots[2], 2)
@@ -100,7 +102,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 func TestEviction(t *testing.T) {
 	require, ctx := require.New(t), context.Background()
 	cfg := DefaultCoherentConfig
-	cfg.KeysLimit = 3
+	cfg.CacheSize = 21
 	cfg.NewBlockWait = 0
 	c := New(cfg)
 	db := memdb.NewTestDB(t)
@@ -109,13 +111,16 @@ func TestEviction(t *testing.T) {
 	var id uint64
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
+		id = tx.ViewID()
+		var versionID [8]byte
+		binary.BigEndian.PutUint64(versionID[:], id)
+		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
-		id = tx.ViewID()
-		_, _ = c.Get(k1[:], tx, view.viewID)
-		_, _ = c.Get([]byte{1}, tx, view.viewID)
-		_, _ = c.Get([]byte{2}, tx, view.viewID)
-		_, _ = c.Get([]byte{3}, tx, view.viewID)
+		_, _ = c.Get(k1[:], tx, view.stateVersionID)
+		_, _ = c.Get([]byte{1}, tx, view.stateVersionID)
+		_, _ = c.Get([]byte{2}, tx, view.stateVersionID)
+		_, _ = c.Get([]byte{3}, tx, view.stateVersionID)
 		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
@@ -134,21 +139,25 @@ func TestEviction(t *testing.T) {
 			},
 		},
 	})
+	require.Equal(21, c.stateEvict.Size())
 	require.Equal(1, c.stateEvict.Len())
-	require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
-		cacheView, _ := c.View(ctx, tx)
-		view := cacheView.(*CoherentView)
 		id = tx.ViewID()
-		_, _ = c.Get(k1[:], tx, view.viewID)
-		_, _ = c.Get(k2[:], tx, view.viewID)
-		_, _ = c.Get([]byte{5}, tx, view.viewID)
-		_, _ = c.Get([]byte{6}, tx, view.viewID)
+		cacheView, _ := c.View(ctx, tx)
+		var versionID [8]byte
+		binary.BigEndian.PutUint64(versionID[:], id)
+		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
+		view := cacheView.(*CoherentView)
+		_, _ = c.Get(k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(k2[:], tx, view.stateVersionID)
+		_, _ = c.Get([]byte{5}, tx, view.stateVersionID)
+		_, _ = c.Get([]byte{6}, tx, view.stateVersionID)
 		return nil
 	})
-	require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
-	require.Equal(cfg.KeysLimit, c.stateEvict.Len())
+	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
+	require.Equal(int(cfg.CacheSize.Bytes()), c.stateEvict.Size())
 }
 
 func TestAPI(t *testing.T) {
@@ -172,7 +181,7 @@ func TestAPI(t *testing.T) {
 					if err != nil {
 						panic(err)
 					}
-					v, err := c.Get(key[:], tx, view.viewID)
+					v, err := c.Get(key[:], tx, view.stateVersionID)
 					if err != nil {
 						panic(err)
 					}
@@ -189,6 +198,9 @@ func TestAPI(t *testing.T) {
 		require.NoError(db.Update(context.Background(), func(tx kv.RwTx) error {
 			_ = tx.Put(kv.PlainState, k, v)
 			txID = tx.ViewID()
+			var versionID [8]byte
+			binary.BigEndian.PutUint64(versionID[:], txID)
+			_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 			return nil
 		}))
 		return txID
@@ -349,11 +361,11 @@ func TestCode(t *testing.T) {
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
 
-		v, err := c.GetCode(k1[:], tx, view.viewID)
+		v, err := c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
 		require.Equal(k2[:], v)
 
-		v, err = c.GetCode(k1[:], tx, view.viewID)
+		v, err = c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
 		require.Equal(k2[:], v)
 
