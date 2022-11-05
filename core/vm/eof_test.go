@@ -104,6 +104,12 @@ var eof1InvalidInstructionsTests = []eof1InvalidTest{
 	{"EF0001010020007F00000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing.Error()},
 	// PUSH32 with 32 bytes of data and no terminating instruction
 	{"EF0001010021007F0000000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing.Error()},
+	// RJUMP to out-of-bounds (negative) offset.
+	{"EF0001010004005CFFFA00", ErrEOF1InvalidRelativeOffset.Error()},
+	// RJUMP to out-of-bounds (positive) offset.
+	{"EF0001010004005C000600", ErrEOF1InvalidRelativeOffset.Error()},
+	// RJUMP to push data.
+	{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset.Error()},
 }
 
 func TestHasEOFMagic(t *testing.T) {
@@ -181,7 +187,7 @@ func TestReadValidEOF1Header(t *testing.T) {
 }
 
 func TestValidateInstructions(t *testing.T) {
-	jt := &londonInstructionSet
+	jt := &shanghaiInstructionSet
 	for _, test := range eof1ValidTests {
 		code := common.Hex2Bytes(test.code)
 		header, err := readEOF1Header(code)
@@ -212,11 +218,14 @@ func TestValidateInstructions(t *testing.T) {
 }
 
 func TestValidateUndefinedInstructions(t *testing.T) {
-	jt := &londonInstructionSet
+	jt := &shanghaiInstructionSet
 	code := common.Hex2Bytes("EF0001010002000C00")
 	instrByte := &code[7]
 	for opcode := uint16(0); opcode <= 0xff; opcode++ {
 		if OpCode(opcode) >= PUSH1 && OpCode(opcode) <= PUSH32 {
+			continue
+		}
+		if OpCode(opcode) == RJUMP || OpCode(opcode) == RJUMPI {
 			continue
 		}
 
@@ -242,12 +251,12 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 }
 
 func TestValidateTerminatingInstructions(t *testing.T) {
-	jt := &londonInstructionSet
+	jt := &shanghaiInstructionSet
 	code := common.Hex2Bytes("EF0001010001000C")
 	instrByte := &code[7]
 	for opcodeValue := uint16(0); opcodeValue <= 0xff; opcodeValue++ {
 		opcode := OpCode(opcodeValue)
-		if opcode >= PUSH1 && opcode <= PUSH32 {
+		if opcode >= PUSH1 && opcode <= PUSH32 || opcode == RJUMP || opcode == RJUMPI {
 			continue
 		}
 		if jt[opcode].undefined {
@@ -275,7 +284,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 }
 
 func TestValidateTruncatedPush(t *testing.T) {
-	jt := &londonInstructionSet
+	jt := &shanghaiInstructionSet
 	zeroes := [33]byte{}
 	code := common.Hex2Bytes("EF0001010001000C")
 	for opcode := PUSH1; opcode <= PUSH32; opcode++ {

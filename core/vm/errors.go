@@ -65,6 +65,7 @@ var (
 	ErrEOF1InvalidTotalSize              = errors.New("invalid total size")
 	ErrEOF1UndefinedInstruction          = errors.New("undefined instruction")
 	ErrEOF1TerminatingInstructionMissing = errors.New("code section doesn't end with terminating instruction")
+	ErrEOF1InvalidRelativeOffset         = errors.New("relative offset points to immediate argument")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

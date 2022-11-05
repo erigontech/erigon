@@ -120,6 +120,8 @@ const (
 	MSIZE    OpCode = 0x59
 	GAS      OpCode = 0x5a
 	JUMPDEST OpCode = 0x5b
+	RJUMP    OpCode = 0x5c
+	RJUMPI   OpCode = 0x5d
 	PUSH0    OpCode = 0x5f
 )
 

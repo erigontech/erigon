@@ -137,15 +137,37 @@ outer:
 
 // validateInstructions checks that there're no undefined instructions and code ends with a terminating instruction
 func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable) error {
-	i := header.CodeBeginOffset()
-	var opcode OpCode
-	for i < header.CodeEndOffset() {
+	var (
+		i        = header.CodeBeginOffset()
+		end      = header.CodeEndOffset()
+		analysis = codeBitmap(code[i : end-1])
+		opcode   OpCode
+	)
+	for i < end {
 		opcode = OpCode(code[i])
 		if jumpTable[opcode].undefined {
 			return ErrEOF1UndefinedInstruction
 		}
 		if opcode >= PUSH1 && opcode <= PUSH32 {
 			i += uint64(opcode) - uint64(PUSH1) + 1
+		}
+		if opcode == RJUMP || opcode == RJUMPI {
+			var arg int16
+			// Read immediate argument.
+			if err := binary.Read(bytes.NewReader(code[i+1:]), binary.BigEndian, &arg); err != nil {
+				return ErrEOF1InvalidRelativeOffset
+			}
+			// Check if offfset points to out-of-bounds code
+			// location.
+			if (arg < 0 && i+3 < uint64(arg)) || (arg > 0 && end < i+3+uint64(arg)) {
+				return ErrEOF1InvalidRelativeOffset
+			}
+			// Check if offset points to non-code segment.
+			pos := uint64(int64(i+3) + int64(arg))
+			if !analysis.codeSegment(pos - header.CodeBeginOffset()) {
+				return ErrEOF1InvalidRelativeOffset
+			}
+			i += 2
 		}
 		i += 1
 	}

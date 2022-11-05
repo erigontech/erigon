@@ -346,7 +346,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
-
+		// fail if op is not available in legacy context
+		if operation.eof1 && callContext.Contract.IsLegacy() {
+			_, err = opUndefined(&pc, in, callContext)
+			break
+		}
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 

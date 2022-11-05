@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"sort"
 
@@ -36,6 +38,7 @@ var activators = map[int]func(*JumpTable){
 	1344: enable1344,
 	3540: enable3540,
 	3670: enable3670,
+	4200: enable4200,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -206,4 +209,67 @@ func enable3540(jt *JumpTable) {
 
 func enable3670(jt *JumpTable) {
 	// Do nothing.
+}
+
+// enable4200 applies EIP-4200 (RJUMP and RJUMPI opcodes)
+func enable4200(jt *JumpTable) {
+	jt[RJUMP] = &operation{
+		execute:     opRjump,
+		constantGas: GasFastStep,
+		minStack:    minStack(0, 0),
+		maxStack:    maxStack(0, 0),
+		eof1:        true,
+	}
+	jt[RJUMPI] = &operation{
+		execute:     opRjumpi,
+		constantGas: GasFastishStep,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+		eof1:        true,
+	}
+}
+
+// opRjump implements the RJUMP opcode
+func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		idx            = scope.Contract.CodeBeginOffset() + *pc + 1
+		arg            = scope.Contract.Code[idx : idx+2]
+		relativeOffset int16
+	)
+	binary.Read(bytes.NewReader(arg), binary.BigEndian, &relativeOffset)
+
+	// Move PC past the RJUMP instruction and its immediate argument.
+	*pc += 2 + 1
+
+	// Calculate the new PC given the relative offset. Already validated,
+	// so no need to verify casts.
+	*pc = uint64(int64(*pc)+int64(relativeOffset)) - 1 // pc will also be increased by interpreter loop
+
+	return nil, nil
+}
+
+// opRjumpi implements the RJUMPI opcode
+func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	condition := scope.Stack.pop()
+	if condition.BitLen() == 0 {
+		// Not branching, just skip over immediate argument.
+		*pc += 2
+		return nil, nil
+	}
+
+	var (
+		idx            = scope.Contract.CodeBeginOffset() + *pc + 1
+		arg            = scope.Contract.Code[idx : idx+2]
+		relativeOffset int16
+	)
+	binary.Read(bytes.NewReader(arg), binary.BigEndian, &relativeOffset)
+
+	// Move PC past the RJUMP instruction and its immediate argument.
+	*pc += 2 + 1
+
+	// Calculate the new PC given the relative offset. Already validated,
+	// so no need to verify casts.
+	*pc = uint64(int64(*pc)+int64(relativeOffset)) - 1 // pc will also be increased by interpreter loop
+
+	return nil, nil
 }
