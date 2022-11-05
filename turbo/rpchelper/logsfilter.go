@@ -66,6 +66,11 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 		default:
 			a.logsFilterLock.Lock()
 			defer a.logsFilterLock.Unlock()
+			// Need to re-check the channel because it might have been closed and removed from the map
+			// which we were not holding the lock
+			if filter, ok = a.logsFilters[filterId]; !ok {
+				return false
+			}
 			a.subtractLogFilters(filter)
 			close(filter.sender)
 			delete(a.logsFilters, filterId)

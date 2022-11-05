@@ -21,7 +21,7 @@ func (r estimatedRamPerWorker) Workers() int {
 }
 
 const (
-	IndexSnapshot     = estimatedRamPerWorker(2 * datasize.GB) //elias-fano index building is single-threaded
-	CompressSnapshot  = estimatedRamPerWorker(1 * datasize.GB) //1-file-compression is multi-threaded
-	ReconstituteState = estimatedRamPerWorker(2 * datasize.GB) //state-reconstitution is multi-threaded
+	IndexSnapshot     = estimatedRamPerWorker(2 * datasize.GB)   //elias-fano index building is single-threaded
+	CompressSnapshot  = estimatedRamPerWorker(1 * datasize.GB)   //1-file-compression is multi-threaded
+	ReconstituteState = estimatedRamPerWorker(512 * datasize.MB) //state-reconstitution is multi-threaded
 )

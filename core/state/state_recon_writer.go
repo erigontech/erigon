@@ -77,9 +77,9 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	}
 	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
 	old, ok := t.ReplaceOrInsert(item)
-	rs.sizeEstimate += uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
+	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 	if ok {
-		rs.sizeEstimate -= uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
 	}
 }
 
