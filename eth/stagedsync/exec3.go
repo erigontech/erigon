@@ -250,7 +250,7 @@ func Exec3(ctx context.Context,
 						// it means better spend time for pruning, before flushing more data to db
 						// also better do it now - instead of before Commit() - because Commit does block execution
 						if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						} else if stepsInDB > 2 {
