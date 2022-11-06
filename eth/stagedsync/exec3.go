@@ -275,7 +275,7 @@ func Exec3(ctx context.Context,
 					cancelApplyCtx()
 					applyWg.Wait()
 
-					var t1, t2 time.Duration
+					var t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -324,14 +324,20 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						t2 = time.Since(tt)
-						tx.CollectMetrics()
 
+						tt = time.Now()
 						if err := agg.Flush(tx); err != nil {
 							return err
 						}
+						t3 = time.Since(tt)
+
+						tt = time.Now()
 						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 							return err
 						}
+						t4 = time.Since(tt)
+
+						tx.CollectMetrics()
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
 						if err = tx.Commit(); err != nil {
 							return err
@@ -354,7 +360,7 @@ func Exec3(ctx context.Context,
 					if err != nil {
 						panic(err)
 					}
-					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2)
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						t := time.Now()
