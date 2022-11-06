@@ -331,17 +331,17 @@ func Exec3(ctx context.Context,
 						}
 						t3 = time.Since(tt)
 
-						tt = time.Now()
 						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 							return err
 						}
-						t4 = time.Since(tt)
 
 						tx.CollectMetrics()
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
+						tt = time.Now()
 						if err = tx.Commit(); err != nil {
 							return err
 						}
+						t4 = time.Since(tt)
 						for i := 0; i < len(reconWorkers); i++ {
 							reconWorkers[i].ResetTx(nil)
 						}
