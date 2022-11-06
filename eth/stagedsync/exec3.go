@@ -482,39 +482,36 @@ loop:
 		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
-		}
 
-		if rs.SizeEstimate() >= commitThreshold {
-			commitStart := time.Now()
-			log.Info("Committing...")
-			if err = agg.Prune(ctx, 10*ethconfig.HistoryV3AggregationStep); err != nil {
-				return err
-			}
-			if err := rs.Flush(applyTx); err != nil {
-				return err
-			}
-			if err := agg.Flush(applyTx); err != nil {
-				return err
-			}
-			if err = execStage.Update(applyTx, stageProgress); err != nil {
-				return err
-			}
-			applyTx.CollectMetrics()
-			if !useExternalTx {
-				if err := applyTx.Commit(); err != nil {
+			if rs.SizeEstimate() >= commitThreshold {
+				commitStart := time.Now()
+				log.Info("Committing...")
+				if err = agg.Prune(ctx, 10*ethconfig.HistoryV3AggregationStep); err != nil {
 					return err
 				}
-				if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+				if err := rs.Flush(applyTx); err != nil {
 					return err
 				}
-				defer applyTx.Rollback()
-				agg.SetTx(applyTx)
-				reconWorkers[0].ResetTx(applyTx)
-				log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+				if err := agg.Flush(applyTx); err != nil {
+					return err
+				}
+				if err = execStage.Update(applyTx, stageProgress); err != nil {
+					return err
+				}
+				applyTx.CollectMetrics()
+				if !useExternalTx {
+					if err := applyTx.Commit(); err != nil {
+						return err
+					}
+					if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+						return err
+					}
+					defer applyTx.Rollback()
+					agg.SetTx(applyTx)
+					reconWorkers[0].ResetTx(applyTx)
+					log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+				}
 			}
-		}
-
-		if !parallel {
 			select {
 			case <-logEvery.C:
 				stepsInDB := idxStepsInDB(applyTx)
