@@ -399,12 +399,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var stoppedErr error
 
-	effectiveEngine := cfg.engine
-	if asyncEngine, ok := effectiveEngine.(consensus.AsyncEngine); ok {
-		asyncEngine = asyncEngine.WithExecutionContext(ctx)
-		effectiveEngine = asyncEngine.(consensus.Engine)
-	}
-
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
 	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
