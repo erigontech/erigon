@@ -275,7 +275,7 @@ func Exec3(ctx context.Context,
 					cancelApplyCtx()
 					applyWg.Wait()
 
-					var t1, t2 time.Duration
+					var t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
 					log.Info("Committing...")
 					err := func() error {
@@ -324,18 +324,24 @@ func Exec3(ctx context.Context,
 							return err
 						}
 						t2 = time.Since(tt)
-						tx.CollectMetrics()
 
+						tt = time.Now()
 						if err := agg.Flush(tx); err != nil {
 							return err
 						}
+						t3 = time.Since(tt)
+
 						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
 							return err
 						}
+
+						tx.CollectMetrics()
 						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
+						tt = time.Now()
 						if err = tx.Commit(); err != nil {
 							return err
 						}
+						t4 = time.Since(tt)
 						for i := 0; i < len(reconWorkers); i++ {
 							reconWorkers[i].ResetTx(nil)
 						}
@@ -354,7 +360,7 @@ func Exec3(ctx context.Context,
 					if err != nil {
 						panic(err)
 					}
-					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2)
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				case <-pruneEvery.C:
 					if agg.CanPrune(tx) {
 						t := time.Now()
@@ -482,39 +488,36 @@ loop:
 		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
-		}
 
-		if rs.SizeEstimate() >= commitThreshold {
-			commitStart := time.Now()
-			log.Info("Committing...")
-			if err = agg.Prune(ctx, 10*ethconfig.HistoryV3AggregationStep); err != nil {
-				return err
-			}
-			if err := rs.Flush(applyTx); err != nil {
-				return err
-			}
-			if err := agg.Flush(applyTx); err != nil {
-				return err
-			}
-			if err = execStage.Update(applyTx, stageProgress); err != nil {
-				return err
-			}
-			applyTx.CollectMetrics()
-			if !useExternalTx {
-				if err := applyTx.Commit(); err != nil {
+			if rs.SizeEstimate() >= commitThreshold {
+				commitStart := time.Now()
+				log.Info("Committing...")
+				if err = agg.Prune(ctx, 10*ethconfig.HistoryV3AggregationStep); err != nil {
 					return err
 				}
-				if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+				if err := rs.Flush(applyTx); err != nil {
 					return err
 				}
-				defer applyTx.Rollback()
-				agg.SetTx(applyTx)
-				reconWorkers[0].ResetTx(applyTx)
-				log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+				if err := agg.Flush(applyTx); err != nil {
+					return err
+				}
+				if err = execStage.Update(applyTx, stageProgress); err != nil {
+					return err
+				}
+				applyTx.CollectMetrics()
+				if !useExternalTx {
+					if err := applyTx.Commit(); err != nil {
+						return err
+					}
+					if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+						return err
+					}
+					defer applyTx.Rollback()
+					agg.SetTx(applyTx)
+					reconWorkers[0].ResetTx(applyTx)
+					log.Info("Committed", "time", time.Since(commitStart), "toProgress", stageProgress)
+				}
 			}
-		}
-
-		if !parallel {
 			select {
 			case <-logEvery.C:
 				stepsInDB := idxStepsInDB(applyTx)

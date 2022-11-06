@@ -145,3 +145,38 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 	}
 	return responsePacket[0].(*cltypes.LightClientUpdate), nil
 }
+
+func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client consensusrpc.SentinelClient) ([]cltypes.ObjectSSZ, error) {
+	req := &cltypes.BeaconBlocksByRangeRequest{
+		StartSlot: start,
+		Count:     count,
+		Step:      1, // deprecated, and must be set to 1.
+	}
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+		return nil, err
+	}
+
+	// Prepare output slice.
+	responsePacket := []cltypes.ObjectSSZ{}
+	for i := 0; i < int(count); i++ {
+		responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
+	}
+
+	data := common.CopyBytes(buffer.Bytes())
+	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
+		Data:  data,
+		Topic: handlers.BeaconBlocksByRangeProtocolV2,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if message.Error {
+		log.Warn("received error", "err", string(message.Data))
+		return nil, nil
+	}
+	if err := ssz_snappy.DecodeListSSZBeaconBlock(message.Data, count, responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
+}
