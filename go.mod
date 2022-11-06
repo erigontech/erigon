@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221103151411-ad300d8d660f
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221105142541-4b0ff0ae5e26
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221026024915-f6abfe5c120e
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/Giulio2002/bls v0.0.0-20221103221031-e1945063d0cf
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.22.2
@@ -63,7 +64,6 @@ require (
 	github.com/spf13/cobra v1.5.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.0
-	github.com/supranational/blst v0.3.10
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
 	github.com/torquem-ch/mdbx-go v0.26.2
@@ -89,7 +89,6 @@ require (
 )
 
 require (
-	github.com/Giulio2002/bls v0.0.0-20221103221031-e1945063d0cf // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/containerd/cgroups v1.0.4 // indirect
@@ -113,7 +112,6 @@ require (
 	github.com/klauspost/compress v1.15.10 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
-	github.com/ledgerwatch/interfaces v0.0.0-20221103124126-5c404021ea28 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -129,7 +127,6 @@ require (
 	github.com/marten-seemann/qtls-go1-18 v0.1.2 // indirect
 	github.com/marten-seemann/qtls-go1-19 v0.1.0 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
-	github.com/matryer/moq v0.2.7 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/miekg/dns v1.1.50 // indirect
@@ -156,6 +153,7 @@ require (
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
+	github.com/supranational/blst v0.3.10 // indirect
 	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
