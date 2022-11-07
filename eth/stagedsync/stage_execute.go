@@ -297,7 +297,7 @@ func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint
 	return
 }
 
-func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewState22()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -305,7 +305,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, cfg.accumulator); err != nil {
+	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
 	if err := rs.Flush(tx); err != nil {
@@ -578,7 +578,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	if cfg.historyV3 {
-		return unwindExec3(u, s, tx, ctx, cfg)
+		return unwindExec3(u, s, tx, ctx, cfg, accumulator)
 	}
 
 	changes := etl.NewCollector(logPrefix, cfg.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
