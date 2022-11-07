@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -24,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
@@ -381,16 +380,14 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if txn == nil {
 			continue
 		}
+		stateReader.SetTxNum(txNum)
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {
 			return nil, err
 		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, api._blockReader)
-		//stateReader.SetTxNum(txNum - 1)
-		stateReader.SetTxNum(txNum)
-		vmConfig := vm.Config{}
-		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+		vmConfig := vm.Config{SkipAnalysis: core.SkipAnalysis(chainConfig, blockNum)}
 		ibs := state.New(stateReader)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
@@ -686,6 +683,7 @@ Logs:
 func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 	// populate a set of addresses
+Logs:
 	for _, log := range logs {
 		// empty address list means no filter
 		if len(addresses) > 0 {
@@ -698,9 +696,8 @@ func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics
 		if len(topics) > len(log.Topics) {
 			continue
 		}
-		var match bool
 		for i, sub := range topics {
-			match = len(sub) == 0 // empty rule set == wildcard
+			match := len(sub) == 0 // empty rule set == wildcard
 			// iterate over the subtopics and look for any match.
 			for _, topic := range sub {
 				if log.Topics[i] == topic {
@@ -710,11 +707,8 @@ func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics
 			}
 			// there was no match, so this log is invalid.
 			if !match {
-				break
+				continue Logs
 			}
-		}
-		if !match {
-			continue
 		}
 		result = append(result, log)
 	}

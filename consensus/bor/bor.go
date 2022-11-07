@@ -940,6 +940,10 @@ func (c *Bor) SealHash(header *types.Header) common.Hash {
 	return SealHash(header, c.config)
 }
 
+func (c *Bor) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
+}
+
 // APIs implements consensus.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
 func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {

@@ -1,4 +1,4 @@
-GO = go # if using docker, should not need to be installed/linked
+GO = /usr/local/go/bin/go
 GOBIN = $(CURDIR)/build/bin
 UNAME = $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
@@ -158,7 +158,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.50.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.50.1
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

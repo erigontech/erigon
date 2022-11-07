@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -27,6 +28,18 @@ import (
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+var (
+	testLocalMetadataV2 = &cltypes.MetadataV2{
+		SeqNumber: 42,
+		Attnets:   43,
+		Syncnets:  44,
+	}
+	testLocalMetadataV1 = &cltypes.MetadataV1{
+		SeqNumber: testLocalMetadataV2.SeqNumber,
+		Attnets:   testLocalMetadataV2.Attnets,
+	}
 )
 
 func initializeNetwork(t *testing.T, ctx context.Context) (*ConsensusHandlers, host.Host, host.Host) {
@@ -38,64 +51,74 @@ func initializeNetwork(t *testing.T, ctx context.Context) (*ConsensusHandlers, h
 	h2pi := h2.Peerstore().PeerInfo(h2.ID())
 	require.NoError(t, h1.Connect(ctx, h2pi))
 
-	return NewConsensusHandlers(h2, &peers.Peers{}, &cltypes.MetadataV2{}), h1, h2
+	return NewConsensusHandlers(h2, &peers.Peers{}, testLocalMetadataV2), h1, h2
 }
 
-func TestPingHandler(t *testing.T) {
-	ctx := context.TODO()
-
-	handlers, h1, h2 := initializeNetwork(t, ctx)
-	defer h1.Close()
-	defer h2.Close()
-	handlers.Start()
-
-	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(PingProtocolV1))
-	require.NoError(t, err)
-	packet := &cltypes.Ping{
-		Id: 32,
+func TestHeartbeatHandlers(t *testing.T) {
+	tests := map[string]struct {
+		protocol       string
+		writePacket    communication.Packet
+		gotPacket      communication.Packet
+		expectedPacket communication.Packet
+	}{
+		"ping": {
+			protocol:       PingProtocolV1,
+			writePacket:    &cltypes.Ping{Id: 32},
+			gotPacket:      &cltypes.Ping{},
+			expectedPacket: &cltypes.Ping{Id: testLocalMetadataV2.SeqNumber},
+		},
+		"goodbye": {
+			protocol:       GoodbyeProtocolV1,
+			writePacket:    &cltypes.Ping{Id: 1},
+			gotPacket:      &cltypes.Ping{},
+			expectedPacket: &cltypes.Ping{Id: 1},
+		},
+		"status": {
+			protocol:       StatusProtocolV1,
+			writePacket:    &cltypes.Status{HeadSlot: 666999},
+			gotPacket:      &cltypes.Status{},
+			expectedPacket: &cltypes.Status{HeadSlot: 666999},
+		},
+		"metadatav1": {
+			protocol:       MetadataProtocolV1,
+			writePacket:    nil,
+			gotPacket:      &cltypes.MetadataV1{},
+			expectedPacket: testLocalMetadataV1,
+		},
+		"metadatav2": {
+			protocol:       MetadataProtocolV2,
+			writePacket:    nil,
+			gotPacket:      &cltypes.MetadataV2{},
+			expectedPacket: testLocalMetadataV2,
+		},
 	}
-	codec := ssz_snappy.NewStreamCodec(stream)
-	err = codec.WritePacket(packet)
-	require.NoError(t, err)
-	require.NoError(t, codec.CloseWriter())
-	time.Sleep(100 * time.Millisecond)
-	r := &cltypes.Ping{}
-
-	code := make([]byte, 1)
-	stream.Read(code)
-	assert.Equal(t, code, []byte{SuccessfullResponsePrefix})
-
-	_, err = codec.Decode(r)
-	require.NoError(t, err)
-
-	assert.Equal(t, r, packet)
-}
-
-func TestStatusHandler(t *testing.T) {
 	ctx := context.TODO()
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			handlers, h1, h2 := initializeNetwork(t, ctx)
+			defer h1.Close()
+			defer h2.Close()
+			handlers.Start()
 
-	handlers, h1, h2 := initializeNetwork(t, ctx)
-	defer h1.Close()
-	defer h2.Close()
-	handlers.Start()
+			stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(tc.protocol))
+			require.NoError(t, err)
+			codec := ssz_snappy.NewStreamCodec(stream)
 
-	stream, err := h1.NewStream(ctx, h2.ID(), protocol.ID(StatusProtocolV1))
-	require.NoError(t, err)
-	packet := &cltypes.Status{
-		HeadSlot: 666999,
+			// Write packet.
+			err = codec.WritePacket(tc.writePacket)
+			require.NoError(t, err)
+			require.NoError(t, codec.CloseWriter())
+			time.Sleep(100 * time.Millisecond)
+
+			// Read packet.
+			code := make([]byte, 1)
+			stream.Read(code)
+			assert.Equal(t, code, []byte{SuccessfulResponsePrefix})
+			_, err = codec.Decode(tc.gotPacket)
+			require.NoError(t, err)
+
+			// Assert on expected packet.
+			assert.Equal(t, tc.gotPacket, tc.expectedPacket)
+		})
 	}
-	codec := ssz_snappy.NewStreamCodec(stream)
-	require.NoError(t, codec.WritePacket(packet))
-	require.NoError(t, codec.CloseWriter())
-	time.Sleep(100 * time.Millisecond)
-	r := &cltypes.Status{}
-
-	code := make([]byte, 1)
-	stream.Read(code)
-	assert.Equal(t, code, []byte{SuccessfullResponsePrefix})
-
-	_, err = codec.Decode(r)
-	require.NoError(t, err)
-
-	assert.Equal(t, r, packet)
 }

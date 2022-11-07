@@ -136,7 +136,6 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			txTask := &state.TxTask{
 				BlockNum:   n,
 				Rules:      params.TestRules,
-				Block:      nil,
 				TxNum:      n,
 				TxIndex:    0,
 				Final:      true,

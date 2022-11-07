@@ -23,9 +23,9 @@ import (
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
