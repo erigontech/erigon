@@ -137,6 +137,6 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
+	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
 	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
 }
