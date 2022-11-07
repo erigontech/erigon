@@ -696,6 +696,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		hd.posAnchor = &Anchor{
 			parentHash:  header.ParentHash,
 			blockHeight: headerNumber,
+			peerID:      peerId,
 		}
 
 		if headerNumber <= 1 {
