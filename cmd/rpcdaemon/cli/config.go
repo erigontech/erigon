@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -30,6 +31,13 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
+	grpcHealth "google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
@@ -47,12 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
-	grpcHealth "google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 var rootCmd = &cobra.Command{
@@ -226,8 +228,8 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 
 func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
-	blockReader services.FullBlockReader, snapshots *snapshotsync.RoSnapshots, agg *libstate.Aggregator22,
-	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
+	blockReader services.FullBlockReader, ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer,
+	miningServer txpool.MiningServer, stateDiffClient StateChangesClient,
 ) (eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters, err error) {
 	if stateCacheCfg.CacheSize > 0 {
 		// notification about new blocks (state stream) doesn't work now inside erigon - because
@@ -238,8 +240,7 @@ func EmbeddedServices(ctx context.Context,
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
-	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB, snapshots, agg)
-	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)

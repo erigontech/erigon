@@ -15,9 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/log/v3"
 
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
@@ -489,6 +490,11 @@ Loop:
 	}
 	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("batch commit: %w", err)
+	}
+
+	_, err = rawdb.IncrementStateVersion(tx)
+	if err != nil {
+		log.Error("writing plain state version", "err", err)
 	}
 
 	if !useExternalTx {

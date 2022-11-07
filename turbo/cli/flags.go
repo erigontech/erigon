@@ -11,6 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
@@ -18,9 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli"
 )
 
 var (
