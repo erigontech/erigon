@@ -158,6 +158,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	if cfg.historyV3 {
 		sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+		cfg.agg.SetWorkers(estimate.CompressSnapshot.Workers())
 		if err := cfg.agg.BuildMissedIndices(ctx, sem); err != nil {
 			return err
 		}
