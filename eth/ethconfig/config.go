@@ -69,7 +69,7 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
-		ExecWorkerCount:            1,
+		ExecWorkerCount:            2,
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
