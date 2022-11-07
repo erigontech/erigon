@@ -2,7 +2,7 @@ package cli
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/internal/logging"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 
 	"github.com/urfave/cli"
 )

@@ -3,20 +3,16 @@ package lightclient
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/fork"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
-
-	blst "github.com/supranational/blst/bindings/go"
 )
 
 const MinSyncCommitteeParticipants = 1
 
-var (
-	DomainSyncCommittee = common.Hex2Bytes("07000000")
-	dst                 = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
-)
+var DomainSyncCommittee = common.Hex2Bytes("07000000")
 
 func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, error) {
 	if update.SyncAggregate.Sum() < MinSyncCommitteeParticipants {
@@ -89,12 +85,12 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	}
 	syncAggregateBits := update.SyncAggregate.SyncCommiteeBits
 
-	var pubkeys [][48]byte
+	var pubkeys [][]byte
 	currPubKeyIndex := 0
 	for i := range syncAggregateBits {
 		for bit := 1; bit <= 128; bit *= 2 {
 			if syncAggregateBits[i]&byte(bit) > 0 {
-				pubkeys = append(pubkeys, syncCommittee.PubKeys[currPubKeyIndex])
+				pubkeys = append(pubkeys, syncCommittee.PubKeys[currPubKeyIndex][:])
 			}
 			currPubKeyIndex++
 		}
@@ -110,21 +106,5 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	if err != nil {
 		return false, err
 	}
-
-	signature, err := utils.SignatureFromBytes(update.SyncAggregate.SyncCommiteeSignature[:])
-	if err != nil {
-		return false, err
-	}
-
-	pks := []*blst.P1Affine{}
-
-	for _, key := range pubkeys {
-		pk, err := utils.PublicKeyFromBytes(key[:])
-		if err != nil {
-			return false, err
-		}
-		pks = append(pks, pk)
-	}
-
-	return signature.FastAggregateVerify(true, pks, signingRoot[:], dst), nil
+	return bls.VerifyAggregate(update.SyncAggregate.SyncCommiteeSignature[:], signingRoot[:], pubkeys)
 }

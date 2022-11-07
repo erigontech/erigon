@@ -11,6 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
@@ -18,9 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli"
 )
 
 var (
@@ -383,7 +384,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		c.WebsocketCompression = true
 	}
 
-	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
+	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.GlobalString(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
+
+	err = c.StateCache.CodeCacheSize.UnmarshalText([]byte(ctx.GlobalString(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
 
 	/*
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")

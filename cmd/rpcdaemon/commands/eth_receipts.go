@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -24,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
@@ -37,14 +36,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 		return cached, nil
 	}
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, block.Hash(), 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, 0, api._agg, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +49,13 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, e := api._blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
+	}
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		header := block.Header()
@@ -188,7 +187,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := filterLogs(logs, addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics)
 			if len(filtered) == 0 {
 				return nil
 			}
@@ -328,10 +327,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		return logs, nil
 	}
 	var lastBlockNum uint64
-	var lastBlockHash common.Hash
-	var lastHeader *types.Header
-	var lastSigner *types.Signer
-	var lastRules *params.Rules
+	var blockHash common.Hash
+	var header *types.Header
+	var signer *types.Signer
+	var rules *params.Rules
+	var skipAnalysis bool
 	stateReader := state.NewHistoryReader22(ac)
 	stateReader.SetTx(tx)
 	//stateReader.SetTrace(true)
@@ -345,34 +345,48 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
+
+	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
+	var blockNum uint64
+	var ok bool
 	for iter.HasNext() {
 		txNum := iter.Next()
-		// Find block number
-		ok, blockNum, err := rawdb.TxNums.FindBlockNum(tx, txNum)
-		if err != nil {
-			return nil, err
+
+		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
+
+		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
+			// Find block number
+			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !ok {
 			return nil, nil
 		}
+
+		// if block number changed, calculate all related field
 		if blockNum > lastBlockNum {
-			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
 			lastBlockNum = blockNum
-			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum)
-			lastRules = chainConfig.Rules(blockNum)
-		}
-		var startTxNum uint64
-		if blockNum > 0 {
-			startTxNum, err = rawdb.TxNums.Min(tx, blockNum) // end is an inclusive bound
+			blockHash = header.Hash()
+			signer = types.MakeSigner(chainConfig, blockNum)
+			rules = chainConfig.Rules(blockNum)
+			skipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+
+			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		txIndex := int(txNum) - int(startTxNum) - 1
+		txIndex := int(txNum) - int(minTxNumInBlock) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
@@ -381,21 +395,19 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if txn == nil {
 			continue
 		}
+		stateReader.SetTxNum(txNum)
 		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
 		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, tx, api._blockReader)
-		//stateReader.SetTxNum(txNum - 1)
-		stateReader.SetTxNum(txNum)
-		vmConfig := vm.Config{}
-		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
+		vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
 		ibs := state.New(stateReader)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, txIndex)
+		ibs.Prepare(txHash, blockHash, txIndex)
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d", err, blockNum, txNum)
@@ -406,14 +418,15 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			log.Index = logIndex
 			logIndex++
 		}
-		filtered := filterLogs(rawLogs, addrMap, crit.Topics)
+		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
-			log.BlockHash = lastBlockHash
+			log.BlockHash = blockHash
 			log.TxHash = txHash
 		}
 		logs = append(logs, filtered...)
 	}
+
 	//stats := api._agg.GetAndResetStats()
 	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
@@ -677,44 +690,6 @@ Logs:
 			if !match {
 				continue Logs
 			}
-		}
-		result = append(result, log)
-	}
-	return result
-}
-
-func filterLogs(logs []*types.Log, addresses map[common.Address]struct{}, topics [][]common.Hash) []*types.Log {
-	result := make(types.Logs, 0, len(logs))
-	// populate a set of addresses
-	for _, log := range logs {
-		// empty address list means no filter
-		if len(addresses) > 0 {
-			// this is basically the includes function but done with a map
-			if _, ok := addresses[log.Address]; !ok {
-				continue
-			}
-		}
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(log.Topics) {
-			continue
-		}
-		var match bool
-		for i, sub := range topics {
-			match = len(sub) == 0 // empty rule set == wildcard
-			// iterate over the subtopics and look for any match.
-			for _, topic := range sub {
-				if log.Topics[i] == topic {
-					match = true
-					break
-				}
-			}
-			// there was no match, so this log is invalid.
-			if !match {
-				break
-			}
-		}
-		if !match {
-			continue
 		}
 		result = append(result, log)
 	}

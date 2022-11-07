@@ -927,6 +927,10 @@ func (p *Parlia) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
+func (p *Parlia) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
+}
+
 func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
 	// deploy a contract
 	if tx.GetTo() == nil {
@@ -1244,6 +1248,7 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 		math.MaxUint64/2, u256.Num0,
 		nil, nil,
 		data, nil, false,
+		true, // isFree
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment

@@ -19,6 +19,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,8 +180,34 @@ type httpServerConn struct {
 }
 
 func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
-	body := io.LimitReader(r.Body, maxRequestContentLength)
-	conn := &httpServerConn{Reader: body, Writer: w, r: r}
+	conn := &httpServerConn{Writer: w, r: r}
+	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
+	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
+	// we however allow for non base64 encoded parameters to be passed
+	if r.Method == http.MethodGet && r.ContentLength == 0 {
+		// default id 1
+		id := `1`
+		id_up := r.URL.Query().Get("id")
+		if id_up != "" {
+			id = id_up
+		}
+		method_up := r.URL.Query().Get("method")
+		params, _ := url.QueryUnescape(r.URL.Query().Get("params"))
+		param := []byte(params)
+		if pb, err := base64.URLEncoding.DecodeString(params); err == nil {
+			param = pb
+		}
+		buf := new(bytes.Buffer)
+		json.NewEncoder(buf).Encode(jsonrpcMessage{
+			ID:     json.RawMessage(id),
+			Method: method_up,
+			Params: param,
+		})
+		conn.Reader = buf
+	} else {
+		// it's a post request or whatever, so just process it like normal
+		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
+	}
 	return NewCodec(conn)
 }
 
@@ -240,8 +267,8 @@ func validateRequest(r *http.Request) (int, error) {
 		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
-	// Allow OPTIONS (regardless of content-type)
-	if r.Method == http.MethodOptions {
+	// Allow OPTIONS and GET (regardless of content-type)
+	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
 		return 0, nil
 	}
 	// Check content-type
