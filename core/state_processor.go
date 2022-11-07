@@ -38,7 +38,8 @@ func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *G
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	if engine != nil {
+	if msg.FeeCap().IsZero() && engine != nil {
+		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */)
 		}
