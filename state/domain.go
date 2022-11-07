@@ -796,8 +796,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted
 }
 
 func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) (*recsplit.Index, error) {
-	_, fName := filepath.Split(idxPath)
-	log.Debug("[snapshots] build idx", "file", fName)
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{

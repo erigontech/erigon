@@ -271,52 +271,49 @@ func (h *History) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighte
 	}
 
 	missedFiles := h.missedIdxFiles()
-	//errs := make(chan error, len(missedFiles))
-	//wg := sync.WaitGroup{}
+	errs := make(chan error, len(missedFiles))
+	wg := sync.WaitGroup{}
 
 	for _, item := range missedFiles {
-		//if err := sem.Acquire(ctx, 1); err != nil {
-		//	errs <- err
-		//	break
-		//}
-		//wg.Add(1)
-		//go func(item *filesItem) {
-		//	defer sem.Release(1)
-		//	defer wg.Done()
+		if err := sem.Acquire(ctx, 1); err != nil {
+			errs <- err
+			break
+		}
+		wg.Add(1)
+		go func(item *filesItem) {
+			defer sem.Release(1)
+			defer wg.Done()
 
-		search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
-		iiItem, ok := h.InvertedIndex.files.Get(search)
-		if !ok {
-			return nil
-		}
+			search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
+			iiItem, ok := h.InvertedIndex.files.Get(search)
+			if !ok {
+				return
+			}
 
-		fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-		fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
-		idxPath := filepath.Join(h.dir, fName)
-		log.Info("[snapshots] build idx", "file", fName)
-		count, err := iterateForVi(item, iiItem, h.compressVals, func(v []byte) error { return nil })
-		if err != nil {
-			return err
-		}
-		if err := buildVi(item, iiItem, idxPath, h.tmpdir, count, false /* values */, h.compressVals); err != nil {
-			return err
-		}
-		//errs <- buildVi(item, iiItem, idxPath, h.tmpdir, count, false /* values */, h.compressVals)
-		//}(item)
+			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
+			idxPath := filepath.Join(h.dir, fName)
+			log.Info("[snapshots] build idx", "file", fName)
+			count, err := iterateForVi(item, iiItem, h.compressVals, func(v []byte) error { return nil })
+			if err != nil {
+				errs <- err
+			}
+			errs <- buildVi(item, iiItem, idxPath, h.tmpdir, count, false /* values */, h.compressVals)
+		}(item)
 	}
-	//go func() {
-	//	wg.Wait()
-	//	close(errs)
-	//}()
-	//var lastError error
-	//for err := range errs {
-	//	if err != nil {
-	//		lastError = err
-	//	}
-	//}
-	//if lastError != nil {
-	//	return lastError
-	//}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	var lastError error
+	for err := range errs {
+		if err != nil {
+			lastError = err
+		}
+	}
+	if lastError != nil {
+		return lastError
+	}
 
 	return h.openFiles()
 }
