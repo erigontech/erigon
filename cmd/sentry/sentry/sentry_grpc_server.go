@@ -758,13 +758,8 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool)
 		return true
 	})
 
-	peers := len(foundPeers)
-	if peers < peerCount {
-		return foundPeers, peers > 0
-	}
-
 	// return the count number of peers ordered by highest block (i.e. best first)
-	return foundPeers[:peerCount], peers > 0
+	return foundPeers, foundPeers.Len() > 0
 }
 
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
