@@ -382,7 +382,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockReader,
 				mock.sentriesClient.Hd,
 				mock.gspec,
-				1,
+				ethconfig.Defaults.Sync,
 				mock.agg,
 			),
 			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg),

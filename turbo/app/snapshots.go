@@ -235,7 +235,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
