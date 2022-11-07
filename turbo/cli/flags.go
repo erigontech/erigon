@@ -382,7 +382,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		c.WebsocketCompression = true
 	}
 
-	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
+	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.GlobalString(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
+
+	err = c.StateCache.CodeCacheSize.UnmarshalText([]byte(ctx.GlobalString(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
 
 	/*
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")

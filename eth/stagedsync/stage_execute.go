@@ -133,7 +133,6 @@ func executeBlock(
 	writeCallTraces bool,
 	initialCycle bool,
 	stateStream bool,
-	effectiveEngine consensus.Engine,
 ) error {
 	blockNum := block.NumberU64()
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
@@ -400,12 +399,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var stoppedErr error
 
-	effectiveEngine := cfg.engine
-	if asyncEngine, ok := effectiveEngine.(consensus.AsyncEngine); ok {
-		asyncEngine = asyncEngine.WithExecutionContext(ctx)
-		effectiveEngine = asyncEngine.(consensus.Engine)
-	}
-
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
 	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
@@ -439,7 +432,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, effectiveEngine); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
