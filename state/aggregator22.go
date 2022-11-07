@@ -485,7 +485,7 @@ func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo ui
 }
 
 func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
-	stateChanges := etl.NewCollector(a.logPrefix, "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer stateChanges.Close()
 	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
 		return stateChanges.Collect(k, v)
