@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -65,6 +66,41 @@ type PeerInfo struct {
 	// if this queue is full (means peer is slow) - old messages will be dropped
 	// channel closed on peer remove
 	tasks chan func()
+}
+
+// BestPeers is the priority queue of peers. Used to select certain number of peers considered to be "best available"
+type BestPeers []*PeerInfo
+
+// Len (part of heap.Interface) returns the current size of the best peers queue
+func (bp BestPeers) Len() int {
+	return len(bp)
+}
+
+// Less (part of heap.Interface) compares two peers
+func (bp BestPeers) Less(i, j int) bool {
+	return bp[i].height < bp[j].height
+}
+
+// Swap (part of heap.Interface) moves two peers in the queue into each other's places.
+func (bp BestPeers) Swap(i, j int) {
+	bp[i], bp[j] = bp[j], bp[i]
+}
+
+// Push (part of heap.Interface) places a new peer onto the end of queue.
+func (bp *BestPeers) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	p := x.(*PeerInfo)
+	*bp = append(*bp, p)
+}
+
+// Pop (part of heap.Interface) removes the first peer from the queue
+func (bp *BestPeers) Pop() interface{} {
+	old := *bp
+	n := len(old)
+	x := old[n-1]
+	*bp = old[0 : n-1]
+	return x
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
@@ -707,16 +743,16 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 
 func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool) {
 	// Choose peer(s) that we can send this request to, with maximum number of permits
-	var maxBlock uint64
 	now := time.Now()
-	foundPeers := make([]*PeerInfo, 0)
+	var foundPeers BestPeers
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if maxBlock == 0 || peerInfo.Height() > maxBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				maxBlock = peerInfo.Height()
-				foundPeers = append([]*PeerInfo{peerInfo}, foundPeers...)
+		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+		if deadlines < maxPermitsPerPeer {
+			heap.Push(&foundPeers, peerInfo)
+			if foundPeers.Len() > peerCount {
+				// Remove the worst peer
+				heap.Pop(&foundPeers)
 			}
 		}
 		return true
