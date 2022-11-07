@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 
@@ -74,11 +75,11 @@ type ExecuteBlockCfg struct {
 	blockReader   services.FullBlockReader
 	hd            *headerdownload.HeaderDownload
 
-	dirs         datadir.Dirs
-	historyV3    bool
-	workersCount int
-	genesis      *core.Genesis
-	agg          *libstate.Aggregator22
+	dirs      datadir.Dirs
+	historyV3 bool
+	syncCfg   ethconfig.Sync
+	genesis   *core.Genesis
+	agg       *libstate.Aggregator22
 }
 
 func StageExecuteBlocksCfg(
@@ -98,7 +99,7 @@ func StageExecuteBlocksCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	genesis *core.Genesis,
-	workersCount int,
+	syncCfg ethconfig.Sync,
 	agg *libstate.Aggregator22,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -117,7 +118,7 @@ func StageExecuteBlocksCfg(
 		hd:            hd,
 		genesis:       genesis,
 		historyV3:     historyV3,
-		workersCount:  workersCount,
+		syncCfg:       syncCfg,
 		agg:           agg,
 	}
 }
@@ -233,7 +234,7 @@ func newStateReaderWriter(
 // ================ Erigon3 ================
 
 func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	workersCount := cfg.workersCount
+	workersCount := cfg.syncCfg.ExecWorkerCount
 	//workersCount := 2
 	if !initialCycle {
 		workersCount = 1
@@ -247,7 +248,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		}
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
-			reconWorkers := estimate.ReconstituteState.Workers()
+			reconWorkers := cfg.syncCfg.ReconWorkerCount
 			log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "from", s.BlockNumber, "to", reconstituteToBlock)
 			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err

@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -69,6 +70,7 @@ var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
 		ExecWorkerCount:            1,
+		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -245,8 +247,9 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle    time.Duration
-	ExecWorkerCount int
+	LoopThrottle     time.Duration
+	ExecWorkerCount  int
+	ReconWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
