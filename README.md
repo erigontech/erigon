@@ -142,6 +142,10 @@ Don't start services as separated processes unless you have clear reason for it:
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 
+### Embedded Consensus Layer
+
+By default the Engine API is disabled in favour of Erigon native Embedded Consensus Layer, if you want to stake or sync an external Consensus Layer, run Erigon with flag `--externalcl`.
+
 ### Optional stages
 
 There is an optional stage that can be enabled through flags:
