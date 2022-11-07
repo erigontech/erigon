@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -34,8 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -89,8 +90,8 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-	} else if err = os.RemoveAll(stateDbPath); err != nil {
-		return err
+		//} else if err = os.RemoveAll(stateDbPath); err != nil {
+		//	return err
 	}
 	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).WriteMap().Open()
 	if err2 != nil {
@@ -120,7 +121,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	var mode libstate.CommitmentMode
 	switch commitmentsMode {
 	case "update":
-		mode = libstate.CommitmentModeUpdates
+		mode = libstate.CommitmentModeUpdate
 	default:
 		mode = libstate.CommitmentModeDirect
 	}
