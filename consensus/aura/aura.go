@@ -773,8 +773,14 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
-func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall,
+) {
 	blockNum := header.Number.Uint64()
+	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
+		state.SetCode(address, rewrittenCode)
+	}
+
 	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
 	}
