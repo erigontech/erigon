@@ -732,28 +732,6 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
-	var maxPermits int
-	now := time.Now()
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if peerInfo.Height() >= minBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				permits := maxPermitsPerPeer - deadlines
-				if permits > maxPermits {
-					maxPermits = permits
-					foundPeerInfo = peerInfo
-				}
-			}
-		}
-		return true
-	})
-	return foundPeerInfo, maxPermits > 0
-}
-
 func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
