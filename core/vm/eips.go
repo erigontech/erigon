@@ -39,6 +39,7 @@ var activators = map[int]func(*JumpTable){
 	3540: enable3540,
 	3670: enable3670,
 	4200: enable4200,
+	4750: enable4750,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -232,7 +233,7 @@ func enable4200(jt *JumpTable) {
 // opRjump implements the RJUMP opcode
 func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		idx            = scope.Contract.CodeBeginOffset() + *pc + 1
+		idx            = scope.Contract.Container.code[scope.ActiveSection] + *pc + 1
 		arg            = scope.Contract.Code[idx : idx+2]
 		relativeOffset int16
 	)
@@ -258,7 +259,7 @@ func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	}
 
 	var (
-		idx            = scope.Contract.CodeBeginOffset() + *pc + 1
+		idx            = scope.Contract.Container.code[scope.ActiveSection] + *pc + 1
 		arg            = scope.Contract.Code[idx : idx+2]
 		relativeOffset int16
 	)
@@ -270,6 +271,75 @@ func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	// Calculate the new PC given the relative offset. Already validated,
 	// so no need to verify casts.
 	*pc = uint64(int64(*pc)+int64(relativeOffset)) - 1 // pc will also be increased by interpreter loop
+
+	return nil, nil
+}
+
+// enable4750 applies EIP-4750 (CALLF and RETF opcodes)
+func enable4750(jt *JumpTable) {
+	jt[CALLF] = &operation{
+		execute:     opCallf,
+		constantGas: GasMidStep,
+		minStack:    minStack(0, 0),
+		maxStack:    maxStack(0, 0),
+		eof1:        true,
+	}
+	jt[RETF] = &operation{
+		execute:     opRetf,
+		constantGas: GasMidStep,
+		minStack:    minStack(0, 0),
+		maxStack:    maxStack(0, 0),
+		eof1:        true,
+	}
+}
+
+// opCallf implements the CALLF opcode.
+func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		idx     = scope.Contract.Container.code[scope.ActiveSection] + *pc + 1
+		arg     = scope.Contract.Code[idx : idx+2]
+		section int16
+	)
+	if err := binary.Read(bytes.NewReader(arg), binary.BigEndian, &section); err != nil {
+		return nil, err
+	}
+	caller := scope.RetStack[len(scope.RetStack)-1]
+	sig := scope.Contract.Container.types[int(section)]
+	if scope.Stack.len() < int(caller.StackHeight)+int(sig.input) {
+		return nil, fmt.Errorf("too few stack items")
+	}
+	if len(scope.RetStack) >= 1024 {
+		return nil, fmt.Errorf("return stack too deep")
+	}
+	context := &SubroutineContext{
+		Section:     scope.ActiveSection,
+		StackHeight: caller.StackHeight + uint64(scope.Stack.len()),
+		Pc:          *pc,
+	}
+	scope.RetStack = append(scope.RetStack, context)
+
+	*pc = 0
+	*pc -= 1 // hacks xD
+	scope.ActiveSection = uint64(section)
+	scope.Stack.floor = int(context.StackHeight)
+
+	return nil, nil
+}
+
+// opRetf implements the RETF opcode.
+func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	sig := scope.Contract.Container.types[scope.ActiveSection]
+	if scope.Stack.len() < int(sig.output) {
+		return nil, fmt.Errorf("too few stack items")
+	}
+
+	last := len(scope.RetStack) - 1
+	context := scope.RetStack[last]
+	scope.RetStack = scope.RetStack[:last]
+
+	*pc = context.Pc - 1
+	scope.ActiveSection = context.Section
+	scope.Stack.floor = int(context.StackHeight)
 
 	return nil, nil
 }

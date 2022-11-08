@@ -109,7 +109,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		stack.Push(x)
 		stack.Push(y)
-		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
 		if len(stack.Data) != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.Data))
 		}
@@ -224,7 +224,7 @@ func TestAddMod(t *testing.T) {
 		stack.Push(z)
 		stack.Push(y)
 		stack.Push(x)
-		opAddmod(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opAddmod(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
 		actual := stack.Pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
@@ -528,12 +528,12 @@ func TestOpMstore(t *testing.T) {
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	stack.PushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil, 0, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	stack.PushN(*new(uint256.Int).SetOne(), *new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil, 0, nil})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
 	}
@@ -556,7 +556,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
 		stack.PushN(*value, *memStart)
-		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil, 0, nil})
 	}
 }
 
@@ -575,7 +575,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
 		stack.PushN(*uint256.NewInt(32), *start)
-		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil, 0, nil})
 	}
 }
 
@@ -671,7 +671,7 @@ func TestRandom(t *testing.T) {
 			pc             = uint64(0)
 			evmInterpreter = env.interpreter
 		)
-		opRandom(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opRandom(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
 		if len(stack.data) != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", tt.name, len(stack.data))
 		}
@@ -708,21 +708,21 @@ func TestStaticRelativeJumps(t *testing.T) {
 			stack          = newstack()
 			pc             = uint64(0)
 			evmInterpreter = env.interpreter
-			code           = makeEOF1(common.Hex2Bytes(tt.code))
+			code           = makeEOF1([][]byte{common.Hex2Bytes(tt.code)}, nil)
 			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
-			header, _      = readEOF1Header(code)
+			container, _   = NewEOF1Container(code, env.interpreter.cfg.JumpTable, true)
 		)
-		contract.SetCallCode(&addr, common.Hash{}, code, &header)
+		contract.SetCallCode(&addr, common.Hash{}, code, &container)
 
 		if tt.op == "RJUMP" {
-			opRjump(&pc, evmInterpreter, &ScopeContext{nil, stack, contract})
+			opRjump(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}}})
 		} else if tt.op == "RJUMPI" {
 			if tt.condition {
 				stack.push(uint256.NewInt(1))
 			} else {
 				stack.push(uint256.NewInt(0))
 			}
-			opRjumpi(&pc, evmInterpreter, &ScopeContext{nil, stack, contract})
+			opRjumpi(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}}})
 		}
 
 		// The pc should be one less than expected because the interpreter will increment it.
@@ -732,8 +732,83 @@ func TestStaticRelativeJumps(t *testing.T) {
 	}
 }
 
-func makeEOF1(code []byte) []byte {
-	header := []byte{0xef, 0x00, 0x01, 0x01, 0xff, 0xff, 0x00}
-	binary.BigEndian.PutUint16(header[4:6], uint16(len(code)))
-	return append(header, code...)
+func TestEOFFunctions(t *testing.T) {
+	type testcase struct {
+		name  string
+		stack int
+		err   bool
+	}
+
+	code := [][]byte{common.Hex2Bytes("600160025e000100"), common.Hex2Bytes("0149")}
+	for _, tt := range []testcase{
+		{name: "valid callf", stack: 2},
+		{name: "stack underflow", stack: 1, err: true},
+		{name: "stack too deep", stack: 1, err: true},
+	} {
+		var (
+			addr           = common.Address{0x42}
+			env            = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+			stack          = newstack()
+			pc             = uint64(0)
+			evmInterpreter = env.interpreter
+			eofCode        = makeEOF1(code, []Annotation{{input: 0, output: 0}, {input: 2, output: 1}})
+			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
+			container, _   = NewEOF1Container(eofCode, env.interpreter.cfg.JumpTable, true)
+		)
+		contract.SetCallCode(&addr, common.Hash{}, eofCode, &container)
+		scope := &ScopeContext{
+			Memory:        nil,
+			Stack:         stack,
+			Contract:      contract,
+			ActiveSection: 0,
+			RetStack:      []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}},
+		}
+		// Fill stack.
+		for i := 0; i < tt.stack; i++ {
+			scope.Stack.push(uint256.NewInt(uint64(i)))
+		}
+		pc = 4
+		if _, err := opCallf(&pc, evmInterpreter, scope); err == nil && tt.err {
+			t.Fatalf("expected error, got none")
+		} else if err != nil && !tt.err {
+			t.Fatalf("unexpected error: %v", err)
+		} else if err != nil && tt.err {
+			continue
+		}
+		if len(scope.RetStack) != 2 {
+			t.Fatalf("subroutine stack not increased")
+		}
+		ctx := scope.RetStack[1]
+		if scope.ActiveSection != 1 {
+			t.Fatalf("test %v: expected section 1, got %d", tt.name, ctx.Section)
+		}
+		if pc+1 != 0 {
+			t.Fatalf("test %v: expected pc 0, got %d", tt.name, pc)
+		}
+	}
+}
+
+func makeEOF1(sections [][]byte, sigs []Annotation) []byte {
+	out := []byte{0xef, 0x00, 0x01}
+	// type header
+	if 0 < len(sigs) {
+		out = append(out, byte(kindType))
+		out = binary.BigEndian.AppendUint16(out, uint16(len(sigs)*2))
+	}
+	// code header
+	for _, code := range sections {
+		out = append(out, byte(kindCode))
+		out = binary.BigEndian.AppendUint16(out, uint16(len(code)))
+	}
+	// terminator
+	out = append(out, 0x0)
+	// type section
+	for _, sig := range sigs {
+		out = append(out, []byte{sig.input, sig.output}...)
+	}
+	// code section
+	for _, code := range sections {
+		out = append(out, code...)
+	}
+	return out
 }

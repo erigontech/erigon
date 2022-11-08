@@ -75,7 +75,6 @@ var eof1InvalidTests = []eof1InvalidTest{
 	{"EF000101000200", ErrEOF1InvalidTotalSize.Error()},                                     // no code section contents
 	{"EF00010100020060", ErrEOF1InvalidTotalSize.Error()},                                   // not complete code section contents
 	{"EF0001010002006000DEADBEEF", ErrEOF1InvalidTotalSize.Error()},                         // trailing bytes after code
-	{"EF00010100020100020060006000", ErrEOF1MultipleCodeSections.Error()},                   // two code sections
 	{"EF000101000000", ErrEOF1EmptyCodeSection.Error()},                                     // 0 size code section
 	{"EF000101000002000200AABB", ErrEOF1EmptyCodeSection.Error()},                           // 0 size code section, with non-0 data section
 	{"EF000102000401000200AABBCCDD6000", ErrEOF1DataSectionBeforeCodeSection.Error()},       // data section before code section
@@ -88,7 +87,7 @@ var eof1InvalidTests = []eof1InvalidTest{
 	{"EF0001010002020004006000AABBCCDDEE", ErrEOF1InvalidTotalSize.Error()},                 // trailing bytes after data
 	{"EF0001010002020000006000", ErrEOF1EmptyDataSection.Error()},                           // 0 size data section
 	{"EF0001010002020004020004006000AABBCCDDAABBCCDD", ErrEOF1MultipleDataSections.Error()}, // two data sections
-	{"EF0001010002030004006000AABBCCDD", ErrEOF1UnknownSection.Error()},                     // section id = 3
+	{"EF00010100020F0004006000AABBCCDD", ErrEOF1UnknownSection.Error()},                     // section id = F
 }
 
 var eof1InvalidInstructionsTests = []eof1InvalidTest{
@@ -139,8 +138,8 @@ func TestReadEOF1Header(t *testing.T) {
 		if err != nil {
 			t.Errorf("code %v validation failure, error: %v", test.code, err)
 		}
-		if header.codeSize != test.codeSize {
-			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize)
+		if header.codeSize[0] != test.codeSize {
+			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize[0])
 		}
 		if header.dataSize != test.dataSize {
 			t.Errorf("code %v dataSize expected %v, got %v", test.code, test.dataSize, header.dataSize)
@@ -162,7 +161,7 @@ func TestValidateEOF(t *testing.T) {
 	for _, test := range eof1ValidTests {
 		_, err := validateEOF(common.Hex2Bytes(test.code), jt)
 		if err != nil {
-			t.Errorf("code %v expected to be valid", test.code)
+			t.Errorf("code %v expected to be valid, got %v", test.code, err)
 		}
 	}
 
@@ -177,8 +176,8 @@ func TestValidateEOF(t *testing.T) {
 func TestReadValidEOF1Header(t *testing.T) {
 	for _, test := range eof1ValidTests {
 		header := readValidEOF1Header(common.Hex2Bytes(test.code))
-		if header.codeSize != test.codeSize {
-			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize)
+		if header.codeSize[0] != test.codeSize {
+			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize[0])
 		}
 		if header.dataSize != test.dataSize {
 			t.Errorf("code %v dataSize expected %v, got %v", test.code, test.dataSize, header.dataSize)
@@ -188,27 +187,9 @@ func TestReadValidEOF1Header(t *testing.T) {
 
 func TestValidateInstructions(t *testing.T) {
 	jt := &shanghaiInstructionSet
-	for _, test := range eof1ValidTests {
-		code := common.Hex2Bytes(test.code)
-		header, err := readEOF1Header(code)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", test.code, err)
-		}
-
-		err = validateInstructions(code, &header, jt)
-		if err != nil {
-			t.Errorf("code %v instruction validation failure, error: %v", test.code, err)
-		}
-	}
-
 	for _, test := range eof1InvalidInstructionsTests {
 		code := common.Hex2Bytes(test.code)
-		header, err := readEOF1Header(code)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", test.code, err)
-		}
-
-		err = validateInstructions(code, &header, jt)
+		_, err := validateEOF(code, jt)
 		if err == nil {
 			t.Errorf("code %v expected to be invalid", test.code)
 		} else if err.Error() != test.error {
@@ -225,17 +206,12 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 		if OpCode(opcode) >= PUSH1 && OpCode(opcode) <= PUSH32 {
 			continue
 		}
-		if OpCode(opcode) == RJUMP || OpCode(opcode) == RJUMPI {
+		if OpCode(opcode) == RJUMP || OpCode(opcode) == RJUMPI || OpCode(opcode) == CALLF {
 			continue
 		}
 
 		*instrByte = byte(opcode)
-		header, err := readEOF1Header(code)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", common.Bytes2Hex(code), err)
-		}
-
-		err = validateInstructions(code, &header, jt)
+		_, err := validateEOF(code, jt)
 		if jt[opcode].undefined {
 			if err == nil {
 				t.Errorf("opcode %v expected to be invalid", opcode)
@@ -256,20 +232,15 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 	instrByte := &code[7]
 	for opcodeValue := uint16(0); opcodeValue <= 0xff; opcodeValue++ {
 		opcode := OpCode(opcodeValue)
-		if opcode >= PUSH1 && opcode <= PUSH32 || opcode == RJUMP || opcode == RJUMPI {
+		if opcode >= PUSH1 && opcode <= PUSH32 || opcode == RJUMP || opcode == RJUMPI || opcode == CALLF || opcode == RETF {
 			continue
 		}
 		if jt[opcode].undefined {
 			continue
 		}
 		*instrByte = byte(opcode)
-		header, err := readEOF1Header(code)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", common.Bytes2Hex(code), err)
-		}
-		err = validateInstructions(code, &header, jt)
-
-		if opcode == STOP || opcode == RETURN || opcode == REVERT || opcode == INVALID || opcode == SELFDESTRUCT {
+		_, err := validateEOF(code, jt)
+		if opcode.isTerminating() {
 			if err != nil {
 				t.Errorf("opcode %v expected to be valid terminating instruction", opcode)
 			}
@@ -295,11 +266,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeTruncatedPush[5] = byte(len(codeTruncatedPush) - 7)
 		codeTruncatedPush[7] = byte(opcode)
 
-		header, err := readEOF1Header(codeTruncatedPush)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", common.Bytes2Hex(code), err)
-		}
-		err = validateInstructions(codeTruncatedPush, &header, jt)
+		_, err := validateEOF(codeTruncatedPush, jt)
 		if err == nil {
 			t.Errorf("code %v has truncated PUSH, expected to be invalid", common.Bytes2Hex(codeTruncatedPush))
 		} else if err != ErrEOF1TerminatingInstructionMissing {
@@ -311,11 +278,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeNotTerminated[5] = byte(len(codeNotTerminated) - 7)
 		codeNotTerminated[7] = byte(opcode)
 
-		header, err = readEOF1Header(codeNotTerminated)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", common.Bytes2Hex(codeNotTerminated), err)
-		}
-		err = validateInstructions(codeTruncatedPush, &header, jt)
+		_, err = validateEOF(codeNotTerminated, jt)
 		if err == nil {
 			t.Errorf("code %v does not have terminating instruction, expected to be invalid", common.Bytes2Hex(codeNotTerminated))
 		} else if err != ErrEOF1TerminatingInstructionMissing {
@@ -327,11 +290,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeValid[5] = byte(len(codeValid) - 7)
 		codeValid[7] = byte(opcode)
 
-		header, err = readEOF1Header(codeValid)
-		if err != nil {
-			t.Errorf("code %v header validation failure, error: %v", common.Bytes2Hex(code), err)
-		}
-		err = validateInstructions(codeValid, &header, jt)
+		_, err = validateEOF(codeValid, jt)
 		if err != nil {
 			t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
 		}

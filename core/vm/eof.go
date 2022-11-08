@@ -31,6 +31,7 @@ const (
 	kindTerminator headerSection = 0
 	kindCode       headerSection = 1
 	kindData       headerSection = 2
+	kindType       headerSection = 3
 
 	versionOffset      int = 2
 	sectionHeaderStart int = 3
@@ -39,8 +40,9 @@ const (
 var eofMagic []byte = []byte{0xEF, 0x00}
 
 type EOF1Header struct {
-	codeSize uint16 // Size of code section. Cannot be 0 for EOF1 code. Equals 0 for legacy code.
-	dataSize uint16 // Size of data section. Equals 0 if data section is absent in EOF1 code. Equals 0 for legacy code.
+	typeSize uint16   // Size of type section. Must be 2 * n bytes, where n is number of code sections.
+	codeSize []uint16 // Size of code sections. Cannot be 0 for EOF1 code. Equals 0 for legacy code.
+	dataSize uint16   // Size of data section. Equals 0 if data section is absent in EOF1 code. Equals 0 for legacy code.
 }
 
 // hasEOFByte returns true if code starts with 0xEF byte
@@ -77,7 +79,9 @@ func readEOF1Header(code []byte) (EOF1Header, error) {
 		err      error
 		codeRead int
 		dataRead int
+		typeRead int
 		header   EOF1Header
+		codeSize int
 	)
 outer:
 	for i < len(code) {
@@ -85,20 +89,36 @@ outer:
 		case kindTerminator:
 			i += 1
 			break outer
-		case kindCode:
-			// Only 1 code section is allowed.
-			if codeRead != 0 {
-				return EOF1Header{}, ErrEOF1MultipleCodeSections
+		case kindType:
+			// Type section header must be read first.
+			if codeRead != 0 || dataRead != 0 {
+				return EOF1Header{}, ErrEOF1TypeSectionHeaderAfterOthers
+			}
+			// Only 1 type section is allowed.
+			if typeRead != 0 {
+				return EOF1Header{}, ErrEOF1MultipleTypeSections
 			}
 			// Size must be present.
-			if header.codeSize, err = readSectionSize(code, i+1); err != nil {
+			if header.typeSize, err = readSectionSize(code, i+1); err != nil {
+				return EOF1Header{}, ErrEOF1TypeSectionSizeMissing
+			}
+			// Type section size must not be 0.
+			if header.typeSize == 0 {
+				return EOF1Header{}, ErrEOF1EmptyDataSection
+			}
+			typeRead += 1
+		case kindCode:
+			// Size must be present.
+			size, err := readSectionSize(code, i+1)
+			if err != nil {
 				return EOF1Header{}, ErrEOF1CodeSectionSizeMissing
 			}
 			// Size must not be 0.
-			if header.codeSize == 0 {
+			if size == 0 {
 				return EOF1Header{}, ErrEOF1EmptyCodeSection
 			}
-			i += 3
+			header.codeSize = append(header.codeSize, size)
+			codeSize += int(size)
 			codeRead += 1
 		case kindData:
 			// Data section is allowed only after code section.
@@ -117,55 +137,71 @@ outer:
 			if header.dataSize == 0 {
 				return EOF1Header{}, ErrEOF1EmptyDataSection
 			}
-			i += 3
 			dataRead += 1
 		default:
 			return EOF1Header{}, ErrEOF1UnknownSection
 		}
+		i += 3
 	}
 	// 1 code section is required.
-	if codeRead != 1 {
+	if codeRead < 1 {
 		return EOF1Header{}, ErrEOF1CodeSectionMissing
 	}
+	// 1024 max code sections.
+	if len(header.codeSize) > 1024 {
+		return EOF1Header{}, ErrEOF1CodeSectionOverflow
+	}
+	// Must have type section if more than one code section.
+	if len(header.codeSize) > 1 && header.typeSize == 0 {
+		return EOF1Header{}, ErrEOF1TypeSectionMissing
+	}
 	// Declared section sizes must correspond to real size (trailing bytes are not allowed.)
-	if i+int(header.codeSize)+int(header.dataSize) != len(code) {
+	if i+int(header.typeSize)+codeSize+int(header.dataSize) != len(code) {
 		return EOF1Header{}, ErrEOF1InvalidTotalSize
 	}
-
 	return header, nil
 }
 
 // validateInstructions checks that there're no undefined instructions and code ends with a terminating instruction
 func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable) error {
 	var (
-		i        = header.CodeBeginOffset()
-		end      = header.CodeEndOffset()
-		analysis = codeBitmap(code[i : end-1])
+		i        = 0
+		analysis = codeBitmap(code)
 		opcode   OpCode
 	)
-	for i < end {
+	for i < len(code) {
 		opcode = OpCode(code[i])
 		if jumpTable[opcode].undefined {
 			return ErrEOF1UndefinedInstruction
-		}
-		if opcode >= PUSH1 && opcode <= PUSH32 {
-			i += uint64(opcode) - uint64(PUSH1) + 1
-		}
-		if opcode == RJUMP || opcode == RJUMPI {
+		} else if opcode >= PUSH1 && opcode <= PUSH32 {
+			i += int(opcode) - int(PUSH1) + 1
+		} else if opcode == RJUMP || opcode == RJUMPI {
 			var arg int16
 			// Read immediate argument.
 			if err := binary.Read(bytes.NewReader(code[i+1:]), binary.BigEndian, &arg); err != nil {
 				return ErrEOF1InvalidRelativeOffset
 			}
-			// Check if offfset points to out-of-bounds code
-			// location.
-			if (arg < 0 && i+3 < uint64(arg)) || (arg > 0 && end < i+3+uint64(arg)) {
+			// Calculate relative target.
+			pos := i + 3 + int(arg)
+
+			// Check if offset points to out-of-bounds location.
+			if pos < 0 || pos >= len(code) {
 				return ErrEOF1InvalidRelativeOffset
 			}
 			// Check if offset points to non-code segment.
-			pos := uint64(int64(i+3) + int64(arg))
-			if !analysis.codeSegment(pos - header.CodeBeginOffset()) {
+			// TODO(matt): include CALLF and RJUMPs in analysis.
+			if !analysis.codeSegment(uint64(pos)) {
 				return ErrEOF1InvalidRelativeOffset
+			}
+			i += 2
+		} else if opcode == CALLF {
+			var arg int16
+			// Read immediate argument.
+			if err := binary.Read(bytes.NewReader(code[i+1:]), binary.BigEndian, &arg); err != nil {
+				return ErrEOF1InvalidCallfSection
+			}
+			if int(arg) >= len(header.codeSize) {
+				return ErrEOF1InvalidCallfSection
 			}
 			i += 2
 		}
@@ -183,36 +219,121 @@ func validateEOF(code []byte, jumpTable *JumpTable) (EOF1Header, error) {
 	if err != nil {
 		return EOF1Header{}, err
 	}
-	err = validateInstructions(code, &header, jumpTable)
-	if err != nil {
-		return EOF1Header{}, err
+	i := header.Size()
+	if header.typeSize != 0 {
+		// TODO(matt): validate type info
+		i += int(header.typeSize)
+	}
+	// Validate each code section.
+	for _, size := range header.codeSize {
+		err = validateInstructions(code[i:i+int(size)], &header, jumpTable)
+		if err != nil {
+			return EOF1Header{}, err
+		}
+		i += int(size)
 	}
 	return header, nil
 }
 
 // readValidEOF1Header parses EOF1-formatted code header, assuming that it is already validated
 func readValidEOF1Header(code []byte) EOF1Header {
-	var header EOF1Header
-	codeSizeOffset := sectionHeaderStart + 1
-	header.codeSize = binary.BigEndian.Uint16(code[codeSizeOffset : codeSizeOffset+2])
-	if code[codeSizeOffset+2] == 2 {
-		dataSizeOffset := codeSizeOffset + 3
-		header.dataSize = binary.BigEndian.Uint16(code[dataSizeOffset : dataSizeOffset+2])
+	var (
+		header       EOF1Header
+		i            = sectionHeaderStart
+		codeSections = uint16(1)
+	)
+	// Try to read type section.
+	if code[i] == byte(kindType) {
+		size, _ := readSectionSize(code, i+1)
+		header.typeSize = size
+		codeSections = size / 2
+		i += 3
+	}
+	i += 1
+	// Read code sections.
+	for j := 0; j < int(codeSections); j++ {
+		size := binary.BigEndian.Uint16(code[i+3*j : i+3*j+2])
+		header.codeSize = append(header.codeSize, size)
+	}
+	i += int(2 * codeSections)
+	// Try to read data section.
+	if code[i] == byte(kindData) {
+		header.dataSize = binary.BigEndian.Uint16(code[i+1 : i+3])
 	}
 	return header
 }
 
-// CodeBeginOffset returns starting offset of the code section
-func (header *EOF1Header) CodeBeginOffset() uint64 {
-	if header.dataSize == 0 {
-		// len(magic) + version + code_section_id + code_section_size + terminator
-		return 7
+// Size returns the total size of the EOF1 header.
+func (h *EOF1Header) Size() int {
+	var (
+		typeHeaderSize = 0
+		codeHeaderSize = len(h.codeSize) * 3
+		dataHeaderSize = 0
+	)
+	if h.typeSize != 0 {
+		typeHeaderSize = 3
 	}
-	// len(magic) + version + code_section_id + code_section_size + data_section_id + data_section_size + terminator
-	return 10
+	if h.dataSize != 0 {
+		dataHeaderSize = 3
+	}
+	// len(magic) + version + typeHeader + codeHeader + dataHeader + terminator
+	return 2 + 1 + typeHeaderSize + codeHeaderSize + dataHeaderSize + 1
 }
 
-// CodeEndOffset returns offset of the code section end
-func (header *EOF1Header) CodeEndOffset() uint64 {
-	return header.CodeBeginOffset() + uint64(header.codeSize)
+type Annotation struct {
+	input  uint8
+	output uint8
+}
+
+type EOF1Container struct {
+	header EOF1Header
+	types  []Annotation // type defs
+	code   []uint64     // code start offsets
+	data   uint64       // data start offset
+}
+
+func NewEOF1Container(code []byte, jt *JumpTable, validated bool) (EOF1Container, error) {
+	var (
+		container EOF1Container
+		err       error
+	)
+	// If the code has been validated (e.g. during deployment), skip the
+	// full validation.
+	if validated {
+		container.header = readValidEOF1Header(code)
+	} else {
+		container.header, err = validateEOF(code, jt)
+		if err != nil {
+			return EOF1Container{}, err
+		}
+	}
+
+	// Set index to first byte after EOF header.
+	idx := container.header.Size()
+
+	// Read type section if it exists.
+	if typeSize := container.header.typeSize; typeSize != 0 {
+		container.types = readTypeSection(code[idx : idx+int(typeSize)])
+		idx += int(typeSize)
+	}
+	// Calculate starting offset for each code section.
+	for _, size := range container.header.codeSize {
+		container.code = append(container.code, uint64(idx))
+		idx += int(size)
+	}
+	// Set data offset.
+	container.data = uint64(idx)
+	return container, nil
+}
+
+// readTypeSection parses an EOF type section.
+func readTypeSection(code []byte) (out []Annotation) {
+	for i := 0; i < len(code); i += 2 {
+		sig := Annotation{
+			input:  code[i],
+			output: code[i+1],
+		}
+		out = append(out, sig)
+	}
+	return
 }

@@ -88,6 +88,7 @@ func newShanghaiInstructionSet() JumpTable {
 	enable3855(&instructionSet) // PUSH0 instruction https://eips.ethereum.org/EIPS/eip-3855
 	enable3860(&instructionSet) // Limit and meter initcode https://eips.ethereum.org/EIPS/eip-3860
 	enable4200(&instructionSet) // Static relative jumps https://eips.ethereum.org/EIPS/eip-4200
+	enable4750(&instructionSet) // Functions https://eips.ethereum.org/EIPS/eip-4750
 	return instructionSet
 }
 

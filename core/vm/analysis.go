@@ -26,6 +26,14 @@ func codeBitmap(code []byte) []uint64 {
 	for pc := 0; pc < len(code); {
 		op := OpCode(code[pc])
 		pc++
+		// Short circruit for now on EOF ops with immediates.
+		// TODO(matt): make EOF-specific code bitmap
+		if op == RJUMP || op == RJUMPI || op == CALLF {
+			// TODO CZ: verify that this is correct
+			bits[pc/64] |= 1 << uint(pc%64)
+			pc += 4
+			continue
+		}
 		if op >= PUSH1 && op <= PUSH32 {
 			numbits := int(op - PUSH1 + 1)
 			x := uint64(1) << (op - PUSH1)

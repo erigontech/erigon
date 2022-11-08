@@ -245,11 +245,17 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		// At this point, we use a copy of address. If we don't, the go compiler will
 		// leak the 'contract' to the outer scope, and make allocation for 'contract'
 		// even if the actual execution ends on RunPrecompiled above.
-		addrCopy := addr
-
-		var header EOF1Header
+		var (
+			addrCopy  = addr
+			container *EOF1Container
+		)
 		if evm.chainRules.IsShanghai && hasEOFMagic(code) {
-			header = readValidEOF1Header(code)
+			evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+			if !ok {
+				return nil, common.Address{}, gas, ErrInvalidInterpreter
+			}
+			c, _ := NewEOF1Container(code, evmInterpreter.jt, true)
+			container = &c
 		}
 
 		// Initialise a new contract and set the code that is to be used by the EVM.
@@ -263,7 +269,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code, &header)
+		contract.SetCallCode(&addrCopy, codeHash, code, container)
 		readOnly := false
 		if callType == STATICCALLT {
 			readOnly = true
@@ -375,17 +381,17 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Try to read code header if it claims to be EOF-formatted.
-	var header EOF1Header
+	var container *EOF1Container
 	if evm.chainRules.IsShanghai && hasEOFMagic(codeAndHash.code) {
 		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
 		if !ok {
 			return nil, common.Address{}, gas, ErrInvalidInterpreter
 		}
-		var err error
-		header, err = validateEOF(codeAndHash.code, evmInterpreter.jt)
+		c, err := NewEOF1Container(codeAndHash.code, evmInterpreter.jt, false)
 		if err != nil {
 			return nil, common.Address{}, gas, ErrInvalidEOFCode
 		}
+		container = &c
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
@@ -398,7 +404,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
-	contract.SetCodeOptionalHash(&address, codeAndHash, &header)
+	contract.SetCodeOptionalHash(&address, codeAndHash, container)
 
 	if evm.config.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil
