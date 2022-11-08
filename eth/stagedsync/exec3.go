@@ -795,6 +795,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
 	}
+	fillWorkers = nil //nolint
 	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollectorX.Close()
 	codeCollectorX.LogLvl(log.LvlDebug)
@@ -818,7 +819,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	codeCollectorX = nil
 	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
-	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
@@ -839,6 +839,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 	}
+
+	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
@@ -879,13 +881,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				prevCount = count
 				prevRollbackCount = rollbackCount
 				syncMetrics[stages.Execution].Set(bn)
-				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
+				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
-					err := func() error {
+					t := time.Now()
+					if err = func() error {
 						lock.Lock()
 						defer lock.Unlock()
 						for i := 0; i < workerCount; i++ {
@@ -909,10 +912,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							reconWorkers[i].SetTx(roTxs[i])
 						}
 						return nil
-					}()
-					if err != nil {
+					}(); err != nil {
 						panic(err)
 					}
+					log.Info(fmt.Sprintf("[%s] State reconstitution, commit", s.LogPrefix()), "took", time.Since(t))
 				}
 			}
 		}
@@ -964,7 +967,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
-		b, txs = nil, nil
+		b, txs = nil, nil //nolint
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 	}
