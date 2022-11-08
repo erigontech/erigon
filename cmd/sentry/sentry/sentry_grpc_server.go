@@ -167,7 +167,7 @@ func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
 // ClearDeadlines goes through the deadlines of
 // given peers and removes the ones that have passed
 // Optionally, it also clears one extra deadline - this is used when response is received
-// It returns the number of deadlines left, and the latest deadline
+// It returns the number of deadlines left
 func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
