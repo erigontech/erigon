@@ -121,6 +121,8 @@ type JsonSpec struct {
 	// Stores human-readable keys associated with addresses, like DNS information.
 	// This contract is primarily required to store the address of the Certifier contract.
 	Registrar *common.Address `json:"registrar"`
+
+	RewriteBytecode map[uint64]map[common.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
 type Code struct {
@@ -193,6 +195,8 @@ type AuthorityRoundParams struct {
 	// Stores human-readable keys associated with addresses, like DNS information.
 	// This contract is primarily required to store the address of the Certifier contract.
 	Registrar *common.Address
+
+	RewriteBytecode map[uint64]map[common.Address][]byte
 }
 
 func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
@@ -249,6 +253,14 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		}
 	}
 	sort.Sort(params.BlockReward)
+
+	params.RewriteBytecode = make(map[uint64]map[common.Address][]byte, len(jsonParams.RewriteBytecode))
+	for block, overrides := range jsonParams.RewriteBytecode {
+		params.RewriteBytecode[block] = make(map[common.Address][]byte, len(overrides))
+		for address, code := range overrides {
+			params.RewriteBytecode[block][address] = []byte(code)
+		}
+	}
 
 	return params, nil
 }
