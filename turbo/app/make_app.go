@@ -2,15 +2,15 @@
 package app
 
 import (
+	"github.com/urfave/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
-
-	"github.com/urfave/cli"
+	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -19,7 +19,7 @@ import (
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags. Returns no error, if some error could not be recovered from write to the log or panic.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
 func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
-	app := flags.NewApp(params.GitCommit, "", "erigon experimental cli")
+	app := cli2.NewApp(params.GitCommit, "", "erigon experimental cli")
 	app.Action = action
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Before = func(ctx *cli.Context) error {

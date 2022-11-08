@@ -60,9 +60,7 @@ func (fw *FillWorker) Progress() uint64 {
 }
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	value := make([]byte, 1024)
@@ -111,9 +109,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
@@ -135,9 +131,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
@@ -171,9 +165,7 @@ func (fw *FillWorker) ResetProgress() {
 }
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
@@ -189,9 +181,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 }
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
@@ -207,9 +197,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 }
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
@@ -309,7 +297,6 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
-	header := txTask.Block.HeaderNoCopy()
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
@@ -328,42 +315,48 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
+			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, txTask.Txs, txTask.Uncles, syscall)
 	} else {
 		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
 			}
 		}
-		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(header, rw.getHeader)
-		blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
+		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
-		txContext := core.NewEVMTxContext(msg)
-		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+
+		var vmenv vm.VMInterface
+		if txTask.Tx.IsStarkNet() {
+			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		} else {
+			blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */)
+			txContext := core.NewEVMTxContext(msg)
+			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txHash, err))
+			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)

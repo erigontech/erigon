@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
@@ -30,7 +34,7 @@ func ClearDevDB() {
 func DeleteLogs() {
 	fmt.Printf("\nRemoving old logs to create new ones...\nBefore re-running the devnet tool, make sure to copy out old logs if you need them!!!\n\n")
 
-	cmd := exec.Command("rm", "-rf", "./erigon_node_1")
+	cmd := exec.Command("rm", "-rf", models.LogDirParam) //nolint
 	err := cmd.Run()
 	if err != nil {
 		fmt.Println("Error occurred removing log node_1")
@@ -74,4 +78,20 @@ func ParseResponse(resp interface{}) (string, error) {
 	}
 
 	return string(result), nil
+}
+
+// HexToInt converts a hexadecimal string to uint64
+func HexToInt(hexStr string) uint64 {
+	cleaned := strings.ReplaceAll(hexStr, "0x", "") // remove the 0x prefix
+	result, _ := strconv.ParseUint(cleaned, 16, 64)
+	return result
+}
+
+// NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
+func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
+	parts := strings.SplitN(method, "_", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid string to split")
+	}
+	return parts[0], parts[1], nil
 }

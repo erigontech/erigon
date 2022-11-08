@@ -12,14 +12,17 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type BlockGetter interface {
@@ -31,9 +34,36 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, dbtx kv.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainState, error) {
+func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.Aggregator22, historyV3 bool) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, state.StateReader, error) {
+	header := block.HeaderNoCopy()
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3)
+	if err != nil {
+		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, err
+	}
+	if historyV3 {
+		//engine := ethash.NewFaker()
+		ibs := state.New(reader)
+		if txIndex == 0 && len(block.Transactions()) == 0 {
+			return nil, vm.BlockContext{}, vm.TxContext{}, ibs, reader, nil
+		}
+		if int(txIndex) > block.Transactions().Len() {
+			return nil, vm.BlockContext{}, vm.TxContext{}, ibs, reader, nil
+		}
+		txn := block.Transactions()[txIndex]
+		signer := types.MakeSigner(cfg, block.NumberU64())
+		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64()))
+		blockCtx, txCtx := GetEvmContext(msg, header, true /* requireCanonical */, dbtx, headerReader)
+		return msg, blockCtx, txCtx, ibs, reader, nil
+
+	}
+
+	engine := ethash.NewFaker()
+	getHeader := func(hash common.Hash, n uint64) *types.Header {
+		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
+		return h
+	}
+
 	// Create the parent state database
-	reader := state.NewPlainState(dbtx, block.NumberU64())
 	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
@@ -42,7 +72,6 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
 
-	header := block.Header()
 	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
@@ -52,7 +81,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		case <-ctx.Done():
 			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, ctx.Err()
 		}
-		statedb.Prepare(tx.Hash(), blockHash, idx)
+		statedb.Prepare(tx.Hash(), block.Hash(), idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
@@ -67,14 +96,14 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP161 (part of Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(rules, reader)
+		_ = statedb.FinalizeTx(rules, reader.(*state.PlainState))
 
 		if idx+1 == len(block.Transactions()) {
 			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case
 			return nil, BlockContext, vm.TxContext{}, statedb, reader, nil
 		}
 	}
-	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
+	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and

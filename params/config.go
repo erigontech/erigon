@@ -118,31 +118,6 @@ var (
 		ChainID:               big.NewInt(1337),
 		Consensus:             EtHashConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
-		TangerineWhistleBlock: big.NewInt(0),
-		TangerineWhistleHash:  common.Hash{},
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
-		Ethash:                new(EthashConfig),
-		Clique:                nil,
-	}
-
-	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
-	// and accepted by the Ethereum core developers into the Clique consensus.
-	AllCliqueProtocolChanges = &ChainConfig{
-		ChainID:               big.NewInt(1337),
-		Consensus:             CliqueConsensus,
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -153,8 +128,27 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
-		ArrowGlacierBlock:     nil,
-		Ethash:                nil,
+		ArrowGlacierBlock:     big.NewInt(0),
+		GrayGlacierBlock:      big.NewInt(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
+	// and accepted by the Ethereum core developers into the Clique consensus.
+	AllCliqueProtocolChanges = &ChainConfig{
+		ChainID:               big.NewInt(1337),
+		Consensus:             CliqueConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		TangerineWhistleHash:  common.Hash{},
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           big.NewInt(0),
 		Clique:                &CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
@@ -169,11 +163,9 @@ var (
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
-		ChainID:               big.NewInt(1),
+		ChainID:               big.NewInt(1337),
 		Consensus:             EtHashConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -183,18 +175,13 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
 		Ethash:                new(EthashConfig),
-		Clique:                nil,
 	}
 
 	TestChainAuraConfig = &ChainConfig{
 		ChainID:               big.NewInt(1),
 		Consensus:             AuRaConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -204,8 +191,6 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
 		Aura:                  &AuRaConfig{},
 	}
 

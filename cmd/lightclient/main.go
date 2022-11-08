@@ -18,11 +18,12 @@ import (
 	"fmt"
 	"os"
 
+	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
-	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
+	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
@@ -62,7 +63,7 @@ func runLightClientNode(cliCtx *cli.Context) {
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 
-	bs, err := lightclient.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
+	bs, err := clcore.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)

@@ -500,6 +500,10 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 	return SealHash(header)
 }
 
+func (c *Clique) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
+}
+
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
 	libcommon.SafeClose(c.exitCh)

@@ -118,6 +118,9 @@ type JsonSpec struct {
 	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
 	// modifications.
 	PosdaoTransition *uint64 `json:"PosdaoTransition"`
+	// Stores human-readable keys associated with addresses, like DNS information.
+	// This contract is primarily required to store the address of the Certifier contract.
+	Registrar *common.Address `json:"registrar"`
 }
 
 type Code struct {
@@ -187,6 +190,9 @@ type AuthorityRoundParams struct {
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
 	// with POSDAO modifications.
 	PosdaoTransition *uint64
+	// Stores human-readable keys associated with addresses, like DNS information.
+	// This contract is primarily required to store the address of the Certifier contract.
+	Registrar *common.Address
 }
 
 func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
@@ -196,6 +202,7 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		RandomnessContractAddress:        jsonParams.RandomnessContractAddress,
 		BlockGasLimitContractTransitions: jsonParams.BlockGasLimitContractTransitions,
 		PosdaoTransition:                 jsonParams.PosdaoTransition,
+		Registrar:                        jsonParams.Registrar,
 	}
 	params.StepDurations = map[uint64]uint64{}
 	if jsonParams.StepDuration != nil {

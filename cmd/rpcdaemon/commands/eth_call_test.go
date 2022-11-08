@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -110,7 +110,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
-	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -152,7 +152,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		t.Error("couldn't retrieve oldest block")
 	}
 
-	response, err := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -191,7 +191,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 
-	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -243,7 +243,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		t.Error("couldn't retrieve middle block")
 	}
 
-	response, err := ethapi.RPCMarshalBlock(middleBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -289,7 +289,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	if pickedBlock == nil {
 		t.Error("couldn't retrieve picked block")
 	}
-	response, err := ethapi.RPCMarshalBlock(pickedBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -320,7 +320,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address
 		bankFunds   = big.NewInt(1e9)
 		contract    = hexutil.MustDecode("0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033")
 		gspec       = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -356,11 +356,17 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainState(tx, 1))
+	agg := m.HistoryV3Components()
+
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, agg, m.HistoryV3)
+	assert.NoError(t, err)
+	st := state.New(stateReader)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
 
-	st = state.New(state.NewPlainState(tx, 2))
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, agg, m.HistoryV3)
+	assert.NoError(t, err)
+	st = state.New(stateReader)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
 

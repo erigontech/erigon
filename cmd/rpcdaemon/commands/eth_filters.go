@@ -262,6 +262,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		logs := make(chan *types.Log, 1)
 		id := api.filters.SubscribeLogs(logs, crit)
 		defer api.filters.UnsubscribeLogs(id)
+
 		for {
 			select {
 			case h, ok := <-logs:

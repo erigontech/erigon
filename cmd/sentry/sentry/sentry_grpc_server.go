@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -65,6 +66,41 @@ type PeerInfo struct {
 	// if this queue is full (means peer is slow) - old messages will be dropped
 	// channel closed on peer remove
 	tasks chan func()
+}
+
+// BestPeers is the priority queue of peers. Used to select certain number of peers considered to be "best available"
+type BestPeers []*PeerInfo
+
+// Len (part of heap.Interface) returns the current size of the best peers queue
+func (bp BestPeers) Len() int {
+	return len(bp)
+}
+
+// Less (part of heap.Interface) compares two peers
+func (bp BestPeers) Less(i, j int) bool {
+	return bp[i].height < bp[j].height
+}
+
+// Swap (part of heap.Interface) moves two peers in the queue into each other's places.
+func (bp BestPeers) Swap(i, j int) {
+	bp[i], bp[j] = bp[j], bp[i]
+}
+
+// Push (part of heap.Interface) places a new peer onto the end of queue.
+func (bp *BestPeers) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	p := x.(*PeerInfo)
+	*bp = append(*bp, p)
+}
+
+// Pop (part of heap.Interface) removes the first peer from the queue
+func (bp *BestPeers) Pop() interface{} {
+	old := *bp
+	n := len(old)
+	x := old[n-1]
+	*bp = old[0 : n-1]
+	return x
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
@@ -705,23 +741,25 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 	return foundPeerInfo, maxPermits > 0
 }
 
-func (ss *GrpcServer) findBestPeerWithPermit() (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
-	var maxBlock uint64
+func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool) {
+	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
+	var foundPeers BestPeers
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if maxBlock == 0 || peerInfo.Height() > maxBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				maxBlock = peerInfo.Height()
-				foundPeerInfo = peerInfo
+		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+		if deadlines < maxPermitsPerPeer {
+			heap.Push(&foundPeers, peerInfo)
+			if foundPeers.Len() > peerCount {
+				// Remove the worst peer
+				heap.Pop(&foundPeers)
 			}
 		}
 		return true
 	})
-	return foundPeerInfo, foundPeerInfo != nil
+
+	// return the count number of peers ordered by highest block (i.e. best first)
+	return foundPeers, foundPeers.Len() > 0
 }
 
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
@@ -737,11 +775,12 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
 		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 	} else {
-		// If peer with specified minBlock is not found, send to best peer with permits
-		peerInfo, found = ss.findBestPeerWithPermit()
+		peerInfos, found := ss.findBestPeersWithPermit(int(inreq.PeerCount))
 		if found {
-			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+			for _, peerInfo := range peerInfos {
+				ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
+				reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
+			}
 		}
 	}
 	return reply, nil

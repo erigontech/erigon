@@ -37,6 +37,7 @@ type Config struct {
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
 	StatelessExec bool   // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState  bool   // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -87,6 +88,17 @@ type VM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
+func copyJumpTable(jt *JumpTable) *JumpTable {
+	var copy JumpTable
+	for i, op := range jt {
+		if op != nil {
+			opCopy := *op
+			copy[i] = &opCopy
+		}
+	}
+	return &copy
+}
+
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
@@ -115,6 +127,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &frontierInstructionSet
 	}
 	if len(cfg.ExtraEips) > 0 {
+		jt = copyJumpTable(jt)
 		for i, eip := range cfg.ExtraEips {
 			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
@@ -299,7 +312,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 			// memory is expanded in words of 32 bytes. Gas
 			// is also calculated in words.
-			if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
+			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
 				return nil, ErrGasUintOverflow
 			}
 		}

@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
@@ -41,7 +42,7 @@ import (
 
 // AggregationStep number of transactions in smallest static file
 const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 16 // 100M / 32
+//const HistoryV3AggregationStep = 3_125_000 / 32 // 100M / 32
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
@@ -68,7 +69,8 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
-		ExecWorkerCount:            1,
+		ExecWorkerCount:            2,
+		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -245,8 +247,9 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle    time.Duration
-	ExecWorkerCount int
+	LoopThrottle     time.Duration
+	ExecWorkerCount  int
+	ReconWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration

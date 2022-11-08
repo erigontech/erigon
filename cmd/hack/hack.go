@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -43,8 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -1302,6 +1302,23 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
+func readSeg(chaindata string) error {
+	vDecomp, err := compress.NewDecompressor(chaindata)
+	if err != nil {
+		return err
+	}
+	defer vDecomp.Close()
+	g := vDecomp.MakeGetter()
+	var buf []byte
+	var count int
+	for g.HasNext() {
+		g.Next(buf[:0])
+		count++
+	}
+	fmt.Printf("count=%d\n", count)
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1321,7 +1338,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+		if err := http.ListenAndServe("localhost:6960", nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
@@ -1429,6 +1446,8 @@ func main() {
 		err = iterate(*chaindata, *account)
 	case "rmSnKey":
 		err = rmSnKey(*chaindata)
+	case "readSeg":
+		err = readSeg(*chaindata)
 	}
 
 	if err != nil {

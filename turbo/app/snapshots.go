@@ -21,20 +21,21 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/internal/logging"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
-	"golang.org/x/sync/semaphore"
 )
 
 const ASSERT = false
@@ -235,7 +236,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
@@ -392,7 +392,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
-	if err = agg.Merge(ctx); err != nil {
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
 
