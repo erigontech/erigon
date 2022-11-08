@@ -358,8 +358,10 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 }
 
 func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *CoherentRoot, error) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	// using the full lock here rather than RLock as RLock causes a lot of calls to runtime.usleep degrading
+	// performance under load
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	r, ok := c.roots[id]
 	if !ok {
 		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
