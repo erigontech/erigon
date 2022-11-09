@@ -414,7 +414,6 @@ loop:
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		if parallel {
 			func() {
@@ -432,6 +431,8 @@ loop:
 			}()
 		}
 
+		signer := *types.MakeSigner(chainConfig, blockNum)
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -440,6 +441,7 @@ loop:
 				Header:       header,
 				Txs:          txs,
 				Uncles:       b.Uncles(),
+				Coinbase:     b.Coinbase(),
 				TxNum:        inputTxNum,
 				TxIndex:      txIndex,
 				BlockHash:    b.Hash(),
@@ -448,7 +450,7 @@ loop:
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					panic(err)
 				}
@@ -485,6 +487,8 @@ loop:
 			}
 			inputTxNum++
 		}
+		b, txs = nil, nil //nolint
+
 		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
