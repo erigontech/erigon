@@ -246,17 +246,8 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		// leak the 'contract' to the outer scope, and make allocation for 'contract'
 		// even if the actual execution ends on RunPrecompiled above.
 		var (
-			addrCopy  = addr
-			container *EOF1Container
+			addrCopy = addr
 		)
-		if evm.chainRules.IsShanghai && hasEOFMagic(code) {
-			evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
-			if !ok {
-				return nil, gas, ErrInvalidInterpreter
-			}
-			c, _ := NewEOF1Container(code, evmInterpreter.jt, true)
-			container = &c
-		}
 
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -269,7 +260,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code, container)
+		contract.SetCallCode(&addrCopy, codeHash, code, evm.mustReadContainer(code))
 		readOnly := false
 		if callType == STATICCALLT {
 			readOnly = true
@@ -381,17 +372,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Try to read code header if it claims to be EOF-formatted.
-	var container *EOF1Container
-	if evm.chainRules.IsShanghai && hasEOFMagic(codeAndHash.code) {
-		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
-		if !ok {
-			return nil, common.Address{}, gas, ErrInvalidInterpreter
-		}
-		c, err := NewEOF1Container(codeAndHash.code, evmInterpreter.jt, false)
-		if err != nil {
-			return nil, common.Address{}, gas, ErrInvalidEOFCode
-		}
-		container = &c
+	container, err := evm.readContainer(codeAndHash.code)
+	if err != nil {
+		return nil, common.Address{}, gas, ErrInvalidEOFCode
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
@@ -417,19 +400,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
-			// Allow only valid EOF1 if EIP-3540 and EIP-3670 are enabled.
-			if hasEOFMagic(ret) {
-				evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
-				if !ok {
-					return nil, common.Address{}, gas, ErrInvalidInterpreter
-				}
-				_, err = NewEOF1Header(ret, evmInterpreter.jt, false)
-				if err != nil {
-					err = ErrInvalidEOFCode
-				}
-			} else {
-				// Reject non-EOF code starting with 0xEF.
-				err = ErrInvalidCode
+			evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+			if !ok {
+				return nil, common.Address{}, gas, ErrInvalidInterpreter
+			}
+			_, err = NewEOF1Header(ret, evmInterpreter.jt, false)
+			if err != nil {
+				err = ErrInvalidEOFCode
 			}
 		} else if evm.chainRules.IsLondon {
 			// Reject code starting with 0xEF in London.
@@ -467,6 +444,36 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	return ret, address, contract.Gas, err
 
+}
+
+// mustReadContainer reads a valid EOF container.
+func (evm *EVM) mustReadContainer(code []byte) *EOF1Container {
+	var container *EOF1Container
+	if evm.chainRules.IsShanghai && hasEOFMagic(code) {
+		if evmInterpreter, ok := evm.interpreter.(*EVMInterpreter); ok {
+			c, _ := NewEOF1Container(code, evmInterpreter.jt, true)
+			container = &c
+		}
+	}
+	return container
+}
+
+// readContainer attempts to read the EOF container defined by code if the
+// chainRules supports it.
+func (evm *EVM) readContainer(code []byte) (*EOF1Container, error) {
+	var container *EOF1Container
+	if evm.chainRules.IsShanghai && hasEOFMagic(code) {
+		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+		if !ok {
+			return nil, ErrInvalidInterpreter
+		}
+		c, err := NewEOF1Container(code, evmInterpreter.jt, false)
+		if err != nil {
+			return nil, err
+		}
+		container = &c
+	}
+	return container, nil
 }
 
 // Create creates a new contract using code as deployment code.
