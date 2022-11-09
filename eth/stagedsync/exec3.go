@@ -666,7 +666,6 @@ func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs 
 		accountCollectorsX[i].Close()
 		accountCollectorsX[i] = nil
 	}
-	accountCollectorsX = nil
 
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -674,7 +673,7 @@ func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs 
 		return nil, err
 	}
 	accountCollectorX.Close()
-	accountCollectorX = nil
+	accountCollectorX = nil //nolint
 	doneCount.Store(0)
 	storageCollectorsX := make([]*etl.Collector, workerCount)
 	for i := 0; i < workerCount; i++ {
