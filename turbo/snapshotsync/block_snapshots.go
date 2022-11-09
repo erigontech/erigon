@@ -1203,12 +1203,17 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 
-	downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
-	for i := range rangesToMerge {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
-	}
+	if downloader != nil && !reflect.ValueOf(downloader).IsNil() {
+		downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
+		for i := range rangesToMerge {
+			downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
+		}
 
-	return RequestSnapshotsDownload(ctx, downloadRequest, downloader)
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, downloader); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
