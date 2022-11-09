@@ -810,7 +810,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble block
-	block := types.NewBlock(header, txs, nil, receipts)
+	block := types.NewBlock(header, txs, nil, receipts, nil /* withdrawals */)
 
 	// set state sync
 	// bc := chain.(*core.BlockChain)

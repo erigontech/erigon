@@ -388,7 +388,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 	}
 
-	return types.NewBlock(head, nil, nil, nil), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, nil), statedb, nil
 }
 
 func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {

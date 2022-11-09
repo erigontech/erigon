@@ -135,7 +135,7 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
 	}
-	return types.NewBlock(header, txs, uncles, receipts), txs, receipts, nil
+	return types.NewBlock(header, txs, uncles, receipts, nil /* withdrawals */), txs, receipts, nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {

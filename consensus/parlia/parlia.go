@@ -791,7 +791,7 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return types.NewBlock(header, outTxs, nil, outReceipts), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, nil, outReceipts, nil /* withdrawals */), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

@@ -57,7 +57,7 @@ func (b *BlockBuilder) Stop() *types.Block {
 
 	if b.err != nil {
 		log.Error("BlockBuilder", "err", b.err)
-		return types.NewBlock(b.emptyHeader, nil, nil, nil)
+		return types.NewBlock(b.emptyHeader, nil, nil, nil, nil)
 	}
 
 	return b.block

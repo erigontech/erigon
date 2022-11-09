@@ -976,7 +976,7 @@ func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *type
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts, nil /* withdrawals */), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
