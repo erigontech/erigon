@@ -342,7 +342,7 @@ func TestInvalidInstructions(t *testing.T) {
 		// RJUMP to push data.
 		{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset},
 	} {
-		_, err := validateEOF(common.Hex2Bytes(test.code), &shanghaiInstructionSet)
+		_, err := NewEOF1Header(common.Hex2Bytes(test.code), &shanghaiInstructionSet, false)
 		if err == nil {
 			t.Errorf("code %v expected to be invalid", test.code)
 		} else if !strings.HasPrefix(err.Error(), test.err.Error()) {
@@ -364,7 +364,7 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 		}
 
 		*instrByte = byte(opcode)
-		_, err := validateEOF(code, jt)
+		_, err := NewEOF1Header(code, jt, false)
 		if jt[opcode].undefined {
 			if err == nil {
 				t.Errorf("opcode %v expected to be invalid", opcode)
@@ -392,7 +392,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 			continue
 		}
 		*instrByte = byte(opcode)
-		_, err := validateEOF(code, jt)
+		_, err := NewEOF1Header(code, jt, false)
 		if opcode.isTerminating() {
 			if err != nil {
 				t.Errorf("opcode %v expected to be valid terminating instruction", opcode)
@@ -419,7 +419,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeTruncatedPush[5] = byte(len(codeTruncatedPush) - 7)
 		codeTruncatedPush[7] = byte(opcode)
 
-		_, err := validateEOF(codeTruncatedPush, jt)
+		_, err := NewEOF1Header(codeTruncatedPush, jt, false)
 		if err == nil {
 			t.Errorf("code %v has truncated PUSH, expected to be invalid", common.Bytes2Hex(codeTruncatedPush))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
@@ -431,7 +431,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeNotTerminated[5] = byte(len(codeNotTerminated) - 7)
 		codeNotTerminated[7] = byte(opcode)
 
-		_, err = validateEOF(codeNotTerminated, jt)
+		_, err = NewEOF1Header(codeNotTerminated, jt, false)
 		if err == nil {
 			t.Errorf("code %v does not have terminating instruction, expected to be invalid", common.Bytes2Hex(codeNotTerminated))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
@@ -443,7 +443,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeValid[5] = byte(len(codeValid) - 7)
 		codeValid[7] = byte(opcode)
 
-		_, err = validateEOF(codeValid, jt)
+		_, err = NewEOF1Header(codeValid, jt, false)
 		if err != nil {
 			t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
 		}

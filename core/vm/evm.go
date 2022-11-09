@@ -423,7 +423,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 				if !ok {
 					return nil, common.Address{}, gas, ErrInvalidInterpreter
 				}
-				_, err = validateEOF(ret, evmInterpreter.jt)
+				_, err = NewEOF1Header(ret, evmInterpreter.jt, false)
 				if err != nil {
 					err = ErrInvalidEOFCode
 				}

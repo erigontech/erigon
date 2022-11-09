@@ -39,12 +39,6 @@ const (
 
 var eofMagic []byte = []byte{0xEF, 0x00}
 
-type EOF1Header struct {
-	typeSize uint16   // Size of type section. Must be 2 * n bytes, where n is number of code sections.
-	codeSize []uint16 // Size of code sections. Cannot be 0 for EOF1 code. Equals 0 for legacy code.
-	dataSize uint16   // Size of data section. Equals 0 if data section is absent in EOF1 code. Equals 0 for legacy code.
-}
-
 // hasEOFByte returns true if code starts with 0xEF byte
 func hasEOFByte(code []byte) bool {
 	return len(code) != 0 && code[0] == eofFormatByte
@@ -61,16 +55,56 @@ func isEOFVersion1(code []byte) bool {
 	return versionOffset < len(code) && code[versionOffset] == byte(eof1Version)
 }
 
-// readSectionSize returns the size of the section at the offset i.
-func readSectionSize(code []byte, i int) (uint16, error) {
-	if len(code) < i+2 {
-		return 0, fmt.Errorf("section size missing")
-	}
-	return binary.BigEndian.Uint16(code[i : i+2]), nil
+type EOF1Header struct {
+	typeSize uint16   // Size of type section. Must be 2 * n bytes, where n is number of code sections.
+	codeSize []uint16 // Size of code sections. Cannot be 0 for EOF1 code. Equals 0 for legacy code.
+	dataSize uint16   // Size of data section. Equals 0 if data section is absent in EOF1 code. Equals 0 for legacy code.
 }
 
-// readEOF1Header parses EOF1-formatted code header
-func readEOF1Header(code []byte) (EOF1Header, error) {
+func NewEOF1Header(code []byte, jt *JumpTable, validated bool) (EOF1Header, error) {
+	if validated {
+		return readEOF1Header(code), nil
+	}
+
+	header, err := readUncheckedEOF1Header(code)
+	if err != nil {
+		return EOF1Header{}, err
+	}
+	i := header.Size()
+	if header.typeSize != 0 {
+		// TODO(matt): validate type info
+		i += int(header.typeSize)
+	}
+	// Validate each code section.
+	for _, size := range header.codeSize {
+		err = validateInstructions(code[i:i+int(size)], &header, jt)
+		if err != nil {
+			return EOF1Header{}, err
+		}
+		i += int(size)
+	}
+	return header, nil
+}
+
+// Size returns the total size of the EOF1 header.
+func (h *EOF1Header) Size() int {
+	var (
+		typeHeaderSize = 0
+		codeHeaderSize = len(h.codeSize) * 3
+		dataHeaderSize = 0
+	)
+	if h.typeSize != 0 {
+		typeHeaderSize = 3
+	}
+	if h.dataSize != 0 {
+		dataHeaderSize = 3
+	}
+	// len(magic) + version + typeHeader + codeHeader + dataHeader + terminator
+	return 2 + 1 + typeHeaderSize + codeHeaderSize + dataHeaderSize + 1
+}
+
+// readUncheckedEOF1Header attempts to parse an EOF1-formatted code header.
+func readUncheckedEOF1Header(code []byte) (EOF1Header, error) {
 	if !hasEOFMagic(code) || !isEOFVersion1(code) {
 		return EOF1Header{}, ErrEOF1InvalidVersion
 	}
@@ -162,6 +196,34 @@ outer:
 	return header, nil
 }
 
+// readEOF1Header parses EOF1-formatted code header, assuming that it is already validated.
+func readEOF1Header(code []byte) EOF1Header {
+	var (
+		header       EOF1Header
+		i            = sectionHeaderStart
+		codeSections = uint16(1)
+	)
+	// Try to read type section.
+	if code[i] == byte(kindType) {
+		size, _ := readSectionSize(code, i+1)
+		header.typeSize = size
+		codeSections = size / 2
+		i += 3
+	}
+	i += 1
+	// Read code sections.
+	for j := 0; j < int(codeSections); j++ {
+		size := binary.BigEndian.Uint16(code[i+3*j : i+3*j+2])
+		header.codeSize = append(header.codeSize, size)
+	}
+	i += int(2 * codeSections)
+	// Try to read data section.
+	if code[i] == byte(kindData) {
+		header.dataSize = binary.BigEndian.Uint16(code[i+1 : i+3])
+	}
+	return header
+}
+
 // validateInstructions checks that there're no undefined instructions and code ends with a terminating instruction
 func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable) error {
 	var (
@@ -213,71 +275,12 @@ func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable)
 	return nil
 }
 
-// validateEOF returns true if code has valid format and code section
-func validateEOF(code []byte, jumpTable *JumpTable) (EOF1Header, error) {
-	header, err := readEOF1Header(code)
-	if err != nil {
-		return EOF1Header{}, err
+// readSectionSize returns the size of the section at the offset i.
+func readSectionSize(code []byte, i int) (uint16, error) {
+	if len(code) < i+2 {
+		return 0, fmt.Errorf("section size missing")
 	}
-	i := header.Size()
-	if header.typeSize != 0 {
-		// TODO(matt): validate type info
-		i += int(header.typeSize)
-	}
-	// Validate each code section.
-	for _, size := range header.codeSize {
-		err = validateInstructions(code[i:i+int(size)], &header, jumpTable)
-		if err != nil {
-			return EOF1Header{}, err
-		}
-		i += int(size)
-	}
-	return header, nil
-}
-
-// readValidEOF1Header parses EOF1-formatted code header, assuming that it is already validated
-func readValidEOF1Header(code []byte) EOF1Header {
-	var (
-		header       EOF1Header
-		i            = sectionHeaderStart
-		codeSections = uint16(1)
-	)
-	// Try to read type section.
-	if code[i] == byte(kindType) {
-		size, _ := readSectionSize(code, i+1)
-		header.typeSize = size
-		codeSections = size / 2
-		i += 3
-	}
-	i += 1
-	// Read code sections.
-	for j := 0; j < int(codeSections); j++ {
-		size := binary.BigEndian.Uint16(code[i+3*j : i+3*j+2])
-		header.codeSize = append(header.codeSize, size)
-	}
-	i += int(2 * codeSections)
-	// Try to read data section.
-	if code[i] == byte(kindData) {
-		header.dataSize = binary.BigEndian.Uint16(code[i+1 : i+3])
-	}
-	return header
-}
-
-// Size returns the total size of the EOF1 header.
-func (h *EOF1Header) Size() int {
-	var (
-		typeHeaderSize = 0
-		codeHeaderSize = len(h.codeSize) * 3
-		dataHeaderSize = 0
-	)
-	if h.typeSize != 0 {
-		typeHeaderSize = 3
-	}
-	if h.dataSize != 0 {
-		dataHeaderSize = 3
-	}
-	// len(magic) + version + typeHeader + codeHeader + dataHeader + terminator
-	return 2 + 1 + typeHeaderSize + codeHeaderSize + dataHeaderSize + 1
+	return binary.BigEndian.Uint16(code[i : i+2]), nil
 }
 
 type Annotation struct {
@@ -299,13 +302,9 @@ func NewEOF1Container(code []byte, jt *JumpTable, validated bool) (EOF1Container
 	)
 	// If the code has been validated (e.g. during deployment), skip the
 	// full validation.
-	if validated {
-		container.header = readValidEOF1Header(code)
-	} else {
-		container.header, err = validateEOF(code, jt)
-		if err != nil {
-			return EOF1Container{}, err
-		}
+	container.header, err = NewEOF1Header(code, jt, validated)
+	if err != nil {
+		return EOF1Container{}, err
 	}
 
 	// Set index to first byte after EOF header.
