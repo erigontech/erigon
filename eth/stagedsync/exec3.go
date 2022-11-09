@@ -437,11 +437,11 @@ loop:
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
-				Rules:        rules,
 				Header:       header,
-				Txs:          txs,
-				Uncles:       b.Uncles(),
 				Coinbase:     b.Coinbase(),
+				Uncles:       b.Uncles(),
+				Rules:        rules,
+				Txs:          txs,
 				TxNum:        inputTxNum,
 				TxIndex:      txIndex,
 				BlockHash:    b.Hash(),
@@ -935,17 +935,20 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		txs := b.Transactions()
+		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, bn)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
-					Header:       b.HeaderNoCopy(),
+					Header:       header,
 					Coinbase:     b.Coinbase(),
 					Uncles:       b.Uncles(),
 					Rules:        rules,
 					TxNum:        inputTxNum,
+					Txs:          txs,
 					TxIndex:      txIndex,
 					BlockHash:    b.Hash(),
 					SkipAnalysis: skipAnalysis,
@@ -953,7 +956,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), b.HeaderNoCopy().BaseFee, txTask.Rules)
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 					if err != nil {
 						return err
 					}
@@ -967,6 +970,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
+		b, txs = nil, nil //nolint
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 	}
