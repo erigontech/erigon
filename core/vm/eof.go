@@ -172,7 +172,7 @@ func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable)
 	for i < len(code) {
 		opcode = OpCode(code[i])
 		if jumpTable[opcode].undefined {
-			return ErrEOF1UndefinedInstruction
+			return fmt.Errorf("%v: %v", ErrEOF1UndefinedInstruction, opcode)
 		} else if opcode >= PUSH1 && opcode <= PUSH32 {
 			i += int(opcode) - int(PUSH1) + 1
 		} else if opcode == RJUMP || opcode == RJUMPI {
@@ -198,17 +198,17 @@ func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable)
 			var arg int16
 			// Read immediate argument.
 			if err := binary.Read(bytes.NewReader(code[i+1:]), binary.BigEndian, &arg); err != nil {
-				return ErrEOF1InvalidCallfSection
+				return fmt.Errorf("%v: %v", ErrEOF1InvalidCallfSection, err)
 			}
 			if int(arg) >= len(header.codeSize) {
-				return ErrEOF1InvalidCallfSection
+				return fmt.Errorf("%v: want section %v, but only have %d sections", ErrEOF1InvalidCallfSection, arg, len(header.codeSize))
 			}
 			i += 2
 		}
 		i += 1
 	}
 	if !opcode.isTerminating() {
-		return ErrEOF1TerminatingInstructionMissing
+		return fmt.Errorf("%v: %v", ErrEOF1TerminatingInstructionMissing, opcode)
 	}
 	return nil
 }

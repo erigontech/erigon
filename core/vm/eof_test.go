@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -52,75 +54,105 @@ func TestHasEOFMagic(t *testing.T) {
 
 func TestEOFContainer(t *testing.T) {
 	for i, test := range []struct {
-		code     string
-		codeSize uint16
-		dataSize uint16
-		err      error
+		code        string
+		typeSize    int
+		codeSize    []int
+		dataSize    int
+		types       [][]int
+		codeOffsets []int
+		data        int
+		err         error
 	}{
 		{
-			code:     "EF00010100010000",
-			codeSize: 1,
-			dataSize: 0,
+			code:        "EF00010100010000",
+			codeSize:    []int{1},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{
-			code:     "EF0001010002000000",
-			codeSize: 2,
-			dataSize: 0,
+			code:        "EF0001010002000000",
+			codeSize:    []int{2},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{
-			code:     "EF0001010002020001000000AA",
-			codeSize: 2,
-			dataSize: 1,
+			code:        "EF0001010002020001000000AA",
+			codeSize:    []int{2},
+			dataSize:    1,
+			codeOffsets: []int{10},
+			data:        12,
 		},
 		{
-			code:     "EF0001010002020004000000AABBCCDD",
-			codeSize: 2,
-			dataSize: 4,
+			code:        "EF0001010002020004000000AABBCCDD",
+			codeSize:    []int{2},
+			dataSize:    4,
+			codeOffsets: []int{10},
+			data:        12,
 		},
 		{
-			code:     "EF0001010005020002006000600100AABB",
-			codeSize: 5,
-			dataSize: 2,
+			code:        "EF0001010005020002006000600100AABB",
+			codeSize:    []int{5},
+			dataSize:    2,
+			codeOffsets: []int{10},
+			data:        15,
 		},
 		{
-			code:     "EF00010100070200040060006001600200AABBCCDD",
-			codeSize: 7,
-			dataSize: 4,
+			code:        "EF00010100070200040060006001600200AABBCCDD",
+			codeSize:    []int{7},
+			dataSize:    4,
+			codeOffsets: []int{10},
+			data:        17,
+		},
+		{
+			code:        "EF00010300040100080100020000000201600160025e0001000149",
+			codeSize:    []int{8, 2},
+			dataSize:    0,
+			typeSize:    4,
+			codeOffsets: []int{17, 25},
+			types:       [][]int{{0, 0}, {2, 1}},
 		},
 		{ // INVALID is defined and can be terminating
-			code:     "EF000101000100FE",
-			codeSize: 1,
-			dataSize: 0,
+			code:        "EF000101000100FE",
+			codeSize:    []int{1},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // terminating with RETURN
-			code:     "EF00010100050060006000F3",
-			codeSize: 5,
-			dataSize: 0,
+			code:        "EF00010100050060006000F3",
+			codeSize:    []int{5},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // terminating with REVERT
-			code:     "EF00010100050060006000FD",
-			codeSize: 5,
-			dataSize: 0,
+			code:        "EF00010100050060006000FD",
+			codeSize:    []int{5},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // terminating with SELFDESTRUCT
-			code:     "EF0001010003006000FF",
-			codeSize: 3,
-			dataSize: 0,
+			code:        "EF0001010003006000FF",
+			codeSize:    []int{3},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // PUSH32
-			code:     "EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000",
-			codeSize: 34,
-			dataSize: 0,
+			code:        "EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000",
+			codeSize:    []int{34},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // undefined instructions inside push data
-			code:     "EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00",
-			codeSize: 34,
-			dataSize: 0,
+			code:        "EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00",
+			codeSize:    []int{34},
+			dataSize:    0,
+			codeOffsets: []int{7},
 		},
 		{ // undefined instructions inside data section
-			code:     "EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F",
-			codeSize: 1,
-			dataSize: 32,
+			code:        "EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F",
+			codeSize:    []int{1},
+			dataSize:    32,
+			codeOffsets: []int{10},
+			data:        11,
 		},
 		{ // no version
 			code: "EF00",
@@ -223,7 +255,18 @@ func TestEOFContainer(t *testing.T) {
 			err:  ErrEOF1UnknownSection,
 		},
 	} {
-		header, err := readEOF1Header(common.Hex2Bytes(test.code))
+		var (
+			jt   = &shanghaiInstructionSet
+			code = common.Hex2Bytes(test.code)
+		)
+
+		// Need to validate both code paths. First is the "trusted" EOF
+		// code that was validated before being stored. This can't
+		// throw and error. The other path is "untrusted" and so the
+		// code is validated as it is parsed. This may throw an error.
+		// If the error is expected, we compare the errors and continue
+		// on.
+		con1, err := NewEOF1Container(code, jt, false)
 		if err != nil {
 			if err == test.err {
 				// failed as expected
@@ -232,12 +275,46 @@ func TestEOFContainer(t *testing.T) {
 				t.Errorf("test %d: code %v validation failure, error: %v", i, test.code, err)
 			}
 		}
-		if header.codeSize[0] != test.codeSize {
-			t.Errorf("test %d: code %v codeSize expected %v, got %v", i, test.code, test.codeSize, header.codeSize[0])
+		con2, _ := NewEOF1Container(code, jt, true)
+
+		validate := func(c EOF1Container, name string) {
+			if len(c.header.codeSize) != len(test.codeSize) {
+				t.Errorf("%s unexpected number of code sections (want: %d, got %d)", name, len(test.codeSize), len(c.header.codeSize))
+			}
+			if len(c.code) != len(test.codeOffsets) {
+				t.Errorf("%s unexpected number of code offsets (want: %d, got %d)", name, len(test.codeOffsets), len(c.code))
+			}
+			if len(c.code) != len(c.header.codeSize) {
+				t.Errorf("%s code offsets does not match code sizes (want: %d, got %d)", name, len(c.header.codeSize), len(c.code))
+			}
+			for j := 0; j < len(c.header.codeSize); j++ {
+				if test.codeSize != nil && c.header.codeSize[j] != uint16(test.codeSize[j]) {
+					t.Errorf("%s codeSize expected %v, got %v", name, test.codeSize[j], c.header.codeSize[j])
+				}
+				if test.codeOffsets != nil && c.code[j] != uint64(test.codeOffsets[j]) {
+					t.Errorf("%s code offset expected %v, got %v", name, test.codeOffsets[j], c.code[j])
+				}
+			}
+			if c.header.dataSize != uint16(test.dataSize) {
+				t.Errorf("%s dataSize expected %v, got %v", name, test.dataSize, c.header.dataSize)
+			}
+			if c.header.dataSize != 0 && c.data != uint64(test.data) {
+				t.Errorf("%s data offset expected %v, got %v", name, test.data, c.data)
+			}
+			if c.header.typeSize != uint16(test.typeSize) {
+				t.Errorf("%s typeSize expected %v, got %v", name, test.typeSize, c.header.typeSize)
+			}
+			if c.header.typeSize != 0 && len(c.types) != len(test.types) {
+				t.Errorf("%s unexpected number of types %v, want %v", name, len(c.types), len(test.types))
+			}
+			for j, ty := range c.types {
+				if int(ty.input) != test.types[j][0] || int(ty.output) != test.types[j][1] {
+					t.Errorf("%s types annotation mismatch (want {%d, %d}, got {%d, %d}", name, test.types[j][0], test.types[j][1], ty.input, ty.output)
+				}
+			}
 		}
-		if header.dataSize != test.dataSize {
-			t.Errorf("test %d: code %v dataSize expected %v, got %v", i, test.code, test.dataSize, header.dataSize)
-		}
+		validate(con1, fmt.Sprintf("test %2d     (validated): code %v", i, test.code))
+		validate(con2, fmt.Sprintf("test %2d (not validated): code %v", i, test.code))
 	}
 }
 
@@ -268,7 +345,7 @@ func TestInvalidInstructions(t *testing.T) {
 		_, err := validateEOF(common.Hex2Bytes(test.code), &shanghaiInstructionSet)
 		if err == nil {
 			t.Errorf("code %v expected to be invalid", test.code)
-		} else if err.Error() != test.err.Error() {
+		} else if !strings.HasPrefix(err.Error(), test.err.Error()) {
 			t.Errorf("code %v expected error: \"%v\" got error: \"%v\"", test.code, test.err, err.Error())
 		}
 	}
@@ -291,7 +368,7 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 		if jt[opcode].undefined {
 			if err == nil {
 				t.Errorf("opcode %v expected to be invalid", opcode)
-			} else if err != ErrEOF1UndefinedInstruction {
+			} else if !strings.HasPrefix(err.Error(), ErrEOF1UndefinedInstruction.Error()) {
 				t.Errorf("opcode %v unxpected error: \"%v\"", opcode, err.Error())
 			}
 		} else {
@@ -323,7 +400,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 		} else {
 			if err == nil {
 				t.Errorf("opcode %v expected to be invalid terminating instruction", opcode)
-			} else if err != ErrEOF1TerminatingInstructionMissing {
+			} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 				t.Errorf("opcode %v unexpected error: \"%v\"", opcode, err.Error())
 			}
 		}
@@ -345,7 +422,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		_, err := validateEOF(codeTruncatedPush, jt)
 		if err == nil {
 			t.Errorf("code %v has truncated PUSH, expected to be invalid", common.Bytes2Hex(codeTruncatedPush))
-		} else if err != ErrEOF1TerminatingInstructionMissing {
+		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeTruncatedPush), err)
 		}
 
@@ -357,7 +434,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		_, err = validateEOF(codeNotTerminated, jt)
 		if err == nil {
 			t.Errorf("code %v does not have terminating instruction, expected to be invalid", common.Bytes2Hex(codeNotTerminated))
-		} else if err != ErrEOF1TerminatingInstructionMissing {
+		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeNotTerminated), err)
 		}
 
