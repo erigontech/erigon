@@ -22,178 +22,254 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-type eof1Test struct {
-	code     string
-	codeSize uint16
-	dataSize uint16
-}
-
-var eof1ValidTests = []eof1Test{
-	{"EF00010100010000", 1, 0},
-	{"EF0001010002000000", 2, 0},
-	{"EF0001010002020001000000AA", 2, 1},
-	{"EF0001010002020004000000AABBCCDD", 2, 4},
-	{"EF0001010005020002006000600100AABB", 5, 2},
-	{"EF00010100070200040060006001600200AABBCCDD", 7, 4},
-	{"EF000101000100FE", 1, 0},         // INVALID is defined and can be terminating
-	{"EF00010100050060006000F3", 5, 0}, // terminating with RETURN
-	{"EF00010100050060006000FD", 5, 0}, // terminating with REVERT
-	{"EF0001010003006000FF", 3, 0},     // terminating with SELFDESTRUCT
-	{"EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000", 34, 0},     // PUSH32
-	{"EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00", 34, 0},     // undefined instructions inside push data
-	{"EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F", 1, 32}, // undefined instructions inside data section
-}
-
-type eof1InvalidTest struct {
-	code  string
-	error string
-}
-
-// Codes starting with something else other than magic
-var notEOFTests = []string{
-	// valid: "EF0001010002020004006000AABBCCDD",
-	"",
-	"FE",                               // invalid first byte
-	"FE0001010002020004006000AABBCCDD", // valid except first byte of magic
-	"EF",                               // incomplete magic
-	"EF01",                             // not correct magic
-	"EF0101010002020004006000AABBCCDD", // valid except second byte of magic
-}
-
-// Codes starting with magic, but the rest is invalid
-var eof1InvalidTests = []eof1InvalidTest{
-	// valid: {"EF0001010002020004006000AABBCCDD", nil},
-	{"EF00", ErrEOF1InvalidVersion.Error()},                                                 // no version
-	{"EF0000", ErrEOF1InvalidVersion.Error()},                                               // invalid version
-	{"EF0002", ErrEOF1InvalidVersion.Error()},                                               // invalid version
-	{"EF0000010002020004006000AABBCCDD", ErrEOF1InvalidVersion.Error()},                     // valid except version
-	{"EF0001", ErrEOF1CodeSectionMissing.Error()},                                           // no header
-	{"EF000100", ErrEOF1CodeSectionMissing.Error()},                                         // no code section
-	{"EF000101", ErrEOF1CodeSectionSizeMissing.Error()},                                     // no code section size
-	{"EF00010100", ErrEOF1CodeSectionSizeMissing.Error()},                                   // code section size incomplete
-	{"EF0001010002", ErrEOF1InvalidTotalSize.Error()},                                       // no section terminator
-	{"EF000101000200", ErrEOF1InvalidTotalSize.Error()},                                     // no code section contents
-	{"EF00010100020060", ErrEOF1InvalidTotalSize.Error()},                                   // not complete code section contents
-	{"EF0001010002006000DEADBEEF", ErrEOF1InvalidTotalSize.Error()},                         // trailing bytes after code
-	{"EF000101000000", ErrEOF1EmptyCodeSection.Error()},                                     // 0 size code section
-	{"EF000101000002000200AABB", ErrEOF1EmptyCodeSection.Error()},                           // 0 size code section, with non-0 data section
-	{"EF000102000401000200AABBCCDD6000", ErrEOF1DataSectionBeforeCodeSection.Error()},       // data section before code section
-	{"EF0001020004AABBCCDD", ErrEOF1DataSectionBeforeCodeSection.Error()},                   // data section without code section
-	{"EF000101000202", ErrEOF1DataSectionSizeMissing.Error()},                               // no data section size
-	{"EF00010100020200", ErrEOF1DataSectionSizeMissing.Error()},                             // data section size incomplete
-	{"EF0001010002020004", ErrEOF1InvalidTotalSize.Error()},                                 // no section terminator
-	{"EF0001010002020004006000", ErrEOF1InvalidTotalSize.Error()},                           // no data section contents
-	{"EF0001010002020004006000AABBCC", ErrEOF1InvalidTotalSize.Error()},                     // not complete data section contents
-	{"EF0001010002020004006000AABBCCDDEE", ErrEOF1InvalidTotalSize.Error()},                 // trailing bytes after data
-	{"EF0001010002020000006000", ErrEOF1EmptyDataSection.Error()},                           // 0 size data section
-	{"EF0001010002020004020004006000AABBCCDDAABBCCDD", ErrEOF1MultipleDataSections.Error()}, // two data sections
-	{"EF00010100020F0004006000AABBCCDD", ErrEOF1UnknownSection.Error()},                     // section id = F
-}
-
-var eof1InvalidInstructionsTests = []eof1InvalidTest{
-	// 0C is undefined instruction
-	{"EF0001010001000C", ErrEOF1UndefinedInstruction.Error()},
-	// EF is undefined instruction
-	{"EF000101000100EF", ErrEOF1UndefinedInstruction.Error()},
-	// ADDRESS is not a terminating instruction
-	{"EF00010100010030", ErrEOF1TerminatingInstructionMissing.Error()},
-	// PUSH1 without data
-	{"EF00010100010060", ErrEOF1TerminatingInstructionMissing.Error()},
-	// PUSH32 with 31 bytes of data
-	{"EF0001010020007F00000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing.Error()},
-	// PUSH32 with 32 bytes of data and no terminating instruction
-	{"EF0001010021007F0000000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing.Error()},
-	// RJUMP to out-of-bounds (negative) offset.
-	{"EF0001010004005CFFFA00", ErrEOF1InvalidRelativeOffset.Error()},
-	// RJUMP to out-of-bounds (positive) offset.
-	{"EF0001010004005C000600", ErrEOF1InvalidRelativeOffset.Error()},
-	// RJUMP to push data.
-	{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset.Error()},
-}
-
 func TestHasEOFMagic(t *testing.T) {
-	for _, test := range notEOFTests {
-		if hasEOFMagic(common.Hex2Bytes(test)) {
-			t.Errorf("code %v expected to be not EOF", test)
-		}
-	}
-
-	for _, test := range eof1ValidTests {
-		if !hasEOFMagic(common.Hex2Bytes(test.code)) {
-			t.Errorf("code %v expected to be EOF", test.code)
-		}
-	}
-
-	// invalid but still EOF
-	for _, test := range eof1InvalidTests {
-		if !hasEOFMagic(common.Hex2Bytes(test.code)) {
-			t.Errorf("code %v expected to be EOF", test.code)
+	for i, test := range []struct {
+		code  string
+		valid bool
+	}{
+		{"EF00010100010000", true},
+		{"EF0001010002000000", true},
+		// invalid EOF but still has magic
+		{"EF00010100020F0004006000AABBCCDD", true},
+		// empty
+		{"", false},
+		// invalid first byte
+		{"FE", false},
+		// valid except first byte of magic
+		{"FE0001010002020004006000AABBCCDD", false},
+		// incomplete magic
+		{"EF", false},
+		// not correct magic
+		{"EF01", false},
+		// valid except second byte of magic
+		{"EF0101010002020004006000AABBCCDD", false},
+	} {
+		if hasEOFMagic(common.Hex2Bytes(test.code)) != test.valid {
+			t.Errorf("test %d: code %v expected to be EOF", i, test.code)
 		}
 	}
 }
 
-func TestReadEOF1Header(t *testing.T) {
-	for _, test := range eof1ValidTests {
+func TestEOFContainer(t *testing.T) {
+	for i, test := range []struct {
+		code     string
+		codeSize uint16
+		dataSize uint16
+		err      error
+	}{
+		{
+			code:     "EF00010100010000",
+			codeSize: 1,
+			dataSize: 0,
+		},
+		{
+			code:     "EF0001010002000000",
+			codeSize: 2,
+			dataSize: 0,
+		},
+		{
+			code:     "EF0001010002020001000000AA",
+			codeSize: 2,
+			dataSize: 1,
+		},
+		{
+			code:     "EF0001010002020004000000AABBCCDD",
+			codeSize: 2,
+			dataSize: 4,
+		},
+		{
+			code:     "EF0001010005020002006000600100AABB",
+			codeSize: 5,
+			dataSize: 2,
+		},
+		{
+			code:     "EF00010100070200040060006001600200AABBCCDD",
+			codeSize: 7,
+			dataSize: 4,
+		},
+		{ // INVALID is defined and can be terminating
+			code:     "EF000101000100FE",
+			codeSize: 1,
+			dataSize: 0,
+		},
+		{ // terminating with RETURN
+			code:     "EF00010100050060006000F3",
+			codeSize: 5,
+			dataSize: 0,
+		},
+		{ // terminating with REVERT
+			code:     "EF00010100050060006000FD",
+			codeSize: 5,
+			dataSize: 0,
+		},
+		{ // terminating with SELFDESTRUCT
+			code:     "EF0001010003006000FF",
+			codeSize: 3,
+			dataSize: 0,
+		},
+		{ // PUSH32
+			code:     "EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000",
+			codeSize: 34,
+			dataSize: 0,
+		},
+		{ // undefined instructions inside push data
+			code:     "EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00",
+			codeSize: 34,
+			dataSize: 0,
+		},
+		{ // undefined instructions inside data section
+			code:     "EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F",
+			codeSize: 1,
+			dataSize: 32,
+		},
+		{ // no version
+			code: "EF00",
+			err:  ErrEOF1InvalidVersion,
+		},
+		{ // invalid version
+			code: "EF0000",
+			err:  ErrEOF1InvalidVersion,
+		},
+		{ // invalid version
+			code: "EF0002",
+			err:  ErrEOF1InvalidVersion,
+		},
+		{ // valid except version
+			code: "EF0000010002020004006000AABBCCDD",
+			err:  ErrEOF1InvalidVersion,
+		},
+		{ // no header
+			code: "EF0001",
+			err:  ErrEOF1CodeSectionMissing,
+		},
+		{ // no code section
+			code: "EF000100",
+			err:  ErrEOF1CodeSectionMissing,
+		},
+		{ // no code section size
+			code: "EF000101",
+			err:  ErrEOF1CodeSectionSizeMissing,
+		},
+		{ // code section size incomplete
+			code: "EF00010100",
+			err:  ErrEOF1CodeSectionSizeMissing,
+		},
+		{ // no section terminator
+			code: "EF0001010002",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // no code section contents
+			code: "EF000101000200",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // not complete code section contents
+			code: "EF00010100020060",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // trailing bytes after code
+			code: "EF0001010002006000DEADBEEF",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // 0 size code section
+			code: "EF000101000000",
+			err:  ErrEOF1EmptyCodeSection,
+		},
+		{ // 0 size code section, with non-0 data section
+			code: "EF000101000002000200AABB",
+			err:  ErrEOF1EmptyCodeSection,
+		},
+		{ // data section before code section
+			code: "EF000102000401000200AABBCCDD6000",
+			err:  ErrEOF1DataSectionBeforeCodeSection,
+		},
+		{ // data section without code section
+			code: "EF0001020004AABBCCDD",
+			err:  ErrEOF1DataSectionBeforeCodeSection,
+		},
+		{ // no data section size
+			code: "EF000101000202",
+			err:  ErrEOF1DataSectionSizeMissing,
+		},
+		{ // data section size incomplete
+			code: "EF00010100020200",
+			err:  ErrEOF1DataSectionSizeMissing,
+		},
+		{ // no section terminator
+			code: "EF0001010002020004",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // no data section contents
+			code: "EF0001010002020004006000",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // not complete data section contents
+			code: "EF0001010002020004006000AABBCC",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // trailing bytes after data
+			code: "EF0001010002020004006000AABBCCDDEE",
+			err:  ErrEOF1InvalidTotalSize,
+		},
+		{ // 0 size data section
+			code: "EF0001010002020000006000",
+			err:  ErrEOF1EmptyDataSection,
+		},
+		{ // two data sections
+			code: "EF0001010002020004020004006000AABBCCDDAABBCCDD",
+			err:  ErrEOF1MultipleDataSections,
+		},
+		{ // section id = F
+			code: "EF00010100020F0004006000AABBCCDD",
+			err:  ErrEOF1UnknownSection,
+		},
+	} {
 		header, err := readEOF1Header(common.Hex2Bytes(test.code))
 		if err != nil {
-			t.Errorf("code %v validation failure, error: %v", test.code, err)
+			if err == test.err {
+				// failed as expected
+				continue
+			} else {
+				t.Errorf("test %d: code %v validation failure, error: %v", i, test.code, err)
+			}
 		}
 		if header.codeSize[0] != test.codeSize {
-			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize[0])
+			t.Errorf("test %d: code %v codeSize expected %v, got %v", i, test.code, test.codeSize, header.codeSize[0])
 		}
 		if header.dataSize != test.dataSize {
-			t.Errorf("code %v dataSize expected %v, got %v", test.code, test.dataSize, header.dataSize)
-		}
-	}
-
-	for _, test := range eof1InvalidTests {
-		_, err := readEOF1Header(common.Hex2Bytes(test.code))
-		if err == nil {
-			t.Errorf("code %v expected to be invalid", test.code)
-		} else if err.Error() != test.error {
-			t.Errorf("code %v expected error: \"%v\" got error: \"%v\"", test.code, test.error, err.Error())
+			t.Errorf("test %d: code %v dataSize expected %v, got %v", i, test.code, test.dataSize, header.dataSize)
 		}
 	}
 }
 
-func TestValidateEOF(t *testing.T) {
-	jt := &mergeInstructionSet
-	for _, test := range eof1ValidTests {
-		_, err := validateEOF(common.Hex2Bytes(test.code), jt)
-		if err != nil {
-			t.Errorf("code %v expected to be valid, got %v", test.code, err)
-		}
-	}
-
-	for _, test := range eof1InvalidTests {
-		_, err := validateEOF(common.Hex2Bytes(test.code), jt)
+func TestInvalidInstructions(t *testing.T) {
+	for _, test := range []struct {
+		code string
+		err  error
+	}{
+		// 0C is undefined instruction
+		{"EF0001010001000C", ErrEOF1UndefinedInstruction},
+		// EF is undefined instruction
+		{"EF000101000100EF", ErrEOF1UndefinedInstruction},
+		// ADDRESS is not a terminating instruction
+		{"EF00010100010030", ErrEOF1TerminatingInstructionMissing},
+		// PUSH1 without data
+		{"EF00010100010060", ErrEOF1TerminatingInstructionMissing},
+		// PUSH32 with 31 bytes of data
+		{"EF0001010020007F00000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing},
+		// PUSH32 with 32 bytes of data and no terminating instruction
+		{"EF0001010021007F0000000000000000000000000000000000000000000000000000000000000000", ErrEOF1TerminatingInstructionMissing},
+		// RJUMP to out-of-bounds (negative) offset.
+		{"EF0001010004005CFFFA00", ErrEOF1InvalidRelativeOffset},
+		// RJUMP to out-of-bounds (positive) offset.
+		{"EF0001010004005C000600", ErrEOF1InvalidRelativeOffset},
+		// RJUMP to push data.
+		{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset},
+	} {
+		_, err := validateEOF(common.Hex2Bytes(test.code), &shanghaiInstructionSet)
 		if err == nil {
 			t.Errorf("code %v expected to be invalid", test.code)
-		}
-	}
-}
-
-func TestReadValidEOF1Header(t *testing.T) {
-	for _, test := range eof1ValidTests {
-		header := readValidEOF1Header(common.Hex2Bytes(test.code))
-		if header.codeSize[0] != test.codeSize {
-			t.Errorf("code %v codeSize expected %v, got %v", test.code, test.codeSize, header.codeSize[0])
-		}
-		if header.dataSize != test.dataSize {
-			t.Errorf("code %v dataSize expected %v, got %v", test.code, test.dataSize, header.dataSize)
-		}
-	}
-}
-
-func TestValidateInstructions(t *testing.T) {
-	jt := &shanghaiInstructionSet
-	for _, test := range eof1InvalidInstructionsTests {
-		code := common.Hex2Bytes(test.code)
-		_, err := validateEOF(code, jt)
-		if err == nil {
-			t.Errorf("code %v expected to be invalid", test.code)
-		} else if err.Error() != test.error {
-			t.Errorf("code %v expected error: \"%v\" got error: \"%v\"", test.code, test.error, err.Error())
+		} else if err.Error() != test.err.Error() {
+			t.Errorf("code %v expected error: \"%v\" got error: \"%v\"", test.code, test.err, err.Error())
 		}
 	}
 }
