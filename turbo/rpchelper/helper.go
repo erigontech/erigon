@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -65,7 +65,6 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
-				log.Warn("no pending block found returning latest executed block")
 				blockNumber = plainStateBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
@@ -107,6 +106,10 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNum
 	if err != nil {
 		return nil, err
 	}
+	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, historyV3, agg)
+}
+
+func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber uint64, latest bool, txnIndex uint64, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
