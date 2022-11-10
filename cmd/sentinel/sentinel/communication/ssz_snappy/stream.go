@@ -156,7 +156,10 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	if _, err := r.Read(forkDigest); err != nil {
 		return err
 	}
+	return DecodeAndReadNoForkDigest(r, val)
+}
 
+func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.ObjectSSZ) error {
 	// Read varint for length of message.
 	encodedLn, _, err := readUvarint(r)
 	if err != nil {

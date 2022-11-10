@@ -211,3 +211,29 @@ func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client con
 		reqData: data,
 	})
 }
+
+func SendStatusReq(ctx context.Context, ourStatus *cltypes.Status, client consensusrpc.SentinelClient) (*cltypes.Status, error) {
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, ourStatus); err != nil {
+		return nil, err
+	}
+	responsePacket := &cltypes.Status{}
+
+	data := common.CopyBytes(buffer.Bytes())
+
+	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
+		Data:  data,
+		Topic: handlers.StatusProtocolV1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if message.Error {
+		log.Warn("received error", "err", string(message.Data))
+		return nil, nil
+	}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(message.Data), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
+}
