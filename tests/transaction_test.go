@@ -25,7 +25,7 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	txt := new(testMatcher)
 
