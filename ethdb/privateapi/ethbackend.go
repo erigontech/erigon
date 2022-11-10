@@ -14,7 +14,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -640,12 +639,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 }
 
 func (s *EthBackendServer) evictOldBuilders() {
-	// sort payload IDs in ascending order
-	ids := make([]uint64, 0, len(s.builders))
-	for id := range s.builders {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
+	ids := common.SortedKeys(s.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(s.builders)-MaxBuilders; i++ {
