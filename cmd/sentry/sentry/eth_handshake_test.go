@@ -23,15 +23,16 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		TD:              big.NewInt(0),
 		Head:            common.Hash{},
 		Genesis:         params.MainnetGenesisHash,
-		ForkID:          forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0),
+		ForkID:          forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0, 0),
 	}
+	forks, _ := forkid.GatherForks(params.MainnetChainConfig)
 	status := proto_sentry.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
 		ForkData: &proto_sentry.Forks{
 			Genesis: gointerfaces.ConvertHashToH256(params.MainnetGenesisHash),
-			Forks:   forkid.GatherForks(params.MainnetChainConfig),
+			Forks:   forks,
 		},
 		MaxBlock: 0,
 	}

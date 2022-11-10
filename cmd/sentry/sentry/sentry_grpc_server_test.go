@@ -34,6 +34,7 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Ha
 
 	headTd256 := new(uint256.Int)
 	headTd256.SetFromBig(headTd)
+	forks, _ := forkid.GatherForks(genesis.Config)
 	s.statusData = &proto_sentry.StatusData{
 		NetworkId:       1,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
@@ -41,7 +42,7 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Ha
 		MaxBlock:        head.Number.Uint64(),
 		ForkData: &proto_sentry.Forks{
 			Genesis: gointerfaces.ConvertHashToH256(genesisHash),
-			Forks:   forkid.GatherForks(genesis.Config),
+			Forks:   forks,
 		},
 	}
 	return s

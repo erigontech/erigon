@@ -279,6 +279,7 @@ func New(
 	if err != nil {
 		panic(err)
 	}
+	forks, _ := forkid.GatherForks(chainConfig)
 	c := &Parlia{
 		chainConfig:     chainConfig,
 		config:          parliaConfig,
@@ -289,7 +290,7 @@ func New(
 		validatorSetABI: vABI,
 		slashABI:        sABI,
 		signer:          types.LatestSigner(chainConfig),
-		forks:           forkid.GatherForks(chainConfig),
+		forks:           forks,
 		snapshots:       snapshots,
 	}
 

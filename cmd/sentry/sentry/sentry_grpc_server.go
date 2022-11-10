@@ -292,7 +292,7 @@ func handShake(
 			TD:              ourTD.ToBig(),
 			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
+			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, nil, genesisHash, status.MaxBlock, 0),
 		}
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()

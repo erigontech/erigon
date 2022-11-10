@@ -311,7 +311,7 @@ func NewMultiClient(
 		passivePeers:  chainConfig.TerminalTotalDifficultyPassed,
 	}
 	cs.ChainConfig = chainConfig
-	cs.forks = forkid.GatherForks(cs.ChainConfig)
+	cs.forks, _ = forkid.GatherForks(cs.ChainConfig)
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error

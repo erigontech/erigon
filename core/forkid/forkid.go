@@ -53,20 +53,29 @@ type ID struct {
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
-// NewID calculates the Ethereum fork ID from the chain config, genesis hash, and head.
-func NewID(config *params.ChainConfig, genesis common.Hash, head uint64) ID {
-	return NewIDFromForks(GatherForks(config), genesis, head)
+// NewID calculates the Ethereum fork ID from the chain config, genesis hash, head height and time.
+func NewID(config *params.ChainConfig, genesis common.Hash, height, time uint64) ID {
+	heightForks, timeForks := GatherForks(config)
+	return NewIDFromForks(heightForks, timeForks, genesis, height, time)
 }
 
-func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
+func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
 	// Calculate the current fork checksum and the next fork block
-	var next uint64
-	for _, fork := range forks {
-		if fork <= head {
+	for _, fork := range heightForks {
+		if height >= fork {
 			// Fork already passed, checksum the previous hash and the fork number
+			hash = checksumUpdate(hash, fork)
+			continue
+		}
+		return ID{Hash: checksumToBytes(hash), Next: fork}
+	}
+	var next uint64
+	for _, fork := range timeForks {
+		if time >= fork {
+			// Fork passed, checksum the previous hash and the fork time
 			hash = checksumUpdate(hash, fork)
 			continue
 		}
@@ -76,10 +85,7 @@ func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
-func NextForkHash(config *params.ChainConfig, genesis common.Hash, head uint64) [4]byte {
-	return NextForkHashFromForks(GatherForks(config), genesis, head)
-}
-
+// TODO(yperbasis): add timeForks
 func NextForkHashFromForks(forks []uint64, genesis common.Hash, head uint64) [4]byte {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
@@ -105,7 +111,7 @@ func NextForkHashFromForks(forks []uint64, genesis common.Hash, head uint64) [4]
 // NewFilter creates a filter that returns if a fork ID should be rejected or notI
 // based on the local chain's status.
 func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint64) Filter {
-	forks := GatherForks(config)
+	forks, _ := GatherForks(config)
 	return newFilter(
 		forks,
 		genesis,
@@ -121,7 +127,7 @@ func NewFilterFromForks(forks []uint64, genesis common.Hash, headNumber uint64) 
 // NewStaticFilter creates a filter at block zero.
 func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
 	head := func() uint64 { return 0 }
-	forks := GatherForks(config)
+	forks, _ := GatherForks(config)
 	return newFilter(forks, genesis, head)
 }
 
@@ -228,17 +234,20 @@ func checksumToBytes(hash uint32) [4]byte {
 }
 
 // GatherForks gathers all the known forks and creates a sorted list out of them.
-func GatherForks(config *params.ChainConfig) []uint64 {
+func GatherForks(config *params.ChainConfig) (heightForks []uint64, timeForks []uint64) {
 	// Gather all the fork block numbers via reflection
 	kind := reflect.TypeOf(params.ChainConfig{})
 	conf := reflect.ValueOf(config).Elem()
 
-	var forks []uint64
 	for i := 0; i < kind.NumField(); i++ {
 		// Fetch the next field and skip non-fork rules
 		field := kind.Field(i)
+		time := false
 		if !strings.HasSuffix(field.Name, "Block") {
-			continue
+			if !strings.HasSuffix(field.Name, "Time") {
+				continue
+			}
+			time = true
 		}
 		if field.Type != reflect.TypeOf(new(big.Int)) {
 			continue
@@ -246,21 +255,25 @@ func GatherForks(config *params.ChainConfig) []uint64 {
 		// Extract the fork rule block number and aggregate it
 		rule := conf.Field(i).Interface().(*big.Int)
 		if rule != nil {
-			forks = append(forks, rule.Uint64())
+			if time {
+				timeForks = append(timeForks, rule.Uint64())
+			} else {
+				heightForks = append(heightForks, rule.Uint64())
+			}
 		}
 	}
-	// Sort the fork block numbers to permit chronological XOR
-	slices.Sort(forks)
-	// Deduplicate block numbers applying multiple forks
-	for i := 1; i < len(forks); i++ {
-		if forks[i] == forks[i-1] {
-			forks = append(forks[:i], forks[i+1:]...)
-			i--
-		}
-	}
+	// Sort the fork block numbers & times to permit chronological XOR
+	slices.Sort(heightForks)
+	slices.Sort(timeForks)
+	// Deduplicate block numbers/times applying to multiple forks
+	heightForks = common.RemoveDuplicatesFromSorted(heightForks)
+	timeForks = common.RemoveDuplicatesFromSorted(timeForks)
 	// Skip any forks in block 0, that's the genesis ruleset
-	if len(forks) > 0 && forks[0] == 0 {
-		forks = forks[1:]
+	if len(heightForks) > 0 && heightForks[0] == 0 {
+		heightForks = heightForks[1:]
 	}
-	return forks
+	if len(timeForks) > 0 && timeForks[0] == 0 {
+		timeForks = timeForks[1:]
+	}
+	return heightForks, timeForks
 }

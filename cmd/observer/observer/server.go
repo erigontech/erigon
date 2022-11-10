@@ -109,7 +109,7 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
-	forks := forkid.GatherForks(chainConfig)
+	forks, _ := forkid.GatherForks(chainConfig)
 	return eth.CurrentENREntryFromForks(forks, *genesisHash, 0), nil
 }
 

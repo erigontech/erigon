@@ -28,7 +28,7 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	if err != nil {
 		return Forks{}, err
 	}
-	forksBlocks := forkid.GatherForks(chainConfig)
+	forksBlocks, _ := forkid.GatherForks(chainConfig)
 
 	return Forks{genesis.Hash(), forksBlocks}, nil
 }
