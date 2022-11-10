@@ -403,9 +403,9 @@ func NewAuRa(config *params.AuRaConfig, db kv.RwDB, ourSigningAddress common.Add
 		StepDuration:        auraParams.StepDurations[0],
 	}
 	durations = append(durations, durInfo)
-	sortedTimes := common.SortedKeys(auraParams.StepDurations)
+	times := common.SortedKeys(auraParams.StepDurations)
 	for i := 1; i < len(auraParams.StepDurations); i++ { // skip first
-		time := sortedTimes[i]
+		time := times[i]
 		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
