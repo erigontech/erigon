@@ -120,11 +120,13 @@ func (rs *State22) put(table string, key, val []byte) {
 		rs.changes[table] = t
 	}
 	old, ok := t.ReplaceOrInsert(statePair{key: key, val: val})
-	rs.sizeEstimate += uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
 	if ok {
-		rs.sizeEstimate -= uint64(len(old.key)) + uint64(len(old.val))
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
 	}
 }
+
+const btreeOverhead = 16
 
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()

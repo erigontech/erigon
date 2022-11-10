@@ -788,6 +788,28 @@ func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	return err
 }
 
+func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
+	}
+	if bitLen < 8 {
+		if bitLen > 0 {
+			buffer[0] = byte(i.Uint64())
+		} else {
+			buffer[0] = 0x80
+		}
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+
+	size := (bitLen + 7) / 8
+	buffer[0] = 0x80 + byte(size)
+	i.FillBytes(buffer[1 : 1+size])
+	_, err := w.Write(buffer[:1+size])
+	return err
+}
+
 func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 	switch len(s) {
 	case 0:

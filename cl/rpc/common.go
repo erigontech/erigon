@@ -145,3 +145,69 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 	}
 	return responsePacket[0].(*cltypes.LightClientUpdate), nil
 }
+
+type blocksRequestOpts struct {
+	topic   string
+	count   int
+	client  consensusrpc.SentinelClient
+	reqData []byte
+}
+
+func sendBlocksRequest(ctx context.Context, opts blocksRequestOpts) ([]cltypes.ObjectSSZ, error) {
+	// Prepare output slice.
+	responsePacket := []cltypes.ObjectSSZ{}
+	for i := 0; i < opts.count; i++ {
+		responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
+	}
+
+	message, err := opts.client.SendRequest(ctx, &consensusrpc.RequestData{
+		Data:  opts.reqData,
+		Topic: opts.topic,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if message.Error {
+		log.Warn("received error", "err", string(message.Data))
+		return nil, nil
+	}
+	if err := ssz_snappy.DecodeListSSZBeaconBlock(message.Data, uint64(opts.count), responsePacket); err != nil {
+		return nil, fmt.Errorf("unable to decode packet: %v", err)
+	}
+	return responsePacket, nil
+}
+
+func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client consensusrpc.SentinelClient) ([]cltypes.ObjectSSZ, error) {
+	req := &cltypes.BeaconBlocksByRangeRequest{
+		StartSlot: start,
+		Count:     count,
+		Step:      1, // deprecated, and must be set to 1.
+	}
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+		return nil, err
+	}
+
+	data := common.CopyBytes(buffer.Bytes())
+	return sendBlocksRequest(ctx, blocksRequestOpts{
+		topic:   handlers.BeaconBlocksByRangeProtocolV2,
+		count:   int(count),
+		client:  client,
+		reqData: data,
+	})
+}
+
+func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client consensusrpc.SentinelClient) ([]cltypes.ObjectSSZ, error) {
+	var req cltypes.BeaconBlocksByRootRequest = roots
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
+		return nil, err
+	}
+	data := common.CopyBytes(buffer.Bytes())
+	return sendBlocksRequest(ctx, blocksRequestOpts{
+		topic:   handlers.BeaconBlocksByRootProtocolV2,
+		count:   len(roots),
+		client:  client,
+		reqData: data,
+	})
+}

@@ -33,7 +33,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -481,10 +480,10 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non EIP155 signed) transactions to be submitted via RPC",
 	}
-	StateCacheFlag = cli.IntFlag{
+	StateCacheFlag = cli.StringFlag{
 		Name:  "state.cache",
-		Value: kvcache.DefaultCoherentConfig.KeysLimit,
-		Usage: "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).",
+		Value: "0MB",
+		Usage: "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB",
 	}
 
 	// Network Settings

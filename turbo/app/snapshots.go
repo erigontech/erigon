@@ -21,6 +21,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -32,9 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
-	"golang.org/x/sync/semaphore"
 )
 
 const ASSERT = false
@@ -235,7 +236,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err

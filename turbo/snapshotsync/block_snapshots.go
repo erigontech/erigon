@@ -114,10 +114,18 @@ func (sn *HeaderSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error
 }
 func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Headers.String())
 	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.idxHeaderHash.ModTime().Before(sn.seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.idxHeaderHash.Close()
+		sn.idxHeaderHash = nil
 	}
 	return nil
 }
@@ -167,10 +175,18 @@ func (sn *BodySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) 
 
 func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Bodies.String())
 	sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.idxBodyNumber.ModTime().Before(sn.seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.idxBodyNumber.Close()
+		sn.idxBodyNumber = nil
 	}
 	return nil
 }
@@ -226,16 +242,29 @@ func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 }
 func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	if sn.Seg == nil {
+		return nil
+	}
 	fileName := snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions.String())
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.IdxTxnHash.Close()
+		sn.IdxTxnHash = nil
 	}
 
 	fileName = snap.IdxFileName(sn.ranges.from, sn.ranges.to, snap.Transactions2Block.String())
 	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.Seg.ModTime()) {
+		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
+		sn.IdxTxnHash2BlockNum.Close()
+		sn.IdxTxnHash2BlockNum = nil
 	}
 	return nil
 }
@@ -715,6 +744,9 @@ func (s *RoSnapshots) Close() {
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
 Loop1:
 	for i, sn := range s.Headers.segments {
+		if sn.seg == nil {
+			continue Loop1
+		}
 		_, name := filepath.Split(sn.seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
@@ -726,6 +758,9 @@ Loop1:
 	}
 Loop2:
 	for i, sn := range s.Bodies.segments {
+		if sn.seg == nil {
+			continue Loop2
+		}
 		_, name := filepath.Split(sn.seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
@@ -737,6 +772,9 @@ Loop2:
 	}
 Loop3:
 	for i, sn := range s.Txs.segments {
+		if sn.Seg == nil {
+			continue Loop3
+		}
 		_, name := filepath.Split(sn.Seg.FilePath())
 		for _, fName := range l {
 			if fName == name {
@@ -1165,12 +1203,17 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 
-	downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
-	for i := range rangesToMerge {
-		downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
-	}
+	if downloader != nil && !reflect.ValueOf(downloader).IsNil() {
+		downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
+		for i := range rangesToMerge {
+			downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
+		}
 
-	return RequestSnapshotsDownload(ctx, downloadRequest, downloader)
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, downloader); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1223,13 +1266,23 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 }
 
 func hasIdxFile(sn *snap.FileInfo) bool {
+	stat, err := os.Stat(sn.Path)
+	if err != nil {
+		return false
+	}
 	dir, _ := filepath.Split(sn.Path)
 	fName := snap.IdxFileName(sn.From, sn.To, sn.T.String())
+	var result bool = true
 	switch sn.T {
 	case snap.Headers:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
+		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			result = false
 		}
 		_ = idx.Close()
 	case snap.Bodies:
@@ -1237,11 +1290,21 @@ func hasIdxFile(sn *snap.FileInfo) bool {
 		if err != nil {
 			return false
 		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			result = false
+		}
 		_ = idx.Close()
 	case snap.Transactions:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
 			return false
+		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			result = false
 		}
 		_ = idx.Close()
 
@@ -1250,9 +1313,14 @@ func hasIdxFile(sn *snap.FileInfo) bool {
 		if err != nil {
 			return false
 		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			result = false
+		}
 		_ = idx.Close()
 	}
-	return true
+	return result
 }
 
 // DumpTxs - [from, to)

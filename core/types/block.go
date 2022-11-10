@@ -76,7 +76,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 type Header struct {
 	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
 	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    common.Address `json:"miner"            gencodec:"required"`
+	Coinbase    common.Address `json:"miner"`
 	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
 	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
 	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
@@ -89,27 +89,22 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
-	BaseFee     *big.Int       `json:"baseFeePerGas"`
-	AuRaStep    uint64
-	AuRaSeal    []byte
+	// AuRa extensions (alternative to MixDigest & Nonce)
+	AuRaStep uint64
+	AuRaSeal []byte
+
+	BaseFee *big.Int `json:"baseFeePerGas"` // EIP-1559
+
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
-	VerkleProof   []byte                `json:"verkleProof"`
-	VerkleKeyVals []verkle.KeyValuePair `json:"verkleKeyVals"`
+	VerkleProof   []byte
+	VerkleKeyVals []verkle.KeyValuePair
 }
 
-func (h Header) EncodingSize() int {
+func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
-		if len(h.AuRaSeal) >= 56 {
-			encodingSize += (bits.Len(uint(len(h.AuRaSeal))) + 7) / 8
-		}
-	} else {
-		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
-	}
 	encodingSize++
 	if h.Difficulty != nil {
 		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
@@ -138,15 +133,19 @@ func (h Header) EncodingSize() int {
 		}
 		encodingSize += len(h.Extra)
 	}
-	// size of BaseFee
-	var baseFeeBitLen, baseFeeLen int
+
+	if len(h.AuRaSeal) != 0 {
+		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
+		if len(h.AuRaSeal) >= 56 {
+			encodingSize += (bits.Len(uint(len(h.AuRaSeal))) + 7) / 8
+		}
+	} else {
+		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
+	}
+
 	if h.BaseFee != nil {
 		encodingSize++
-		baseFeeBitLen = h.BaseFee.BitLen()
-		if baseFeeBitLen >= 8 {
-			baseFeeLen = (baseFeeBitLen + 7) / 8
-		}
-		encodingSize += baseFeeLen
+		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
 	}
 
 	if h.Verkle {
@@ -176,94 +175,8 @@ func (h Header) EncodingSize() int {
 	return encodingSize
 }
 
-func (h Header) EncodeRLP(w io.Writer) error {
-	// Precompute the size of the encoding
-	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
-		33 /* ReceiptHash */ + 259 /* Bloom */
-
-	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
-		if len(h.AuRaSeal) >= 56 {
-			encodingSize += (bits.Len(uint(len(h.AuRaSeal))) + 7) / 8
-		}
-	} else {
-		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
-	}
-	if h.Verkle {
-		// Encoding of Verkle Proof
-		encodingSize++
-		switch len(h.VerkleProof) {
-		case 0:
-		case 1:
-			if h.VerkleProof[0] >= 128 {
-				encodingSize++
-			}
-		default:
-			if len(h.VerkleProof) >= 56 {
-				encodingSize += (bits.Len(uint(len(h.VerkleProof))) + 7) / 8
-			}
-			encodingSize += len(h.VerkleProof)
-		}
-		encodingSize++
-
-		var tmpBuffer bytes.Buffer
-		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
-			return nil
-		}
-		encodingSize += tmpBuffer.Len()
-	}
-
-	encodingSize++
-	var diffBitLen, diffLen int
-	if h.Difficulty != nil {
-		diffBitLen = h.Difficulty.BitLen()
-		if diffBitLen >= 8 {
-			diffLen = (diffBitLen + 7) / 8
-		}
-	}
-	encodingSize += diffLen
-
-	encodingSize++
-	var numberBitLen, numberLen int
-	if h.Number != nil {
-		numberBitLen = h.Number.BitLen()
-		if numberBitLen >= 8 {
-			numberLen = (numberBitLen + 7) / 8
-		}
-	}
-	encodingSize += numberLen
-
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
-
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
-
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.Time)
-	// size of Extra
-	encodingSize++
-	switch len(h.Extra) {
-	case 0:
-	case 1:
-		if h.Extra[0] >= 128 {
-			encodingSize++
-		}
-	default:
-		if len(h.Extra) >= 56 {
-			encodingSize += (bits.Len(uint(len(h.Extra))) + 7) / 8
-		}
-		encodingSize += len(h.Extra)
-	}
-	var baseFeeBitLen, baseFeeLen int
-	if h.BaseFee != nil {
-		encodingSize++
-		baseFeeBitLen = h.BaseFee.BitLen()
-		if baseFeeBitLen >= 8 {
-			baseFeeLen = (baseFeeBitLen + 7) / 8
-		}
-		encodingSize += baseFeeLen
-	}
+func (h *Header) EncodeRLP(w io.Writer) error {
+	encodingSize := h.EncodingSize()
 
 	var b [33]byte
 	// Prefix
@@ -318,37 +231,11 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
 		return err
 	}
-	if diffBitLen < 8 {
-		if diffBitLen > 0 {
-			b[0] = byte(h.Difficulty.Uint64())
-		} else {
-			b[0] = 128
-		}
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(diffLen)
-		h.Difficulty.FillBytes(b[1 : 1+diffLen])
-		if _, err := w.Write(b[:1+diffLen]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeBigInt(h.Difficulty, w, b[:]); err != nil {
+		return err
 	}
-	if numberBitLen < 8 {
-		if numberBitLen > 0 {
-			b[0] = byte(h.Number.Uint64())
-		} else {
-			b[0] = 128
-		}
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(numberLen)
-		h.Number.FillBytes(b[1 : 1+numberLen])
-		if _, err := w.Write(b[:1+numberLen]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeBigInt(h.Number, w, b[:]); err != nil {
+		return err
 	}
 	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
 		return err
@@ -388,21 +275,8 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BaseFee != nil {
-		if baseFeeBitLen < 8 {
-			if baseFeeBitLen > 0 {
-				b[0] = byte(h.BaseFee.Uint64())
-			} else {
-				b[0] = 128
-			}
-			if _, err := w.Write(b[:1]); err != nil {
-				return err
-			}
-		} else {
-			b[0] = 128 + byte(baseFeeLen)
-			h.BaseFee.FillBytes(b[1 : 1+baseFeeLen])
-			if _, err := w.Write(b[:1+baseFeeLen]); err != nil {
-				return err
-			}
+		if err := rlp.EncodeBigInt(h.BaseFee, w, b[:]); err != nil {
+			return err
 		}
 	}
 
@@ -544,6 +418,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		rlp.DecodeBytes(rawKv, h.VerkleKeyVals)
 	}
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
