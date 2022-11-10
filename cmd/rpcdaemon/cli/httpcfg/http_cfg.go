@@ -50,6 +50,7 @@ type HttpCfg struct {
 	HTTPTimeouts             rpccfg.HTTPTimeouts
 	AuthRpcTimeouts          rpccfg.HTTPTimeouts
 	EvmCallTimeout           time.Duration
+	InternalCL               bool
 	LogDirVerbosity          string
 	LogDirPath               string
 }
