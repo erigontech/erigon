@@ -1,9 +1,8 @@
 package common
 
 import (
-	"sort"
-
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/slices"
 )
 
 func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
@@ -13,6 +12,6 @@ func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
 		keys[i] = k
 		i++
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	return keys
 }
