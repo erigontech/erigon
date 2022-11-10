@@ -388,11 +388,8 @@ func NewAuRa(config *params.AuRaConfig, db kv.RwDB, ourSigningAddress common.Add
 	}
 	for _, v := range auraParams.StepDurations {
 		if v == 0 {
-			return nil, fmt.Errorf("authority Round step 0 duration is undefined")
+			return nil, fmt.Errorf("authority Round step duration cannot be 0")
 		}
-	}
-	if _, ok := auraParams.StepDurations[0]; !ok {
-		return nil, fmt.Errorf("authority Round step duration cannot be 0")
 	}
 	//shouldTimeout := auraParams.StartStep == nil
 	initialStep := uint64(0)
@@ -406,13 +403,10 @@ func NewAuRa(config *params.AuRaConfig, db kv.RwDB, ourSigningAddress common.Add
 		StepDuration:        auraParams.StepDurations[0],
 	}
 	durations = append(durations, durInfo)
-	var i = 0
-	for time, dur := range auraParams.StepDurations {
-		if i == 0 { // skip first
-			i++
-			continue
-		}
-
+	sortedTimes := common.SortedKeys(auraParams.StepDurations)
+	for i := 1; i < len(auraParams.StepDurations); i++ { // skip first
+		time := sortedTimes[i]
+		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
 			return nil, fmt.Errorf("timestamp overflow")
