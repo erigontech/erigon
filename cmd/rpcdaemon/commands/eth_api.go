@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -326,7 +325,8 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		chainId = types.DeriveChainId(&t.V)
-		if !chainId.Eq(u256.Num0) {
+		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
+		if !chainId.IsZero() {
 			result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		}
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
