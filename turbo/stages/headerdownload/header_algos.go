@@ -1297,7 +1297,7 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				_, sentToPeer := headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
+					hd.UpdateRetryTime(req, currentTime, 30*time.Second /* timeout */)
 					log.Debug("[Downloader] Sent request", "height", req.Number)
 				}
 			}
