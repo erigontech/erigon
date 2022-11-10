@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -90,8 +91,6 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		//} else if err = os.RemoveAll(stateDbPath); err != nil {
-		//	return err
 	}
 	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).WriteMap().Open()
 	if err2 != nil {
@@ -236,6 +235,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		}
 		agg.SetTx(rwTx)
 		readWrapper.roTx = rwTx
+		readWrapper.ac = agg.MakeContext()
 		return nil
 	}
 
@@ -444,18 +444,20 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
-	if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
-		rootHash, err := ww.w.ComputeCommitment(true, trace)
-		if err != nil {
-			return 0, nil, err
+	if txNum >= startTxNum {
+		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+			rootHash, err := ww.w.ComputeCommitment(true, trace)
+			if err != nil {
+				return 0, nil, err
+			}
+			if !bytes.Equal(rootHash, header.Root[:]) {
+				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
+			}
 		}
-		if !bytes.Equal(rootHash, header.Root[:]) {
-			return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
-		}
-	}
 
-	if err := ww.w.FinishTx(); err != nil {
-		return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+		if err := ww.w.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+		}
 	}
 
 	return txNum, receipts, nil
