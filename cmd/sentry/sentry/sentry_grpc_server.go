@@ -740,7 +740,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	var pokeDeadline time.Time
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-		height := peerInfo.height
+		height := peerInfo.Height()
 		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
