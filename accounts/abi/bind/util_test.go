@@ -87,16 +87,17 @@ func TestWaitDeployed(t *testing.T) {
 				mined   = make(chan struct{})
 				ctx     = context.Background()
 			)
-			go func() {
-				address, err = bind.WaitDeployed(ctx, backend, tx)
-				close(mined)
-			}()
 
 			// Send and mine the transaction.
 			if err = backend.SendTransaction(ctx, tx); err != nil {
 				t.Fatalf("test %q: failed to set tx: %v", name, err)
 			}
 			backend.Commit()
+
+			go func() {
+				address, err = bind.WaitDeployed(ctx, backend, tx)
+				close(mined)
+			}()
 
 			select {
 			case <-mined:
@@ -144,6 +145,10 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	tx = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, testKey)
 
+	if err := backend.SendTransaction(ctx, tx); err != nil {
+		t.Errorf("error when sending tx: %v", err)
+	}
+
 	done := make(chan bool)
 	go func() {
 		defer close(done)
@@ -154,9 +159,6 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		done <- true
 	}()
 
-	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %v", err)
-	}
 	cancel()
 	<-done
 }
