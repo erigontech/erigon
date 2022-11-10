@@ -118,22 +118,45 @@ func runSentinelNode(cliCtx *cli.Context) {
 			Count:     3,
 			Step:      1, // deprecated, must be set to 1.
 		}
+
+		roots := make([][32]byte, 3)
+		rawRoot1, err := hex.DecodeString("57dd8e0ee7ed614283fbf80ca19229752839d4a4e232148efd128e85edee9b12")
+		check(err)
+		rawRoot2, err := hex.DecodeString("1d527f21e17897198752838431821558d1b9864654bcaf476232da55458ed5ce")
+		check(err)
+		rawRoot3, err := hex.DecodeString("830eab2e3de70cc7ebc80b6c950ebb2a7946d8a6e3bb653f8b6dafd6a402d49b")
+		check(err)
+
+		copy(roots[0][:], rawRoot1)
+		copy(roots[1][:], rawRoot2)
+		copy(roots[2][:], rawRoot3)
+
+		var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
 	*/
 
-	roots := make([][32]byte, 3)
-	rawRoot1, err := hex.DecodeString("57dd8e0ee7ed614283fbf80ca19229752839d4a4e232148efd128e85edee9b12")
+	// Getting fork digest into bytes array.
+	forkDigest := "4a26c58b"
+	fdSlice, err := hex.DecodeString(forkDigest)
 	check(err)
-	rawRoot2, err := hex.DecodeString("1d527f21e17897198752838431821558d1b9864654bcaf476232da55458ed5ce")
-	check(err)
-	rawRoot3, err := hex.DecodeString("830eab2e3de70cc7ebc80b6c950ebb2a7946d8a6e3bb653f8b6dafd6a402d49b")
-	check(err)
+	var fdArr [4]byte
+	copy(fdArr[:], fdSlice)
 
-	copy(roots[0][:], rawRoot1)
-	copy(roots[1][:], rawRoot2)
-	copy(roots[2][:], rawRoot3)
+	// Getting CP block root into bytes array.
+	cpRootRaw := "3657dbacf691e5c3787bf6b824bdd83bec8c3446797635370bdd0ed4b7c5b760"
+	cpRootSlice, err := hex.DecodeString(cpRootRaw)
+	check(err)
+	var cpRootArr [32]byte
+	copy(cpRootArr[:], cpRootSlice)
 
-	var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
-	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
+	// USING: https://beaconcha.in/slot/5101760 as the checkpoint & current block.
+	statusReq := &cltypes.Status{
+		ForkDigest:     fdArr,
+		FinalizedRoot:  cpRootArr,
+		FinalizedEpoch: 159430,
+		HeadRoot:       cpRootArr,
+		HeadSlot:       5101760,
+	}
+	req, err := constructRequest(handlers.StatusProtocolV1, statusReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
 	}
