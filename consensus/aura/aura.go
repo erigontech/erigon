@@ -111,7 +111,7 @@ func (s *Step) doCalibrate() {
 
 // optCalibrate Calibrates the AuRa step number according to the current time.
 func (s *Step) optCalibrate() bool {
-	now := time.Now().Second()
+	now := time.Now().Unix()
 	var info StepDurationInfo
 	i := 0
 	for _, d := range s.durations {
