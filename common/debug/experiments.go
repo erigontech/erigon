@@ -28,7 +28,7 @@ var (
 )
 
 func MergeTr() bool {
-	writeMapOnce.Do(func() {
+	mergeTrOnce.Do(func() {
 		v, _ := os.LookupEnv("MERGE_THRESHOLD")
 		if v == "true" {
 			mergeTr = true
