@@ -764,10 +764,10 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			return nil
 		})
 		require.NoError(err)
-		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
 		if m.HistoryV3 {
 			// receipts are not stored in erigon3
 		} else {
+			require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
 			require.Greater(found, uint64(0))
 		}
 	} else {

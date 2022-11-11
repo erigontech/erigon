@@ -453,44 +453,40 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockReader, chainConfig, assembleBlockPOS, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 
-	if config.CL {
-		// Chains supported are Sepolia, Mainnet and Goerli
-		if config.NetworkID == 1 || config.NetworkID == 5 || config.NetworkID == 11155111 {
-			genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
-			if err != nil {
-				return nil, err
-			}
-			client, err := service.StartSentinelService(&sentinel.SentinelConfig{
-				IpAddr:        "127.0.0.1",
-				Port:          4000,
-				TCPPort:       4001,
-				GenesisConfig: genesisCfg,
-				NetworkConfig: networkCfg,
-				BeaconConfig:  beaconCfg,
-			}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
-			if err != nil {
-				return nil, err
-			}
-
-			lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
-			if err != nil {
-				return nil, err
-			}
-			bs, err := clcore.RetrieveBeaconState(ctx,
-				clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
-
-			if err != nil {
-				return nil, err
-			}
-
-			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
-				return nil, err
-			}
-
-			go lc.Start()
-		} else {
-			log.Warn("Cannot run lightclient on a non-supported chain. only goerli, sepolia and mainnet are allowed")
+	// If we choose not to run a consensus layer, run our embedded.
+	if !config.CL && clparams.Supported(config.NetworkID) {
+		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
+		if err != nil {
+			return nil, err
 		}
+		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
+			IpAddr:        "127.0.0.1",
+			Port:          4000,
+			TCPPort:       4001,
+			GenesisConfig: genesisCfg,
+			NetworkConfig: networkCfg,
+			BeaconConfig:  beaconCfg,
+		}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
+		if err != nil {
+			return nil, err
+		}
+
+		lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
+		if err != nil {
+			return nil, err
+		}
+		bs, err := clcore.RetrieveBeaconState(ctx,
+			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+
+		if err != nil {
+			return nil, err
+		}
+
+		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+			return nil, err
+		}
+
+		go lc.Start()
 	}
 
 	if stack.Config().PrivateApiAddr != "" {

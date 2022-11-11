@@ -129,7 +129,7 @@ func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClien
 	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout)
 
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
-	engineImpl := NewEngineAPI(base, db, eth)
+	engineImpl := NewEngineAPI(base, db, eth, cfg.InternalCL)
 
 	list = append(list, rpc.API{
 		Namespace: "eth",

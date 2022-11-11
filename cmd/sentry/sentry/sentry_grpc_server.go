@@ -52,11 +52,12 @@ const (
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
 type PeerInfo struct {
-	peer      *p2p.Peer
-	lock      sync.RWMutex
-	deadlines []time.Time // Request deadlines
-	height    uint64
-	rw        p2p.MsgReadWriter
+	peer          *p2p.Peer
+	lock          sync.RWMutex
+	deadlines     []time.Time // Request deadlines
+	latestDealine time.Time
+	height        uint64
+	rw            p2p.MsgReadWriter
 
 	removed    chan struct{} // close this channel on remove
 	ctx        context.Context
@@ -68,34 +69,39 @@ type PeerInfo struct {
 	tasks chan func()
 }
 
-// BestPeers is the priority queue of peers. Used to select certain number of peers considered to be "best available"
-type BestPeers []*PeerInfo
+type PeerRef struct {
+	pi     *PeerInfo
+	height uint64
+}
+
+// PeersByMinBlock is the priority queue of peers. Used to select certain number of peers considered to be "best available"
+type PeersByMinBlock []PeerRef
 
 // Len (part of heap.Interface) returns the current size of the best peers queue
-func (bp BestPeers) Len() int {
+func (bp PeersByMinBlock) Len() int {
 	return len(bp)
 }
 
 // Less (part of heap.Interface) compares two peers
-func (bp BestPeers) Less(i, j int) bool {
+func (bp PeersByMinBlock) Less(i, j int) bool {
 	return bp[i].height < bp[j].height
 }
 
 // Swap (part of heap.Interface) moves two peers in the queue into each other's places.
-func (bp BestPeers) Swap(i, j int) {
+func (bp PeersByMinBlock) Swap(i, j int) {
 	bp[i], bp[j] = bp[j], bp[i]
 }
 
 // Push (part of heap.Interface) places a new peer onto the end of queue.
-func (bp *BestPeers) Push(x interface{}) {
+func (bp *PeersByMinBlock) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	p := x.(*PeerInfo)
+	p := x.(PeerRef)
 	*bp = append(*bp, p)
 }
 
 // Pop (part of heap.Interface) removes the first peer from the queue
-func (bp *BestPeers) Pop() interface{} {
+func (bp *PeersByMinBlock) Pop() interface{} {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
@@ -141,6 +147,7 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	pi.deadlines = append(pi.deadlines, deadline)
+	pi.latestDealine = deadline
 }
 
 func (pi *PeerInfo) Height() uint64 {
@@ -176,6 +183,12 @@ func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 	return len(pi.deadlines)
 }
 
+func (pi *PeerInfo) LatestDeadline() time.Time {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.latestDealine
+}
+
 func (pi *PeerInfo) Remove() {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
@@ -201,7 +214,7 @@ func (pi *PeerInfo) Async(f func()) {
 			pi.tasks = nil
 		}
 	case pi.tasks <- f:
-		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
+		if len(pi.tasks) == cap(pi.tasks) { // if channel full - discard old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
 				select {
 				case <-pi.tasks:
@@ -719,47 +732,41 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
-	var maxPermits int
+func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
+	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
+	byMinBlock := make(PeersByMinBlock, 0, peerCount)
+	var pokePeer *PeerInfo // Peer with the earliest dealine, to be "poked" by the request
+	var pokeDeadline time.Time
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if peerInfo.Height() >= minBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				permits := maxPermitsPerPeer - deadlines
-				if permits > maxPermits {
-					maxPermits = permits
-					foundPeerInfo = peerInfo
+		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+		height := peerInfo.Height()
+		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+		if deadlines < maxPermitsPerPeer {
+			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
+			if byMinBlock.Len() > peerCount {
+				// Remove the worst peer
+				peerRef := heap.Pop(&byMinBlock).(PeerRef)
+				latestDeadline := peerRef.pi.LatestDeadline()
+				if pokePeer == nil || latestDeadline.Before(pokeDeadline) {
+					pokeDeadline = latestDeadline
+					pokePeer = peerInfo
 				}
 			}
 		}
 		return true
 	})
-	return foundPeerInfo, maxPermits > 0
-}
-
-func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) ([]*PeerInfo, bool) {
-	// Choose peer(s) that we can send this request to, with maximum number of permits
-	now := time.Now()
-	var foundPeers BestPeers
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-		if deadlines < maxPermitsPerPeer {
-			heap.Push(&foundPeers, peerInfo)
-			if foundPeers.Len() > peerCount {
-				// Remove the worst peer
-				heap.Pop(&foundPeers)
-			}
-		}
-		return true
-	})
-
-	// return the count number of peers ordered by highest block (i.e. best first)
-	return foundPeers, foundPeers.Len() > 0
+	var foundPeers []*PeerInfo
+	if peerCount == 1 || pokePeer == nil {
+		foundPeers = make([]*PeerInfo, len(byMinBlock))
+	} else {
+		foundPeers = make([]*PeerInfo, len(byMinBlock)+1)
+		foundPeers[len(foundPeers)-1] = pokePeer
+	}
+	for i, peerRef := range byMinBlock {
+		foundPeers[i] = peerRef.pi
+	}
+	return foundPeers
 }
 
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
@@ -770,18 +777,11 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
-	peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
-	if found {
-		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
-	} else {
-		peerInfos, found := ss.findBestPeersWithPermit(int(inreq.PeerCount))
-		if found {
-			for _, peerInfo := range peerInfos {
-				ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
-				reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
-			}
-		}
+	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
+	reply.Peers = make([]*proto_types.H512, len(peerInfos))
+	for i, peerInfo := range peerInfos {
+		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
+		reply.Peers[i] = gointerfaces.ConvertHashToH512(peerInfo.ID())
 	}
 	return reply, nil
 }

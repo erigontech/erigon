@@ -433,10 +433,12 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	ff.logsSubs.addLogsFilters(f)
 	// if any filter in the aggregate needs all addresses or all topics then the global log subscription needs to
 	// allow all addresses or topics through
+	ff.logsSubs.logsFilterLock.Lock()
 	lfr := &remote.LogsFilterRequest{
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs >= 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics >= 1,
 	}
+	ff.logsSubs.logsFilterLock.Unlock()
 
 	addresses, topics := ff.logsSubs.getAggMaps()
 
@@ -468,10 +470,12 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	isDeleted := ff.logsSubs.removeLogsFilter(id)
 	// if any filters in the aggregate need all addresses or all topics then the request to the central
 	// log subscription needs to honour this
+	ff.logsSubs.logsFilterLock.Lock()
 	lfr := &remote.LogsFilterRequest{
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs >= 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics >= 1,
 	}
+	ff.logsSubs.logsFilterLock.Unlock()
 
 	addresses, topics := ff.logsSubs.getAggMaps()
 

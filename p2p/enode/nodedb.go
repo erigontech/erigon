@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 
@@ -611,6 +612,6 @@ func (db *DB) Close() {
 	if db.quit == nil {
 		return
 	}
-	close(db.quit)
+	libcommon.SafeClose(db.quit)
 	db.kv.Close()
 }

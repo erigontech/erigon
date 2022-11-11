@@ -414,7 +414,6 @@ loop:
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		b.Coinbase()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		if parallel {
 			func() {
@@ -432,14 +431,17 @@ loop:
 			}()
 		}
 
+		signer := *types.MakeSigner(chainConfig, blockNum)
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:     blockNum,
-				Rules:        rules,
 				Header:       header,
-				Txs:          txs,
+				Coinbase:     b.Coinbase(),
 				Uncles:       b.Uncles(),
+				Rules:        rules,
+				Txs:          txs,
 				TxNum:        inputTxNum,
 				TxIndex:      txIndex,
 				BlockHash:    b.Hash(),
@@ -448,7 +450,7 @@ loop:
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), header.BaseFee, txTask.Rules)
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					panic(err)
 				}
@@ -485,6 +487,8 @@ loop:
 			}
 			inputTxNum++
 		}
+		b, txs = nil, nil //nolint
+
 		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
@@ -601,6 +605,168 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 	}
 }
 
+func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs, workerCount int, fillWorkers []*exec3.FillWorker, agg *state2.Aggregator22) (bitmap *roaring64.Bitmap, err error) {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	var fromKey, toKey []byte
+	bigCount := big.NewInt(int64(workerCount))
+	bigStep := big.NewInt(0x100000000)
+	bigStep.Div(bigStep, bigCount)
+	bigCurrent := big.NewInt(0)
+	doneCount := atomic2.NewUint64(0)
+	for i := 0; i < workerCount; i++ {
+		fromKey = toKey
+		if i == workerCount-1 {
+			toKey = nil
+		} else {
+			bigCurrent.Add(bigCurrent, bigStep)
+			toKey = make([]byte, 4)
+			bigCurrent.FillBytes(toKey)
+		}
+		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
+	}
+
+	doneCount.Store(0)
+	accountCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
+		accountCollectorsX[i].LogLvl(log.LvlDebug)
+		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
+	}
+	t := time.Now()
+	for doneCount.Load() < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	log.Info("Scan accounts history", "took", time.Since(t))
+
+	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer accountCollectorX.Close()
+	accountCollectorX.LogLvl(log.LvlDebug)
+	for i := 0; i < workerCount; i++ {
+		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return accountCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return nil, err
+		}
+		accountCollectorsX[i].Close()
+		accountCollectorsX[i] = nil
+	}
+
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
+	}); err != nil {
+		return nil, err
+	}
+	accountCollectorX.Close()
+	accountCollectorX = nil //nolint
+	doneCount.Store(0)
+	storageCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
+		storageCollectorsX[i].LogLvl(log.LvlDebug)
+		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
+	}
+	t = time.Now()
+	for doneCount.Load() < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	log.Info("Scan storage history", "took", time.Since(t))
+
+	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer storageCollectorX.Close()
+	storageCollectorX.LogLvl(log.LvlDebug)
+	for i := 0; i < workerCount; i++ {
+		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return storageCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return nil, err
+		}
+		storageCollectorsX[i].Close()
+		storageCollectorsX[i] = nil //nolint
+	}
+	storageCollectorsX = nil //nolint
+
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
+	}); err != nil {
+		return nil, err
+	}
+	storageCollectorX.Close()
+	doneCount.Store(0)
+	codeCollectorsX := make([]*etl.Collector, workerCount)
+	for i := 0; i < workerCount; i++ {
+		fillWorkers[i].ResetProgress()
+		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
+		codeCollectorsX[i].LogLvl(log.LvlDebug)
+		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
+	}
+	for doneCount.Load() < uint64(workerCount) {
+		<-logEvery.C
+		var m runtime.MemStats
+		common.ReadMemStats(&m)
+		var p float64
+		for i := 0; i < workerCount; i++ {
+			if total := fillWorkers[i].Total(); total > 0 {
+				p += float64(fillWorkers[i].Progress()) / float64(total)
+			}
+		}
+		p *= 100.0
+		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+		)
+	}
+	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer codeCollectorX.Close()
+	codeCollectorX.LogLvl(log.LvlDebug)
+
+	bitmap = roaring64.New()
+	for i := 0; i < workerCount; i++ {
+		bitmap.Or(fillWorkers[i].Bitmap())
+		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return codeCollectorX.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
+			return nil, err
+		}
+		codeCollectorsX[i].Close()
+		codeCollectorsX[i] = nil
+	}
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
+	}); err != nil {
+		return nil, err
+	}
+	codeCollectorX.Close()
+	return bitmap, nil
+}
+
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
@@ -640,55 +806,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 
 	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
-	var wg sync.WaitGroup
-	workCh := make(chan *state.TxTask, workerCount*4)
-	rs := state.NewReconState(workCh)
-	var fromKey, toKey []byte
-	bigCount := big.NewInt(int64(workerCount))
-	bigStep := big.NewInt(0x100000000)
-	bigStep.Div(bigStep, bigCount)
-	bigCurrent := big.NewInt(0)
-	fillWorkers := make([]*exec3.FillWorker, workerCount)
-	doneCount := atomic2.NewUint64(0)
-	for i := 0; i < workerCount; i++ {
-		fromKey = toKey
-		if i == workerCount-1 {
-			toKey = nil
-		} else {
-			bigCurrent.Add(bigCurrent, bigStep)
-			toKey = make([]byte, 4)
-			bigCurrent.FillBytes(toKey)
-		}
-		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
-	}
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	doneCount.Store(0)
-	accountCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		accountCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
-	}
-	t := time.Now()
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	log.Info("Scan accounts history", "took", time.Since(t))
 
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
@@ -707,118 +824,20 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
-	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer accountCollectorX.Close()
-	accountCollectorX.LogLvl(log.LvlDebug)
-	for i := 0; i < workerCount; i++ {
-		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return accountCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		accountCollectorsX[i].Close()
-		accountCollectorsX[i] = nil
+	fillWorkers := make([]*exec3.FillWorker, workerCount)
+	bitmap, err := reconstituteStateStep1(ctx, db, txNum, dirs, workerCount, fillWorkers, agg)
+	if err != nil {
+		return err
 	}
 
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	accountCollectorX.Close()
-	accountCollectorX = nil
-	doneCount.Store(0)
-	storageCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		storageCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
-	}
-	t = time.Now()
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	log.Info("Scan storage history", "took", time.Since(t))
+	var wg sync.WaitGroup
+	workCh := make(chan *state.TxTask, workerCount*4)
+	rs := state.NewReconState(workCh)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
-	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer storageCollectorX.Close()
-	storageCollectorX.LogLvl(log.LvlDebug)
-	for i := 0; i < workerCount; i++ {
-		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return storageCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		storageCollectorsX[i].Close()
-		storageCollectorsX[i] = nil
-	}
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	storageCollectorX.Close()
-	storageCollectorX = nil
-	doneCount.Store(0)
-	codeCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		codeCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
-	}
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer codeCollectorX.Close()
-	codeCollectorX.LogLvl(log.LvlDebug)
-	var bitmap roaring64.Bitmap
-	for i := 0; i < workerCount; i++ {
-		bitmap.Or(fillWorkers[i].Bitmap())
-		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return codeCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		codeCollectorsX[i].Close()
-		codeCollectorsX[i] = nil
-	}
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	codeCollectorX.Close()
-	codeCollectorX = nil
 	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
-	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
 	chainTxs := make([]kv.Tx, workerCount)
 	defer func() {
@@ -839,6 +858,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 	}
+
+	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
@@ -879,13 +900,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				prevCount = count
 				prevRollbackCount = rollbackCount
 				syncMetrics[stages.Execution].Set(bn)
-				log.Info("State reconstitution", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
+				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
 					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
-					err := func() error {
+					t := time.Now()
+					if err = func() error {
 						lock.Lock()
 						defer lock.Unlock()
 						for i := 0; i < workerCount; i++ {
@@ -909,10 +931,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 							reconWorkers[i].SetTx(roTxs[i])
 						}
 						return nil
-					}()
-					if err != nil {
+					}(); err != nil {
 						panic(err)
 					}
+					log.Info(fmt.Sprintf("[%s] State reconstitution, commit", s.LogPrefix()), "took", time.Since(t))
 				}
 			}
 		}
@@ -923,25 +945,30 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var inputTxNum uint64
 	var b *types.Block
 	var txKey [8]byte
+	var t time.Time
 	for bn = uint64(0); bn <= blockNum; bn++ {
-		t := time.Now()
+		t = time.Now()
 		rules := chainConfig.Rules(bn)
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
 			return err
 		}
 		txs := b.Transactions()
+		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, bn)
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
-					Header:       b.HeaderNoCopy(),
+					Header:       header,
 					Coinbase:     b.Coinbase(),
 					Uncles:       b.Uncles(),
 					Rules:        rules,
 					TxNum:        inputTxNum,
+					Txs:          txs,
 					TxIndex:      txIndex,
 					BlockHash:    b.Hash(),
 					SkipAnalysis: skipAnalysis,
@@ -949,7 +976,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(*types.MakeSigner(chainConfig, txTask.BlockNum), b.HeaderNoCopy().BaseFee, txTask.Rules)
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 					if err != nil {
 						return err
 					}
@@ -963,6 +990,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			}
 			inputTxNum++
 		}
+		b, txs = nil, nil //nolint
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 	}
@@ -1038,7 +1066,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		plainContractCollectors[i] = etl.NewCollector(fmt.Sprintf("plainContract %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer plainContractCollectors[i].Close()
 	}
-	doneCount.Store(0)
+	doneCount := atomic2.NewUint64(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
