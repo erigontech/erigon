@@ -301,7 +301,7 @@ func runCmd(ctx *cli.Context) error {
 			os.Exit(1)
 		}
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Println("could not write memory profile: ", err)
+			fmt.Println("could not write memory profile")
 			os.Exit(1)
 		}
 		closeErr := f.Close()

@@ -83,3 +83,5 @@ coverage.out
 
 dist
 __debug_bin
+
+.dccache
