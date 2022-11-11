@@ -263,6 +263,7 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.RopstenChainName:    {},
 	networkname.MumbaiChainName:     {},
 	networkname.BorMainnetChainName: {},
+	networkname.GnosisChainName:     {},
 }
 
 func UseSnapshotsByChainName(chain string) bool {
