@@ -19,7 +19,6 @@ package vm
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -792,13 +791,15 @@ func makeEOF1(sections [][]byte, sigs []Annotation) []byte {
 	out := []byte{0xef, 0x00, 0x01}
 	// type header
 	if 0 < len(sigs) {
-		out = append(out, byte(kindType))
-		out = binary.BigEndian.AppendUint16(out, uint16(len(sigs)*2))
+		out = append(out, byte(kindType),
+			byte(uint16(len(sigs)*2)),
+			byte(uint16(len(sigs)*2)>>8))
 	}
 	// code header
 	for _, code := range sections {
-		out = append(out, byte(kindCode))
-		out = binary.BigEndian.AppendUint16(out, uint16(len(code)))
+		out = append(out, byte(kindCode),
+			byte(uint16(len(code))),
+			byte(uint16(len(code))>>8))
 	}
 	// terminator
 	out = append(out, 0x0)
