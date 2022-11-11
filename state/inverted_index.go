@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -374,14 +375,27 @@ func (ii *invertedIndexWAL) close() {
 	ii.indexKeys.Close()
 }
 
+var WALCollectorRam = etl.BufferOptimalSize / 16
+
+func init() {
+	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")
+	if v != "" {
+		var err error
+		WALCollectorRam, err = datasize.ParseString(v)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWAL {
 	w := &invertedIndexWAL{ii: ii,
 		buffered: true,
 		tmpdir:   tmpdir,
 		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		index:     etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
-		indexKeys: etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/16)),
+		index:     etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
+		indexKeys: etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
 	}
 	w.index.LogLvl(log.LvlTrace)
 	w.indexKeys.LogLvl(log.LvlTrace)
