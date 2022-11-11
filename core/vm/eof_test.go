@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,6 +26,7 @@ import (
 )
 
 func TestHasEOFMagic(t *testing.T) {
+	t.Parallel()
 	for i, test := range []struct {
 		code  string
 		valid bool
@@ -46,218 +48,219 @@ func TestHasEOFMagic(t *testing.T) {
 		// valid except second byte of magic
 		{"EF0101010002020004006000AABBCCDD", false},
 	} {
-		if hasEOFMagic(common.Hex2Bytes(test.code)) != test.valid {
+		if hasEOFMagic(common.FromHex(test.code)) != test.valid {
 			t.Errorf("test %d: code %v expected to be EOF", i, test.code)
 		}
 	}
 }
 
 func TestEOFContainer(t *testing.T) {
+	t.Parallel()
 	for i, test := range []struct {
-		code        string
-		typeSize    int
-		codeSize    []int
-		dataSize    int
-		types       [][]int
-		codeOffsets []int
-		data        int
-		err         error
+		code            string
+		wantTypeSize    int
+		wantCodeSize    []int
+		wantDataSize    int
+		wantTypes       [][]int
+		wantCodeOffsets []int
+		wantDataOffset  int
+		wantErr         error
 	}{
 		{
-			code:        "EF00010100010000",
-			codeSize:    []int{1},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF00010100010000",
+			wantCodeSize:    []int{1},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{
-			code:        "EF0001010002000000",
-			codeSize:    []int{2},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF0001010002000000",
+			wantCodeSize:    []int{2},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{
-			code:        "EF0001010002020001000000AA",
-			codeSize:    []int{2},
-			dataSize:    1,
-			codeOffsets: []int{10},
-			data:        12,
+			code:            "EF0001010002020001000000AA",
+			wantCodeSize:    []int{2},
+			wantDataSize:    1,
+			wantCodeOffsets: []int{10},
+			wantDataOffset:  12,
 		},
 		{
-			code:        "EF0001010002020004000000AABBCCDD",
-			codeSize:    []int{2},
-			dataSize:    4,
-			codeOffsets: []int{10},
-			data:        12,
+			code:            "EF0001010002020004000000AABBCCDD",
+			wantCodeSize:    []int{2},
+			wantDataSize:    4,
+			wantCodeOffsets: []int{10},
+			wantDataOffset:  12,
 		},
 		{
-			code:        "EF0001010005020002006000600100AABB",
-			codeSize:    []int{5},
-			dataSize:    2,
-			codeOffsets: []int{10},
-			data:        15,
+			code:            "EF0001010005020002006000600100AABB",
+			wantCodeSize:    []int{5},
+			wantDataSize:    2,
+			wantCodeOffsets: []int{10},
+			wantDataOffset:  15,
 		},
 		{
-			code:        "EF00010100070200040060006001600200AABBCCDD",
-			codeSize:    []int{7},
-			dataSize:    4,
-			codeOffsets: []int{10},
-			data:        17,
+			code:            "EF00010100070200040060006001600200AABBCCDD",
+			wantCodeSize:    []int{7},
+			wantDataSize:    4,
+			wantCodeOffsets: []int{10},
+			wantDataOffset:  17,
 		},
 		{
-			code:        "EF00010300040100080100020000000201600160025e0001000149",
-			codeSize:    []int{8, 2},
-			dataSize:    0,
-			typeSize:    4,
-			codeOffsets: []int{17, 25},
-			types:       [][]int{{0, 0}, {2, 1}},
+			code:            "EF00010300040100080100020000000201600160025e0001000149",
+			wantCodeSize:    []int{8, 2},
+			wantDataSize:    0,
+			wantTypeSize:    4,
+			wantCodeOffsets: []int{17, 25},
+			wantTypes:       [][]int{{0, 0}, {2, 1}},
 		},
 		{ // INVALID is defined and can be terminating
-			code:        "EF000101000100FE",
-			codeSize:    []int{1},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF000101000100FE",
+			wantCodeSize:    []int{1},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // terminating with RETURN
-			code:        "EF00010100050060006000F3",
-			codeSize:    []int{5},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF00010100050060006000F3",
+			wantCodeSize:    []int{5},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // terminating with REVERT
-			code:        "EF00010100050060006000FD",
-			codeSize:    []int{5},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF00010100050060006000FD",
+			wantCodeSize:    []int{5},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // terminating with SELFDESTRUCT
-			code:        "EF0001010003006000FF",
-			codeSize:    []int{3},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF0001010003006000FF",
+			wantCodeSize:    []int{3},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // PUSH32
-			code:        "EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000",
-			codeSize:    []int{34},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF0001010022007F000000000000000000000000000000000000000000000000000000000000000000",
+			wantCodeSize:    []int{34},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // undefined instructions inside push data
-			code:        "EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00",
-			codeSize:    []int{34},
-			dataSize:    0,
-			codeOffsets: []int{7},
+			code:            "EF0001010022007F0C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F00",
+			wantCodeSize:    []int{34},
+			wantDataSize:    0,
+			wantCodeOffsets: []int{7},
 		},
 		{ // undefined instructions inside data section
-			code:        "EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F",
-			codeSize:    []int{1},
-			dataSize:    32,
-			codeOffsets: []int{10},
-			data:        11,
+			code:            "EF000101000102002000000C0D0E0F1E1F2122232425262728292A2B2C2D2E2F494A4B4C4D4E4F5C5D5E5F",
+			wantCodeSize:    []int{1},
+			wantDataSize:    32,
+			wantCodeOffsets: []int{10},
+			wantDataOffset:  11,
 		},
 		{ // no version
-			code: "EF00",
-			err:  ErrEOF1InvalidVersion,
+			code:    "EF00",
+			wantErr: ErrEOF1InvalidVersion,
 		},
 		{ // invalid version
-			code: "EF0000",
-			err:  ErrEOF1InvalidVersion,
+			code:    "EF0000",
+			wantErr: ErrEOF1InvalidVersion,
 		},
 		{ // invalid version
-			code: "EF0002",
-			err:  ErrEOF1InvalidVersion,
+			code:    "EF0002",
+			wantErr: ErrEOF1InvalidVersion,
 		},
 		{ // valid except version
-			code: "EF0000010002020004006000AABBCCDD",
-			err:  ErrEOF1InvalidVersion,
+			code:    "EF0000010002020004006000AABBCCDD",
+			wantErr: ErrEOF1InvalidVersion,
 		},
 		{ // no header
-			code: "EF0001",
-			err:  ErrEOF1CodeSectionMissing,
+			code:    "EF0001",
+			wantErr: ErrEOF1CodeSectionMissing,
 		},
 		{ // no code section
-			code: "EF000100",
-			err:  ErrEOF1CodeSectionMissing,
+			code:    "EF000100",
+			wantErr: ErrEOF1CodeSectionMissing,
 		},
 		{ // no code section size
-			code: "EF000101",
-			err:  ErrEOF1CodeSectionSizeMissing,
+			code:    "EF000101",
+			wantErr: ErrEOF1CodeSectionSizeMissing,
 		},
 		{ // code section size incomplete
-			code: "EF00010100",
-			err:  ErrEOF1CodeSectionSizeMissing,
+			code:    "EF00010100",
+			wantErr: ErrEOF1CodeSectionSizeMissing,
 		},
 		{ // no section terminator
-			code: "EF0001010002",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // no code section contents
-			code: "EF000101000200",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF000101000200",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // not complete code section contents
-			code: "EF00010100020060",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF00010100020060",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // trailing bytes after code
-			code: "EF0001010002006000DEADBEEF",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002006000DEADBEEF",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // 0 size code section
-			code: "EF000101000000",
-			err:  ErrEOF1EmptyCodeSection,
+			code:    "EF000101000000",
+			wantErr: ErrEOF1EmptyCodeSection,
 		},
 		{ // 0 size code section, with non-0 data section
-			code: "EF000101000002000200AABB",
-			err:  ErrEOF1EmptyCodeSection,
+			code:    "EF000101000002000200AABB",
+			wantErr: ErrEOF1EmptyCodeSection,
 		},
 		{ // data section before code section
-			code: "EF000102000401000200AABBCCDD6000",
-			err:  ErrEOF1DataSectionBeforeCodeSection,
+			code:    "EF000102000401000200AABBCCDD6000",
+			wantErr: ErrEOF1DataSectionBeforeCodeSection,
 		},
 		{ // data section without code section
-			code: "EF0001020004AABBCCDD",
-			err:  ErrEOF1DataSectionBeforeCodeSection,
+			code:    "EF0001020004AABBCCDD",
+			wantErr: ErrEOF1DataSectionBeforeCodeSection,
 		},
 		{ // no data section size
-			code: "EF000101000202",
-			err:  ErrEOF1DataSectionSizeMissing,
+			code:    "EF000101000202",
+			wantErr: ErrEOF1DataSectionSizeMissing,
 		},
 		{ // data section size incomplete
-			code: "EF00010100020200",
-			err:  ErrEOF1DataSectionSizeMissing,
+			code:    "EF00010100020200",
+			wantErr: ErrEOF1DataSectionSizeMissing,
 		},
 		{ // no section terminator
-			code: "EF0001010002020004",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002020004",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // no data section contents
-			code: "EF0001010002020004006000",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002020004006000",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // not complete data section contents
-			code: "EF0001010002020004006000AABBCC",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002020004006000AABBCC",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // trailing bytes after data
-			code: "EF0001010002020004006000AABBCCDDEE",
-			err:  ErrEOF1InvalidTotalSize,
+			code:    "EF0001010002020004006000AABBCCDDEE",
+			wantErr: ErrEOF1InvalidTotalSize,
 		},
 		{ // 0 size data section
-			code: "EF0001010002020000006000",
-			err:  ErrEOF1EmptyDataSection,
+			code:    "EF0001010002020000006000",
+			wantErr: ErrEOF1EmptyDataSection,
 		},
 		{ // two data sections
-			code: "EF0001010002020004020004006000AABBCCDDAABBCCDD",
-			err:  ErrEOF1MultipleDataSections,
+			code:    "EF0001010002020004020004006000AABBCCDDAABBCCDD",
+			wantErr: ErrEOF1MultipleDataSections,
 		},
 		{ // section id = F
-			code: "EF00010100020F0004006000AABBCCDD",
-			err:  ErrEOF1UnknownSection,
+			code:    "EF00010100020F0004006000AABBCCDD",
+			wantErr: ErrEOF1UnknownSection,
 		},
 	} {
 		var (
 			jt   = &shanghaiInstructionSet
-			code = common.Hex2Bytes(test.code)
+			code = common.FromHex(test.code)
 		)
 
 		// Need to validate both code paths. First is the "trusted" EOF
@@ -267,49 +270,42 @@ func TestEOFContainer(t *testing.T) {
 		// If the error is expected, we compare the errors and continue
 		// on.
 		con1, err := NewEOF1Container(code, jt, false)
-		if err != nil {
-			if err == test.err {
-				// failed as expected
+		if err != nil || test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
 				continue
-			} else {
-				t.Errorf("test %d: code %v validation failure, error: %v", i, test.code, err)
 			}
+			t.Errorf("test %d: code %v validation failure, have: %v want %v", i, test.code, err, test.wantErr)
 		}
 		con2, _ := NewEOF1Container(code, jt, true)
 
 		validate := func(c EOF1Container, name string) {
-			if len(c.header.codeSize) != len(test.codeSize) {
-				t.Errorf("%s unexpected number of code sections (want: %d, got %d)", name, len(test.codeSize), len(c.header.codeSize))
-			}
-			if len(c.code) != len(test.codeOffsets) {
-				t.Errorf("%s unexpected number of code offsets (want: %d, got %d)", name, len(test.codeOffsets), len(c.code))
-			}
-			if len(c.code) != len(c.header.codeSize) {
-				t.Errorf("%s code offsets does not match code sizes (want: %d, got %d)", name, len(c.header.codeSize), len(c.code))
+			switch {
+			case len(c.header.codeSize) != len(test.wantCodeSize):
+				t.Errorf("%s unexpected number of code sections (want: %d, have %d)", name, len(test.wantCodeSize), len(c.header.codeSize))
+			case len(c.code) != len(test.wantCodeOffsets):
+				t.Errorf("%s unexpected number of code offsets (want: %d, have %d)", name, len(test.wantCodeOffsets), len(c.code))
+			case len(c.code) != len(c.header.codeSize):
+				t.Errorf("%s code offsets does not match code sizes (want: %d, have %d)", name, len(c.header.codeSize), len(c.code))
+			case c.header.dataSize != uint16(test.wantDataSize):
+				t.Errorf("%s dataSize want %v, have %v", name, test.wantDataSize, c.header.dataSize)
+			case c.header.dataSize != 0 && c.data != uint64(test.wantDataOffset):
+				t.Errorf("%s data offset want %v, have %v", name, test.wantDataOffset, c.data)
+			case c.header.typeSize != uint16(test.wantTypeSize):
+				t.Errorf("%s typeSize want %v, have %v", name, test.wantTypeSize, c.header.typeSize)
+			case c.header.typeSize != 0 && len(c.types) != len(test.wantTypes):
+				t.Errorf("%s unexpected number of types %v, want %v", name, len(c.types), len(test.wantTypes))
 			}
 			for j := 0; j < len(c.header.codeSize); j++ {
-				if test.codeSize != nil && c.header.codeSize[j] != uint16(test.codeSize[j]) {
-					t.Errorf("%s codeSize expected %v, got %v", name, test.codeSize[j], c.header.codeSize[j])
+				if test.wantCodeSize != nil && c.header.codeSize[j] != uint16(test.wantCodeSize[j]) {
+					t.Errorf("%s codeSize want %v, have %v", name, test.wantCodeSize[j], c.header.codeSize[j])
 				}
-				if test.codeOffsets != nil && c.code[j] != uint64(test.codeOffsets[j]) {
-					t.Errorf("%s code offset expected %v, got %v", name, test.codeOffsets[j], c.code[j])
+				if test.wantCodeOffsets != nil && c.code[j] != uint64(test.wantCodeOffsets[j]) {
+					t.Errorf("%s code offset want %v, have %v", name, test.wantCodeOffsets[j], c.code[j])
 				}
-			}
-			if c.header.dataSize != uint16(test.dataSize) {
-				t.Errorf("%s dataSize expected %v, got %v", name, test.dataSize, c.header.dataSize)
-			}
-			if c.header.dataSize != 0 && c.data != uint64(test.data) {
-				t.Errorf("%s data offset expected %v, got %v", name, test.data, c.data)
-			}
-			if c.header.typeSize != uint16(test.typeSize) {
-				t.Errorf("%s typeSize expected %v, got %v", name, test.typeSize, c.header.typeSize)
-			}
-			if c.header.typeSize != 0 && len(c.types) != len(test.types) {
-				t.Errorf("%s unexpected number of types %v, want %v", name, len(c.types), len(test.types))
 			}
 			for j, ty := range c.types {
-				if int(ty.input) != test.types[j][0] || int(ty.output) != test.types[j][1] {
-					t.Errorf("%s types annotation mismatch (want {%d, %d}, got {%d, %d}", name, test.types[j][0], test.types[j][1], ty.input, ty.output)
+				if int(ty.input) != test.wantTypes[j][0] || int(ty.output) != test.wantTypes[j][1] {
+					t.Errorf("%s types annotation mismatch (want {%d, %d}, have {%d, %d}", name, test.wantTypes[j][0], test.wantTypes[j][1], ty.input, ty.output)
 				}
 			}
 		}
@@ -319,7 +315,8 @@ func TestEOFContainer(t *testing.T) {
 }
 
 func TestInvalidInstructions(t *testing.T) {
-	for _, test := range []struct {
+	t.Parallel()
+	for i, test := range []struct {
 		code string
 		err  error
 	}{
@@ -342,19 +339,24 @@ func TestInvalidInstructions(t *testing.T) {
 		// RJUMP to push data.
 		{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset},
 	} {
-		_, err := NewEOF1Header(common.Hex2Bytes(test.code), &shanghaiInstructionSet, false)
-		if err == nil {
-			t.Errorf("code %v expected to be invalid", test.code)
+		if _, err := NewEOF1Header(common.FromHex(test.code), &shanghaiInstructionSet, false); err == nil {
+			t.Errorf("test %d: expected invalid code: %v", i, test.code)
 		} else if !strings.HasPrefix(err.Error(), test.err.Error()) {
-			t.Errorf("code %v expected error: \"%v\" got error: \"%v\"", test.code, test.err, err.Error())
+			t.Errorf("test %d: want error: \"%v\" have error: \"%v\"", i, test.err, err.Error())
 		}
 	}
 }
 
 func TestValidateUndefinedInstructions(t *testing.T) {
+	t.Parallel()
 	jt := &shanghaiInstructionSet
-	code := common.Hex2Bytes("EF0001010002000C00")
-	instrByte := &code[7]
+	code := common.FromHex("EF000101000200" + "0C00")
+	// Iterate over all possible opcodes, except the ones with immediates:
+	// PUSH1-PUSH32, RJUMP, RJUMPI, CALLF
+	// The actual code being validated is
+	// 0000
+	// 0100
+	/// ...
 	for opcode := uint16(0); opcode <= 0xff; opcode++ {
 		if OpCode(opcode) >= PUSH1 && OpCode(opcode) <= PUSH32 {
 			continue
@@ -362,47 +364,48 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 		if OpCode(opcode) == RJUMP || OpCode(opcode) == RJUMPI || OpCode(opcode) == CALLF {
 			continue
 		}
-
-		*instrByte = byte(opcode)
+		code[7] = byte(opcode)
 		_, err := NewEOF1Header(code, jt, false)
-		if jt[opcode].undefined {
-			if err == nil {
-				t.Errorf("opcode %v expected to be invalid", opcode)
-			} else if !strings.HasPrefix(err.Error(), ErrEOF1UndefinedInstruction.Error()) {
-				t.Errorf("opcode %v unxpected error: \"%v\"", opcode, err.Error())
-			}
-		} else {
+		if !jt[opcode].undefined {
 			if err != nil {
 				t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
 			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("opcode %v expected to be invalid", opcode)
+		} else if !strings.HasPrefix(err.Error(), ErrEOF1UndefinedInstruction.Error()) {
+			t.Errorf("opcode %v unexpected error: \"%v\"", opcode, err.Error())
 		}
 	}
 }
 
 func TestValidateTerminatingInstructions(t *testing.T) {
+	t.Parallel()
 	jt := &shanghaiInstructionSet
-	code := common.Hex2Bytes("EF0001010001000C")
-	instrByte := &code[7]
+	code := common.FromHex("EF000101000100" + "0C")
 	for opcodeValue := uint16(0); opcodeValue <= 0xff; opcodeValue++ {
 		opcode := OpCode(opcodeValue)
+		// Iterate over all possible opcodes, except the ones with immediates:
+		// PUSH1-PUSH32, RJUMP, RJUMPI, CALLF
 		if opcode >= PUSH1 && opcode <= PUSH32 || opcode == RJUMP || opcode == RJUMPI || opcode == CALLF || opcode == RETF {
 			continue
 		}
 		if jt[opcode].undefined {
 			continue
 		}
-		*instrByte = byte(opcode)
+		code[7] = byte(opcode)
 		_, err := NewEOF1Header(code, jt, false)
 		if opcode.isTerminating() {
 			if err != nil {
 				t.Errorf("opcode %v expected to be valid terminating instruction", opcode)
 			}
-		} else {
-			if err == nil {
-				t.Errorf("opcode %v expected to be invalid terminating instruction", opcode)
-			} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
-				t.Errorf("opcode %v unexpected error: \"%v\"", opcode, err.Error())
-			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("opcode %v expected to be invalid terminating instruction", opcode)
+		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
+			t.Errorf("opcode %v unexpected error: \"%v\"", opcode, err.Error())
 		}
 	}
 }
@@ -410,7 +413,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 func TestValidateTruncatedPush(t *testing.T) {
 	jt := &shanghaiInstructionSet
 	zeroes := [33]byte{}
-	code := common.Hex2Bytes("EF0001010001000C")
+	code := common.FromHex("EF0001010001000C")
 	for opcode := PUSH1; opcode <= PUSH32; opcode++ {
 		requiredBytes := opcode - PUSH1 + 1
 
