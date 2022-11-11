@@ -460,7 +460,7 @@ func (h *Header) SanityCheck() error {
 		return fmt.Errorf("too large block number: bitlen %d", h.Number.BitLen())
 	}
 	if h.Difficulty != nil {
-		if diffLen := h.Difficulty.BitLen(); diffLen > 80 {
+		if diffLen := h.Difficulty.BitLen(); diffLen > 192 {
 			return fmt.Errorf("too large block difficulty: bitlen %d", diffLen)
 		}
 	}
