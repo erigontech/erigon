@@ -266,7 +266,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.waitExceededCount.Store(0) // reset the circuit breaker
-	id := stateChanges.DatabaseViewID
+	id := stateChanges.StateVersionID
 	r := c.advanceRoot(id)
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
@@ -317,7 +317,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	if switched {
 		close(r.ready) //broadcast
 	}
-	//log.Info("on new block handled", "viewID", stateChanges.DatabaseViewID)
+	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {

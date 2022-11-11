@@ -11,7 +11,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.2.1
-	github.com/ledgerwatch/interfaces v0.0.0-20221103124126-5c404021ea28
+	github.com/ledgerwatch/interfaces v0.0.0-20221110171008-1309329613dc
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/matryer/moq v0.2.7

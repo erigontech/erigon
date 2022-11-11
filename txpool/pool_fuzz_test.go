@@ -468,7 +468,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			return nil
 		})
 		change := &remote.StateChangeBatch{
-			DatabaseViewID:      txID,
+			StateVersionID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 0, BlockHash: h0},
@@ -494,7 +494,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		_, _, _ = p2pReceived, txs2, txs3
 		change = &remote.StateChangeBatch{
-			DatabaseViewID:      txID,
+			StateVersionID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 1, BlockHash: h0},
@@ -507,7 +507,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		// unwind everything and switch to new fork (need unwind mined now)
 		change = &remote.StateChangeBatch{
-			DatabaseViewID:      txID,
+			StateVersionID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
@@ -519,7 +519,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txs2, types.TxSlots{}, "fork2")
 
 		change = &remote.StateChangeBatch{
-			DatabaseViewID:      txID,
+			StateVersionID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
 				{BlockHeight: 1, BlockHash: h22},
