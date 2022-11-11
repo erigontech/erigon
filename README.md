@@ -552,6 +552,15 @@ Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will 
 Port
 9091 is for internal gRCP connections (e.g erigon -> sentry).
 
+#### `sentinel` ports
+
+| Port  | Protocol  |     Purpose      | Expose  |
+|:-----:|:---------:|:----------------:|:-------:|
+| 4000  |    UDP    |     Peering      | Public  |
+| 4001  |    TCP    |     Peering      | Public  |
+| 7777  |    TCP    | gRPC Connections | Private |
+
+
 #### Other ports
 
 | Port | Protocol | Purpose | Expose  |

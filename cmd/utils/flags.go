@@ -726,6 +726,31 @@ var (
 		Usage: "Sets erigon flags from YAML/TOML file",
 		Value: "",
 	}
+	LightClientDiscoveryAddrFlag = cli.StringFlag{
+		Name:  "lightclient.discovery.addr",
+		Usage: "Address for lightclient DISCV5 protocol",
+		Value: "127.0.0.1",
+	}
+	LightClientDiscoveryPortFlag = cli.Uint64Flag{
+		Name:  "lightclient.discovery.port",
+		Usage: "Port for lightclient DISCV5 protocol",
+		Value: 4000,
+	}
+	LightClientDiscoveryTCPPortFlag = cli.Uint64Flag{
+		Name:  "lightclient.discovery.tcpport",
+		Usage: "TCP Port for lightclient DISCV5 protocol",
+		Value: 4001,
+	}
+	SentinelAddrFlag = cli.StringFlag{
+		Name:  "sentinel.addr",
+		Usage: "Address for sentinel",
+		Value: "localhost",
+	}
+	SentinelPortFlag = cli.Uint64Flag{
+		Name:  "sentinel.port",
+		Usage: "Port for sentinel",
+		Value: 7777,
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1428,6 +1453,12 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.CL = ctx.GlobalBool(ExternalConsensusFlag.Name)
+	cfg.LightClientDiscoveryAddr = ctx.GlobalString(LightClientDiscoveryAddrFlag.Name)
+	cfg.LightClientDiscoveryPort = ctx.GlobalUint64(LightClientDiscoveryPortFlag.Name)
+	cfg.LightClientDiscoveryTCPPort = ctx.GlobalUint64(LightClientDiscoveryTCPPortFlag.Name)
+	cfg.SentinelAddr = ctx.GlobalString(SentinelAddrFlag.Name)
+	cfg.SentinelPort = ctx.GlobalUint64(SentinelPortFlag.Name)
+
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
