@@ -148,4 +148,10 @@ var DefaultFlags = []cli.Flag{
 	logging.LogConsoleJsonFlag,
 	logging.LogJsonFlag,
 	logging.LogDirJsonFlag,
+
+	utils.LightClientDiscoveryAddrFlag,
+	utils.LightClientDiscoveryPortFlag,
+	utils.LightClientDiscoveryTCPPortFlag,
+	utils.SentinelAddrFlag,
+	utils.SentinelPortFlag,
 }
