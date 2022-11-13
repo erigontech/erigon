@@ -1,0 +1,7 @@
+---
+resources:
+  - eth66-peering-tcp.yaml
+  - eth66-peering-udp.yaml
+  - http.yaml
+  - snap-sync-tcp.yaml
+  - snap-sync-udp.yaml

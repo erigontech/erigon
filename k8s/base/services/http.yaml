@@ -1,18 +1,19 @@
+---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     app: erigon
-  name: snap-sync-udp
+  name: http
 spec:
   ipFamilies:
-  - IPv4
+    - IPv4
   ipFamilyPolicy: SingleStack
   ports:
-  - name: snap-sync-udp
-    port: 42069
-    protocol: UDP
-    targetPort: 42069
+    - name: http
+      port: 8545
+      protocol: TCP
+      targetPort: 8545
   selector:
     app: erigon
   type: LoadBalancer
