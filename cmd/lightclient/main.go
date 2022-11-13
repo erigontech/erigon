@@ -30,7 +30,7 @@ import (
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runLightClientNode, flags.LightClientDefaultFlags)
+	app := lightclientapp.MakeApp(runLightClientNode, flags.ConsensusLayerDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -42,13 +42,13 @@ func main() {
 
 func runLightClientNode(cliCtx *cli.Context) {
 	ctx := context.Background()
-	lcCfg, err := lcCli.SetUpLightClientCfg(cliCtx)
+	lcCfg, err := lcCli.SetUpConsensusLayerCfg(cliCtx)
 	if err != nil {
 		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
-	log.Info("[LightClient]", "chain", cliCtx.GlobalString(flags.LightClientChain.Name))
-	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
+	log.Info("[ConsensusLayer]", "chain", cliCtx.GlobalString(flags.ConsensusLayerChain.Name))
+	log.Info("[ConsensusLayer] Running lightclient", "cfg", lcCfg)
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),

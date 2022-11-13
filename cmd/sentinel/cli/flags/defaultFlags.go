@@ -2,14 +2,14 @@ package flags
 
 import "github.com/urfave/cli"
 
-var LightClientDefaultFlags = []cli.Flag{
-	LightClientPort,
-	LightClientAddr,
-	LightClientTcpPort,
-	LightClientVerbosity,
-	LightClientChain,
-	LightClientServerAddr,
-	LightClientServerPort,
-	LightClientServerProtocol,
-	LightClientDiscovery,
+var ConsensusLayerDefaultFlags = []cli.Flag{
+	ConsensusLayerPort,
+	ConsensusLayerAddr,
+	ConsensusLayerTcpPort,
+	ConsensusLayerVerbosity,
+	ConsensusLayerChain,
+	ConsensusLayerServerAddr,
+	ConsensusLayerServerPort,
+	ConsensusLayerServerProtocol,
+	ConsensusLayerDiscovery,
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-type LightClientCliCfg struct {
+type ConsensusLayerCliCfg struct {
 	GenesisCfg     *clparams.GenesisConfig     `json:"genesisCfg"`
 	BeaconCfg      *clparams.BeaconChainConfig `json:"beaconCfg"`
 	NetworkCfg     *clparams.NetworkConfig     `json:"networkCfg"`
@@ -22,23 +22,23 @@ type LightClientCliCfg struct {
 	CheckpointUri  string                      `json:"checkpointUri"`
 }
 
-func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
-	cfg := &LightClientCliCfg{}
-	chainName := ctx.GlobalString(flags.LightClientChain.Name)
+func SetUpConsensusLayerCfg(ctx *cli.Context) (*ConsensusLayerCliCfg, error) {
+	cfg := &ConsensusLayerCliCfg{}
+	chainName := ctx.GlobalString(flags.ConsensusLayerChain.Name)
 	var err error
 	var network clparams.NetworkType
 	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, network, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
 	}
-	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(flags.LightClientServerAddr.Name), ctx.GlobalInt(flags.LightClientServerPort.Name))
-	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(flags.LightClientServerProtocol.Name))
+	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(flags.ConsensusLayerServerAddr.Name), ctx.GlobalInt(flags.ConsensusLayerServerPort.Name))
+	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(flags.ConsensusLayerServerProtocol.Name))
 
-	cfg.Port = uint(ctx.GlobalInt(flags.LightClientPort.Name))
-	cfg.Addr = ctx.GlobalString(flags.LightClientAddr.Name)
+	cfg.Port = uint(ctx.GlobalInt(flags.ConsensusLayerPort.Name))
+	cfg.Addr = ctx.GlobalString(flags.ConsensusLayerAddr.Name)
 
-	cfg.LogLvl = ctx.GlobalUint(flags.LightClientVerbosity.Name)
-	cfg.NoDiscovery = !ctx.GlobalBoolT(flags.LightClientDiscovery.Name)
+	cfg.LogLvl = ctx.GlobalUint(flags.ConsensusLayerVerbosity.Name)
+	cfg.NoDiscovery = !ctx.GlobalBoolT(flags.ConsensusLayerDiscovery.Name)
 	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
 	return cfg, nil
 }

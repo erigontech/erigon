@@ -38,7 +38,7 @@ import (
 )
 
 func main() {
-	app := sentinelapp.MakeApp(runSentinelNode, flags.LightClientDefaultFlags)
+	app := sentinelapp.MakeApp(runSentinelNode, flags.ConsensusLayerDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -74,7 +74,7 @@ func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*consensusrpc.Reques
 }
 
 func runSentinelNode(cliCtx *cli.Context) {
-	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
+	lcCfg, _ := lcCli.SetUpConsensusLayerCfg(cliCtx)
 	ctx := context.Background()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
@@ -103,12 +103,12 @@ func runSentinelNode(cliCtx *cli.Context) {
 
 	log.Info("Sending test request")
 	/*
-		sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.ConsensusLayerFinalityUpdateV1))
 		sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
 		sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV2))
-		sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientOptimisticUpdateV1))
+		sendRequest(ctx, s, constructBodyFreeRequest(handlers.ConsensusLayerOptimisticUpdateV1))
 
-		lcUpdateReq := &cltypes.LightClientUpdatesByRangeRequest{
+		lcUpdateReq := &cltypes.ConsensusLayerUpdatesByRangeRequest{
 			Period: 604,
 			Count:  1,
 		}
