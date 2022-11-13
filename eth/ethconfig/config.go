@@ -236,12 +236,12 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// ConsenSUS layer
-	CL                          bool
-	LightClientDiscoveryAddr    string
-	LightClientDiscoveryPort    uint64
-	LightClientDiscoveryTCPPort uint64
-	SentinelAddr                string
-	SentinelPort                uint64
+	CL                             bool
+	ConsensusLayerDiscoveryAddr    string
+	ConsensusLayerDiscoveryPort    uint64
+	ConsensusLayerDiscoveryTCPPort uint64
+	SentinelAddr                   string
+	SentinelPort                   uint64
 
 	// FORK_NEXT_VALUE (see EIP-3675) block override
 	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`

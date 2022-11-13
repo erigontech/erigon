@@ -482,9 +482,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
-			IpAddr:        config.LightClientDiscoveryAddr,
-			Port:          int(config.LightClientDiscoveryPort),
-			TCPPort:       uint(config.LightClientDiscoveryTCPPort),
+			IpAddr:        config.ConsensusLayerDiscoveryAddr,
+			Port:          int(config.ConsensusLayerDiscoveryPort),
+			TCPPort:       uint(config.ConsensusLayerDiscoveryTCPPort),
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
