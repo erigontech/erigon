@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -43,4 +44,7 @@ func main() {
 		return
 	}
 	log.Info("Everything Successfull Hurray!")
+
+	fmt.Printf("beacon root=%x, beacon epoch=%d\n", state.FinalizedCheckpoint.Root, state.FinalizedCheckpoint.Epoch)
+	fmt.Printf("current root=%x, current slot=%d\n", state.Eth1Data.Root, state.LatestBlockHeader.Slot)
 }
