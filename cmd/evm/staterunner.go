@@ -24,14 +24,15 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 var stateTestCommand = cli.Command{
@@ -60,20 +61,20 @@ func stateTestCmd(ctx *cli.Context) error {
 
 	// Configure the EVM logger
 	config := &vm.LogConfig{
-		DisableMemory:     ctx.GlobalBool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.GlobalBool(DisableStackFlag.Name),
-		DisableStorage:    ctx.GlobalBool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.GlobalBool(DisableReturnDataFlag.Name),
+		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:      ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
+		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	var (
 		tracer   vm.Tracer
 		debugger *vm.StructLogger
 	)
 	switch {
-	case ctx.GlobalBool(MachineFlag.Name):
+	case ctx.Bool(MachineFlag.Name):
 		tracer = vm.NewJSONLogger(config, os.Stderr)
 
-	case ctx.GlobalBool(DebugFlag.Name):
+	case ctx.Bool(DebugFlag.Name):
 		debugger = vm.NewStructLogger(config)
 		tracer = debugger
 
@@ -110,7 +111,7 @@ func aggregateResultsFromStateTests(
 	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
 		Tracer: tracer,
-		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
+		Debug:  ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 	}
 	db := memdb.New()
 	defer db.Close()
@@ -156,7 +157,7 @@ func aggregateResultsFromStateTests(
 			*/
 
 			// print state root for evmlab tracing
-			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+			if ctx.Bool(MachineFlag.Name) && statedb != nil {
 				_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root.Bytes())
 				if printErr != nil {
 					log.Warn("Failed to write to stderr", "err", printErr)
@@ -166,7 +167,7 @@ func aggregateResultsFromStateTests(
 			results = append(results, *result)
 
 			// Print any structured logs collected
-			if ctx.GlobalBool(DebugFlag.Name) {
+			if ctx.Bool(DebugFlag.Name) {
 				if debugger != nil {
 					_, printErr := fmt.Fprintln(os.Stderr, "#### TRACE ####")
 					if printErr != nil {

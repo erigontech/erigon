@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
+	"github.com/urfave/cli/v2"
 
-	"github.com/urfave/cli"
+	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 )
 
 var compileCommand = cli.Command{
@@ -34,7 +34,7 @@ var compileCommand = cli.Command{
 }
 
 func compileCmd(ctx *cli.Context) error {
-	debug := ctx.GlobalBool(DebugFlag.Name)
+	debug := ctx.Bool(DebugFlag.Name)
 
 	if len(ctx.Args().First()) == 0 {
 		return errors.New("filename required")
