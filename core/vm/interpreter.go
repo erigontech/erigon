@@ -271,7 +271,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// The default case is set above, if the contract is actually EOF the
 	// offset should be updated to beginning of the first code section.
 	if !contract.IsLegacy() {
-		callContext.RetStack[0].CodeOffset = contract.Container.code[0]
+		callContext.RetStack[0].CodeOffset = contract.Container.codeOffsets[0]
 	}
 	// Don't move this deferred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before

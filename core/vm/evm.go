@@ -260,7 +260,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code, evm.mustReadContainer(code))
+		contract.SetCallCode(&addrCopy, codeHash, code, evm.mustParseContainer(code))
 		readOnly := false
 		if callType == STATICCALLT {
 			readOnly = true
@@ -372,7 +372,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Try to read code header if it claims to be EOF-formatted.
-	container, err := evm.readContainer(codeAndHash.code)
+	container, err := evm.parseContainer(codeAndHash.code)
 	if err != nil {
 		return nil, common.Address{}, gas, ErrInvalidEOFCode
 	}
@@ -404,7 +404,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			if !ok {
 				return nil, common.Address{}, gas, ErrInvalidInterpreter
 			}
-			_, err = NewEOF1Header(ret, evmInterpreter.jt, false)
+			_, err := ParseAndValidateEOF1Container(ret, evmInterpreter.jt)
 			if err != nil {
 				err = ErrInvalidEOFCode
 			}
@@ -446,32 +446,29 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 }
 
-// mustReadContainer reads a valid EOF container.
-func (evm *EVM) mustReadContainer(code []byte) *EOF1Container {
+// mustParseContainer reads a valid EOF container.
+func (evm *EVM) mustParseContainer(code []byte) *EOF1Container {
 	var container *EOF1Container
 	if evm.chainRules.IsShanghai && hasEOFMagic(code) {
-		if evmInterpreter, ok := evm.interpreter.(*EVMInterpreter); ok {
-			c, _ := NewEOF1Container(code, evmInterpreter.jt, true)
-			container = &c
-		}
+		container, _ = ParseEOF1Container(code)
 	}
 	return container
 }
 
-// readContainer attempts to read the EOF container defined by code if the
+// parseContainer attempts to read the EOF container defined by code if the
 // chainRules supports it.
-func (evm *EVM) readContainer(code []byte) (*EOF1Container, error) {
+func (evm *EVM) parseContainer(code []byte) (*EOF1Container, error) {
 	var container *EOF1Container
 	if evm.chainRules.IsShanghai && hasEOFMagic(code) {
 		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
 		if !ok {
 			return nil, ErrInvalidInterpreter
 		}
-		c, err := NewEOF1Container(code, evmInterpreter.jt, false)
+		c, err := ParseAndValidateEOF1Container(code, evmInterpreter.jt)
 		if err != nil {
 			return nil, err
 		}
-		container = &c
+		container = c
 	}
 	return container, nil
 }

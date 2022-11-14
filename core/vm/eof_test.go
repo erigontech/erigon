@@ -259,58 +259,47 @@ func TestEOFContainer(t *testing.T) {
 		},
 	} {
 		var (
-			jt   = &shanghaiInstructionSet
 			code = common.FromHex(test.code)
+			name = fmt.Sprintf("test %2d: code %v", i, test.code)
 		)
 
-		// Need to validate both code paths. First is the "trusted" EOF
-		// code that was validated before being stored. This can't
-		// throw and error. The other path is "untrusted" and so the
-		// code is validated as it is parsed. This may throw an error.
-		// If the error is expected, we compare the errors and continue
-		// on.
-		con1, err := NewEOF1Container(code, jt, false)
+		c, err := ParseEOF1Container(code)
 		if err != nil || test.wantErr != nil {
 			if errors.Is(err, test.wantErr) {
 				continue
 			}
 			t.Errorf("test %d: code %v validation failure, have: %v want %v", i, test.code, err, test.wantErr)
 		}
-		con2, _ := NewEOF1Container(code, jt, true)
 
-		validate := func(c EOF1Container, name string) {
-			switch {
-			case len(c.header.codeSize) != len(test.wantCodeSize):
-				t.Errorf("%s unexpected number of code sections (want: %d, have %d)", name, len(test.wantCodeSize), len(c.header.codeSize))
-			case len(c.code) != len(test.wantCodeOffsets):
-				t.Errorf("%s unexpected number of code offsets (want: %d, have %d)", name, len(test.wantCodeOffsets), len(c.code))
-			case len(c.code) != len(c.header.codeSize):
-				t.Errorf("%s code offsets does not match code sizes (want: %d, have %d)", name, len(c.header.codeSize), len(c.code))
-			case c.header.dataSize != uint16(test.wantDataSize):
-				t.Errorf("%s dataSize want %v, have %v", name, test.wantDataSize, c.header.dataSize)
-			case c.header.dataSize != 0 && c.data != uint64(test.wantDataOffset):
-				t.Errorf("%s data offset want %v, have %v", name, test.wantDataOffset, c.data)
-			case c.header.typeSize != uint16(test.wantTypeSize):
-				t.Errorf("%s typeSize want %v, have %v", name, test.wantTypeSize, c.header.typeSize)
-			case c.header.typeSize != 0 && len(c.types) != len(test.wantTypes):
-				t.Errorf("%s unexpected number of types %v, want %v", name, len(c.types), len(test.wantTypes))
+		switch {
+		case len(c.codeSize) != len(test.wantCodeSize):
+			t.Errorf("%s unexpected number of code sections (want: %d, have %d)", name, len(test.wantCodeSize), len(c.codeSize))
+		case len(c.codeOffsets) != len(test.wantCodeOffsets):
+			t.Errorf("%s unexpected number of code offsets (want: %d, have %d)", name, len(test.wantCodeOffsets), len(c.codeOffsets))
+		case len(c.codeOffsets) != len(c.codeSize):
+			t.Errorf("%s code offsets does not match code sizes (want: %d, have %d)", name, len(c.codeSize), len(c.codeOffsets))
+		case c.dataSize != uint16(test.wantDataSize):
+			t.Errorf("%s dataSize want %v, have %v", name, test.wantDataSize, c.dataSize)
+		case c.dataSize != 0 && c.dataOffset != uint64(test.wantDataOffset):
+			t.Errorf("%s data offset want %v, have %v", name, test.wantDataOffset, c.data)
+		case c.typeSize != uint16(test.wantTypeSize):
+			t.Errorf("%s typeSize want %v, have %v", name, test.wantTypeSize, c.typeSize)
+		case c.typeSize != 0 && len(c.types) != len(test.wantTypes):
+			t.Errorf("%s unexpected number of types %v, want %v", name, len(c.types), len(test.wantTypes))
+		}
+		for j := 0; j < len(c.codeSize); j++ {
+			if test.wantCodeSize != nil && c.codeSize[j] != uint16(test.wantCodeSize[j]) {
+				t.Errorf("%s codeSize want %v, have %v", name, test.wantCodeSize[j], c.codeSize[j])
 			}
-			for j := 0; j < len(c.header.codeSize); j++ {
-				if test.wantCodeSize != nil && c.header.codeSize[j] != uint16(test.wantCodeSize[j]) {
-					t.Errorf("%s codeSize want %v, have %v", name, test.wantCodeSize[j], c.header.codeSize[j])
-				}
-				if test.wantCodeOffsets != nil && c.code[j] != uint64(test.wantCodeOffsets[j]) {
-					t.Errorf("%s code offset want %v, have %v", name, test.wantCodeOffsets[j], c.code[j])
-				}
-			}
-			for j, ty := range c.types {
-				if int(ty.input) != test.wantTypes[j][0] || int(ty.output) != test.wantTypes[j][1] {
-					t.Errorf("%s types annotation mismatch (want {%d, %d}, have {%d, %d}", name, test.wantTypes[j][0], test.wantTypes[j][1], ty.input, ty.output)
-				}
+			if test.wantCodeOffsets != nil && c.codeOffsets[j] != uint64(test.wantCodeOffsets[j]) {
+				t.Errorf("%s code offset want %v, have %v", name, test.wantCodeOffsets[j], c.codeOffsets[j])
 			}
 		}
-		validate(con1, fmt.Sprintf("test %2d     (validated): code %v", i, test.code))
-		validate(con2, fmt.Sprintf("test %2d (not validated): code %v", i, test.code))
+		for j, ty := range c.types {
+			if int(ty.Input) != test.wantTypes[j][0] || int(ty.Output) != test.wantTypes[j][1] {
+				t.Errorf("%s types annotation mismatch (want {%d, %d}, have {%d, %d}", name, test.wantTypes[j][0], test.wantTypes[j][1], ty.Input, ty.Output)
+			}
+		}
 	}
 }
 
@@ -339,7 +328,7 @@ func TestInvalidInstructions(t *testing.T) {
 		// RJUMP to push data.
 		{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset},
 	} {
-		if _, err := NewEOF1Header(common.FromHex(test.code), &shanghaiInstructionSet, false); err == nil {
+		if _, err := ParseAndValidateEOF1Container(common.FromHex(test.code), &shanghaiInstructionSet); err == nil {
 			t.Errorf("test %d: expected invalid code: %v", i, test.code)
 		} else if !strings.HasPrefix(err.Error(), test.err.Error()) {
 			t.Errorf("test %d: want error: \"%v\" have error: \"%v\"", i, test.err, err.Error())
@@ -365,7 +354,7 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 			continue
 		}
 		code[7] = byte(opcode)
-		_, err := NewEOF1Header(code, jt, false)
+		_, err := ParseAndValidateEOF1Container(code, jt)
 		if !jt[opcode].undefined {
 			if err != nil {
 				t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
@@ -395,7 +384,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 			continue
 		}
 		code[7] = byte(opcode)
-		_, err := NewEOF1Header(code, jt, false)
+		_, err := ParseAndValidateEOF1Container(code, jt)
 		if opcode.isTerminating() {
 			if err != nil {
 				t.Errorf("opcode %v expected to be valid terminating instruction", opcode)
@@ -422,8 +411,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeTruncatedPush[5] = byte(len(codeTruncatedPush) - 7)
 		codeTruncatedPush[7] = byte(opcode)
 
-		_, err := NewEOF1Header(codeTruncatedPush, jt, false)
-		if err == nil {
+		if _, err := ParseAndValidateEOF1Container(codeTruncatedPush, jt); err == nil {
 			t.Errorf("code %v has truncated PUSH, expected to be invalid", common.Bytes2Hex(codeTruncatedPush))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeTruncatedPush), err)
@@ -434,8 +422,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeNotTerminated[5] = byte(len(codeNotTerminated) - 7)
 		codeNotTerminated[7] = byte(opcode)
 
-		_, err = NewEOF1Header(codeNotTerminated, jt, false)
-		if err == nil {
+		if _, err := ParseAndValidateEOF1Container(codeNotTerminated, jt); err == nil {
 			t.Errorf("code %v does not have terminating instruction, expected to be invalid", common.Bytes2Hex(codeNotTerminated))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeNotTerminated), err)
@@ -446,8 +433,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeValid[5] = byte(len(codeValid) - 7)
 		codeValid[7] = byte(opcode)
 
-		_, err = NewEOF1Header(codeValid, jt, false)
-		if err != nil {
+		if _, err := ParseAndValidateEOF1Container(codeValid, jt); err != nil {
 			t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
 		}
 	}

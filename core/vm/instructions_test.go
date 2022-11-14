@@ -709,19 +709,22 @@ func TestStaticRelativeJumps(t *testing.T) {
 			evmInterpreter = env.interpreter
 			code           = makeEOF1([][]byte{common.Hex2Bytes(tt.code)}, nil)
 			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
-			container, _   = NewEOF1Container(code, env.interpreter.cfg.JumpTable, true)
+			container, err = ParseEOF1Container(code)
 		)
-		contract.SetCallCode(&addr, common.Hash{}, code, &container)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract.SetCallCode(&addr, common.Hash{}, code, container)
 
 		if tt.op == "RJUMP" {
-			opRjump(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}}})
+			opRjump(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.codeOffsets[0], uint64(container.codeSize[0])}}})
 		} else if tt.op == "RJUMPI" {
 			if tt.condition {
 				stack.push(uint256.NewInt(1))
 			} else {
 				stack.push(uint256.NewInt(0))
 			}
-			opRjumpi(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}}})
+			opRjumpi(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.codeOffsets[0], uint64(container.codeSize[0])}}})
 		}
 
 		// The pc should be one less than expected because the interpreter will increment it.
@@ -750,17 +753,17 @@ func TestEOFFunctions(t *testing.T) {
 			stack          = newstack()
 			pc             = uint64(0)
 			evmInterpreter = env.interpreter
-			eofCode        = makeEOF1(code, []Annotation{{input: 0, output: 0}, {input: 2, output: 1}})
+			eofCode        = makeEOF1(code, []Annotation{{Input: 0, Output: 0}, {Input: 2, Output: 1}})
 			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
-			container, _   = NewEOF1Container(eofCode, env.interpreter.cfg.JumpTable, true)
+			container, _   = ParseEOF1Container(eofCode)
 		)
-		contract.SetCallCode(&addr, common.Hash{}, eofCode, &container)
+		contract.SetCallCode(&addr, common.Hash{}, eofCode, container)
 		scope := &ScopeContext{
 			Memory:        nil,
 			Stack:         stack,
 			Contract:      contract,
 			ActiveSection: 0,
-			RetStack:      []*SubroutineContext{{0, 0, 0, container.code[0], uint64(container.header.codeSize[0])}},
+			RetStack:      []*SubroutineContext{{0, 0, 0, container.codeOffsets[0], uint64(container.codeSize[0])}},
 		}
 		// Fill stack.
 		for i := 0; i < tt.stack; i++ {
@@ -790,22 +793,22 @@ func TestEOFFunctions(t *testing.T) {
 func makeEOF1(sections [][]byte, sigs []Annotation) []byte {
 	out := []byte{0xef, 0x00, 0x01}
 	// type header
-	if 0 < len(sigs) {
+	if len(sigs) != 0 {
 		out = append(out, byte(kindType),
-			byte(uint16(len(sigs)*2)),
-			byte(uint16(len(sigs)*2)>>8))
+			byte(uint16(len(sigs)*2)>>8),
+			byte(uint16(len(sigs)*2)))
 	}
 	// code header
 	for _, code := range sections {
 		out = append(out, byte(kindCode),
-			byte(uint16(len(code))),
-			byte(uint16(len(code))>>8))
+			byte(uint16(len(code))>>8),
+			byte(uint16(len(code))))
 	}
 	// terminator
 	out = append(out, 0x0)
 	// type section
 	for _, sig := range sigs {
-		out = append(out, []byte{sig.input, sig.output}...)
+		out = append(out, []byte{sig.Input, sig.Output}...)
 	}
 	// code section
 	for _, code := range sections {
