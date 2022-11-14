@@ -91,8 +91,9 @@ func checkNodes(t *testing.T, nodes []*Node, wantLen int) {
 
 // This test checks fairness of FairMix in the happy case where all sources return nodes
 // within the context's deadline.
-func TestFairMix(t *testing.T) {
-	for i := 0; i < 500; i++ {
+// see: iter_integration_test.go
+func TestFairMixOnce(t *testing.T) {
+	for i := 0; i < 10; i++ {
 		testMixerFairness(t)
 	}
 }

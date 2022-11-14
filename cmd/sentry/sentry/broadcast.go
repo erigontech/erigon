@@ -3,6 +3,7 @@ package sentry
 import (
 	"context"
 	"errors"
+	"math"
 	"math/big"
 	"strings"
 	"syscall"
@@ -27,7 +28,7 @@ const (
 	maxTxPacketSize = 100 * 1024
 )
 
-func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
+func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 	typedRequest := make(eth.NewBlockHashesPacket, len(announces))
@@ -37,18 +38,23 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 	}
 	data, err := rlp.EncodeToBytes(&typedRequest)
 	if err != nil {
-		log.Error("propagateNewBlockHashes", "error", err)
+		log.Error("propagateNewBlockHashes", "err", err)
 		return
 	}
 	var req66 *proto_sentry.OutboundMessageData
-	for _, sentry := range cs.sentries {
+	// Send the block to a subset of our peers
+	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+	for i, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
+		}
+		if i > sendToAmount { //TODO: send to random sentries, not just to fi
+			break
 		}
 
 		switch sentry.Protocol() {
 
-		case eth.ETH66:
+		case eth.ETH66, eth.ETH67:
 			if req66 == nil {
 				req66 = &proto_sentry.OutboundMessageData{
 					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
@@ -57,7 +63,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 
 				_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					log.Error("propagateNewBlockHashes", "error", err)
+					log.Error("propagateNewBlockHashes", "err", err)
 				}
 			}
 		default:
@@ -66,7 +72,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
+func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
@@ -74,17 +80,22 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 		TD:    td,
 	})
 	if err != nil {
-		log.Error("broadcastNewBlock", "error", err)
+		log.Error("broadcastNewBlock", "err", err)
 	}
 	var req66 *proto_sentry.SendMessageToRandomPeersRequest
-	for _, sentry := range cs.sentries {
+	// Send the block to a subset of our peers
+	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+	for i, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
+		}
+		if i > sendToAmount { //TODO: send to random sentries, not just to fi
+			break
 		}
 
 		switch sentry.Protocol() {
 
-		case eth.ETH66:
+		case eth.ETH66, eth.ETH67:
 			if req66 == nil {
 				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 					MaxPeers: 1024,
@@ -96,16 +107,16 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 			}
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-					log.Debug("broadcastNewBlock", "error", err)
+					log.Debug("broadcastNewBlock", "err", err)
 					continue
 				}
-				log.Error("broadcastNewBlock", "error", err)
+				log.Error("broadcastNewBlock", "err", err)
 			}
 		}
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -128,16 +139,21 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("BroadcastLocalPooledTxs", "error", err)
+			log.Error("BroadcastLocalPooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.OutboundMessageData
-		for _, sentry := range cs.sentries {
+		// Send the block to a subset of our peers
+		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+		for i, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
 			}
+			if i > sendToAmount { //TODO: send to random sentries, not just to fi
+				break
+			}
 
 			switch sentry.Protocol() {
-			case eth.ETH66:
+			case eth.ETH66, eth.ETH67:
 				if req66 == nil {
 					req66 = &proto_sentry.OutboundMessageData{
 						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
@@ -147,10 +163,10 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastLocalPooledTxs", "error", err)
+						log.Debug("BroadcastLocalPooledTxs", "err", err)
 						continue
 					}
-					log.Error("BroadcastLocalPooledTxs", "error", err)
+					log.Error("BroadcastLocalPooledTxs", "err", err)
 				}
 				avgPeersPerSent66 += len(peers.GetPeers())
 			}
@@ -163,7 +179,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -182,17 +198,22 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("BroadcastRemotePooledTxs", "error", err)
+			log.Error("BroadcastRemotePooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.SendMessageToRandomPeersRequest
-		for _, sentry := range cs.sentries {
+		// Send the block to a subset of our peers
+		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+		for i, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
+			}
+			if i > sendToAmount { //TODO: send to random sentries, not just to fi
+				break
 			}
 
 			switch sentry.Protocol() {
 
-			case eth.ETH66:
+			case eth.ETH66, eth.ETH67:
 				if req66 == nil {
 					req66 = &proto_sentry.SendMessageToRandomPeersRequest{
 						MaxPeers: 1024,
@@ -204,17 +225,17 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 				}
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastRemotePooledTxs", "error", err)
+						log.Debug("BroadcastRemotePooledTxs", "err", err)
 						continue
 					}
-					log.Error("BroadcastRemotePooledTxs", "error", err)
+					log.Error("BroadcastRemotePooledTxs", "err", err)
 				}
 			}
 		}
 	}
 }
 
-func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H256, txs []common.Hash) {
+func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -233,7 +254,7 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("PropagatePooledTxsToPeersList", "error", err)
+			log.Error("PropagatePooledTxsToPeersList", "err", err)
 		}
 		for _, sentry := range cs.sentries {
 			if !sentry.Ready() {
@@ -243,7 +264,7 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 			for _, peer := range peers {
 				switch sentry.Protocol() {
 
-				case eth.ETH66:
+				case eth.ETH66, eth.ETH67:
 					req66 := &proto_sentry.SendMessageByIdRequest{
 						PeerId: peer,
 						Data: &proto_sentry.OutboundMessageData{
@@ -253,10 +274,10 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 					}
 					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-							log.Debug("PropagatePooledTxsToPeersList", "error", err)
+							log.Debug("PropagatePooledTxsToPeersList", "err", err)
 							continue
 						}
-						log.Error("PropagatePooledTxsToPeersList", "error", err)
+						log.Error("PropagatePooledTxsToPeersList", "err", err)
 					}
 				}
 			}

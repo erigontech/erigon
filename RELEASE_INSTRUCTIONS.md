@@ -9,7 +9,7 @@ until which we have manually checked the usefulness of the Jump dest code bitmap
 commands:
 ````
 make state
-./build/bin/state checkChangeSets --datadir <path to datadir> --block <value of MainnetNotCheckedFrom>
+./build/bin/state checkChangeSets --datadir=<path to datadir> --block=<value of MainnetNotCheckedFrom>
 ````
 If there are any transactions where code bitmap was useful, warning messages like this will be displayed:
 ````

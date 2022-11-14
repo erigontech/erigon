@@ -23,12 +23,12 @@ If evereything is fine, by changing directory to erigon/build/bin you will see t
 On the terminal you can type the following command to start node1.
 
 ```bash
-./erigon --datadir=dev --chain dev --private.api.addr=localhost:9090 --mine
+./erigon --datadir=dev --chain=dev --private.api.addr=localhost:9090 --mine
 ```
  
  Argument notes:
  * datadir : Tells where the data is stored, default level is dev folder.
- * datadir : Tells that we want to run Erigon in the dev chain.
+ * chain : Tells that we want to run Erigon in the dev chain.
  * private.api.addr=localhost:9090 : Tells where Eigon is going to listen for connections.
  * mine : Add this if you want the node to mine.
  * dev.period <number-of-seconds>: Add this to specify the timing interval amongst blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
@@ -48,7 +48,7 @@ enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b
 Open terminal 2 and navigate to erigon/build/bin folder. Here type the following command
     
 ```bash 
-./rpcdaemon --datadir=dev  --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./rpcdaemon --datadir=dev  --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,parity
 ```
 The result will look like this:
 <img width="1636" alt="rpc daemon start" src="https://user-images.githubusercontent.com/24697803/140478408-ac1be94a-4a63-42c6-8673-e24decadd658.png">
@@ -63,14 +63,14 @@ To tell Node 2 where Node 1 is we will use the Enode info of Node 1 we saved bef
 Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following command the Enode info and run it, be careful to remove the last part ?discport=0.
 
 ```bash  
-./erigon --datadir=dev2  --chain dev --private.api.addr=localhost:9091 \
-    --staticpeers "enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
-    --port 30305 --p2p.eth65.port 30306 --nodiscover
+./erigon --datadir=dev2  --chain=dev --private.api.addr=localhost:9091 \
+    --staticpeers="enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
+    --nodiscover
 ```
     
 To check if the nodes are connected, you can go to the log of both the nodes and look for the line
     
-  ```  [p2p] GoodPeers    eth66=0 eth65=1 ```
+  ```  [p2p] GoodPeers    eth66=1 ```
     
 Note: this might take a while it is not istantaneus, also if you see a 1 on either one of the two the node is fine.
     

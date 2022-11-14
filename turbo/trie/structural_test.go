@@ -22,13 +22,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -39,7 +39,7 @@ func TestV2HashBuilding(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])[:8]
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, key := range keys {
 		if i > 0 && keys[i-1] == key {
 			fmt.Printf("Duplicate!\n")
@@ -50,9 +50,9 @@ func TestV2HashBuilding(t *testing.T) {
 	valueShort := []byte("VAL")
 	for i, key := range keys {
 		if i%2 == 0 {
-			tr.Update([]byte(key), valueNode(valueLong))
+			tr.Update([]byte(key), valueLong)
 		} else {
-			tr.Update([]byte(key), valueNode(valueShort))
+			tr.Update([]byte(key), valueShort)
 		}
 	}
 	trieHash := tr.Hash()
@@ -106,11 +106,11 @@ func TestV2Resolution(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])[:8]
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	tr := New(common.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
-		tr.Update([]byte(key), valueNode(value))
+		tr.Update([]byte(key), value)
 	}
 	trieHash := tr.Hash()
 
@@ -197,11 +197,11 @@ func TestEmbeddedStorage(t *testing.T) {
 	var location3 = common.Hash{3}
 	locationKey3 := append(append([]byte{}, addrHash...), crypto.Keccak256(location3[:])...)
 	var keys = []string{string(locationKey1), string(locationKey2), string(locationKey3)}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	tr := New(common.Hash{})
 	valueShort := []byte("VAL")
 	for _, key := range keys {
-		tr.Update([]byte(key)[common.HashLength:], valueNode(valueShort))
+		tr.Update([]byte(key)[common.HashLength:], valueShort)
 	}
 	trieHash := tr.Hash()
 

@@ -59,6 +59,14 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	if err != nil {
 		return common.Hash{}, err
 	}
+
+	txnChainId := txn.GetChainID()
+	chainId := cc.ChainID
+
+	if chainId.Cmp(txnChainId.ToBig()) != 0 {
+		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
+	}
+
 	signer := types.MakeSigner(cc, *blockNum)
 	from, err := txn.Sender(*signer)
 	if err != nil {

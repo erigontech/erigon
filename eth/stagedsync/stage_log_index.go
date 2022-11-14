@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
@@ -14,12 +13,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -45,7 +45,7 @@ func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
 	}
 }
 
-func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context) error {
+func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, prematureEndBlock uint64) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -61,7 +61,15 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	if endBlock == s.BlockNumber {
+	// if prematureEndBlock is nonzero and less than the latest executed block,
+	// then we only run the log index stage until prematureEndBlock
+	if prematureEndBlock != 0 && prematureEndBlock < endBlock {
+		endBlock = prematureEndBlock
+	}
+	// It is possible that prematureEndBlock < s.BlockNumber,
+	// in which case it is important that we skip this stage,
+	// or else we could overwrite stage_at with prematureEndBlock
+	if endBlock <= s.BlockNumber {
 		return nil
 	}
 
@@ -73,8 +81,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if startBlock > 0 {
 		startBlock++
 	}
-
-	if err = promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -90,7 +97,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg, ctx context.Context) error {
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -112,6 +119,10 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 
 	reader := bytes.NewReader(nil)
 
+	if endBlock != 0 && endBlock-start > 100 {
+		log.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock)
+	}
+
 	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
 		if err != nil {
 			return err
@@ -122,11 +133,18 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 		}
 		blockNum := binary.BigEndian.Uint64(k[:8])
 
+		// if endBlock is positive, we only run the stage up until endBlock
+		// if endBlock is zero, we run the stage for all available blocks
+		if endBlock != 0 && blockNum > endBlock {
+			log.Info(fmt.Sprintf("[%s] Reached user-specified end block", logPrefix), "endBlock", endBlock)
+			break
+		}
+
 		select {
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, cfg.bufLimit) {
@@ -322,7 +340,7 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange(tx, bucket, []byte(k), uint32(to+1)); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)
@@ -332,40 +350,35 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	return nil
 }
 
-func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pruneTo uint64, logPrefix string, ctx context.Context) error {
+func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo uint64, ctx context.Context) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	keys := make([]string, 0, len(inMem))
-	for k := range inMem {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+
 	c, err := tx.RwCursor(bucket)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	for _, kS := range keys {
-		seek := []byte(kS)
-		for k, _, err := c.Seek(seek); k != nil; k, _, err = c.Next() {
+
+	if err := inMem.Load(tx, bucket, func(key, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		for k, _, err := c.Seek(key); k != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			blockNum := uint64(binary.BigEndian.Uint32(k[len(seek):]))
-			if !bytes.HasPrefix(k, seek) || blockNum >= pruneTo {
+			blockNum := uint64(binary.BigEndian.Uint32(k[len(key):]))
+			if !bytes.HasPrefix(k, key) || blockNum >= pruneTo {
 				break
 			}
-			select {
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
-			case <-ctx.Done():
-				return libcommon.ErrStopped
-			default:
-			}
+
 			if err = c.DeleteCurrent(); err != nil {
 				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
 			}
 		}
+		return nil
+	}, etl.TransformArgs{
+		Quit: ctx.Done(),
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -405,8 +418,11 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	topics := map[string]struct{}{}
-	addrs := map[string]struct{}{}
+	bufferSize := etl.BufferOptimalSize
+	topics := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
+	defer topics.Close()
+	addrs := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(bufferSize))
+	defer addrs.Close()
 
 	reader := bytes.NewReader(nil)
 	{
@@ -440,17 +456,21 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 
 			for _, l := range logs {
 				for _, topic := range l.Topics {
-					topics[string(topic.Bytes())] = struct{}{}
+					if err := topics.Collect(topic.Bytes(), nil); err != nil {
+						return err
+					}
 				}
-				addrs[string(l.Address.Bytes())] = struct{}{}
+				if err := addrs.Collect(l.Address.Bytes(), nil); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
-	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogTopicIndex, topics, pruneTo, ctx); err != nil {
 		return err
 	}
-	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, logPrefix, ctx); err != nil {
+	if err := pruneOldLogChunks(tx, kv.LogAddressIndex, addrs, pruneTo, ctx); err != nil {
 		return err
 	}
 	return nil

@@ -17,7 +17,7 @@
 package ethash
 
 import (
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -38,7 +38,7 @@ func TestRemoteNotify(t *testing.T) {
 	// Start a simple web server to capture notifications.
 	sink := make(chan [3]string)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		blob, err := ioutil.ReadAll(req.Body)
+		blob, err := io.ReadAll(req.Body)
 		if err != nil {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
@@ -83,7 +83,7 @@ func TestRemoteNotifyFull(t *testing.T) {
 	// Start a simple web server to capture notifications.
 	sink := make(chan map[string]interface{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		blob, err := ioutil.ReadAll(req.Body)
+		blob, err := io.ReadAll(req.Body)
 		if err != nil {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
@@ -132,7 +132,7 @@ func TestRemoteMultiNotify(t *testing.T) {
 	// Start a simple web server to capture notifications.
 	sink := make(chan [3]string, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		blob, err := ioutil.ReadAll(req.Body)
+		blob, err := io.ReadAll(req.Body)
 		if err != nil {
 			t.Errorf("failed to read miner notification: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestRemoteMultiNotifyFull(t *testing.T) {
 	// Start a simple web server to capture notifications.
 	sink := make(chan map[string]interface{}, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		blob, err := ioutil.ReadAll(req.Body)
+		blob, err := io.ReadAll(req.Body)
 		if err != nil {
 			t.Errorf("failed to read miner notification: %v", err)
 		}

@@ -35,6 +35,7 @@ type lookup struct {
 	result      nodesByDistance
 	replyBuffer []*node
 	queries     int
+	noSlowdown  bool
 }
 
 type queryFunc func(*node) ([]*node, error)
@@ -50,6 +51,8 @@ func newLookup(ctx context.Context, tab *Table, target enode.ID, q queryFunc) *l
 		cancelCh:  ctx.Done(),
 		queries:   -1,
 	}
+	it.noSlowdown = isDisabledLookupSlowdown(ctx)
+
 	// Don't query further if we hit ourself.
 	// Unlikely to happen often in practice.
 	it.asked[tab.self().ID()] = true
@@ -129,7 +132,18 @@ func (it *lookup) startQueries() bool {
 	return it.queries > 0
 }
 
+func disableLookupSlowdown(ctx context.Context) context.Context {
+	return context.WithValue(ctx, "p2p.discover.lookup.noSlowdown", true)
+}
+
+func isDisabledLookupSlowdown(ctx context.Context) bool {
+	return ctx.Value("p2p.discover.lookup.noSlowdown") != nil
+}
+
 func (it *lookup) slowdown() {
+	if it.noSlowdown {
+		return
+	}
 	sleep := time.NewTimer(1 * time.Second)
 	defer sleep.Stop()
 	select {

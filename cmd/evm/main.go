@@ -22,15 +22,17 @@ import (
 	"math/big"
 	"os"
 
+	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli"
 )
 
 var (
-	app = flags.NewApp(params.GitCommit, "", "the evm command line interface")
+	app = cli2.NewApp(params.GitCommit, "", "the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",
@@ -148,7 +150,6 @@ var stateTransitionCommand = cli.Command{
 		t8ntool.InputTxsFlag,
 		t8ntool.ForknameFlag,
 		t8ntool.ChainIDFlag,
-		t8ntool.RewardFlag,
 		t8ntool.VerbosityFlag,
 	},
 }
@@ -186,16 +187,18 @@ func init() {
 		stateTestCommand,
 		stateTransitionCommand,
 	}
-	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 
 func main() {
 	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
-			code = ec.Code()
+			code = ec.ExitCode()
 		}
-		fmt.Fprintln(os.Stderr, err)
+		_, printErr := fmt.Fprintln(os.Stderr, err)
+		if printErr != nil {
+			log.Warn("print error", "err", printErr)
+		}
 		os.Exit(code)
 	}
 }

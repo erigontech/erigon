@@ -26,6 +26,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -46,7 +47,7 @@ func newTestTable(t transport) (*Table, *enode.DB) {
 	if err != nil {
 		panic(err)
 	}
-	tab, _ := newTable(t, db, nil, log.Root())
+	tab, _ := newTable(t, db, nil, time.Hour, log.Root())
 	go tab.loop()
 	return tab, db
 }
@@ -60,9 +61,16 @@ func nodeAtDistance(base enode.ID, ld int, ip net.IP) *node {
 
 // nodesAtDistance creates n nodes for which enode.LogDist(base, node.ID()) == ld.
 func nodesAtDistance(base enode.ID, ld int, n int) []*enode.Node {
-	results := make([]*enode.Node, n)
-	for i := range results {
-		results[i] = unwrapNode(nodeAtDistance(base, ld, intIP(i)))
+	results := make([]*enode.Node, 0, n)
+	nodeSet := make(map[enode.ID]bool, n)
+	for len(results) < n {
+		node := unwrapNode(nodeAtDistance(base, ld, intIP(len(results)+1)))
+		// idAtDistance might return an ID that's already generated
+		// make sure that the node has a unique ID, otherwise regenerate
+		if !nodeSet[node.ID()] {
+			nodeSet[node.ID()] = true
+			results = append(results, node)
+		}
 	}
 	return results
 }
@@ -244,7 +252,7 @@ func hexEncPrivkey(h string) *ecdsa.PrivateKey {
 }
 
 // hexEncPubkey decodes h as a public key.
-func hexEncPubkey(h string) (ret encPubkey) {
+func hexEncPubkey(h string) (ret enode.PubkeyEncoded) {
 	b, err := hex.DecodeString(h)
 	if err != nil {
 		panic(err)

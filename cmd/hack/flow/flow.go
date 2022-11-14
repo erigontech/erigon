@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -93,7 +94,7 @@ func worker(code []byte) {
 		defer debug.LogPanic()
 		for {
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			common.ReadMemStats(&m)
 			// For info on each, see: https://golang.org/pkg/runtime/#MemStats
 			if !*quiet {
 				fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
@@ -142,7 +143,7 @@ func bToMb(b uint64) uint64 {
 }
 
 func batchServer() {
-	numWorkers := runtime.NumCPU() - 2
+	numWorkers := runtime.GOMAXPROCS(-1) - 2
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
 	file, err := os.Open("absintdata/contract_bytecode_txcnt.csv")
@@ -343,7 +344,7 @@ func absIntAndJumpImprecision() {
 	runCfgAnly("AndJumpImprecision00", s)
 }
 
-//17891 transactions, 588 bytecode len
+// 17891 transactions, 588 bytecode len
 func absIntTestSmallImprecision2() {
 	const s = "6080604052600436106100405763ffffffff7c010000000000000000000000000000000000000000000000000000000060003504166393e84cd98114610045575b600080fd5b34801561005157600080fd5b5061005a61005c565b005b60008060008060008060008060008060008060008073a62142888aba8370742be823c1782d17a0389da173ffffffffffffffffffffffffffffffffffffffff1663747dff426040518163ffffffff167c01000000000000000000000000000000000000000000000000000000000281526004016101c060405180830381600087803b1580156100ea57600080fd5b505af11580156100fe573d6000803e3d6000fd5b505050506040513d6101c081101561011557600080fd5b8101908080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291908051906020019092919080519060200190929190805190602001909291905050509d509d509d509d509d509d509d509d509d509d509d509d509d509d508673ffffffffffffffffffffffffffffffffffffffff167318a0451ea56fd4ff58f59837e9ec30f346ffdca573ffffffffffffffffffffffffffffffffffffffff161415151561021057fe5b50505050505050505050505050505600a165627a7a72305820ec5e1703d3b74688c3350622a2bcfc097615733fa5f8df7adf51d66ebf42d0260029"
 	runCfgAnly("SmallImprecision02", s)

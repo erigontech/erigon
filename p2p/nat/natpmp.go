@@ -63,6 +63,10 @@ func (n *pmp) DeleteMapping(protocol string, extport, intport int) (err error) {
 	return err
 }
 
+func (n *pmp) SupportsMapping() bool {
+	return true
+}
+
 func discoverPMP() Interface {
 	// run external address lookups on all potential gateways
 	gws := potentialGateways()

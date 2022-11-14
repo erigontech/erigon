@@ -47,7 +47,24 @@ Content-Type: application/json
 
 ###
 
-# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber", "params": ["0x1b4", true], "id":1}' localhost:8545
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x1302cc71b89c1482b18a97a6fa2c9c375f4bf7548122363b6e91528440272fde"], "id":1}' localhost:8545
+POST localhost:8545
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getTransactionByHash",
+  "params": [
+    "0x1302cc71b89c1482b18a97a6fa2c9c375f4bf7548122363b6e91528440272fde"
+  ],
+  "id": 1
+}
+
+###
+
+
+
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x1302cc71b89c1482b18a97a6fa2c9c375f4bf7548122363b6e91528440272fde"], "id":1}' localhost:8545
 POST localhost:8545
 Content-Type: application/json
 
@@ -55,7 +72,7 @@ Content-Type: application/json
   "jsonrpc": "2.0",
   "method": "eth_getBlockByNumber",
   "params": [
-    "0x0",
+    "0x4C4B40",
     true
   ],
   "id": 1

@@ -69,13 +69,6 @@ type stateObject struct {
 	original accounts.Account
 	db       *IntraBlockState
 
-	// DB error.
-	// State objects are used by the consensus core and VM which are
-	// unable to deal with database-level errors. Any error that occurs
-	// during a database read is memoized here and will eventually be returned
-	// by IntraBlockState.Commit.
-	dbErr error
-
 	// Write caches.
 	//trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
@@ -134,8 +127,8 @@ func (so *stateObject) EncodeRLP(w io.Writer) error {
 
 // setError remembers the first non-nil error it is called with.
 func (so *stateObject) setError(err error) {
-	if so.dbErr == nil {
-		so.dbErr = err
+	if so.db.savedErr == nil {
+		so.db.savedErr = err
 	}
 }
 
@@ -156,6 +149,11 @@ func (so *stateObject) touch() {
 
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	value, dirty := so.dirtyStorage[*key]
 	if dirty {
 		*out = value
@@ -167,6 +165,11 @@ func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[*key]
@@ -197,6 +200,16 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 
 // SetState updates a value in account storage.
 func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
+	// If the fake storage is set, put the temporary state update here.
+	if so.fakeStorage != nil {
+		so.db.journal.append(fakeStorageChange{
+			account:  &so.address,
+			key:      *key,
+			prevalue: so.fakeStorage[*key],
+		})
+		so.fakeStorage[*key] = value
+		return
+	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	so.GetState(key, &prev)
@@ -295,18 +308,6 @@ func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
-}
-
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := newObject(db, so.address, &so.data, &so.original)
-	stateObject.code = so.code
-	stateObject.dirtyStorage = so.dirtyStorage.Copy()
-	stateObject.originStorage = so.originStorage.Copy()
-	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
-	stateObject.suicided = so.suicided
-	stateObject.dirtyCode = so.dirtyCode
-	stateObject.deleted = so.deleted
-	return stateObject
 }
 
 //

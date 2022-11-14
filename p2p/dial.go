@@ -86,13 +86,12 @@ var (
 // dialer creates outbound connections and submits them into Server.
 // Two types of peer connections can be created:
 //
-//  - static dials are pre-configured connections. The dialer attempts
-//    keep these nodes connected at all times.
+//   - static dials are pre-configured connections. The dialer attempts
+//     keep these nodes connected at all times.
 //
-//  - dynamic dials are created from node discovery results. The dialer
-//    continuously reads candidate nodes from its input iterator and attempts
-//    to create peer connections to nodes arriving through the iterator.
-//
+//   - dynamic dials are created from node discovery results. The dialer
+//     continuously reads candidate nodes from its input iterator and attempts
+//     to create peer connections to nodes arriving through the iterator.
 type dialScheduler struct {
 	dialConfig
 	setupFunc   dialSetupFunc
@@ -146,9 +145,6 @@ type dialConfig struct {
 }
 
 func (cfg dialConfig) withDefaults() dialConfig {
-	if cfg.maxActiveDials == 0 {
-		cfg.maxActiveDials = defaultMaxPendingPeers
-	}
 	if cfg.log == nil {
 		cfg.log = log.Root()
 	}
@@ -161,7 +157,7 @@ func (cfg dialConfig) withDefaults() dialConfig {
 			panic(err)
 		}
 		seed := int64(binary.BigEndian.Uint64(seedb))
-		cfg.rand = mrand.New(mrand.NewSource(seed))
+		cfg.rand = mrand.New(mrand.NewSource(seed)) // nolint: gosec
 	}
 	return cfg
 }
@@ -339,7 +335,7 @@ func (d *dialScheduler) readNodes(it enode.Iterator) {
 }
 
 // or comes back online.
-//nolint
+// nolint
 func (d *dialScheduler) logStats() {
 	now := d.clock.Now()
 	if d.lastStatsLog.Add(dialStatsLogInterval) > now {

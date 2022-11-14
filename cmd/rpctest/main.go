@@ -152,6 +152,16 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
+	var benchTraceBlockByHashCmd = &cobra.Command{
+		Use:   "benchTraceBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchTraceTransactionCmd = &cobra.Command{
 		Use:   "benchTraceTransaction",
 		Short: "",
@@ -232,6 +242,16 @@ func main() {
 	}
 	with(benchTraceReplayTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchEthBlockByNumberCmd = &cobra.Command{
+		Use:   "benchBlockByNumber",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchEthGetBlockByNumber(erigonURL)
+		},
+	}
+	with(benchEthBlockByNumberCmd, withErigonUrl)
+
 	var replayCmd = &cobra.Command{
 		Use:   "replay",
 		Short: "",
@@ -283,6 +303,7 @@ func main() {
 		benchTxReceiptCmd,
 		compareAccountRange,
 		benchTraceReplayTransactionCmd,
+		benchEthBlockByNumberCmd,
 		replayCmd,
 	)
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {

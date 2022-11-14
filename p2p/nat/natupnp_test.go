@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package nat
 
 import (
@@ -218,7 +220,7 @@ func (dev *fakeIGD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (dev *fakeIGD) replaceListenAddr(resp string) string {
-	return strings.Replace(resp, "{{listenAddr}}", dev.listener.Addr().String(), -1)
+	return strings.ReplaceAll(resp, "{{listenAddr}}", dev.listener.Addr().String())
 }
 
 func (dev *fakeIGD) listen() (err error) {

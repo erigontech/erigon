@@ -374,6 +374,39 @@ type intField struct {
 	X int
 }
 
+type optionalFields struct {
+	A uint
+	B uint `rlp:"optional"`
+	C uint `rlp:"optional"`
+}
+
+type optionalAndTailField struct {
+	A    uint
+	B    uint   `rlp:"optional"`
+	Tail []uint `rlp:"tail"`
+}
+
+type optionalBigIntField struct {
+	A uint
+	B *big.Int `rlp:"optional"`
+}
+
+type optionalPtrField struct {
+	A uint
+	B *[3]byte `rlp:"optional"`
+}
+
+type optionalPtrFieldNil struct {
+	A uint
+	B *[3]byte `rlp:"optional,nil"`
+}
+
+type ignoredField struct {
+	A uint
+	B uint `rlp:"-"`
+	C uint
+}
+
 var (
 	veryBigInt = uint256.NewInt(0).Add(
 		uint256.NewInt(0).Lsh(uint256.NewInt(0xFFFFFFFFFFFFFF), 16),
@@ -382,12 +415,6 @@ var (
 	realBigInt     = big.NewInt(0).SetBytes(unhex("010000000000000000000000000000000000000000000000000000000000000000"))
 	veryVeryBigInt = new(big.Int).Exp(veryBigInt.ToBig(), big.NewInt(8), nil)
 )
-
-type hasIgnoredField struct {
-	A uint
-	B uint `rlp:"-"`
-	C uint
-}
 
 var decodeTests = []decodeTest{
 	// booleans
@@ -578,8 +605,8 @@ var decodeTests = []decodeTest{
 	// struct tag "-"
 	{
 		input: "C20102",
-		ptr:   new(hasIgnoredField),
-		value: hasIgnoredField{A: 1, C: 2},
+		ptr:   new(ignoredField),
+		value: ignoredField{A: 1, C: 2},
 	},
 
 	// struct tag "nilList"
@@ -617,6 +644,110 @@ var decodeTests = []decodeTest{
 		input: "C2C103",
 		ptr:   new(nilStringSlice),
 		value: nilStringSlice{X: &[]uint{3}},
+	},
+
+	// struct tag "optional"
+	{
+		input: "C101",
+		ptr:   new(optionalFields),
+		value: optionalFields{1, 0, 0},
+	},
+	{
+		input: "C20102",
+		ptr:   new(optionalFields),
+		value: optionalFields{1, 2, 0},
+	},
+	{
+		input: "C3010203",
+		ptr:   new(optionalFields),
+		value: optionalFields{1, 2, 3},
+	},
+	{
+		input: "C401020304",
+		ptr:   new(optionalFields),
+		error: "rlp: input list has too many elements for rlp.optionalFields",
+	},
+	{
+		input: "C101",
+		ptr:   new(optionalAndTailField),
+		value: optionalAndTailField{A: 1},
+	},
+	{
+		input: "C20102",
+		ptr:   new(optionalAndTailField),
+		value: optionalAndTailField{A: 1, B: 2, Tail: []uint{}},
+	},
+	{
+		input: "C401020304",
+		ptr:   new(optionalAndTailField),
+		value: optionalAndTailField{A: 1, B: 2, Tail: []uint{3, 4}},
+	},
+	{
+		input: "C101",
+		ptr:   new(optionalBigIntField),
+		value: optionalBigIntField{A: 1, B: nil},
+	},
+	{
+		input: "C20102",
+		ptr:   new(optionalBigIntField),
+		value: optionalBigIntField{A: 1, B: big.NewInt(2)},
+	},
+	{
+		input: "C101",
+		ptr:   new(optionalPtrField),
+		value: optionalPtrField{A: 1},
+	},
+	{
+		input: "C20180", // not accepted because "optional" doesn't enable "nil"
+		ptr:   new(optionalPtrField),
+		error: "rlp: input string too short for [3]uint8, decoding into (rlp.optionalPtrField).B",
+	},
+	{
+		input: "C20102",
+		ptr:   new(optionalPtrField),
+		error: "rlp: input string too short for [3]uint8, decoding into (rlp.optionalPtrField).B",
+	},
+	{
+		input: "C50183010203",
+		ptr:   new(optionalPtrField),
+		value: optionalPtrField{A: 1, B: &[3]byte{1, 2, 3}},
+	},
+	{
+		input: "C101",
+		ptr:   new(optionalPtrFieldNil),
+		value: optionalPtrFieldNil{A: 1},
+	},
+	{
+		input: "C20180", // accepted because "nil" tag allows empty input
+		ptr:   new(optionalPtrFieldNil),
+		value: optionalPtrFieldNil{A: 1},
+	},
+	{
+		input: "C20102",
+		ptr:   new(optionalPtrFieldNil),
+		error: "rlp: input string too short for [3]uint8, decoding into (rlp.optionalPtrFieldNil).B",
+	},
+
+	// struct tag "optional" field clearing
+	{
+		input: "C101",
+		ptr:   &optionalFields{A: 9, B: 8, C: 7},
+		value: optionalFields{A: 1, B: 0, C: 0},
+	},
+	{
+		input: "C20102",
+		ptr:   &optionalFields{A: 9, B: 8, C: 7},
+		value: optionalFields{A: 1, B: 2, C: 0},
+	},
+	{
+		input: "C20102",
+		ptr:   &optionalAndTailField{A: 9, B: 8, Tail: []uint{7, 6, 5}},
+		value: optionalAndTailField{A: 1, B: 2, Tail: []uint{}},
+	},
+	{
+		input: "C101",
+		ptr:   &optionalPtrField{A: 9, B: &[3]byte{8, 7, 6}},
+		value: optionalPtrField{A: 1},
 	},
 
 	// RawValue
@@ -849,6 +980,40 @@ func TestDecoderFunc(t *testing.T) {
 	x()
 }
 
+// This tests the validity checks for fields with struct tag "optional".
+func TestInvalidOptionalField(t *testing.T) {
+	type (
+		invalid1 struct {
+			A uint `rlp:"optional"`
+			B uint
+		}
+		invalid2 struct {
+			T []uint `rlp:"tail,optional"`
+		}
+		invalid3 struct {
+			T []uint `rlp:"optional,tail"`
+		}
+	)
+
+	tests := []struct {
+		v   interface{}
+		err string
+	}{
+		{v: new(invalid1), err: `rlp: struct field rlp.invalid1.B needs "optional" tag`},
+		{v: new(invalid2), err: `rlp: invalid struct tag "optional" for rlp.invalid2.T (also has "tail" tag)`},
+		{v: new(invalid3), err: `rlp: invalid struct tag "tail" for rlp.invalid3.T (also has "optional" tag)`},
+	}
+	for _, test := range tests {
+		err := DecodeBytes(unhex("C20102"), test.v)
+		if err == nil {
+			t.Errorf("no error for %T", test.v)
+		} else if err.Error() != test.err {
+			t.Errorf("wrong error for %T: %v", test.v, err.Error())
+		}
+	}
+
+}
+
 func ExampleDecode() {
 	input, _ := hex.DecodeString("C90A1486666F6F626172")
 
@@ -968,7 +1133,7 @@ func encodeTestSlice(n uint) []byte {
 }
 
 func unhex(str string) []byte {
-	b, err := hex.DecodeString(strings.Replace(str, " ", "", -1))
+	b, err := hex.DecodeString(strings.ReplaceAll(str, " ", ""))
 	if err != nil {
 		panic(fmt.Sprintf("invalid hex string: %q", str))
 	}

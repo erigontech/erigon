@@ -29,6 +29,7 @@ const (
 	MimetypeTypedData         = "data/typed"
 	MimetypeClique            = "application/x-clique-header"
 	MimetypeParlia            = "application/x-parlia-header"
+	MimetypeBor               = "application/x-bor-header"
 	MimetypeTextPlain         = "text/plain"
 )
 
@@ -83,12 +84,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	var nonceBytes int
-	if a.Nonce < 128 && a.Nonce != 0 {
-		nonceBytes = 0
-	} else {
-		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
-	}
+	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
 	structLength += uint(balanceBytes + nonceBytes + 2)
 
@@ -209,12 +205,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	var nonceBytes int
-	if a.Nonce < 128 && a.Nonce != 0 {
-		nonceBytes = 0
-	} else {
-		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
-	}
+	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
@@ -616,4 +607,103 @@ func (a *Account) Equals(acc *Account) bool {
 		a.CodeHash == acc.CodeHash &&
 		a.Balance.Cmp(&acc.Balance) == 0 &&
 		a.Incarnation == acc.Incarnation
+}
+
+// Deserialise2 - method to deserialize accounts in Erigon22 history
+func Deserialise2(a *Account, enc []byte) error {
+	a.Reset()
+	pos := 0
+	nonceBytes := int(enc[pos])
+	pos++
+	if nonceBytes > 0 {
+		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		pos += nonceBytes
+	}
+	balanceBytes := int(enc[pos])
+	pos++
+	if balanceBytes > 0 {
+		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	codeHashBytes := int(enc[pos])
+	pos++
+	if codeHashBytes > 0 {
+		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
+		pos += codeHashBytes
+	}
+	if pos >= len(enc) {
+		return fmt.Errorf("deserialse2: %d >= %d ", pos, len(enc))
+	}
+	incBytes := int(enc[pos])
+	pos++
+	if incBytes > 0 {
+		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+	}
+	return nil
+}
+
+func Serialise2(a *Account) []byte {
+	var l int
+	l++
+	if a.Nonce > 0 {
+		l += (bits.Len64(a.Nonce) + 7) / 8
+	}
+	l++
+	if !a.Balance.IsZero() {
+		l += a.Balance.ByteLen()
+	}
+	l++
+	if !a.IsEmptyCodeHash() {
+		l += 32
+	}
+	l++
+	if a.Incarnation > 0 {
+		l += (bits.Len64(a.Incarnation) + 7) / 8
+	}
+	value := make([]byte, l)
+	pos := 0
+	if a.Nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
+		value[pos] = byte(nonceBytes)
+		var nonce = a.Nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if a.Balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := a.Balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if a.IsEmptyCodeHash() {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], a.CodeHash[:])
+		pos += 32
+	}
+	if a.Incarnation == 0 {
+		value[pos] = 0
+	} else {
+		incBytes := (bits.Len64(a.Incarnation) + 7) / 8
+		value[pos] = byte(incBytes)
+		var inc = a.Incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+	}
+	return value
 }

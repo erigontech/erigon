@@ -18,6 +18,8 @@ package math
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type operation byte
@@ -113,4 +115,11 @@ func TestMustParseUint64Panic(t *testing.T) {
 		}
 	}()
 	MustParseUint64("ggg")
+}
+
+func TestAbsoluteDifference(t *testing.T) {
+	x1 := uint64(99)
+	x2 := uint64(45)
+	assert.Equal(t, AbsoluteDifference(x1, x2), x1-x2)
+	assert.Equal(t, AbsoluteDifference(x2, x1), x1-x2)
 }

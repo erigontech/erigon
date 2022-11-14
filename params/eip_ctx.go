@@ -9,9 +9,8 @@ type configKey int
 
 const (
 	IsHomesteadEnabled configKey = iota
-	IsEIP150Enabled
-	IsEIP155Enabled
-	IsEIP158Enabled
+	IsTangerineWhistleEnabled
+	IsSpuriousDragonEnabled
 	IsByzantiumEnabled
 	IsConstantinopleEnabled
 	IsPetersburgEnabled
@@ -21,9 +20,8 @@ const (
 
 func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum uint64) context.Context {
 	ctx = context.WithValue(ctx, IsHomesteadEnabled, c.IsHomestead(blockNum))
-	ctx = context.WithValue(ctx, IsEIP150Enabled, c.IsEIP150(blockNum))
-	ctx = context.WithValue(ctx, IsEIP155Enabled, c.IsEIP155(blockNum))
-	ctx = context.WithValue(ctx, IsEIP158Enabled, c.IsEIP158(blockNum))
+	ctx = context.WithValue(ctx, IsTangerineWhistleEnabled, c.IsTangerineWhistle(blockNum))
+	ctx = context.WithValue(ctx, IsSpuriousDragonEnabled, c.IsSpuriousDragon(blockNum))
 	ctx = context.WithValue(ctx, IsByzantiumEnabled, c.IsByzantium(blockNum))
 	ctx = context.WithValue(ctx, IsConstantinopleEnabled, c.IsConstantinople(blockNum))
 	ctx = context.WithValue(ctx, IsPetersburgEnabled, c.IsPetersburg(blockNum))

@@ -27,13 +27,13 @@ We have Go, Rust and C++ implementations of `RoKV` interface.
 
 Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](../../ethdb/Readme.md)
 
-MDBX docs: [erthink.github.io/libmdbx/](https://erthink.github.io/libmdbx/)
-and [https://github.com/erthink/libmdbx/blob/master/mdbx.h](https://github.com/erthink/libmdbx/blob/master/mdbx.h)
+MDBX: [docs](https://libmdbx.website.yandexcloud.net)
+and [mdbx.h](https://github.com/torquem-ch/libmdbx/blob/master/mdbx.h)
 
 
 ### How RAM used
 
-Erigon will use all available RAM, but this RAM will not belong to Eroigon’s process. OS will own all this
+Erigon will use all available RAM, but this RAM will not belong to Erigon’s process. OS will own all this
 memory. And OS will maintain hot part of DB in RAM. If OS will need RAM for other programs or for second Erigon instance
 OS will manage all the work. This called PageCache. Erigon itself using under 2Gb. So, Erigon will benefit from more
 RAM and will use all RAM without re-configuration. Same PageCache can be used by other processes if they run on same

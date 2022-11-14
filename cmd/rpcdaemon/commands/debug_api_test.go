@@ -11,7 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -37,12 +39,99 @@ var debugTraceTransactionNoRefundTests = []struct {
 	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, ""},
 }
 
+func TestTraceBlockByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
+	for _, tt := range debugTraceTransactionTests {
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		err = api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er []ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
+		if len(er) != int(*txcount) {
+			t.Fatalf("incorrect length: %v", err)
+		}
+	}
+	var buf bytes.Buffer
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	err := api.TraceBlockByNumber(context.Background(), rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
+	if err != nil {
+		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
+	}
+	if err = stream.Flush(); err != nil {
+		t.Fatalf("error flusing: %v", err)
+	}
+	var er []ethapi.ExecutionResult
+	if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		t.Fatalf("parsing result: %v", err)
+	}
+}
+
+func TestTraceBlockByHash(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
+	for _, tt := range debugTraceTransactionTests {
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		err = api.TraceBlockByHash(context.Background(), *tx.BlockHash, &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er []ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
+		if len(er) != int(*txcount) {
+			t.Fatalf("incorrect length: %v", err)
+		}
+	}
+}
+
 func TestTraceTransaction(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
-		db, 0)
+		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout),
+		m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -70,11 +159,13 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
-		db, 0)
+		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout),
+		m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)

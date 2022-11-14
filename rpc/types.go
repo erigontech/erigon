@@ -68,15 +68,19 @@ type jsonWriter interface {
 }
 
 type BlockNumber int64
+type Timestamp uint64
 
 const (
-	PendingBlockNumber  = BlockNumber(-2)
-	LatestBlockNumber   = BlockNumber(-1)
-	EarliestBlockNumber = BlockNumber(0)
+	LatestExecutedBlockNumber = BlockNumber(-5)
+	FinalizedBlockNumber      = BlockNumber(-4)
+	SafeBlockNumber           = BlockNumber(-3)
+	PendingBlockNumber        = BlockNumber(-2)
+	LatestBlockNumber         = BlockNumber(-1)
+	EarliestBlockNumber       = BlockNumber(0)
 )
 
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
-// - "latest", "earliest" or "pending" as string arguments
+// - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
 // - the block number
 // Returned errors:
 // - an invalid block number error when the given argument isn't a known strings
@@ -96,6 +100,15 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	case "pending":
 		*bn = PendingBlockNumber
+		return nil
+	case "safe":
+		*bn = SafeBlockNumber
+		return nil
+	case "finalized":
+		*bn = FinalizedBlockNumber
+		return nil
+	case "latestExecuted":
+		*bn = LatestExecutedBlockNumber
 		return nil
 	case "null":
 		*bn = LatestBlockNumber
@@ -118,7 +131,7 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 }
 
 func (bn BlockNumber) Int64() int64 {
-	return (int64)(bn)
+	return int64(bn)
 }
 
 type BlockNumberOrHash struct {
@@ -134,6 +147,9 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	if err == nil {
 		if e.BlockNumber != nil && e.BlockHash != nil {
 			return fmt.Errorf("cannot specify both BlockHash and BlockNumber, choose one or the other")
+		}
+		if e.BlockNumber == nil && e.BlockHash == nil {
+			return fmt.Errorf("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
 		}
 		bnh.BlockNumber = e.BlockNumber
 		bnh.BlockHash = e.BlockHash
@@ -165,6 +181,14 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		return nil
 	case "pending":
 		bn := PendingBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
+	case "safe":
+		bn := SafeBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
+	case "finalized":
+		bn := FinalizedBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
 	default:
@@ -239,4 +263,30 @@ func (dh *DecimalOrHex) UnmarshalJSON(data []byte) error {
 	}
 	*dh = DecimalOrHex(value)
 	return nil
+}
+
+func (ts Timestamp) TurnIntoUint64() uint64 {
+	return uint64(ts)
+}
+
+func (ts *Timestamp) UnmarshalJSON(data []byte) error {
+	input := strings.TrimSpace(string(data))
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+		input = input[1 : len(input)-1]
+	}
+
+	// parse string to uint64
+	timestamp, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+
+		// try hex number
+		if timestamp, err = hexutil.DecodeUint64(input); err != nil {
+			return err
+		}
+
+	}
+
+	*ts = Timestamp(timestamp)
+	return nil
+
 }

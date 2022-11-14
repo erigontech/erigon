@@ -4,44 +4,37 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// atomic: bit 0 is the value, bit 1 is the initialized flag
-var getNodeData uint32
-
-const (
-	gndValueFlag = 1 << iota
-	gndInitializedFlag
+var (
+	writeMap     bool
+	writeMapOnce sync.Once
 )
 
-// IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
-// By default that's driven by the presence or absence of DISABLE_GET_NODE_DATA environment variable.
-func IsGetNodeData() bool {
-	x := atomic.LoadUint32(&getNodeData)
-	if x&gndInitializedFlag != 0 { // already initialized
-		return x&gndValueFlag != 0
-	}
-
-	RestoreGetNodeData()
-	return IsGetNodeData()
+func WriteMap() bool {
+	writeMapOnce.Do(func() {
+		v, _ := os.LookupEnv("WRITE_MAP")
+		if v == "true" {
+			writeMap = true
+		}
+	})
+	return writeMap
 }
 
-// RestoreGetNodeData enables or disables the GetNodeData functionality
-// according to the presence or absence of GET_NODE_DATA environment variable.
-func RestoreGetNodeData() {
-	_, envVarSet := os.LookupEnv("GET_NODE_DATA")
-	OverrideGetNodeData(envVarSet)
-}
+var (
+	mdbxReaadahead     bool
+	mdbxReaadaheadOnce sync.Once
+)
 
-// OverrideGetNodeData allows to explicitly enable or disable the GetNodeData functionality.
-func OverrideGetNodeData(val bool) {
-	if val {
-		atomic.StoreUint32(&getNodeData, gndInitializedFlag|gndValueFlag)
-	} else {
-		atomic.StoreUint32(&getNodeData, gndInitializedFlag)
-	}
+func MdbxReadAhead() bool {
+	mdbxReaadaheadOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_READAHEAD")
+		if v == "true" {
+			mdbxReaadahead = true
+		}
+	})
+	return mdbxReaadahead
 }
 
 var (
@@ -107,6 +100,8 @@ func SlowCommit() time.Duration {
 var (
 	stopBeforeStage     string
 	stopBeforeStageFlag sync.Once
+	stopAfterStage      string
+	stopAfterStageFlag  sync.Once
 )
 
 func StopBeforeStage() string {
@@ -118,4 +113,18 @@ func StopBeforeStage() string {
 	}
 	stopBeforeStageFlag.Do(f)
 	return stopBeforeStage
+}
+
+// TODO(allada) We should possibly consider removing `STOP_BEFORE_STAGE`, as `STOP_AFTER_STAGE` can
+// perform all same the functionality, but due to reverse compatibility reasons we are going to
+// leave it.
+func StopAfterStage() string {
+	f := func() {
+		v, _ := os.LookupEnv("STOP_AFTER_STAGE") // see names in eth/stagedsync/stages/stages.go
+		if v != "" {
+			stopAfterStage = v
+		}
+	}
+	stopAfterStageFlag.Do(f)
+	return stopAfterStage
 }

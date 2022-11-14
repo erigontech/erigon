@@ -20,14 +20,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core"
 	"math/big"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon/core"
+
 	"github.com/holiman/uint256"
-	"gopkg.in/olebedev/go-duktape.v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -57,14 +57,14 @@ func makeSlice(ptr unsafe.Pointer, size uint) []byte {
 }
 
 // popSlice pops a buffer off the JavaScript stack and returns it as a slice.
-func popSlice(ctx *duktape.Context) []byte {
+func popSlice(ctx *JSVM) []byte {
 	blob := common.CopyBytes(makeSlice(ctx.GetBuffer(-1)))
 	ctx.Pop()
 	return blob
 }
 
 // pushBigInt create a JavaScript BigInteger in the VM.
-func pushBigInt(n *big.Int, ctx *duktape.Context) {
+func pushBigInt(n *big.Int, ctx *JSVM) {
 	ctx.GetGlobalString("bigInt")
 	ctx.PushString(n.String())
 	ctx.Call(1)
@@ -77,16 +77,16 @@ type opWrapper struct {
 
 // pushObject assembles a JSVM object wrapping a swappable opcode and pushes it
 // onto the VM stack.
-func (ow *opWrapper) pushObject(vm *duktape.Context) {
+func (ow *opWrapper) pushObject(vm *JSVM) {
 	obj := vm.PushObject()
 
-	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushInt(int(ow.op)); return 1 })
+	vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushInt(int(ow.op)); return 1 })
 	vm.PutPropString(obj, "toNumber")
 
-	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushString(ow.op.String()); return 1 })
+	vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushString(ow.op.String()); return 1 })
 	vm.PutPropString(obj, "toString")
 
-	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushBoolean(ow.op.IsPush()); return 1 })
+	vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushBoolean(ow.op.IsPush()); return 1 })
 	vm.PutPropString(obj, "isPush")
 }
 
@@ -128,13 +128,14 @@ func (mw *memoryWrapper) getUint(addr int64) *big.Int {
 
 // pushObject assembles a JSVM object wrapping a swappable memory and pushes it
 // onto the VM stack.
-func (mw *memoryWrapper) pushObject(vm *duktape.Context) {
+func (mw *memoryWrapper) pushObject(vm *JSVM) {
 	obj := vm.PushObject()
 
 	// Generate the `slice` method which takes two ints and returns a buffer
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		blob := mw.slice(int64(ctx.GetInt(-2)), int64(ctx.GetInt(-1)))
-		ctx.Pop2()
+		ctx.Pop()
+		ctx.Pop()
 
 		ptr := ctx.PushFixedBuffer(len(blob))
 		copy(makeSlice(ptr, uint(len(blob))), blob)
@@ -143,7 +144,7 @@ func (mw *memoryWrapper) pushObject(vm *duktape.Context) {
 	vm.PutPropString(obj, "slice")
 
 	// Generate the `getUint` method which takes an int and returns a bigint
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		offset := int64(ctx.GetInt(-1))
 		ctx.Pop()
 
@@ -171,14 +172,14 @@ func (sw *stackWrapper) peek(idx int) *big.Int {
 
 // pushObject assembles a JSVM object wrapping a swappable stack and pushes it
 // onto the VM stack.
-func (sw *stackWrapper) pushObject(vm *duktape.Context) {
+func (sw *stackWrapper) pushObject(vm *JSVM) {
 	obj := vm.PushObject()
 
-	vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushInt(sw.stack.Len()); return 1 })
+	vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushInt(sw.stack.Len()); return 1 })
 	vm.PutPropString(obj, "length")
 
 	// Generate the `peek` method which takes an int and returns a bigint
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		offset := ctx.GetInt(-1)
 		ctx.Pop()
 
@@ -195,25 +196,25 @@ type dbWrapper struct {
 
 // pushObject assembles a JSVM object wrapping a swappable database and pushes it
 // onto the VM stack.
-func (dw *dbWrapper) pushObject(vm *duktape.Context) {
+func (dw *dbWrapper) pushObject(vm *JSVM) {
 	obj := vm.PushObject()
 
 	// Push the wrapper for statedb.GetBalance
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		pushBigInt(dw.db.GetBalance(common.BytesToAddress(popSlice(ctx))).ToBig(), ctx)
 		return 1
 	})
 	vm.PutPropString(obj, "getBalance")
 
 	// Push the wrapper for statedb.GetNonce
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		ctx.PushInt(int(dw.db.GetNonce(common.BytesToAddress(popSlice(ctx)))))
 		return 1
 	})
 	vm.PutPropString(obj, "getNonce")
 
 	// Push the wrapper for statedb.GetCode
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		code := dw.db.GetCode(common.BytesToAddress(popSlice(ctx)))
 
 		ptr := ctx.PushFixedBuffer(len(code))
@@ -223,7 +224,7 @@ func (dw *dbWrapper) pushObject(vm *duktape.Context) {
 	vm.PutPropString(obj, "getCode")
 
 	// Push the wrapper for statedb.GetState
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		hash := popSlice(ctx)
 		addr := popSlice(ctx)
 
@@ -238,7 +239,7 @@ func (dw *dbWrapper) pushObject(vm *duktape.Context) {
 	vm.PutPropString(obj, "getState")
 
 	// Push the wrapper for statedb.Exists
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		ctx.PushBoolean(dw.db.Exist(common.BytesToAddress(popSlice(ctx))))
 		return 1
 	})
@@ -252,11 +253,11 @@ type contractWrapper struct {
 
 // pushObject assembles a JSVM object wrapping a swappable contract and pushes it
 // onto the VM stack.
-func (cw *contractWrapper) pushObject(vm *duktape.Context) {
+func (cw *contractWrapper) pushObject(vm *JSVM) {
 	obj := vm.PushObject()
 
 	// Push the wrapper for contract.Caller
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		ptr := ctx.PushFixedBuffer(20)
 		copy(makeSlice(ptr, 20), cw.contract.Caller().Bytes())
 		return 1
@@ -264,7 +265,7 @@ func (cw *contractWrapper) pushObject(vm *duktape.Context) {
 	vm.PutPropString(obj, "getCaller")
 
 	// Push the wrapper for contract.Address
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		ptr := ctx.PushFixedBuffer(20)
 		copy(makeSlice(ptr, 20), cw.contract.Address().Bytes())
 		return 1
@@ -272,14 +273,14 @@ func (cw *contractWrapper) pushObject(vm *duktape.Context) {
 	vm.PutPropString(obj, "getAddress")
 
 	// Push the wrapper for contract.Value
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		pushBigInt(cw.contract.Value().ToBig(), ctx)
 		return 1
 	})
 	vm.PutPropString(obj, "getValue")
 
 	// Push the wrapper for contract.Input
-	vm.PushGoFunction(func(ctx *duktape.Context) int {
+	vm.PushGoFunction(func(ctx *JSVM) int {
 		blob := cw.contract.Input
 
 		ptr := ctx.PushFixedBuffer(len(blob))
@@ -292,7 +293,7 @@ func (cw *contractWrapper) pushObject(vm *duktape.Context) {
 // Tracer provides an implementation of Tracer that evaluates a Javascript
 // function for each VM execution step.
 type Tracer struct {
-	vm *duktape.Context // Javascript VM instance
+	vm *JSVM // Javascript VM instance
 
 	tracerObject int // Stack index of the tracer JavaScript object
 	stateObject  int // Stack index of the global state to pull arguments from
@@ -336,7 +337,7 @@ func New(code string, ctx *Context) (*Tracer, error) {
 		code = tracer
 	}
 	tracer := &Tracer{
-		vm:              duktape.New(),
+		vm:              JSVMNew(),
 		ctx:             make(map[string]interface{}),
 		opWrapper:       new(opWrapper),
 		stackWrapper:    new(stackWrapper),
@@ -359,11 +360,11 @@ func New(code string, ctx *Context) (*Tracer, error) {
 	}
 
 	// Set up builtins for this environment
-	tracer.vm.PushGlobalGoFunction("toHex", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("toHex", func(ctx *JSVM) int {
 		ctx.PushString(hexutil.Encode(popSlice(ctx)))
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("toWord", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("toWord", func(ctx *JSVM) int {
 		var word common.Hash
 		if ptr, size := ctx.GetBuffer(-1); ptr != nil {
 			word = common.BytesToHash(makeSlice(ptr, size))
@@ -374,7 +375,7 @@ func New(code string, ctx *Context) (*Tracer, error) {
 		copy(makeSlice(ctx.PushFixedBuffer(32), 32), word[:])
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("toAddress", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("toAddress", func(ctx *JSVM) int {
 		var addr common.Address
 		if ptr, size := ctx.GetBuffer(-1); ptr != nil {
 			addr = common.BytesToAddress(makeSlice(ptr, size))
@@ -385,7 +386,7 @@ func New(code string, ctx *Context) (*Tracer, error) {
 		copy(makeSlice(ctx.PushFixedBuffer(20), 20), addr[:])
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("toContract", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("toContract", func(ctx *JSVM) int {
 		var from common.Address
 		if ptr, size := ctx.GetBuffer(-2); ptr != nil {
 			from = common.BytesToAddress(makeSlice(ptr, size))
@@ -393,13 +394,14 @@ func New(code string, ctx *Context) (*Tracer, error) {
 			from = common.HexToAddress(ctx.GetString(-2))
 		}
 		nonce := uint64(ctx.GetInt(-1))
-		ctx.Pop2()
+		ctx.Pop()
+		ctx.Pop()
 
 		contract := crypto.CreateAddress(from, nonce)
 		copy(makeSlice(ctx.PushFixedBuffer(20), 20), contract[:])
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("toContract2", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("toContract2", func(ctx *JSVM) int {
 		var from common.Address
 		if ptr, size := ctx.GetBuffer(-3); ptr != nil {
 			from = common.BytesToAddress(makeSlice(ptr, size))
@@ -416,12 +418,14 @@ func New(code string, ctx *Context) (*Tracer, error) {
 			code = common.FromHex(ctx.GetString(-1))
 		}
 		codeHash := crypto.Keccak256(code)
-		ctx.Pop3()
+		ctx.Pop()
+		ctx.Pop()
+		ctx.Pop()
 		contract := crypto.CreateAddress2(from, salt, codeHash)
 		copy(makeSlice(ctx.PushFixedBuffer(20), 20), contract[:])
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("isPrecompiled", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("isPrecompiled", func(ctx *JSVM) int {
 		addr := common.BytesToAddress(popSlice(ctx))
 		for _, p := range tracer.activePrecompiles {
 			if p == addr {
@@ -429,15 +433,19 @@ func New(code string, ctx *Context) (*Tracer, error) {
 				return 1
 			}
 		}
-		ctx.PushBoolean(false)
 
-		_, ok := vm.PrecompiledContractsIstanbul[common.BytesToAddress(popSlice(ctx))]
-		ctx.PushBoolean(ok)
+		if _, ok := vm.PrecompiledContractsIstanbul[addr]; ok {
+			ctx.PushBoolean(true)
+			return 1
+		}
+
+		ctx.PushBoolean(false)
 		return 1
 	})
-	tracer.vm.PushGlobalGoFunction("slice", func(ctx *duktape.Context) int {
+	tracer.vm.PushGlobalGoFunction("slice", func(ctx *JSVM) int {
 		start, end := ctx.GetInt(-2), ctx.GetInt(-1)
-		ctx.Pop2()
+		ctx.Pop()
+		ctx.Pop()
 
 		blob := popSlice(ctx)
 		size := end - start
@@ -495,22 +503,22 @@ func New(code string, ctx *Context) (*Tracer, error) {
 	tracer.contractWrapper.pushObject(tracer.vm)
 	tracer.vm.PutPropString(logObject, "contract")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushUint(*tracer.pcValue); return 1 })
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushUint(*tracer.pcValue); return 1 })
 	tracer.vm.PutPropString(logObject, "getPC")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushUint(*tracer.gasValue); return 1 })
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushUint(*tracer.gasValue); return 1 })
 	tracer.vm.PutPropString(logObject, "getGas")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushUint(*tracer.costValue); return 1 })
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushUint(*tracer.costValue); return 1 })
 	tracer.vm.PutPropString(logObject, "getCost")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushUint(*tracer.depthValue); return 1 })
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushUint(*tracer.depthValue); return 1 })
 	tracer.vm.PutPropString(logObject, "getDepth")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int { ctx.PushUint(*tracer.refundValue); return 1 })
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int { ctx.PushUint(*tracer.refundValue); return 1 })
 	tracer.vm.PutPropString(logObject, "getRefund")
 
-	tracer.vm.PushGoFunction(func(ctx *duktape.Context) int {
+	tracer.vm.PushGoFunction(func(ctx *JSVM) int {
 		if tracer.errorValue != nil {
 			ctx.PushString(*tracer.errorValue)
 		} else {
@@ -592,7 +600,8 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	// Compute intrinsic gas
 	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
 	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
-	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+	isShanghai := env.ChainConfig().IsShanghai(env.Context().BlockNumber)
+	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul, isShanghai)
 	if err != nil {
 		return
 	}
@@ -713,9 +722,6 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		jst.err = wrapError("result", err)
 	}
-	// Clean up the JavaScript environment
-	jst.vm.DestroyHeap()
-	jst.vm.Destroy()
 
 	return result, jst.err
 }

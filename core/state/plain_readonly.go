@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -39,12 +40,14 @@ func (a *storageItem) Less(b btree.Item) bool {
 	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
 
+// State at the beginning of blockNr
 type PlainState struct {
 	accHistoryC, storageHistoryC kv.Cursor
 	accChangesC, storageChangesC kv.CursorDupSort
 	tx                           kv.Tx
 	blockNr                      uint64
 	storage                      map[common.Address]*btree.BTree
+	trace                        bool
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
@@ -61,6 +64,10 @@ func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 	}
 }
 
+func (s *PlainState) SetTrace(trace bool) {
+	s.trace = trace
+}
+
 func (s *PlainState) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
 }
@@ -73,13 +80,13 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(k[:], addr[:])
-	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr+1)
+	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
 	if err != nil {
 		return err
 	}
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
-		log.Error("Error decoding account", "error", err)
+		log.Error("Error decoding account", "err", err)
 		return err
 	}
 	binary.BigEndian.PutUint64(k[common.AddressLength:], acc.Incarnation)
@@ -100,7 +107,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr+1, func(kAddr, kLoc, vs []byte) (bool, error) {
+	if err := WalkAsOfStorage(s.tx, addr, acc.Incarnation, startLocation, s.blockNr, func(kAddr, kLoc, vs []byte) (bool, error) {
 		if !bytes.Equal(kAddr, addr[:]) {
 			return false, nil
 		}
@@ -145,11 +152,14 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 }
 
 func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
+	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
 	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
+		if s.trace {
+			fmt.Printf("ReadAccountData [%x] => []\n", address)
+		}
 		return nil, nil
 	}
 	var a accounts.Account
@@ -166,14 +176,20 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 			return nil, err1
 		}
 	}
+	if s.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+	}
 	return &a, nil
 }
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr+1)
+	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 	if err != nil {
 		return nil, err
+	}
+	if s.trace {
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
 	if len(enc) == 0 {
 		return nil, nil
@@ -186,6 +202,9 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 		return nil, nil
 	}
 	code, err := s.tx.GetOne(kv.Code, codeHash[:])
+	if s.trace {
+		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+	}
 	if len(code) == 0 {
 		return nil, nil
 	}
@@ -198,7 +217,7 @@ func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uin
 }
 
 func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+2)
+	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
 	if err != nil {
 		return 0, err
 	}

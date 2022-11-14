@@ -34,23 +34,17 @@ import (
 // Constants to match up protocol versions and messages
 const (
 	ETH66 = 66
+	ETH67 = 67
 )
 
 var ProtocolToString = map[uint]string{
 	ETH66: "eth66",
+	ETH67: "eth67",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
 // devp2p capability negotiation.
 const ProtocolName = "eth"
-
-// ProtocolVersions are the supported versions of the `eth` protocol (first
-// is primary).
-var ProtocolVersions = []uint{ETH66} //nolint
-
-// protocolLengths are the number of implemented message corresponding to
-// different protocol versions.
-var protocolLengths = map[uint]uint64{ETH66: 17} //nolint
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
@@ -77,25 +71,6 @@ const (
 	PooledTransactionsMsg         = 0x0a
 )
 
-//nolint
-var ToString = map[uint]string{
-	StatusMsg:                     "StatusMsg",
-	NewBlockHashesMsg:             "NewBlockHashesMsg",
-	TransactionsMsg:               "TransactionsMsg",
-	GetBlockHeadersMsg:            "GetBlockHeadersMsg",
-	BlockHeadersMsg:               "BlockHeadersMsg",
-	GetBlockBodiesMsg:             "GetBlockBodiesMsg",
-	BlockBodiesMsg:                "BlockBodiesMsg",
-	NewBlockMsg:                   "NewBlockMsg",
-	GetNodeDataMsg:                "GetNodeDataMsg",
-	NodeDataMsg:                   "NodeDataMsg",
-	GetReceiptsMsg:                "GetReceiptsMsg",
-	ReceiptsMsg:                   "ReceiptsMsg",
-	NewPooledTransactionHashesMsg: "NewPooledTransactionHashesMsg",
-	GetPooledTransactionsMsg:      "GetPooledTransactionsMsg",
-	PooledTransactionsMsg:         "PooledTransactionsMsg",
-}
-
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 	ETH66: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
@@ -104,6 +79,20 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
 		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_66,
 		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+	},
+	ETH67: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
 		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
 		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
 		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
@@ -132,18 +121,21 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
+	ETH67: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
 }
-
-var (
-	ErrNoStatusMsg             = errors.New("no status message")
-	errMsgTooLarge             = errors.New("message too long")
-	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code")
-	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
-	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
-	ErrGenesisMismatch         = errors.New("genesis mismatch")
-	ErrForkIDRejected          = errors.New("fork ID rejected")
-)
 
 // Packet represents a p2p message in the `eth` protocol.
 type Packet interface {
@@ -383,8 +375,8 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// sanityCheck verifies that the values are reasonable, as a DoS protection
-func (request *NewBlockPacket) sanityCheck() error {
+// SanityCheck verifies that the values are reasonable, as a DoS protection
+func (request *NewBlockPacket) SanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {
 		return err
 	}
@@ -825,10 +817,7 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 	encodingSize := 0
 	// Size of RequestID
 	encodingSize++
-	var requestIdLen int
-	if ptp66.RequestId >= 128 {
-		requestIdLen = (bits.Len64(ptp66.RequestId) + 7) / 8
-	}
+	requestIdLen := rlp.IntLenExcludingHead(ptp66.RequestId)
 	encodingSize += requestIdLen
 	// size of Transactions
 	encodingSize++

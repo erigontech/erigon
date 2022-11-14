@@ -3,6 +3,9 @@
 package ethconfig
 
 import (
+	"time"
+
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -14,61 +17,83 @@ import (
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
-		Genesis          *core.Genesis `toml:",omitempty"`
-		NetworkID        uint64
-		EthDiscoveryURLs []string
-		Whitelist        map[uint64]common.Hash `toml:"-"`
-		StorageMode      string
-		OnlyAnnounce     bool
-		Miner            params.MiningConfig
-		Ethash           ethash.Config
-		TxPool           core.TxPoolConfig
-		GPO              gasprice.Config
-		RPCGasCap        uint64  `toml:",omitempty"`
-		RPCTxFeeCap      float64 `toml:",omitempty"`
+		Genesis                        *core.Genesis `toml:",omitempty"`
+		NetworkID                      uint64
+		EthDiscoveryURLs               []string
+		P2PEnabled                     bool
+		Prune                          prune.Mode
+		BatchSize                      datasize.ByteSize
+		ImportMode                     bool
+		BadBlockHash                   common.Hash
+		Snapshot                       Snapshot
+		BlockDownloaderWindow          int
+		ExternalSnapshotDownloaderAddr string
+		Whitelist                      map[uint64]common.Hash `toml:"-"`
+		Miner                          params.MiningConfig
+		Ethash                         ethash.Config
+		Clique                         params.ConsensusSnapshotConfig
+		Aura                           params.AuRaConfig
+		Parlia                         params.ParliaConfig
+		TxPool                         core.TxPoolConfig
+		GPO                            gasprice.Config
+		RPCGasCap                      uint64  `toml:",omitempty"`
+		RPCTxFeeCap                    float64 `toml:",omitempty"`
+		StateStream                    bool
+		BodyDownloadTimeoutSeconds     int
+		SyncLoopThrottle               time.Duration
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
+	enc.P2PEnabled = c.P2PEnabled
+	enc.Prune = c.Prune
+	enc.BatchSize = c.BatchSize
+	enc.ImportMode = c.ImportMode
+	enc.BadBlockHash = c.BadBlockHash
+	enc.Snapshot = c.Snapshot
+	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
-	enc.StorageMode = c.Prune.String()
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
-	enc.TxPool = c.TxPool
+	enc.Clique = c.Clique
+	enc.Aura = c.Aura
+	enc.Parlia = c.Parlia
+	enc.TxPool = c.DeprecatedTxPool
 	enc.GPO = c.GPO
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
+	enc.StateStream = c.StateStream
 	return &enc, nil
 }
 
 // UnmarshalTOML unmarshals from TOML.
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
-		Genesis            *core.Genesis `toml:",omitempty"`
-		NetworkID          *uint64
-		EthDiscoveryURLs   []string
-		Whitelist          map[uint64]common.Hash `toml:"-"`
-		Mode               *string
-		PruneH             *uint64
-		PruneR             *uint64
-		PruneT             *uint64
-		PruneC             *uint64
-		PruneBeforeH       *uint64
-		PruneBeforeR       *uint64
-		PruneBeforeT       *uint64
-		PruneBeforeC       *uint64
-		Experiments        *[]string
-		OnlyAnnounce       *bool
-		SkipBcVersionCheck *bool `toml:"-"`
-		DatabaseHandles    *int  `toml:"-"`
-		DatabaseFreezer    *string
-		Miner              *params.MiningConfig
-		Ethash             *ethash.Config
-		TxPool             *core.TxPoolConfig
-		GPO                *gasprice.Config
-		RPCGasCap          *uint64  `toml:",omitempty"`
-		RPCTxFeeCap        *float64 `toml:",omitempty"`
+		Genesis                        *core.Genesis `toml:",omitempty"`
+		NetworkID                      *uint64
+		EthDiscoveryURLs               []string
+		P2PEnabled                     *bool
+		Prune                          *prune.Mode
+		BatchSize                      *datasize.ByteSize
+		ImportMode                     *bool
+		BadBlockHash                   *common.Hash
+		Snapshot                       *Snapshot
+		BlockDownloaderWindow          *int
+		ExternalSnapshotDownloaderAddr *string
+		Whitelist                      map[uint64]common.Hash `toml:"-"`
+		Miner                          *params.MiningConfig
+		Ethash                         *ethash.Config
+		Clique                         *params.ConsensusSnapshotConfig
+		Aura                           *params.AuRaConfig
+		Parlia                         *params.ParliaConfig
+		TxPool                         *core.TxPoolConfig
+		GPO                            *gasprice.Config
+		RPCGasCap                      *uint64  `toml:",omitempty"`
+		RPCTxFeeCap                    *float64 `toml:",omitempty"`
+		StateStream                    *bool
+		BodyDownloadTimeoutSeconds     *int
+		SyncLoopThrottle               *time.Duration
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -83,16 +108,29 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.EthDiscoveryURLs != nil {
 		c.EthDiscoveryURLs = dec.EthDiscoveryURLs
 	}
+	if dec.P2PEnabled != nil {
+		c.P2PEnabled = *dec.P2PEnabled
+	}
+	if dec.Prune != nil {
+		c.Prune = *dec.Prune
+	}
+	if dec.BatchSize != nil {
+		c.BatchSize = *dec.BatchSize
+	}
+	if dec.ImportMode != nil {
+		c.ImportMode = *dec.ImportMode
+	}
+	if dec.BadBlockHash != nil {
+		c.BadBlockHash = *dec.BadBlockHash
+	}
+	if dec.Snapshot != nil {
+		c.Snapshot = *dec.Snapshot
+	}
+	if dec.ExternalSnapshotDownloaderAddr != nil {
+		c.ExternalSnapshotDownloaderAddr = *dec.ExternalSnapshotDownloaderAddr
+	}
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
-	}
-	if dec.Mode != nil {
-		mode, err := prune.FromCli(*dec.Mode, *dec.PruneH, *dec.PruneR, *dec.PruneT, *dec.PruneC,
-			*dec.PruneBeforeH, *dec.PruneBeforeR, *dec.PruneBeforeT, *dec.PruneBeforeC, *dec.Experiments)
-		if err != nil {
-			return err
-		}
-		c.Prune = mode
 	}
 	if dec.Miner != nil {
 		c.Miner = *dec.Miner
@@ -100,8 +138,17 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Ethash != nil {
 		c.Ethash = *dec.Ethash
 	}
+	if dec.Clique != nil {
+		c.Clique = *dec.Clique
+	}
+	if dec.Aura != nil {
+		c.Aura = *dec.Aura
+	}
+	if dec.Parlia != nil {
+		c.Parlia = *dec.Parlia
+	}
 	if dec.TxPool != nil {
-		c.TxPool = *dec.TxPool
+		c.DeprecatedTxPool = *dec.TxPool
 	}
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO
@@ -111,6 +158,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.RPCTxFeeCap != nil {
 		c.RPCTxFeeCap = *dec.RPCTxFeeCap
+	}
+	if dec.StateStream != nil {
+		c.StateStream = *dec.StateStream
 	}
 	return nil
 }

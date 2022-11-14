@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// +build amd64,blsasm
+//go:build amd64 && blsasm
 
 package bls12381
 

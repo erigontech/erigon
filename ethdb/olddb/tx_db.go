@@ -14,8 +14,8 @@ import (
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
 // you can put unlimited amount of data into this class
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
-//Deprecated
-//nolint
+// Deprecated
+// nolint
 type TxDb struct {
 	db      ethdb.Database
 	tx      kv.Tx
@@ -24,7 +24,7 @@ type TxDb struct {
 	len     uint64
 }
 
-//nolint
+// nolint
 func WrapIntoTxDB(tx kv.RwTx) *TxDb {
 	return &TxDb{tx: tx, cursors: map[string]kv.Cursor{}}
 }
@@ -66,13 +66,13 @@ func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
 	return m.tx.ReadSequence(bucket)
 }
 
-func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
-	m.len += uint64(len(key) + len(value))
-	c, err := m.cursor(bucket)
+func (m *TxDb) Put(table string, k, v []byte) error {
+	m.len += uint64(len(k) + len(v))
+	c, err := m.cursor(table)
 	if err != nil {
 		return err
 	}
-	return c.(kv.RwCursor).Put(key, value)
+	return c.(kv.RwCursor).Put(k, v)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
@@ -93,13 +93,13 @@ func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	return c.(kv.RwCursorDupSort).AppendDup(key, value)
 }
 
-func (m *TxDb) Delete(bucket string, k, v []byte) error {
+func (m *TxDb) Delete(table string, k []byte) error {
 	m.len += uint64(len(k))
-	c, err := m.cursor(bucket)
+	c, err := m.cursor(table)
 	if err != nil {
 		return err
 	}
-	return c.(kv.RwCursor).Delete(k, v)
+	return c.(kv.RwCursor).Delete(k)
 }
 
 func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {

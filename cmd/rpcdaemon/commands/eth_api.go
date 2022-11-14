@@ -5,15 +5,16 @@ import (
 	"context"
 	"math/big"
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -21,9 +22,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -44,7 +47,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
@@ -54,11 +57,11 @@ type EthAPI interface {
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
-	NewPendingTransactionFilter(_ context.Context) (hexutil.Uint64, error)
-	NewBlockFilter(_ context.Context) (hexutil.Uint64, error)
-	NewFilter(_ context.Context, filter interface{}) (hexutil.Uint64, error)
-	UninstallFilter(_ context.Context, index hexutil.Uint64) (bool, error)
-	GetFilterChanges(_ context.Context, index hexutil.Uint64) ([]interface{}, error)
+	NewPendingTransactionFilter(_ context.Context) (string, error)
+	NewBlockFilter(_ context.Context) (string, error)
+	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (string, error)
+	UninstallFilter(_ context.Context, index string) (bool, error)
+	GetFilterChanges(_ context.Context, index string) ([]interface{}, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
@@ -75,14 +78,14 @@ type EthAPI interface {
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
-	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
+	Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
-	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error)
+	CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -91,27 +94,27 @@ type EthAPI interface {
 	GetWork(ctx context.Context) ([4]string, error)
 	SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error)
-
-	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
-	GetCompilers(_ context.Context) ([]string, error)
-	CompileLLL(_ context.Context, _ string) (hexutil.Bytes, error)
-	CompileSolidity(ctx context.Context, _ string) (hexutil.Bytes, error)
-	CompileSerpent(ctx context.Context, _ string) (hexutil.Bytes, error)
 }
 
 type BaseAPI struct {
 	stateCache   kvcache.Cache // thread-safe
 	blocksLRU    *lru.Cache    // thread-safe
-	filters      *filters.Filters
+	filters      *rpchelper.Filters
 	_chainConfig *params.ChainConfig
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader interfaces.BlockReader
-	TevmEnabled  bool // experiment
+	_historyV3     *bool
+	_historyV3Lock sync.RWMutex
+
+	_blockReader services.FullBlockReader
+	_txnReader   services.TxnReader
+	_agg         *libstate.Aggregator22
+
+	evmCallTimeout time.Duration
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, singleNodeMode bool, evmCallTimeout time.Duration) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -121,7 +124,7 @@ func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interf
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -129,12 +132,14 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	return cfg, err
 }
 
-func (api *BaseAPI) EnableTevmExperiment() { api.TevmEnabled = true }
-
 // nolint:unused
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
+}
+
+func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
+	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
@@ -154,6 +159,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 	if number == nil {
 		return nil, nil
 	}
+
 	return api.blockWithSenders(tx, hash, *number)
 }
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
@@ -175,9 +181,33 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		return block, nil
 	}
 	if api.blocksLRU != nil {
+		// calc fields before put to cache
+		for _, txn := range block.Transactions() {
+			txn.Hash()
+		}
+		block.Hash()
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
+}
+
+func (api *BaseAPI) historyV3(tx kv.Tx) bool {
+	api._historyV3Lock.RLock()
+	historyV3 := api._historyV3
+	api._historyV3Lock.RUnlock()
+
+	if historyV3 != nil {
+		return *historyV3
+	}
+	enabled, err := rawdb.HistoryV3.Enabled(tx)
+	if err != nil {
+		log.Warn("HisoryV2Enabled: read", "err", err)
+		return false
+	}
+	api._historyV3Lock.Lock()
+	api._historyV3 = &enabled
+	api._historyV3Lock.Unlock()
+	return enabled
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
@@ -210,11 +240,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil
-	}
-
-	n, err := getBlockNumber(number, tx)
+	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -223,18 +249,27 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 	return block, err
 }
 
+func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	return api._blockReader.Header(context.Background(), tx, h, n)
+}
+
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend services.ApiBackend
+	ethBackend rpchelper.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
+	gasCache   *GasPriceCache
 	db         kv.RoDB
 	GasCap     uint64
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -245,6 +280,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend, txPool txpool
 		ethBackend: eth,
 		txPool:     txPool,
 		mining:     mining,
+		gasCache:   NewGasPriceCache(),
 		GasCap:     gascap,
 	}
 }
@@ -332,6 +368,30 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	return result
 }
 
+// newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
+// representation, with the given location metadata set (if available).
+func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+	tx := opaqueTx.(*types.LegacyTx)
+	result := &RPCTransaction{
+		Type:     hexutil.Uint64(tx.Type()),
+		ChainID:  (*hexutil.Big)(new(big.Int)),
+		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
+		Gas:      hexutil.Uint64(tx.GetGas()),
+		Hash:     txHash,
+		Input:    hexutil.Bytes(tx.GetData()),
+		Nonce:    hexutil.Uint64(tx.GetNonce()),
+		From:     common.Address{},
+		To:       tx.GetTo(),
+		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
+	}
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(tx types.Transaction, current *types.Header, config *params.ChainConfig) *RPCTransaction {
 	var baseFee *big.Int
@@ -350,4 +410,34 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.B
 	var buf bytes.Buffer
 	err := txs[index].MarshalBinary(&buf)
 	return buf.Bytes(), err
+}
+
+type GasPriceCache struct {
+	latestPrice *big.Int
+	latestHash  common.Hash
+	mtx         sync.Mutex
+}
+
+func NewGasPriceCache() *GasPriceCache {
+	return &GasPriceCache{
+		latestPrice: big.NewInt(0),
+		latestHash:  common.Hash{},
+	}
+}
+
+func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
+	var hash common.Hash
+	var price *big.Int
+	c.mtx.Lock()
+	hash = c.latestHash
+	price = c.latestPrice
+	c.mtx.Unlock()
+	return hash, price
+}
+
+func (c *GasPriceCache) SetLatest(hash common.Hash, price *big.Int) {
+	c.mtx.Lock()
+	c.latestPrice = price
+	c.latestHash = hash
+	c.mtx.Unlock()
 }

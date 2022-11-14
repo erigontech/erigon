@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build go1.7 && amd64 && !gccgo && !appengine
-// +build go1.7,amd64,!gccgo,!appengine
 
 package blake2b
 

@@ -17,11 +17,11 @@
 package core
 
 import (
-	"github.com/ledgerwatch/erigon/params"
-)
+	"sort"
 
-// MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 13804600
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
+)
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
 // for the historical blocks (on mainnet now but perhaps on the testsnets
@@ -29,20 +29,32 @@ const MainnetNotCheckedFrom uint64 = 13804600
 // where codeBitmap was useful. Invalid jumps either did not occur, or were
 // prevented simply by checking whether the jump destination has JUMPDEST opcode
 // Mainnet transactions that use jumpdest analysis are:
+// 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 // 0x88a1f2a9f048a21fd944b28ad9962f533ab5d3c40e17b1bc3f99ae999a4021b2 (block 6426432)
 // 0x86e55d1818b5355424975de9633a57c40789ca08552297b726333a9433949c92 (block 6426298)
-// 0x3666640316df11865abd1352f4c0b4c5126f8ac1d858ef2a0c6e744a4865bca2 (block 5800596)
 // 0xcdb5bf0b4b51093e1c994f471921f88623c9d3e1b6aa2782049f53a0048f2b32 (block 11079912)
-// 0x21ab7bf7245a87eae265124aaf180d91133377e47db2b1a4866493ec4b371150 (block 13140429)
+// 0x21ab7bf7245a87eae265124aaf180d91133377e47db2b1a4866493ec4b371150 (block 13119520)
+
+var analysisBlocks = map[string][]uint64{
+	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 15_081_051},
+	networkname.BSCChainName:        {19_278_044},
+	networkname.BorMainnetChainName: {29_447_463},
+	networkname.RopstenChainName:    {2_534_105, 2_534_116, 3_028_887, 3_028_940, 3_028_956, 3_450_102, 5_294_626, 5_752_787, 10_801_303, 10_925_062, 11_440_683, 11_897_655, 11_898_288, 12_291_199, 12_331_664},
+}
+
 func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
-	if config != params.MainnetChainConfig {
+	blockNums, ok := analysisBlocks[config.ChainName]
+	if !ok {
 		return false
 	}
-	if blockNumber >= MainnetNotCheckedFrom { // We have not checked beyond that block
+	// blockNums is ordered, and the last element is the first block number which has not been checked
+	p := sort.Search(len(blockNums), func(i int) bool {
+		return blockNums[i] >= blockNumber
+	})
+	if p == len(blockNums) {
+		// blockNum is beyond the last element, no optimisation
 		return false
 	}
-	if blockNumber == 6426298 || blockNumber == 6426432 || blockNumber == 5800596 || blockNumber == 11079912 || blockNumber == 13140429 {
-		return false
-	}
-	return true
+	// If the blockNumber is in the list, no optimisation
+	return blockNumber != blockNums[p]
 }

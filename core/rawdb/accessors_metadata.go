@@ -59,5 +59,5 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) e
 
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
 func DeleteChainConfig(db kv.Deleter, hash common.Hash) error {
-	return db.Delete(kv.ConfigTable, hash[:], nil)
+	return db.Delete(kv.ConfigTable, hash[:])
 }

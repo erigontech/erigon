@@ -27,7 +27,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -74,7 +73,7 @@ func TestLargeValue(t *testing.T) {
 
 // TestRandomCases tests som cases that were found via random fuzzing
 func TestRandomCases(t *testing.T) {
-	var rt []randTestStep = []randTestStep{
+	var rt = []randTestStep{
 		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 0
 		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 1
 		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000002")},   // step 2
@@ -280,45 +279,6 @@ func TestDeepHash(t *testing.T) {
 			t.Errorf("DeepHash mistmatch: %x, expected %x, testcase %d", hash2, hash1, i)
 		}
 	}
-}
-
-func TestHashMapLeak(t *testing.T) {
-	debug.OverrideGetNodeData(true)
-	defer debug.OverrideGetNodeData(false)
-	// freeze the randomness
-	random := rand.New(rand.NewSource(794656320434))
-
-	// now create a trie with some small and some big leaves
-	trie := newEmpty()
-	nTouches := 256 * 10
-
-	var key [1]byte
-	var val [8]byte
-	for i := 0; i < nTouches; i++ {
-		key[0] = byte(random.Intn(256))
-		binary.BigEndian.PutUint64(val[:], random.Uint64())
-
-		option := random.Intn(3)
-		if option == 0 {
-			// small leaf node
-			trie.Update(key[:], val[:])
-		} else if option == 1 {
-			// big leaf node
-			trie.Update(key[:], crypto.Keccak256(val[:]))
-		} else {
-			// test delete as well
-			trie.Delete(key[:])
-		}
-	}
-
-	// check the size of trie's hash map
-	trie.Hash()
-
-	nHashes := trie.HashMapSize()
-	nExpected := 1 + 16 + 256/3
-
-	assert.GreaterOrEqual(t, nHashes, nExpected*7/8)
-	assert.LessOrEqual(t, nHashes, nExpected*9/8)
 }
 
 func genRandomByteArrayOfLen(length uint) []byte {

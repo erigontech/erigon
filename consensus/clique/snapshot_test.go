@@ -423,7 +423,7 @@ func TestClique(t *testing.T) {
 			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
-			m := stages.MockWithGenesisEngine(t, genesis, engine)
+			m := stages.MockWithGenesisEngine(t, genesis, engine, false)
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
@@ -433,7 +433,7 @@ func TestClique(t *testing.T) {
 					copy(nonce[:], clique.NonceAuthVote)
 					gen.SetNonce(nonce)
 				}
-			}, false /* intemediateHashes */)
+			}, false /* intermediateHashes */)
 			if err != nil {
 				t.Fatalf("generate blocks: %v", err)
 			}
@@ -471,7 +471,6 @@ func TestClique(t *testing.T) {
 				for k, b := range batches[j] {
 					chainX.Headers[k] = b.Header()
 				}
-				chainX.Length = len(batches[j])
 				chainX.TopBlock = batches[j][len(batches[j])-1]
 				if err = m.InsertChain(chainX); err != nil {
 					t.Errorf("test %d: failed to import batch %d, %v", i, j, err)
@@ -488,7 +487,6 @@ func TestClique(t *testing.T) {
 			for k, b := range batches[len(batches)-1] {
 				chainX.Headers[k] = b.Header()
 			}
-			chainX.Length = len(batches[len(batches)-1])
 			chainX.TopBlock = batches[len(batches)-1][len(batches[len(batches)-1])-1]
 			err = m.InsertChain(chainX)
 			if tt.failure != nil && err == nil {

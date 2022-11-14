@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 
 	mapset "github.com/deckarep/golang-set"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -49,11 +50,13 @@ type Server struct {
 	codecs          mapset.Set
 
 	batchConcurrency uint
+	disableStreaming bool
+	traceRequests    bool // Whether to print requests at INFO level
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint) *Server {
-	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency}
+func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool) *Server {
+	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency, disableStreaming: disableStreaming, traceRequests: traceRequests}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -99,13 +102,13 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
 // is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
 // this mode.
-func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
+func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsoniter.Stream) {
 	// Don't serve if server is stopped.
 	if atomic.LoadInt32(&s.run) == 0 {
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
@@ -119,7 +122,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 	if batch {
 		h.handleBatch(reqs)
 	} else {
-		h.handleMsg(reqs[0])
+		h.handleMsg(reqs[0], stream)
 	}
 }
 

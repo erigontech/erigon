@@ -9,13 +9,15 @@ import (
 	"strings"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
+	"go.uber.org/atomic"
 )
 
 var stateBuckets = []string{
@@ -40,7 +42,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -57,7 +59,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -74,7 +76,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		err := mdbxToMdbx(ctx, logger, chaindata, toChaindata)
 		if err != nil {
@@ -89,7 +91,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil {
@@ -101,19 +103,19 @@ var cmdFToMdbx = &cobra.Command{
 }
 
 func init() {
-	withDatadir(cmdCompareBucket)
+	withDataDir(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
 	withBucket(cmdCompareBucket)
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
-	withDatadir(cmdCompareStates)
+	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
 
-	withDatadir(cmdMdbxToMdbx)
+	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
 
@@ -345,9 +347,11 @@ MainLoop:
 }
 
 func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
-	_ = os.RemoveAll(to)
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).
+		WriteMap().
+		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit }).
+		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 
@@ -366,11 +370,13 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
+	var total uint64
 	for name, b := range src.AllBuckets() {
 		if b.IsDeprecated {
 			continue
 		}
 
+		kv.ReadAhead(ctx, src, atomic.NewBool(false), name, nil, math.MaxUint32)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
 			return err
@@ -379,7 +385,10 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		if err != nil {
 			return err
 		}
+		total, _ = srcC.Count()
+
 		casted, isDupsort := c.(kv.RwCursorDupSort)
+		i := uint64(0)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
@@ -396,11 +405,12 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 				}
 			}
 
+			i++
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", name, "key", fmt.Sprintf("%x", k))
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", fmt.Sprintf("%x", k))
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}

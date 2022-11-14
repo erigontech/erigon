@@ -36,7 +36,8 @@ type Config struct {
 	TraceJumpDest bool   // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool   // Do not calculate receipts
 	ReadOnly      bool   // Do no perform any block finalisation
-	EnableTEMV    bool   // true if execution with TEVM enable flag
+	StatelessExec bool   // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState  bool   // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -73,7 +74,8 @@ type EVMInterpreter struct {
 	jt *JumpTable // EVM instruction table
 }
 
-//structcheck doesn't see embedding
+// structcheck doesn't see embedding
+//
 //nolint:structcheck
 type VM struct {
 	evm *EVM
@@ -86,10 +88,25 @@ type VM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
+func copyJumpTable(jt *JumpTable) *JumpTable {
+	var copy JumpTable
+	for i, op := range jt {
+		if op != nil {
+			opCopy := *op
+			copy[i] = &opCopy
+		}
+	}
+	return &copy
+}
+
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case evm.ChainRules().IsBerlin:
@@ -100,9 +117,9 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &constantinopleInstructionSet
 	case evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
-	case evm.ChainRules().IsEIP158:
+	case evm.ChainRules().IsSpuriousDragon:
 		jt = &spuriousDragonInstructionSet
-	case evm.ChainRules().IsEIP150:
+	case evm.ChainRules().IsTangerineWhistle:
 		jt = &tangerineWhistleInstructionSet
 	case evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
@@ -110,11 +127,12 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &frontierInstructionSet
 	}
 	if len(cfg.ExtraEips) > 0 {
+		jt = copyJumpTable(jt)
 		for i, eip := range cfg.ExtraEips {
 			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "error", err)
+				log.Error("EIP activation failed", "eip", eip, "err", err)
 			}
 		}
 	}
@@ -131,6 +149,10 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case vm.evm.ChainRules().IsCancun:
+		jt = &cancunInstructionSet
+	case vm.evm.ChainRules().IsShanghai:
+		jt = &shanghaiInstructionSet
 	case vm.evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case vm.evm.ChainRules().IsBerlin:
@@ -141,9 +163,9 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 		jt = &constantinopleInstructionSet
 	case vm.evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
-	case vm.evm.ChainRules().IsEIP158:
+	case vm.evm.ChainRules().IsSpuriousDragon:
 		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules().IsEIP150:
+	case vm.evm.ChainRules().IsTangerineWhistle:
 		jt = &tangerineWhistleInstructionSet
 	case vm.evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
@@ -155,7 +177,7 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "error", err)
+				log.Error("EIP activation failed", "eip", eip, "err", err)
 			}
 		}
 	}
@@ -290,7 +312,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 			// memory is expanded in words of 32 bytes. Gas
 			// is also calculated in words.
-			if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
+			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
 				return nil, ErrGasUintOverflow
 			}
 		}

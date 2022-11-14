@@ -24,12 +24,12 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -77,12 +77,16 @@ func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
 }
 
 func NextForkHash(config *params.ChainConfig, genesis common.Hash, head uint64) [4]byte {
+	return NextForkHashFromForks(GatherForks(config), genesis, head)
+}
+
+func NextForkHashFromForks(forks []uint64, genesis common.Hash, head uint64) [4]byte {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
 	// Calculate the current fork checksum and the next fork block
 	var next uint64
-	for _, fork := range GatherForks(config) {
+	for _, fork := range forks {
 		if fork <= head {
 			// Fork already passed, checksum the previous hash and the fork number
 			hash = checksumUpdate(hash, fork)
@@ -225,15 +229,11 @@ func checksumToBytes(hash uint32) [4]byte {
 
 // GatherForks gathers all the known forks and creates a sorted list out of them.
 func GatherForks(config *params.ChainConfig) []uint64 {
-	if config.ChainID.Uint64() == 77 {
-		return []uint64{6464300, 7026400, 12095200, 21050600}
-	}
-
 	// Gather all the fork block numbers via reflection
 	kind := reflect.TypeOf(params.ChainConfig{})
 	conf := reflect.ValueOf(config).Elem()
 
-	forks := make(map[uint64]struct{})
+	var forks []uint64
 	for i := 0; i < kind.NumField(); i++ {
 		// Fetch the next field and skip non-fork rules
 		field := kind.Field(i)
@@ -246,21 +246,21 @@ func GatherForks(config *params.ChainConfig) []uint64 {
 		// Extract the fork rule block number and aggregate it
 		rule := conf.Field(i).Interface().(*big.Int)
 		if rule != nil {
-			forks[rule.Uint64()] = struct{}{}
+			forks = append(forks, rule.Uint64())
 		}
 	}
-
 	// Sort the fork block numbers to permit chronological XOR
-	forkBlocks := make([]uint64, 0, len(forks))
-	for num := range forks {
-		forkBlocks = append(forkBlocks, num)
+	slices.Sort(forks)
+	// Deduplicate block numbers applying multiple forks
+	for i := 1; i < len(forks); i++ {
+		if forks[i] == forks[i-1] {
+			forks = append(forks[:i], forks[i+1:]...)
+			i--
+		}
 	}
-	sort.SliceStable(forkBlocks, func(i, j int) bool {
-		return forkBlocks[i] < forkBlocks[j]
-	})
 	// Skip any forks in block 0, that's the genesis ruleset
-	if len(forkBlocks) > 0 && forkBlocks[0] == 0 {
-		forkBlocks = forkBlocks[1:]
+	if len(forks) > 0 && forks[0] == 0 {
+		forks = forks[1:]
 	}
-	return forkBlocks
+	return forks
 }

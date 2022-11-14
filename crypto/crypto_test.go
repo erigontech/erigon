@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"testing"
@@ -34,6 +33,7 @@ import (
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
 var testPrivHex = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
+var testPubkeyHex = "7db227d7094ce215c3a0f57e1bcc732551fe351f94249471934567e0f5dc1bf795962b8cccb87a2eb56b29fbe37d614e2f4c3c45b789ae4f1f51f4cb21972ffd"
 
 // These tests are sanity checks.
 // They should ensure that we don't e.g. use Sha3-224 instead of Sha3-256
@@ -78,7 +78,7 @@ func TestUnmarshalPubkey(t *testing.T) {
 	}
 
 	var (
-		enc, _ = hex.DecodeString("04760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1b01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
+		enc, _ = hex.DecodeString("760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1b01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
 		dec    = &ecdsa.PublicKey{
 			Curve: S256(),
 			X:     hexutil.MustDecodeBig("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1"),
@@ -94,6 +94,26 @@ func TestUnmarshalPubkey(t *testing.T) {
 	}
 }
 
+func TestMarshalPubkey(t *testing.T) {
+	check := func(privateKeyHex, expectedPubkeyHex string) {
+		key, err := HexToECDSA(privateKeyHex)
+		if err != nil {
+			t.Errorf("bad private key: %s", err)
+			return
+		}
+		pubkeyHex := hex.EncodeToString(MarshalPubkey(&key.PublicKey))
+		if pubkeyHex != expectedPubkeyHex {
+			t.Errorf("unexpected public key: %s", pubkeyHex)
+		}
+	}
+
+	check(testPrivHex, testPubkeyHex)
+	check(
+		"36a7edad64d51a568b00e51d3fa8cd340aa704153010edf7f55ab3066ca4ef21",
+		"24bfa2cdce7c6a41184fa0809ad8d76969b7280952e9aa46179d90cfbab90f7d2b004928f0364389a1aa8d5166281f2ff7568493c1f719e8f6148ef8cf8af42d",
+	)
+}
+
 func TestSign(t *testing.T) {
 	key, _ := HexToECDSA(testPrivHex)
 	addr := common.HexToAddress(testAddrHex)
@@ -107,7 +127,7 @@ func TestSign(t *testing.T) {
 	if err != nil {
 		t.Errorf("ECRecover error: %s", err)
 	}
-	pubKey, _ := UnmarshalPubkey(recoveredPub)
+	pubKey, _ := UnmarshalPubkeyStd(recoveredPub)
 	recoveredAddr := PubkeyToAddress(*pubKey)
 	if addr != recoveredAddr {
 		t.Errorf("Address mismatch: want: %x have: %x", addr, recoveredAddr)
@@ -184,7 +204,7 @@ func TestLoadECDSA(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		f, err := ioutil.TempFile("", "loadecdsa_test.*.txt")
+		f, err := os.CreateTemp("", "loadecdsa_test.*.txt")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +225,7 @@ func TestLoadECDSA(t *testing.T) {
 }
 
 func TestSaveECDSA(t *testing.T) {
-	f, err := ioutil.TempFile("", "saveecdsa_test.*.txt")
+	f, err := os.CreateTemp("", "saveecdsa_test.*.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

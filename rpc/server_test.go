@@ -21,8 +21,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,7 +31,7 @@ import (
 )
 
 func TestServerRegisterName(t *testing.T) {
-	server := NewServer(50)
+	server := NewServer(50, false /* traceRequests */, true)
 	service := new(testService)
 
 	if err := server.RegisterName("test", service); err != nil {
@@ -54,7 +54,7 @@ func TestServerRegisterName(t *testing.T) {
 }
 
 func TestServer(t *testing.T) {
-	files, err := ioutil.ReadDir("testdata")
+	files, err := os.ReadDir("testdata")
 	if err != nil {
 		t.Fatal("where'd my testdata go?")
 	}
@@ -72,7 +72,7 @@ func TestServer(t *testing.T) {
 
 func runTestScript(t *testing.T, file string) {
 	server := newTestServer()
-	content, err := ioutil.ReadFile(file)
+	content, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -59,11 +60,9 @@ var (
 
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
-	Disable   bool
-	Locals    []common.Address // Addresses that should be treated by default as local
-	NoLocals  bool             // Whether local transaction handling should be disabled
-	Journal   string           // Journal of local transactions to survive node restarts
-	Rejournal time.Duration    // Time interval to regenerate the local transaction journal
+	Disable  bool
+	Locals   []common.Address // Addresses that should be treated by default as local
+	NoLocals bool             // Whether local transaction handling should be disabled
 
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
@@ -80,12 +79,9 @@ type TxPoolConfig struct {
 	TracedSenders []string // List of senders for which tx pool should print out debugging info
 }
 
-// DefaultTxPoolConfig contains the default configurations for the transaction
+// DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
-var DefaultTxPoolConfig = TxPoolConfig{
-	Journal:   "transactions.rlp",
-	Rejournal: time.Hour,
-
+var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	PriceLimit: 1,
 	PriceBump:  10,
 
@@ -96,4 +92,18 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	GlobalQueue:        30_000,
 
 	Lifetime: 3 * time.Hour,
+}
+
+var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpool.Config {
+	cfg := txpool.DefaultConfig
+	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
+	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
+	cfg.QueuedSubPoolLimit = int(pool1Cfg.GlobalQueue)
+	cfg.PriceBump = pool1Cfg.PriceBump
+	cfg.MinFeeCap = pool1Cfg.PriceLimit
+	cfg.AccountSlots = pool1Cfg.AccountSlots
+	cfg.LogEvery = 1 * time.Minute
+	cfg.CommitEvery = 5 * time.Minute
+	cfg.TracedSenders = pool1Cfg.TracedSenders
+	return cfg
 }

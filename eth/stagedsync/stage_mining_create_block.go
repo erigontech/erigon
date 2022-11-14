@@ -5,29 +5,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []types.Transaction
+	Txs      types.Transactions
 	Receipts types.Receipts
 
 	LocalTxs  types.TransactionsStream
@@ -35,10 +41,11 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig    *params.MiningConfig
-	PendingResultCh chan *types.Block
-	MiningResultCh  chan *types.Block
-	MiningBlock     *MiningBlock
+	MiningConfig      *params.MiningConfig
+	PendingResultCh   chan *types.Block
+	MiningResultCh    chan *types.Block
+	MiningResultPOSCh chan *types.Block
+	MiningBlock       *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
@@ -50,30 +57,44 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 	}
 }
 
-type MiningCreateBlockCfg struct {
-	db          kv.RwDB
-	miner       MiningState
-	chainConfig params.ChainConfig
-	engine      consensus.Engine
-	txPool2     *txpool.TxPool
-	txPool2DB   kv.RoDB
-	tmpdir      string
-}
-
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, tmpdir string) MiningCreateBlockCfg {
-	return MiningCreateBlockCfg{
-		db:          db,
-		miner:       miner,
-		chainConfig: chainConfig,
-		engine:      engine,
-		txPool2:     txPool2,
-		txPool2DB:   txPool2DB,
-		tmpdir:      tmpdir,
+func NewProposingState(cfg *params.MiningConfig) MiningState {
+	return MiningState{
+		MiningConfig:      cfg,
+		PendingResultCh:   make(chan *types.Block, 1),
+		MiningResultCh:    make(chan *types.Block, 1),
+		MiningResultPOSCh: make(chan *types.Block, 1),
+		MiningBlock:       &MiningBlock{},
 	}
 }
 
+type MiningCreateBlockCfg struct {
+	db                     kv.RwDB
+	miner                  MiningState
+	chainConfig            params.ChainConfig
+	engine                 consensus.Engine
+	txPool2                *txpool.TxPool
+	txPool2DB              kv.RoDB
+	tmpdir                 string
+	blockBuilderParameters *core.BlockBuilderParameters
+}
+
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
+	return MiningCreateBlockCfg{
+		db:                     db,
+		miner:                  miner,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		txPool2:                txPool2,
+		txPool2DB:              txPool2DB,
+		tmpdir:                 tmpdir,
+		blockBuilderParameters: blockBuilderParameters,
+	}
+}
+
+var maxTransactions uint16 = 1000
+
 // SpawnMiningCreateBlockStage
-//TODO:
+// TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
 	current := cfg.miner.MiningBlock
@@ -85,10 +106,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		staleThreshold = 7
 	)
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
-		return fmt.Errorf("refusing to mine without etherbase")
-	}
-
 	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -96,34 +113,60 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
-		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+		return fmt.Errorf("empty block %d", executionAt)
+	}
+
+	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ParentHash != parent.Hash() {
+		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
+	}
+
+	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+		if cfg.blockBuilderParameters == nil {
+			return fmt.Errorf("refusing to mine without etherbase")
+		}
+		// If we do not have an etherbase, let's use the suggested one
+		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
 	}
 
 	blockNum := executionAt + 1
-	var txs []types.Transaction
-	if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-		txSlots := txpool.TxsRlp{}
-		if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
-			return err
+	txSlots := types2.TxsRlp{}
+	var onTime bool
+	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
+		var err error
+		counter := 0
+		for !onTime && counter < 1000 {
+			if onTime, err = cfg.txPool2.Best(maxTransactions, &txSlots, poolTx, executionAt); err != nil {
+				return err
+			}
+			time.Sleep(1 * time.Millisecond)
+			counter++
 		}
-
-		txs, err = types.DecodeTransactions(txSlots.Txs)
-		if err != nil {
-			return fmt.Errorf("decode rlp of pending txs: %w", err)
-		}
-		var sender common.Address
-		for i := range txs {
-			copy(sender[:], txSlots.Senders.At(i))
-			txs[i].SetSender(sender)
-		}
-
 		return nil
 	}); err != nil {
 		return err
 	}
-	current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
-	// txpool v2 - doesn't prioritise local txs over remote
-	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+	var skipByChainIDMismatch uint64 = 0
+	var txs []types.Transaction //nolint:prealloc
+	for i := range txSlots.Txs {
+		s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
+
+		transaction, err := types.DecodeTransaction(s)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
+			skipByChainIDMismatch++
+			continue
+		}
+		var sender common.Address
+		copy(sender[:], txSlots.Senders.At(i))
+		// Check if tx nonce is too low
+		txs = append(txs, transaction)
+		txs[len(txs)-1].SetSender(sender)
+	}
 	log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -161,36 +204,35 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	// re-written miner/worker.go:commitNewWork
-	timestamp := time.Now().Unix()
-	if parent.Time >= uint64(timestamp) {
-		timestamp = int64(parent.Time + 1)
-	}
-	num := parent.Number
-	header := &types.Header{
-		ParentHash: parent.Hash(),
-		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
-		Extra:      cfg.miner.MiningConfig.ExtraData,
-		Time:       uint64(timestamp),
-	}
-
-	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if cfg.chainConfig.IsLondon(header.Number.Uint64()) {
-		header.Eip1559 = true
-		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
-		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
-			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
+	var timestamp uint64
+	if cfg.blockBuilderParameters == nil {
+		timestamp = uint64(time.Now().Unix())
+		if parent.Time >= timestamp {
+			timestamp = parent.Time + 1
 		}
+	} else {
+		// If we are on proof-of-stake timestamp should be already set for us
+		timestamp = cfg.blockBuilderParameters.Timestamp
 	}
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
-	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
-	//if w.isRunning() {
+	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
 	header.Coinbase = coinbase
-	//}
+	header.Extra = cfg.miner.MiningConfig.ExtraData
 
-	if err = cfg.engine.Prepare(chain, header); err != nil {
+	txs, err = filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee, cfg.tmpdir)
+	if err != nil {
+		return err
+	}
+	current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
+	// txpool v2 - doesn't prioritise local txs over remote
+	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit, "txs", len(txs))
+
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+
+	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
@@ -200,6 +242,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
 		return err
+	}
+
+	if cfg.blockBuilderParameters != nil {
+		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
+
+		current.Header = header
+		current.Uncles = nil
+		return nil
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
@@ -307,4 +357,124 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 
 	}
 	return
+}
+
+func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, tmpDir string) ([]types.Transaction, error) {
+	initialCnt := len(transactions)
+	var filtered []types.Transaction
+	simulationTx := memdb.NewMemoryBatch(tx, tmpDir)
+	defer simulationTx.Rollback()
+	gasBailout := config.Consensus == params.ParliaConsensus
+
+	missedTxs := 0
+	noSenderCnt := 0
+	noAccountCnt := 0
+	nonceTooLowCnt := 0
+	notEOACnt := 0
+	feeTooLowCnt := 0
+	balanceTooLowCnt := 0
+	overflowCnt := 0
+	for len(transactions) > 0 && missedTxs != len(transactions) {
+		transaction := transactions[0]
+		sender, ok := transaction.GetSender()
+		if !ok {
+			transactions = transactions[1:]
+			noSenderCnt++
+			continue
+		}
+		var account accounts.Account
+		ok, err := rawdb.ReadAccount(simulationTx, sender, &account)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			transactions = transactions[1:]
+			noAccountCnt++
+			continue
+		}
+		// Check transaction nonce
+		if account.Nonce > transaction.GetNonce() {
+			transactions = transactions[1:]
+			nonceTooLowCnt++
+			continue
+		}
+		if account.Nonce < transaction.GetNonce() {
+			missedTxs++
+			transactions = append(transactions[1:], transaction)
+			continue
+		}
+		missedTxs = 0
+
+		// Make sure the sender is an EOA (EIP-3607)
+		if !account.IsEmptyCodeHash() {
+			transactions = transactions[1:]
+			notEOACnt++
+			continue
+		}
+
+		if config.IsLondon(blockNumber) {
+			baseFee256 := uint256.NewInt(0)
+			if overflow := baseFee256.SetFromBig(baseFee); overflow {
+				return nil, fmt.Errorf("bad baseFee %s", baseFee)
+			}
+			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
+			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
+				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256, false /* isFree */); err != nil {
+					transactions = transactions[1:]
+					feeTooLowCnt++
+					continue
+				}
+			}
+		}
+		txnGas := transaction.GetGas()
+		txnPrice := transaction.GetPrice()
+		value := transaction.GetValue()
+		accountBalance := account.Balance
+
+		want := uint256.NewInt(0)
+		want.SetUint64(txnGas)
+		want, overflow := want.MulOverflow(want, txnPrice)
+		if overflow {
+			transactions = transactions[1:]
+			overflowCnt++
+			continue
+		}
+
+		if transaction.GetFeeCap() != nil {
+			want.SetUint64(txnGas)
+			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
+			if overflow {
+				transactions = transactions[1:]
+				overflowCnt++
+				continue
+			}
+			want, overflow = want.AddOverflow(want, value)
+			if overflow {
+				transactions = transactions[1:]
+				overflowCnt++
+				continue
+			}
+		}
+
+		if accountBalance.Cmp(want) < 0 {
+			if !gasBailout {
+				transactions = transactions[1:]
+				balanceTooLowCnt++
+				continue
+			}
+		}
+		// Updates account in the simulation
+		account.Nonce++
+		account.Balance.Sub(&account.Balance, want)
+		accountBuffer := make([]byte, account.EncodingLengthForStorage())
+		account.EncodeForStorage(accountBuffer)
+		if err := simulationTx.Put(kv.PlainState, sender[:], accountBuffer); err != nil {
+			return nil, err
+		}
+		// Mark transaction as valid
+		filtered = append(filtered, transaction)
+		transactions = transactions[1:]
+	}
+	log.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "filtered", len(filtered))
+	return filtered, nil
 }

@@ -161,7 +161,7 @@ func BenchmarkCall(b *testing.B) {
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	_, tx := memdb.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 0))
+		statedb  = state.New(state.NewPlainState(tx, 1))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -177,15 +177,14 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		Coinbase:    common.Address{},
 		BlockNumber: new(big.Int).SetUint64(1),
 		ChainConfig: &params.ChainConfig{
-			ChainID:             big.NewInt(1),
-			HomesteadBlock:      new(big.Int),
-			ByzantiumBlock:      new(big.Int),
-			ConstantinopleBlock: new(big.Int),
-			DAOForkBlock:        new(big.Int),
-			DAOForkSupport:      false,
-			EIP150Block:         new(big.Int),
-			EIP155Block:         new(big.Int),
-			EIP158Block:         new(big.Int),
+			ChainID:               big.NewInt(1),
+			HomesteadBlock:        new(big.Int),
+			ByzantiumBlock:        new(big.Int),
+			ConstantinopleBlock:   new(big.Int),
+			DAOForkBlock:          new(big.Int),
+			DAOForkSupport:        false,
+			TangerineWhistleBlock: new(big.Int),
+			SpuriousDragonBlock:   new(big.Int),
 		},
 		EVMConfig: vm.Config{},
 	}
@@ -330,7 +329,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 0))
+	cfg.State = state.New(state.NewPlainState(tx, 1))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

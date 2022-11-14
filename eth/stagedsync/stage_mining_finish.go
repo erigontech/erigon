@@ -14,7 +14,7 @@ type MiningFinishCfg struct {
 	db          kv.RwDB
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
-	sealCancel  <-chan struct{}
+	sealCancel  chan struct{}
 	miningState MiningState
 }
 
@@ -23,7 +23,7 @@ func StageMiningFinishCfg(
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	miningState MiningState,
-	sealCancel <-chan struct{},
+	sealCancel chan struct{},
 ) MiningFinishCfg {
 	return MiningFinishCfg{
 		db:          db,
@@ -54,6 +54,10 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 
+	if cfg.miningState.MiningResultPOSCh != nil {
+		cfg.miningState.MiningResultPOSCh <- block
+		return nil
+	}
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		cfg.miningState.MiningResultCh <- block
@@ -64,14 +68,19 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 
 	if block.Transactions().Len() > 0 {
 		log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-			"blocn_num", block.NumberU64(),
+			"block_num", block.NumberU64(),
 			"transactions", block.Transactions().Len(),
 			"gas_used", block.GasUsed(),
 			"gas_limit", block.GasLimit(),
 			"difficulty", block.Difficulty(),
 		)
 	}
-
+	// interrupt aborts the in-flight sealing task.
+	select {
+	case cfg.sealCancel <- struct{}{}:
+	default:
+		log.Trace("None in-flight sealing task.")
+	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)

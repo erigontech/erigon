@@ -1,47 +1,30 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
-	"path"
-	"syscall"
+	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 var (
 	genesisPath string
 	genesis     *core.Genesis
+	chainConfig *params.ChainConfig
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }
 
 var rootCmd = &cobra.Command{
@@ -52,12 +35,21 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 
-		genesis = core.DefaultGenesisBlock()
+		genesis, chainConfig = getChainGenesisAndConfig()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
 		}
+		if genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
+			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
+				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
+		}
+		// Apply special hacks for BSC params
+		if chainConfig.Parlia != nil {
+			params.ApplyBinanceSmartChainParams()
+		}
+
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -79,8 +71,19 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 	return genesis
 }
 
+func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *params.ChainConfig) {
+	if chain == "" {
+		genesis, chainConfig = core.DefaultGenesisBlock(), params.MainnetChainConfig
+	} else {
+		genesis, chainConfig = core.DefaultGenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
+	}
+	return genesis, chainConfig
+}
+
 func Execute() {
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

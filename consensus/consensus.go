@@ -18,18 +18,14 @@
 package consensus
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-)
-
-var (
-	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
@@ -95,25 +91,31 @@ type Engine interface {
 
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
-	Prepare(chain ChainHeaderReader, header *types.Header) error
+	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header,
+		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error)
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
+	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, []*types.Receipt, error)
+	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
+	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -127,13 +129,17 @@ type Engine interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []rlp.RawValue
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
+
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
+	Type() params.ConsensusType
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
 }
@@ -146,12 +152,22 @@ type PoW interface {
 	Hashrate() float64
 }
 
-// PoSA is a consensus engine based on proof-of-stake-authority used by Binance Smart Chain.
+var (
+	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
+
 type PoSA interface {
 	Engine
 
-	IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error)
+	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
 	IsSystemContract(to *common.Address) bool
 	EnoughDistance(chain ChainReader, header *types.Header) bool
 	IsLocalBlock(header *types.Header) bool
+	AllowLightProcess(chain ChainReader, currentHeader *types.Header) bool
+}
+
+type AsyncEngine interface {
+	Engine
+
+	WithExecutionContext(context.Context) AsyncEngine
 }

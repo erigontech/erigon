@@ -111,9 +111,8 @@ WHERE prevaccount = select(state, tx.sender)
 WHEN prevaccount.nonce = tx.nonce AND prevbalance >= cost
 ```
 
-We have introduced `WHERE` section to define some variable for convinience, and placed the guard into the `WHEN` section.
-Pattern and substitution are on the first line, separated by the arrow `==>`. One needs to notice that the substution
+We have introduced `WHERE` section to define some variable for convenience, and placed the guard into the `WHEN` section.
+Pattern and substitution are on the first line, separated by the arrow `==>`. One needs to notice that the substitution
 contains three-element sequence whereas the pattern contains only two elements. If the gas purchase is successful,
 the "gas" object gets introduced. It will be useful for the subsequent rules, because now we can make all of them
 simply require the presence of that "gas" object, instead of repeating the guards of the gas purchasing rule.
-

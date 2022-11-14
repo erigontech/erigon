@@ -56,19 +56,3 @@ func HashData(data []byte) (Hash, error) {
 	}
 	return buf, nil
 }
-
-func HashTo(data []byte, to []byte) {
-	h := NewHasher()
-	defer ReturnHasherToPool(h)
-	h.Sha.Reset()
-
-	_, err := h.Sha.Write(data)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = h.Sha.Read(to)
-	if err != nil {
-		panic(err)
-	}
-}

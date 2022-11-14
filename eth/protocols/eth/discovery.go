@@ -17,12 +17,11 @@
 package eth
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -39,25 +38,20 @@ func (e enrEntry) ENRKey() string {
 	return "eth"
 }
 
-// StartENRUpdater starts the `eth` ENR updater loop, which listens for chain
-// head events and updates the requested node record whenever a fork is passed.
-func StartENRUpdater(chainConfig *params.ChainConfig, genesisHash common.Hash, events *privateapi.Events, ln *enode.LocalNode) {
-	events.AddHeaderSubscription(func(h *types.Header) error {
-		ln.Set(CurrentENREntry(chainConfig, genesisHash, h.Number.Uint64()))
-		return nil
-	})
-}
-
-// CurrentENREntry constructs an `eth` ENR entry based on the current state of the chain.
-func CurrentENREntry(chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) *enrEntry {
-	return &enrEntry{
-		ForkID: forkid.NewID(chainConfig, genesisHash, headHeight),
-	}
-}
-
 // CurrentENREntryFromForks constructs an `eth` ENR entry based on the current state of the chain.
 func CurrentENREntryFromForks(forks []uint64, genesisHash common.Hash, headHeight uint64) *enrEntry {
 	return &enrEntry{
 		ForkID: forkid.NewIDFromForks(forks, genesisHash, headHeight),
 	}
+}
+
+func LoadENRForkID(r *enr.Record) (*forkid.ID, error) {
+	var entry enrEntry
+	if err := r.Load(&entry); err != nil {
+		if enr.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to load fork ID from ENR: %w", err)
+	}
+	return &entry.ForkID, nil
 }

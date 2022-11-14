@@ -21,14 +21,18 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -36,13 +40,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
-	config        *Config
+	config        *nodecfg.Config
 	log           log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
@@ -50,14 +53,8 @@ type Node struct {
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
 	state         int           // Tracks state of node lifecycle
 
-	lock          sync.Mutex
-	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
-	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
-	http          *httpServer //
-	ws            *httpServer //
-	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
-
-	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
+	lock       sync.Mutex
+	lifecycles []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 
 	databases []kv.Closer
 }
@@ -69,20 +66,13 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *Config) (*Node, error) {
+func New(conf *nodecfg.Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
 	conf = &confCopy
-	if conf.DataDir != "" {
-		absdatadir, err := filepath.Abs(conf.DataDir)
-		if err != nil {
-			return nil, err
-		}
-		conf.DataDir = absdatadir
-	}
-	if conf.Logger == nil {
-		conf.Logger = log.New()
+	if conf.Log == nil {
+		conf.Log = log.New()
 	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
@@ -95,37 +85,16 @@ func New(conf *Config) (*Node, error) {
 	}
 
 	node := &Node{
-		config:        conf,
-		inprocHandler: rpc.NewServer(50),
-		log:           conf.Logger,
-		stop:          make(chan struct{}),
-		databases:     make([]kv.Closer, 0),
+		config:    conf,
+		log:       conf.Log,
+		stop:      make(chan struct{}),
+		databases: make([]kv.Closer, 0),
 	}
-	// Register built-in APIs.
-	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
 
 	// Acquire the instance directory lock.
 	if err := node.openDataDir(); err != nil {
 		return nil, err
 	}
-
-	var err error
-	// Initialize the p2p server. This creates the node key and discovery databases.
-
-	// Check HTTP/WS prefixes are valid.
-	if err = validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
-		return nil, err
-	}
-	if err = validatePrefix("WebSocket", conf.WSPathPrefix); err != nil {
-		return nil, err
-	}
-
-	// Configure RPC servers.
-	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
-	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
-	// Check for uncaught crashes from the previous boot and notify the user if
-	// there are any
-	//debug.CheckForCrashes(conf.DataDir)
 
 	return node, nil
 }
@@ -149,20 +118,14 @@ func (n *Node) Start() error {
 		return ErrNodeStopped
 	}
 	n.state = runningState
-	// open networking and RPC endpoints
-	err := n.openEndpoints()
 	lifecycles := make([]Lifecycle, len(n.lifecycles))
 	copy(lifecycles, n.lifecycles)
 	n.lock.Unlock()
 
-	// Check if endpoint startup failed.
-	if err != nil {
-		n.doClose(nil)
-		return err
-	}
 	// Start all registered lifecycles.
 	// preallocation leads to bugs here
 	var started []Lifecycle //nolint:prealloc
+	var err error
 	for _, lifecycle := range lifecycles {
 		if err = lifecycle.Start(); err != nil {
 			break
@@ -171,8 +134,14 @@ func (n *Node) Start() error {
 	}
 	// Check if any lifecycle failed to start.
 	if err != nil {
-		n.stopServices(started) //nolint:errcheck
-		n.doClose(nil)
+		stopErr := n.stopServices(started)
+		if stopErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", stopErr)
+		} //nolint:errcheck
+		closeErr := n.doClose(nil)
+		if closeErr != nil {
+			n.log.Warn("Failed to doClose for this node", "err", closeErr)
+		}
 	}
 	return err
 }
@@ -232,16 +201,6 @@ func (n *Node) doClose(errs []error) error {
 	}
 }
 
-// openEndpoints starts all network and RPC endpoints.
-func (n *Node) openEndpoints() error {
-	// start RPC endpoints
-	err := n.startRPC()
-	if err != nil {
-		n.stopRPC()
-	}
-	return err
-}
-
 // containsLifecycle checks if 'lfs' contains 'l'.
 func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 	for _, obj := range lfs {
@@ -272,11 +231,11 @@ func (n *Node) stopServices(running []Lifecycle) error {
 }
 
 func (n *Node) openDataDir() error {
-	if n.config.DataDir == "" {
+	if n.config.Dirs.DataDir == "" {
 		return nil // ephemeral
 	}
 
-	instdir := n.config.DataDir
+	instdir := n.config.Dirs.DataDir
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
@@ -288,7 +247,7 @@ func (n *Node) openDataDir() error {
 		return convertFileLockError(err)
 	}
 	if !locked {
-		return fmt.Errorf("%w: %s\n", ErrDatadirUsed, instdir)
+		return fmt.Errorf("%w: %s", ErrDataDirUsed, instdir)
 	}
 	n.dirLock = l
 	return nil
@@ -302,85 +261,6 @@ func (n *Node) closeDataDir() {
 		}
 		n.dirLock = nil
 	}
-}
-
-// SetAllowListForRPC sets granular allow list for exposed RPC methods
-func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
-	n.rpcAllowList = allowList
-}
-
-// configureRPC is a helper method to configure all the various RPC endpoints during node
-// startup. It's not meant to be called at any time afterwards as it makes certain
-// assumptions about the state of the node.
-func (n *Node) startRPC() error {
-	if err := n.startInProc(); err != nil {
-		return err
-	}
-
-	// Configure HTTP.
-	if n.config.HTTPHost != "" {
-		config := httpConfig{
-			CorsAllowedOrigins: n.config.HTTPCors,
-			Vhosts:             n.config.HTTPVirtualHosts,
-			Modules:            n.config.HTTPModules,
-			prefix:             n.config.HTTPPathPrefix,
-		}
-		if err := n.http.setListenAddr(n.config.HTTPHost, n.config.HTTPPort); err != nil {
-			return err
-		}
-		if err := n.http.enableRPC(n.rpcAPIs, config, n.rpcAllowList); err != nil {
-			return err
-		}
-	}
-
-	// Configure WebSocket.
-	if n.config.WSHost != "" {
-		server := n.wsServerForPort(n.config.WSPort)
-		config := wsConfig{
-			Modules: n.config.WSModules,
-			Origins: n.config.WSOrigins,
-			prefix:  n.config.WSPathPrefix,
-		}
-		if err := server.setListenAddr(n.config.WSHost, n.config.WSPort); err != nil {
-			return err
-		}
-		if err := server.enableWS(n.rpcAPIs, config, n.rpcAllowList); err != nil {
-			return err
-		}
-	}
-
-	if err := n.http.start(); err != nil {
-		return err
-	}
-	return n.ws.start()
-}
-
-func (n *Node) wsServerForPort(port int) *httpServer {
-	if n.config.HTTPHost == "" || n.http.port == port {
-		return n.http
-	}
-	return n.ws
-}
-
-func (n *Node) stopRPC() {
-	n.http.stop()
-	n.ws.stop()
-	n.stopInProc()
-}
-
-// startInProc registers all RPC APIs on the inproc server.
-func (n *Node) startInProc() error {
-	for _, api := range n.rpcAPIs {
-		if err := n.inprocHandler.RegisterName(api.Namespace, api.Service); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// stopInProc terminates the in-process RPC endpoint.
-func (n *Node) stopInProc() {
-	n.inprocHandler.Stop()
 }
 
 // Wait blocks until the node is closed.
@@ -412,90 +292,17 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	}
 }
 
-// RegisterAPIs registers the APIs a service provides on the node.
-func (n *Node) RegisterAPIs(apis []rpc.API) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state != initializingState {
-		panic("can't register APIs on running/stopped node")
-	}
-	n.rpcAPIs = append(n.rpcAPIs, apis...)
-}
-
-// RegisterHandler mounts a handler on the given path on the canonical HTTP server.
-//
-// The name of the handler is shown in a log message when the HTTP server starts
-// and should be a descriptive term for the service provided by the handler.
-func (n *Node) RegisterHandler(name, path string, handler http.Handler) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state != initializingState {
-		panic("can't register HTTP handler on running/stopped node")
-	}
-
-	n.http.mux.Handle(path, handler)
-	n.http.handlerNames[path] = name
-}
-
-// Attach creates an RPC client attached to an in-process API handler.
-func (n *Node) Attach() (*rpc.Client, error) {
-	return rpc.DialInProc(n.inprocHandler), nil
-}
-
-// RPCHandler returns the in-process RPC request handler.
-func (n *Node) RPCHandler() (*rpc.Server, error) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state == closedState {
-		return nil, ErrNodeStopped
-	}
-	return n.inprocHandler, nil
-}
-
 // Config returns the configuration of node.
-func (n *Node) Config() *Config {
+func (n *Node) Config() *nodecfg.Config {
 	return n.config
 }
 
-// Server retrieves the currently running P2P network layer. This method is meant
-// only to inspect fields of the currently running server. Callers should not
-// start or stop the returned server.
-func (n *Node) Server() *p2p.Server {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	return n.server
-}
-
 // DataDir retrieves the current datadir used by the protocol stack.
-// Deprecated: No files should be stored in this directory, use InstanceDir instead.
 func (n *Node) DataDir() string {
-	return n.config.DataDir
+	return n.config.Dirs.DataDir
 }
 
-// InstanceDir retrieves the instance directory used by the protocol stack.
-func (n *Node) InstanceDir() string {
-	return n.config.DataDir
-}
-
-// HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
-// contain the JSON-RPC path prefix set by HTTPPathPrefix.
-func (n *Node) HTTPEndpoint() string {
-	return "http://" + n.http.listenAddr()
-}
-
-// WSEndpoint returns the current JSON-RPC over WebSocket endpoint.
-func (n *Node) WSEndpoint() string {
-	if n.http.wsAllowed() {
-		return "ws://" + n.http.listenAddr() + n.http.wsConfig.prefix
-	}
-	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
-}
-
-func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.ChainDB:
@@ -506,27 +313,39 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		name = "test"
 	}
 	var db kv.RwDB
-	if config.DataDir == "" {
+	if config.Dirs.DataDir == "" {
 		db = memdb.New()
 		return db, nil
 	}
 
-	oldDbPath := filepath.Join(config.DataDir, "erigon", name)
-	dbPath := filepath.Join(config.DataDir, name)
-	if _, err := os.Stat(oldDbPath); err == nil {
-		log.Error("Old directory location found", "path", oldDbPath, "please move to new path", dbPath)
-		return nil, fmt.Errorf("safety error, see log message")
-	}
-
+	dbPath := filepath.Join(config.Dirs.DataDir, name)
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+		roTxLimit := int64(32)
+		if config.Http.DBReadConcurrency > 0 {
+			roTxLimit = int64(config.Http.DBReadConcurrency)
+		}
+		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
+		opts := mdbx.NewMDBX(logger).
+			WriteMergeThreshold(4 * 8192).
+			Path(dbPath).Label(label).
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts.AugumentLimit(config.MdbxAugumentLimit)
+			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
+		} else {
+			opts = opts.GrowthStep(16 * datasize.MB)
+		}
+		if debug.WriteMap() {
+			opts = opts.WriteMap().WriteMergeThreshold(1 * 8192)
+		}
+		if debug.MdbxReadAhead() {
+			opts = opts.Flags(func(u uint) uint {
+				return u &^ mdbx2.NoReadahead
+			})
 		}
 		return opts.Open()
 	}
@@ -536,6 +355,10 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		return nil, err
 	}
 	migrator := migrations.NewMigrator(label)
+	if err := migrator.VerifyVersion(db); err != nil {
+		return nil, err
+	}
+
 	has, err := migrator.HasPendingMigrations(db)
 	if err != nil {
 		return nil, err
@@ -547,7 +370,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.DataDir); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
 			return nil, err
 		}
 		db.Close()

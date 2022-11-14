@@ -31,14 +31,19 @@ func (g *RequestGenerator) blockNumber() string {
 	const template = `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
 	return fmt.Sprintf(template, g.reqID)
 }
-func (g *RequestGenerator) getBlockByNumber(blockNum uint64) string {
-	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
-	return fmt.Sprintf(template, blockNum, g.reqID)
+func (g *RequestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",%t],"id":%d}`
+	return fmt.Sprintf(template, blockNum, withTxs, g.reqID)
 }
 
 func (g *RequestGenerator) storageRangeAt(hash common.Hash, i int, to *common.Address, nextKey common.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 	return fmt.Sprintf(template, hash, i, to, nextKey, 1024, g.reqID)
+}
+
+func (g *RequestGenerator) traceBlockByHash(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID)
 }
 
 func (g *RequestGenerator) traceTransaction(hash string) string {
@@ -168,34 +173,6 @@ func (g *RequestGenerator) debugTraceCall(from common.Address, to *common.Addres
 func (g *RequestGenerator) traceBlock(bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_block", "params": ["0x%x"]`, bn)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterCount(prevBn uint64, bn uint64, count uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "count": %d}]`, prevBn, bn, count)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterAfter(prevBn uint64, bn uint64, after uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "after": %d}]`, prevBn, bn, after)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterCountAfter(prevBn uint64, bn uint64, after, count uint64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "count": %d, "after": %d}]`, prevBn, bn, count, after)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
-	return sb.String()
-}
-
-func (g *RequestGenerator) traceFilterUnion(prevBn uint64, bn uint64, from, to common.Address) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "fromAddress": ["0x%x"], "toAddress": ["0x%x"]}]`, prevBn, bn, from, to)
 	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
 	return sb.String()
 }

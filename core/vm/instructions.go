@@ -262,7 +262,7 @@ func opSAR(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	return nil, nil
 }
 
-func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opKeccak256(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Peek()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
@@ -371,7 +371,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(common.Address(slot.Bytes20()))))
+	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
 	return nil, nil
 }
 
@@ -415,16 +415,21 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
 // to `state.GetCodeHash` function to ensure the correctness.
-//   (1) Caller tries to get the code hash of a normal contract account, state
+//
+//	(1) Caller tries to get the code hash of a normal contract account, state
+//
 // should return the relative code hash and set it as the result.
 //
-//   (2) Caller tries to get the code hash of a non-existent account, state should
+//	(2) Caller tries to get the code hash of a non-existent account, state should
+//
 // return common.Hash{} and zero will be set as the result.
 //
-//   (3) Caller tries to get the code hash for an account without contract code,
+//	(3) Caller tries to get the code hash for an account without contract code,
+//
 // state should return emptyCodeHash(0xc5d246...) as the result.
 //
-//   (4) Caller tries to get the code hash of a precompiled account, the result
+//	(4) Caller tries to get the code hash of a precompiled account, the result
+//
 // should be zero or emptyCodeHash.
 //
 // It is worth noting that in order to avoid unnecessary create and clean,
@@ -433,10 +438,12 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 // If the precompile account is not transferred any amount on a private or
 // customized chain, the return value will be zero.
 //
-//   (5) Caller tries to get the code hash for an account which is marked as suicided
+//	(5) Caller tries to get the code hash for an account which is marked as suicided
+//
 // in the current transaction, the code hash of this account should be returned.
 //
-//   (6) Caller tries to get the code hash for an account which is marked as deleted,
+//	(6) Caller tries to get the code hash for an account which is marked as deleted,
+//
 // this account should be regarded as a non-existent account and zero should be returned.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
@@ -498,9 +505,16 @@ func opNumber(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v, overflow := uint256.FromBig(interpreter.evm.Context().Difficulty)
-	if overflow {
-		return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+	var v *uint256.Int
+	if interpreter.evm.Context().PrevRanDao != nil {
+		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
+		v = new(uint256.Int).SetBytes(interpreter.evm.Context().PrevRanDao.Bytes())
+	} else {
+		var overflow bool
+		v, overflow = uint256.FromBig(interpreter.evm.Context().Difficulty)
+		if overflow {
+			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+		}
 	}
 	scope.Stack.Push(v)
 	return nil, nil
@@ -557,11 +571,18 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	pos := scope.Stack.Pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
-		if usedBitmap && interpreter.cfg.TraceJumpDest {
-			log.Warn("Code Bitmap used for detecting invalid jump",
-				"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
-				"block_num", interpreter.evm.Context().BlockNumber,
-			)
+		if usedBitmap {
+			if interpreter.cfg.TraceJumpDest {
+				log.Warn("Code Bitmap used for detecting invalid jump",
+					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+					"block_num", interpreter.evm.Context().BlockNumber,
+				)
+			} else {
+				// This is "cheaper" version because it does not require calculation of txHash for each transaction
+				log.Warn("Code Bitmap used for detecting invalid jump",
+					"block_num", interpreter.evm.Context().BlockNumber,
+				)
+			}
 		}
 		return nil, ErrInvalidJump
 	}
@@ -573,11 +594,18 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	pos, cond := scope.Stack.Pop(), scope.Stack.Pop()
 	if !cond.IsZero() {
 		if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
-			if usedBitmap && interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
-					"block_num", interpreter.evm.Context().BlockNumber,
-				)
+			if usedBitmap {
+				if interpreter.cfg.TraceJumpDest {
+					log.Warn("Code Bitmap used for detecting invalid jump",
+						"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+						"block_num", interpreter.evm.Context().BlockNumber,
+					)
+				} else {
+					// This is "cheaper" version because it does not require calculation of txHash for each transaction
+					log.Warn("Code Bitmap used for detecting invalid jump",
+						"block_num", interpreter.evm.Context().BlockNumber,
+					)
+				}
 			}
 			return nil, ErrInvalidJump
 		}
@@ -615,7 +643,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 		gas    = scope.Contract.Gas
 	)
-	if interpreter.evm.ChainRules().IsEIP150 {
+	if interpreter.evm.ChainRules().IsTangerineWhistle {
 		gas -= gas / 64
 	}
 	// reuse size int for stackvalue
@@ -823,10 +851,10 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
 	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	if interpreter.evm.Config().Debug {
 		interpreter.evm.Config().Tracer.CaptureSelfDestruct(callerAddr, beneficiaryAddr, balance.ToBig())
 	}
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	interpreter.evm.IntraBlockState().Suicide(callerAddr)
 	return nil, nil
 }
@@ -841,7 +869,7 @@ func makeLog(size int) executionFunc {
 		mStart, mSize := stack.Pop(), stack.Pop()
 		for i := 0; i < size; i++ {
 			addr := stack.Pop()
-			topics[i] = common.Hash(addr.Bytes32())
+			topics[i] = addr.Bytes32()
 		}
 
 		d := scope.Memory.GetCopy(mStart.Uint64(), mSize.Uint64())

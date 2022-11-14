@@ -1,19 +1,22 @@
 package types
 
 import (
-	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rlp"
 	"io"
 	"math/big"
 	"math/bits"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type StarknetTransaction struct {
 	CommonTx
 
+	Salt       []byte // cairo contract address salt
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
@@ -21,6 +24,10 @@ type StarknetTransaction struct {
 
 func (tx StarknetTransaction) Type() byte {
 	return StarknetType
+}
+
+func (tx StarknetTransaction) GetSalt() []byte {
+	return tx.Salt
 }
 
 func (tx StarknetTransaction) IsStarkNet() bool {
@@ -33,28 +40,19 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for ChainID: %d", len(b))
-	}
-	//tx.ChainID = new(uint256.Int).SetBytes(b)
+	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -70,14 +68,14 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	if tx.Salt, err = s.Bytes(); err != nil {
 		return err
 	}
 	// decode AccessList
@@ -86,25 +84,16 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	return s.ListEnd()
@@ -115,7 +104,7 @@ func (tx StarknetTransaction) GetPrice() *uint256.Int {
 }
 
 func (tx StarknetTransaction) GetTip() *uint256.Int {
-	panic("implement me")
+	return tx.Tip
 }
 
 func (tx StarknetTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
@@ -123,15 +112,44 @@ func (tx StarknetTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 }
 
 func (tx StarknetTransaction) GetFeeCap() *uint256.Int {
-	panic("implement me")
+	return tx.FeeCap
 }
 
 func (tx StarknetTransaction) Cost() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
-	panic("implement me")
+func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
+	msg := Message{
+		nonce:      tx.Nonce,
+		gasLimit:   tx.Gas,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
+		to:         tx.To,
+		amount:     *tx.Value,
+		data:       tx.Data,
+		accessList: tx.AccessList,
+		checkNonce: true,
+	}
+
+	if !rules.IsStarknet {
+		return msg, errors.New("starknet tx not supported")
+	}
+
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	if msg.gasPrice.Gt(tx.FeeCap) {
+		msg.gasPrice.Set(tx.FeeCap)
+	}
+
+	var err error
+	msg.from, err = tx.Sender(s)
+	return msg, err
 }
 
 func (tx *StarknetTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -172,7 +190,20 @@ func (tx StarknetTransaction) Hash() common.Hash {
 }
 
 func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
-	panic("implement me")
+	return prefixedRlpHash(
+		StarknetType,
+		[]interface{}{
+			chainID,
+			tx.Nonce,
+			tx.Tip,
+			tx.FeeCap,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			tx.Salt,
+			tx.AccessList,
+		})
 }
 
 func (tx StarknetTransaction) Size() common.StorageSize {
@@ -184,7 +215,7 @@ func (tx StarknetTransaction) GetAccessList() AccessList {
 }
 
 func (tx StarknetTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	panic("implement me")
+	return &tx.V, &tx.R, &tx.S
 }
 
 func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
@@ -200,8 +231,40 @@ func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx StarknetTransaction) Sender(signer Signer) (common.Address, error) {
-	panic("implement me")
+func (tx *StarknetTransaction) Sender(signer Signer) (common.Address, error) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), nil
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	tx.from.Store(addr)
+	return addr, nil
+}
+
+func (tx StarknetTransaction) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
+	var b [33]byte
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = StarknetType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
@@ -214,17 +277,8 @@ func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Nonce
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
 	}
 	// encode MaxPriorityFeePerGas
 	if err := tx.Tip.EncodeRLP(w); err != nil {
@@ -235,17 +289,8 @@ func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Gas
-	if tx.Gas > 0 && tx.Gas < 128 {
-		b[0] = byte(tx.Gas)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		b[8-gasLen] = 128 + byte(gasLen)
-		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
 	}
 	// encode To
 	if tx.To == nil {
@@ -266,7 +311,11 @@ func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Data
-	if err := EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+	// encode cairo contract address salt
+	if err := rlp.EncodeString(tx.Salt, w, b); err != nil {
 		return err
 	}
 	// prefix
@@ -295,16 +344,10 @@ func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
-	var chainIdLen int
-	if tx.ChainID.BitLen() >= 8 {
-		chainIdLen = (tx.ChainID.BitLen() + 7) / 8
-	}
-	payloadSize += chainIdLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
 	// size of Nonce
 	payloadSize++
-	if tx.Nonce >= 128 {
-		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
-	}
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
 	payloadSize += nonceLen
 	// size of MaxPriorityFeePerGas
 	payloadSize++
@@ -322,9 +365,7 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 	payloadSize += feeCapLen
 	// size of Gas
 	payloadSize++
-	if tx.Gas >= 128 {
-		gasLen = (bits.Len64(tx.Gas) + 7) / 8
-	}
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -333,11 +374,8 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 	}
 	// size of Value
 	payloadSize++
-	var valueLen int
-	if tx.Value.BitLen() >= 8 {
-		valueLen = (tx.Value.BitLen() + 7) / 8
-	}
-	payloadSize += valueLen
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
+
 	// size of Data
 	payloadSize++
 	switch len(tx.Data) {
@@ -352,6 +390,22 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 		}
 		payloadSize += len(tx.Data)
 	}
+
+	// size of cairo contract address salt
+	payloadSize++
+	switch len(tx.Salt) {
+	case 0:
+	case 1:
+		if tx.Salt[0] >= 128 {
+			payloadSize++
+		}
+	default:
+		if len(tx.Salt) >= 56 {
+			payloadSize += (bits.Len(uint(len(tx.Salt))) + 7) / 8
+		}
+		payloadSize += len(tx.Salt)
+	}
+
 	// size of AccessList
 	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
@@ -361,25 +415,13 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 	payloadSize += accessListLen
 	// size of V
 	payloadSize++
-	var vLen int
-	if tx.V.BitLen() >= 8 {
-		vLen = (tx.V.BitLen() + 7) / 8
-	}
-	payloadSize += vLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
 	// size of R
 	payloadSize++
-	var rLen int
-	if tx.R.BitLen() >= 8 {
-		rLen = (tx.R.BitLen() + 7) / 8
-	}
-	payloadSize += rLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	// size of S
 	payloadSize++
-	var sLen int
-	if tx.S.BitLen() >= 8 {
-		sLen = (tx.S.BitLen() + 7) / 8
-	}
-	payloadSize += sLen
+	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
@@ -396,6 +438,7 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			Gas:     tx.Gas,
 			Value:   new(uint256.Int),
 		},
+		Salt:       common.CopyBytes(tx.Salt),
 		AccessList: make(AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -417,4 +460,15 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 	cpy.R.Set(&tx.R)
 	cpy.S.Set(&tx.S)
 	return cpy
+}
+
+func (tx StarknetTransaction) EncodingSize() int {
+	payloadSize, _, _, _ := tx.payloadSize()
+	envelopeSize := payloadSize
+	// Add envelope size and type size
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	envelopeSize += 2
+	return envelopeSize
 }

@@ -31,7 +31,7 @@ import (
 )
 
 func TestIHCursor(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	db, tx := memdb.NewTestTx(t)
 	require := require.New(t)
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
@@ -57,7 +57,7 @@ func TestIHCursor(t *testing.T) {
 	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 
-	integrity.Trie(tx, false, context.Background())
+	integrity.Trie(db, tx, false, context.Background())
 
 	cursor, err := tx.Cursor(kv.TrieOfAccounts)
 	require.NoError(err)
@@ -77,7 +77,7 @@ func TestIHCursor(t *testing.T) {
 	}, cursor, nil)
 	k, _, _, _ := ih.AtPrefix([]byte{})
 	require.Equal(common.FromHex("0001"), k)
-	require.True(ih.SkipState)
+	require.False(ih.SkipState)
 	require.Equal([]byte{}, ih.FirstNotCoveredPrefix())
 	k, _, _, _ = ih.Next()
 	require.Equal(common.FromHex("0100"), k)

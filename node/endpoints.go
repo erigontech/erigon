@@ -22,11 +22,12 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
-func StartHTTPEndpoint(endpoint string, timeouts rpc.HTTPTimeouts, handler http.Handler) (*http.Server, net.Addr, error) {
+func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler http.Handler) (*http.Server, net.Addr, error) {
 	// start the HTTP listener
 	var (
 		listener net.Listener
@@ -39,12 +40,18 @@ func StartHTTPEndpoint(endpoint string, timeouts rpc.HTTPTimeouts, handler http.
 	CheckTimeouts(&timeouts)
 	// Bundle and start the HTTP server
 	httpSrv := &http.Server{
-		Handler:      handler,
-		ReadTimeout:  timeouts.ReadTimeout,
-		WriteTimeout: timeouts.WriteTimeout,
-		IdleTimeout:  timeouts.IdleTimeout,
+		Handler:           handler,
+		ReadTimeout:       timeouts.ReadTimeout,
+		WriteTimeout:      timeouts.WriteTimeout,
+		IdleTimeout:       timeouts.IdleTimeout,
+		ReadHeaderTimeout: timeouts.ReadTimeout,
 	}
-	go httpSrv.Serve(listener)
+	go func() {
+		serveErr := httpSrv.Serve(listener)
+		if serveErr != nil {
+			log.Warn("Failed to serve http endpoint", "err", serveErr)
+		}
+	}()
 	return httpSrv, listener.Addr(), err
 }
 
@@ -68,17 +75,17 @@ func checkModuleAvailability(modules []string, apis []rpc.API) (bad, available [
 }
 
 // CheckTimeouts ensures that timeout values are meaningful
-func CheckTimeouts(timeouts *rpc.HTTPTimeouts) {
+func CheckTimeouts(timeouts *rpccfg.HTTPTimeouts) {
 	if timeouts.ReadTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP read timeout", "provided", timeouts.ReadTimeout, "updated", rpc.DefaultHTTPTimeouts.ReadTimeout)
-		timeouts.ReadTimeout = rpc.DefaultHTTPTimeouts.ReadTimeout
+		log.Warn("Sanitizing invalid HTTP read timeout", "provided", timeouts.ReadTimeout, "updated", rpccfg.DefaultHTTPTimeouts.ReadTimeout)
+		timeouts.ReadTimeout = rpccfg.DefaultHTTPTimeouts.ReadTimeout
 	}
 	if timeouts.WriteTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpc.DefaultHTTPTimeouts.WriteTimeout)
-		timeouts.WriteTimeout = rpc.DefaultHTTPTimeouts.WriteTimeout
+		log.Warn("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpccfg.DefaultHTTPTimeouts.WriteTimeout)
+		timeouts.WriteTimeout = rpccfg.DefaultHTTPTimeouts.WriteTimeout
 	}
 	if timeouts.IdleTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpc.DefaultHTTPTimeouts.IdleTimeout)
-		timeouts.IdleTimeout = rpc.DefaultHTTPTimeouts.IdleTimeout
+		log.Warn("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
+		timeouts.IdleTimeout = rpccfg.DefaultHTTPTimeouts.IdleTimeout
 	}
 }

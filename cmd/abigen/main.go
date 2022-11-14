@@ -19,7 +19,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,8 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/compiler"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/params"
+	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
@@ -98,7 +98,7 @@ var (
 )
 
 func init() {
-	app = flags.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
+	app = cli2.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		abiFlag,
 		binFlag,
@@ -115,7 +115,6 @@ func init() {
 		aliasFlag,
 	}
 	app.Action = abigen
-	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 
 func abigen(c *cli.Context) error {
@@ -147,23 +146,23 @@ func abigen(c *cli.Context) error {
 	if c.GlobalString(abiFlag.Name) != "" {
 		// Load up the ABI, optional bytecode and type name from the parameters
 		var (
-			abi []byte
-			err error
+			abiBytes []byte
+			err      error
 		)
 		input := c.GlobalString(abiFlag.Name)
 		if input == "-" {
-			abi, err = ioutil.ReadAll(os.Stdin)
+			abiBytes, err = io.ReadAll(os.Stdin)
 		} else {
-			abi, err = ioutil.ReadFile(input)
+			abiBytes, err = os.ReadFile(input)
 		}
 		if err != nil {
 			utils.Fatalf("Failed to read input ABI: %v", err)
 		}
-		abis = append(abis, string(abi))
+		abis = append(abis, string(abiBytes))
 
 		var bin []byte
 		if binFile := c.GlobalString(binFlag.Name); binFile != "" {
-			if bin, err = ioutil.ReadFile(binFile); err != nil {
+			if bin, err = os.ReadFile(binFile); err != nil {
 				utils.Fatalf("Failed to read input bytecode: %v", err)
 			}
 			if strings.Contains(string(bin), "//") {
@@ -210,7 +209,7 @@ func abigen(c *cli.Context) error {
 			}
 
 		case c.GlobalIsSet(jsonFlag.Name):
-			jsonOutput, err := ioutil.ReadFile(c.GlobalString(jsonFlag.Name))
+			jsonOutput, err := os.ReadFile(c.GlobalString(jsonFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to read combined-json from compiler: %v", err)
 			}
@@ -260,7 +259,7 @@ func abigen(c *cli.Context) error {
 		fmt.Printf("%s\n", code)
 		return nil
 	}
-	if err := ioutil.WriteFile(c.GlobalString(outFlag.Name), []byte(code), 0600); err != nil {
+	if err := os.WriteFile(c.GlobalString(outFlag.Name), []byte(code), 0600); err != nil {
 		utils.Fatalf("Failed to write ABI binding: %v", err)
 	}
 	return nil

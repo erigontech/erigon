@@ -23,12 +23,11 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -45,14 +44,12 @@ var (
 // Use New to create a trie that sits on top of a database.
 //
 // Trie is not safe for concurrent use.
-//Deprecated
-//use package turbo/trie
+// Deprecated
+// use package turbo/trie
 type Trie struct {
 	root node
 
 	newHasherFunc func() *hasher
-
-	hashMap map[common.Hash]node
 }
 
 // New creates a trie with an existing root node from db.
@@ -61,12 +58,11 @@ type Trie struct {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-//Deprecated
+// Deprecated
 // use package turbo/trie
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
-		hashMap:       make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}
@@ -79,7 +75,6 @@ func New(root common.Hash) *Trie {
 func NewTestRLPTrie(root common.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
-		hashMap:       make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}
@@ -357,13 +352,6 @@ func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode
 	return false, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // FindSubTriesToLoad walks over the trie and creates the list of DB prefixes and
 // corresponding list of valid bits in the prefix (for the cases when prefix contains an
 // odd number of nibbles) that would allow loading the missing information from the database
@@ -393,7 +381,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 				dbPrefix = append(dbPrefix, b<<4)
 			} else {
 				dbPrefix[len(dbPrefix)-1] &= 0xf0
-				dbPrefix[len(dbPrefix)-1] |= (b & 0xf)
+				dbPrefix[len(dbPrefix)-1] |= b & 0xf
 			}
 			bits += 4
 		}
@@ -412,7 +400,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= (i1 & 0xf)
+				newDbPrefix[len(newDbPrefix)-1] |= i1 & 0xf
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
@@ -425,7 +413,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-				newDbPrefix[len(newDbPrefix)-1] |= (i2 & 0xf)
+				newDbPrefix[len(newDbPrefix)-1] |= i2 & 0xf
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child2, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
@@ -447,7 +435,7 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
-						newDbPrefix[len(newDbPrefix)-1] |= (byte(i) & 0xf)
+						newDbPrefix[len(newDbPrefix)-1] |= byte(i) & 0xf
 					}
 					newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(child, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 				}
@@ -521,7 +509,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 
 		// replacing nodes except accounts
 		if !origNok {
-			t.evictSubtreeFromHashMap(origNode)
 			return true, value
 		}
 	}
@@ -544,14 +531,12 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			updated, nn = t.insertRecursive(n.Val, key, pos+matchlen, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.Val = nn
 				n.ref.len = 0
 			}
 			newNode = n
 		} else {
 			// Otherwise branch out at the index where they differ.
-			t.evictNodeFromHashMap(n)
 			var c1 node
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
@@ -594,7 +579,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 		case i1:
 			updated, nn = t.insertRecursive(n.child1, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.child1 = nn
 				n.ref.len = 0
 			}
@@ -602,13 +586,11 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 		case i2:
 			updated, nn = t.insertRecursive(n.child2, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.child2 = nn
 				n.ref.len = 0
 			}
 			newNode = n
 		default:
-			t.evictNodeFromHashMap(n)
 			var child node
 			if len(key) == pos+1 {
 				child = value
@@ -628,7 +610,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 	case *fullNode:
 		child := n.Children[key[pos]]
 		if child == nil {
-			t.evictNodeFromHashMap(n)
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
@@ -639,7 +620,6 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 		} else {
 			updated, nn = t.insertRecursive(child, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
 				n.ref.len = 0
 			}
@@ -766,14 +746,6 @@ func (t *Trie) hook(hex []byte, n node, hash []byte) error {
 }
 
 func (t *Trie) touchAll(n node, hex []byte, del bool, incarnation uint64) {
-	if del {
-		t.evictNodeFromHashMap(n)
-	} else if len(n.reference()) == common.HashLength && debug.IsGetNodeData() {
-		var key common.Hash
-		copy(key[:], n.reference())
-		t.hashMap[key] = n
-	}
-
 	switch n := n.(type) {
 	case *shortNode:
 		if _, ok := n.Val.(valueNode); !ok {
@@ -825,7 +797,6 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 		// might not be loaded yet, resolve it just for this
 		// check.
 		if short, ok := child.(*shortNode); ok {
-			t.evictNodeFromHashMap(child)
 			k := make([]byte, len(short.Key)+1)
 			k[0] = byte(pos)
 			copy(k[1:], short.Key)
@@ -852,7 +823,7 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
-		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
+		if matchlen == cmp.Min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
 			fullMatch := matchlen == len(key)-keyStart
 			removeNodeEntirely := fullMatch
 			if preserveAccountNode {
@@ -860,7 +831,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 			}
 
 			if removeNodeEntirely {
-				t.evictNodeFromHashMap(n)
 				updated = true
 				touchKey := key[:keyStart+matchlen]
 				if touchKey[len(touchKey)-1] == 16 {
@@ -877,7 +847,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 				if !updated {
 					newNode = n
 				} else {
-					t.evictNodeFromHashMap(n)
 					if nn == nil {
 						newNode = nil
 					} else {
@@ -911,7 +880,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 			if !updated {
 				newNode = n
 			} else {
-				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
@@ -925,7 +893,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 			if !updated {
 				newNode = n
 			} else {
-				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					newNode = t.convertToShortNode(n.child1, uint(i1))
 				} else {
@@ -946,7 +913,6 @@ func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserve
 		if !updated {
 			newNode = n
 		} else {
-			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
@@ -1084,13 +1050,7 @@ func (t *Trie) Reset() {
 }
 
 func (t *Trie) getHasher() *hasher {
-	h := t.newHasherFunc()
-	if debug.IsGetNodeData() {
-		h.callback = func(key common.Hash, nd node) {
-			t.hashMap[key] = nd
-		}
-	}
-	return h
+	return t.newHasherFunc()
 }
 
 // DeepHash returns internal hash of a node reachable by the specified key prefix.
@@ -1140,8 +1100,6 @@ func (t *Trie) EvictNode(hex []byte) {
 	default:
 		// can work with other nodes type
 	}
-
-	t.evictSubtreeFromHashMap(nd)
 
 	var hn common.Hash
 	if nd == nil {
@@ -1219,66 +1177,4 @@ func (t *Trie) TrieSize() int {
 
 func (t *Trie) NumberOfAccounts() int {
 	return calcSubtreeNodes(t.root)
-}
-
-// GetNodeByHash gets node's RLP by hash.
-func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
-	nd := t.hashMap[hash]
-	if nd == nil {
-		return nil
-	}
-
-	h := t.getHasher()
-	defer returnHasherToPool(h)
-
-	rlp, err := h.hashChildren(nd, 0)
-	if err != nil {
-		log.Warn("GetNodeByHash error while producing node RLP", "err", err)
-		return nil
-	}
-
-	return libcommon.Copy(rlp)
-}
-
-func (t *Trie) evictNodeFromHashMap(nd node) {
-	if !debug.IsGetNodeData() || nd == nil {
-		return
-	}
-	if len(nd.reference()) == common.HashLength {
-		var key common.Hash
-		copy(key[:], nd.reference())
-		delete(t.hashMap, key)
-	}
-}
-
-func (t *Trie) evictSubtreeFromHashMap(n node) {
-	if !debug.IsGetNodeData() {
-		return
-	}
-	t.evictNodeFromHashMap(n)
-
-	switch n := n.(type) {
-	case *shortNode:
-		if _, ok := n.Val.(valueNode); !ok {
-			t.evictSubtreeFromHashMap(n.Val)
-		}
-	case *duoNode:
-		t.evictSubtreeFromHashMap(n.child1)
-		t.evictSubtreeFromHashMap(n.child2)
-	case *fullNode:
-		for _, child := range n.Children {
-			if child != nil {
-				t.evictSubtreeFromHashMap(child)
-			}
-		}
-	case *accountNode:
-		if n.storage != nil {
-			t.evictSubtreeFromHashMap(n.storage)
-		}
-	}
-}
-
-// HashMapSize returns the number of entries in trie's hash map.
-func (t *Trie) HashMapSize() int {
-	return len(t.hashMap)
 }

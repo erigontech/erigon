@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// EthBackendServiceAPIVersion
+// MiningAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 var MiningAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
@@ -132,6 +132,7 @@ func (s *MiningServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
+	log.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err

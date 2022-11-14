@@ -84,6 +84,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	//fmt.Printf("balance,%x,%d\n", address, &account.Balance)
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
@@ -91,15 +92,21 @@ func (w *ChangeSetWriter) UpdateAccountData(address common.Address, original, ac
 }
 
 func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	//fmt.Printf("code,%x,%x\n", address, code)
 	return nil
 }
 
 func (w *ChangeSetWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	//fmt.Printf("delete,%x\n", address)
+	if original == nil || !original.Initialised {
+		return nil
+	}
 	w.accountChanges[address] = originalAccountData(original, false)
 	return nil
 }
 
 func (w *ChangeSetWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	//fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
 	if *original == *value {
 		return nil
 	}

@@ -45,7 +45,7 @@ type SealRegular SealKind
 // Engine does not generate seal for this block right now.
 type None SealKind
 
-/// The type of sealing the engine is currently able to perform.
+// / The type of sealing the engine is currently able to perform.
 type SealingState uint8
 
 const (

@@ -62,7 +62,7 @@ type EthBlockByNumberResult struct {
 
 type EthBlockByNumber struct {
 	CommonResponse
-	Result EthBlockByNumberResult `json:"result"`
+	Result *EthBlockByNumberResult `json:"result"`
 }
 
 type StructLog struct {
@@ -229,17 +229,22 @@ type EthReceipt struct {
 	Result Receipt `json:"result"`
 }
 
-type EthLogs struct {
-	CommonResponse
-	Result []*Log `json:"result"`
-}
-
 type EthGetProof struct {
 	CommonResponse
 	Result AccountResult `json:"result"`
 }
 
-// Result structs for GetProof
+type EthGetLogs struct {
+	CommonResponse
+	Result []Log `json:"result"`
+}
+
+type EthGetTransactionCount struct {
+	CommonResponse
+	Result hexutil.Uint64 `json:"result"`
+}
+
+// AccountResult is the result struct for GetProof
 type AccountResult struct {
 	Address      common.Address  `json:"address"`
 	AccountProof []string        `json:"accountProof"`
@@ -253,4 +258,9 @@ type StorageResult struct {
 	Key   string       `json:"key"`
 	Value *hexutil.Big `json:"value"`
 	Proof []string     `json:"proof"`
+}
+
+type ParityListStorageKeysResult struct {
+	CommonResponse
+	Result []hexutil.Bytes `json:"result"`
 }

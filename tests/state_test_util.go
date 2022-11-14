@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -60,42 +61,22 @@ func (t *StateTest) UnmarshalJSON(in []byte) error {
 type stJSON struct {
 	Env  stEnv                    `json:"env"`
 	Pre  core.GenesisAlloc        `json:"pre"`
-	Tx   stTransaction            `json:"transaction"`
+	Tx   stTransactionMarshaling  `json:"transaction"`
 	Out  hexutil.Bytes            `json:"out"`
 	Post map[string][]stPostState `json:"post"`
 }
 
 type stPostState struct {
-	Root    common.UnprefixedHash `json:"hash"`
-	Logs    common.UnprefixedHash `json:"logs"`
-	Indexes struct {
+	Root            common.UnprefixedHash `json:"hash"`
+	Logs            common.UnprefixedHash `json:"logs"`
+	Tx              hexutil.Bytes         `json:"txbytes"`
+	ExpectException string                `json:"expectException"`
+	Indexes         struct {
 		Data  int `json:"data"`
 		Gas   int `json:"gas"`
 		Value int `json:"value"`
 	}
 }
-
-//go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
-
-type stEnv struct {
-	Coinbase   common.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty *big.Int       `json:"currentDifficulty" gencodec:"required"`
-	GasLimit   uint64         `json:"currentGasLimit"   gencodec:"required"`
-	Number     uint64         `json:"currentNumber"     gencodec:"required"`
-	Timestamp  uint64         `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee    *big.Int       `json:"currentBaseFee"  gencodec:"optional"`
-}
-
-type stEnvMarshaling struct {
-	Coinbase   common.UnprefixedAddress
-	Difficulty *math.HexOrDecimal256
-	GasLimit   math.HexOrDecimal64
-	Number     math.HexOrDecimal64
-	Timestamp  math.HexOrDecimal64
-	BaseFee    *math.HexOrDecimal256
-}
-
-//go:generate gencodec -type stTransaction -field-override stTransactionMarshaling -out gen_sttransaction.go
 
 type stTransaction struct {
 	GasPrice             *big.Int            `json:"gasPrice"`
@@ -111,12 +92,38 @@ type stTransaction struct {
 }
 
 type stTransactionMarshaling struct {
-	GasPrice             *math.HexOrDecimal256
-	MaxFeePerGas         *math.HexOrDecimal256
-	MaxPriorityFeePerGas *math.HexOrDecimal256
-	Nonce                math.HexOrDecimal64
-	GasLimit             []math.HexOrDecimal64
-	PrivateKey           hexutil.Bytes
+	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
+	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
+	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
+	PrivateKey           hexutil.Bytes         `json:"secretKey"`
+	To                   string                `json:"to"`
+	Data                 []string              `json:"data"`
+	Value                []string              `json:"value"`
+	AccessLists          []*types.AccessList   `json:"accessLists,omitempty"`
+}
+
+//go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
+
+type stEnv struct {
+	Coinbase   common.Address `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty *big.Int       `json:"currentDifficulty" gencodec:"required"`
+	Random     *big.Int       `json:"currentRandom"     gencodec:"optional"`
+	GasLimit   uint64         `json:"currentGasLimit"   gencodec:"required"`
+	Number     uint64         `json:"currentNumber"     gencodec:"required"`
+	Timestamp  uint64         `json:"currentTimestamp"  gencodec:"required"`
+	BaseFee    *big.Int       `json:"currentBaseFee"    gencodec:"optional"`
+}
+
+type stEnvMarshaling struct {
+	Coinbase   common.UnprefixedAddress
+	Difficulty *math.HexOrDecimal256
+	Random     *math.HexOrDecimal256
+	GasLimit   math.HexOrDecimal64
+	Number     math.HexOrDecimal64
+	Timestamp  math.HexOrDecimal64
+	BaseFee    *math.HexOrDecimal256
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -157,7 +164,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
 	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
@@ -175,7 +182,7 @@ func (t *StateTest) Run(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vm
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -189,7 +196,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(params.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&params.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -206,19 +213,33 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		}
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
-	msg, err := t.json.Tx.toMessage(post, baseFee)
+	msg, err := toMessage(t.json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, err
+	}
+	if len(post.Tx) != 0 {
+		txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
+		if err != nil {
+			return nil, common.Hash{}, err
+		}
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
+		if err != nil {
+			return nil, common.Hash{}, err
+		}
 	}
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
-	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase, contractHasTEVM)
+	header := block.Header()
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
 		context.BaseFee.SetFromBig(baseFee)
+	}
+	if t.json.Env.Random != nil {
+		rnd := common.BigToHash(t.json.Env.Random)
+		context.PrevRanDao = &rnd
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 
@@ -284,11 +305,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	return statedb, root, nil
 }
 
-func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
-	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
-}
-
-func MakePreState(rules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -303,9 +320,16 @@ func MakePreState(rules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, bl
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(addr, 1)
+			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
+			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
@@ -328,22 +352,36 @@ func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {
 	}
 }
 
-func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Message, error) {
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewLegacyKeccak256()
+	if err := rlp.Encode(hw, x); err != nil {
+		panic(err)
+	}
+	hw.Sum(h[:0])
+	return h
+}
+
+func vmTestBlockHash(n uint64) common.Hash {
+	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+}
+
+func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (core.Message, error) {
 	// Derive sender from private key if present.
 	var from common.Address
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("invalid private key: %w", err)
+			return nil, fmt.Errorf("invalid private key: %v", err)
 		}
 		from = crypto.PubkeyToAddress(key.PublicKey)
 	}
+
 	// Parse recipient if present.
 	var to *common.Address
 	if tx.To != "" {
 		to = new(common.Address)
 		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
-			return nil, fmt.Errorf("invalid to address: %w", err)
+			return nil, fmt.Errorf("invalid to address: %v", err)
 		}
 	}
 
@@ -360,14 +398,18 @@ func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Messa
 	dataHex := tx.Data[ps.Indexes.Data]
 	valueHex := tx.Value[ps.Indexes.Value]
 	gasLimit := tx.GasLimit[ps.Indexes.Gas]
-	// Value, Data hex encoding is messy: https://github.com/ethereum/tests/issues/203
+
 	value := new(uint256.Int)
 	if valueHex != "0x" {
-		v, ok := math.ParseBig256(valueHex)
+		va, ok := math.ParseBig256(valueHex)
 		if !ok {
 			return nil, fmt.Errorf("invalid tx value %q", valueHex)
 		}
-		value.SetFromBig(v)
+		v, overflow := uint256.FromBig(va)
+		if overflow {
+			return nil, fmt.Errorf("invalid tx value (overflowed) %q", valueHex)
+		}
+		value = v
 	}
 	data, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
 	if err != nil {
@@ -378,6 +420,8 @@ func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Messa
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
 
+	var feeCap, tipCap big.Int
+
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	gasPrice := tx.GasPrice
 	if baseFee != nil {
@@ -385,42 +429,39 @@ func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Messa
 			tx.MaxFeePerGas = gasPrice
 		}
 		if tx.MaxFeePerGas == nil {
-			tx.MaxFeePerGas = new(big.Int)
+			tx.MaxFeePerGas = math.NewHexOrDecimal256(0)
 		}
 		if tx.MaxPriorityFeePerGas == nil {
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
-		gasPrice = math.BigMin(new(big.Int).Add(tx.MaxPriorityFeePerGas, baseFee),
-			tx.MaxFeePerGas)
+
+		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
+		tipCap = big.Int(*tx.MaxFeePerGas)
+
+		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
+		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
-	var gasPrice256, maxFee256, maxTip256 *uint256.Int
-	if gasPrice != nil {
-		gasPrice256 = new(uint256.Int)
-		gasPrice256.SetFromBig(gasPrice)
-	}
-	if tx.MaxFeePerGas != nil {
-		maxFee256 = new(uint256.Int)
-		maxFee256.SetFromBig(tx.MaxFeePerGas)
-	}
-	if tx.MaxPriorityFeePerGas != nil {
-		maxTip256 = new(uint256.Int)
-		maxTip256.SetFromBig(tx.MaxPriorityFeePerGas)
+	if gasPrice == nil {
+		return nil, fmt.Errorf("no gas price provided")
 	}
 
-	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, gasPrice256,
-		maxFee256, maxTip256, data, accessList, true)
+	gpi := big.Int(*gasPrice)
+	gasPriceInt := uint256.NewInt(gpi.Uint64())
+
+	// TODO the conversion to int64 then uint64 then new int isn't working!
+	msg := types.NewMessage(
+		from,
+		to,
+		uint64(tx.Nonce),
+		value,
+		uint64(gasLimit),
+		gasPriceInt,
+		uint256.NewInt(feeCap.Uint64()),
+		uint256.NewInt(tipCap.Uint64()),
+		data,
+		accessList,
+		false, /* checkNonce */
+		false /* isFree */)
+
 	return msg, nil
-}
-
-func rlpHash(x interface{}) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
-	if err := rlp.Encode(hw, x); err != nil {
-		panic(err)
-	}
-	hw.Sum(h[:0])
-	return h
-}
-
-func vmTestBlockHash(n uint64) common.Hash {
-	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }

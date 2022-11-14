@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"sync"
 	"testing"
@@ -280,12 +279,30 @@ var encTests = []encTest{
 	{val: simplestruct{A: 3, B: "foo"}, output: "C50383666F6F"},
 	{val: &recstruct{5, nil}, output: "C205C0"},
 	{val: &recstruct{5, &recstruct{4, &recstruct{3, nil}}}, output: "C605C404C203C0"},
+	{val: &intField{X: 3}, error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)"},
+
+	// struct tag "-"
+	{val: &ignoredField{A: 1, B: 2, C: 3}, output: "C20103"},
+
+	// struct tag "tail"
 	{val: &tailRaw{A: 1, Tail: []RawValue{unhex("02"), unhex("03")}}, output: "C3010203"},
 	{val: &tailRaw{A: 1, Tail: []RawValue{unhex("02")}}, output: "C20102"},
 	{val: &tailRaw{A: 1, Tail: []RawValue{}}, output: "C101"},
 	{val: &tailRaw{A: 1, Tail: nil}, output: "C101"},
-	{val: &hasIgnoredField{A: 1, B: 2, C: 3}, output: "C20103"},
-	{val: &intField{X: 3}, error: "rlp: type int is not RLP-serializable (struct field rlp.intField.X)"},
+
+	// struct tag "optional"
+	{val: &optionalFields{}, output: "C180"},
+	{val: &optionalFields{A: 1}, output: "C101"},
+	{val: &optionalFields{A: 1, B: 2}, output: "C20102"},
+	{val: &optionalFields{A: 1, B: 2, C: 3}, output: "C3010203"},
+	{val: &optionalFields{A: 1, B: 0, C: 3}, output: "C3018003"},
+	{val: &optionalAndTailField{A: 1}, output: "C101"},
+	{val: &optionalAndTailField{A: 1, B: 2}, output: "C20102"},
+	{val: &optionalAndTailField{A: 1, Tail: []uint{5, 6}}, output: "C401800506"},
+	{val: &optionalAndTailField{A: 1, Tail: []uint{5, 6}}, output: "C401800506"},
+	{val: &optionalBigIntField{A: 1}, output: "C101"},
+	{val: &optionalPtrField{A: 1}, output: "C101"},
+	{val: &optionalPtrFieldNil{A: 1}, output: "C101"},
 
 	// nil
 	{val: (*uint)(nil), output: "80"},
@@ -401,7 +418,7 @@ func TestEncodeToReader(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return ioutil.ReadAll(r)
+		return io.ReadAll(r)
 	})
 }
 
@@ -422,7 +439,7 @@ func TestEncodeToReaderPiecewise(t *testing.T) {
 			}
 			n, err := r.Read(output[start:end])
 			end = start + n
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			} else if err != nil {
 				return nil, err
@@ -442,7 +459,7 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 		go func() {
 			for i := 0; i < 1000; i++ {
 				_, r, _ := EncodeToReader("foo")
-				ioutil.ReadAll(r)
+				io.ReadAll(r)
 				r.Read(buf)
 				r.Read(buf)
 				r.Read(buf)

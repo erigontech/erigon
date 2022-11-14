@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -19,7 +19,9 @@ var routes map[string]string
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
+//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//
 // fullTest - if false - then call only methods which RPCDaemon currently supports
 func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(erigonURL, gethURL)
@@ -55,7 +57,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		resultsCh <- res
 		if res.Err != nil {
 			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
@@ -68,7 +70,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 		if needCompare {
 			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
+			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
 				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
 				return
@@ -357,14 +359,14 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		}
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
-		dir := path.Join(tmpDir, "erigon_stress_test")
+		dir := filepath.Join(tmpDir, "erigon_stress_test")
 		if err = os.MkdirAll(dir, 0770); err != nil {
 			panic(err)
 		}
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
-				file := path.Join(dir, "results_"+route+"_"+method+".csv")
+				file := filepath.Join(dir, "results_"+route+"_"+method+".csv")
 				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
 					panic(err)
@@ -374,7 +376,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
-				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
+				file := filepath.Join(dir, "vegeta_"+route+"_"+method+".txt")
 				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
 					panic(err)

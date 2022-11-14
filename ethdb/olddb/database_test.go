@@ -15,7 +15,6 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build !js
-// +build !js
 
 package olddb
 
@@ -89,7 +88,7 @@ func TestPutGet(t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		err := tx.Delete(testBucket, []byte(v), nil)
+		err := tx.Delete(testBucket, []byte(v))
 		require.NoError(t, err)
 	}
 
@@ -180,7 +179,7 @@ func TestParallelPutGet(t *testing.T) {
 		go func(key string) {
 			defer pending.Done()
 			_ = db.Update(context.Background(), func(tx kv.RwTx) error {
-				err := tx.Delete(testBucket, []byte(key), nil)
+				err := tx.Delete(testBucket, []byte(key))
 				if err != nil {
 					panic("delete failed: " + err.Error())
 				}

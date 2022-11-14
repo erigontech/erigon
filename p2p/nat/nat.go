@@ -41,6 +41,7 @@ type Interface interface {
 	// the gateway when its lifetime ends.
 	AddMapping(protocol string, extport, intport int, name string, lifetime time.Duration) error
 	DeleteMapping(protocol string, extport, intport int) error
+	SupportsMapping() bool
 
 	// This method should return the external (Internet-facing)
 	// address of the gateway device.
@@ -54,38 +55,50 @@ type Interface interface {
 // The following formats are currently accepted.
 // Note that mechanism names are not case-sensitive.
 //
-//     "" or "none"         return nil
-//     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-//     "any"                uses the first auto-detected mechanism
-//     "upnp"               uses the Universal Plug and Play protocol
-//     "pmp"                uses NAT-PMP with an auto-detected gateway address
-//     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+//	"" or "none"         return nil
+//	"extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+//	"any"                uses the first auto-detected mechanism
+//	"upnp"               uses the Universal Plug and Play protocol
+//	"pmp"                uses NAT-PMP with an auto-detected gateway address
+//	"pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+//	"stun"               uses STUN to detect an external IP using a default server
+//	"stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 func Parse(spec string) (Interface, error) {
 	var (
 		parts = strings.SplitN(spec, ":", 2)
 		mech  = strings.ToLower(parts[0])
-		ip    net.IP
 	)
-	if len(parts) > 1 {
-		ip = net.ParseIP(parts[1])
-		if ip == nil {
-			return nil, errors.New("invalid IP address")
-		}
-	}
 	switch mech {
 	case "", "none", "off":
 		return nil, nil
 	case "any", "auto", "on":
 		return Any(), nil
 	case "extip", "ip":
-		if ip == nil {
+		if len(parts) < 2 {
 			return nil, errors.New("missing IP address")
+		}
+		ip := net.ParseIP(parts[1])
+		if ip == nil {
+			return nil, errors.New("invalid IP address")
 		}
 		return ExtIP(ip), nil
 	case "upnp":
 		return UPnP(), nil
 	case "pmp", "natpmp", "nat-pmp":
+		var ip net.IP
+		if len(parts) > 1 {
+			ip = net.ParseIP(parts[1])
+			if ip == nil {
+				return nil, errors.New("invalid IP address")
+			}
+		}
 		return PMP(ip), nil
+	case "stun":
+		var addr string
+		if len(parts) > 1 {
+			addr = parts[1]
+		}
+		return NewSTUN(addr), nil
 	default:
 		return nil, fmt.Errorf("unknown mechanism %q", parts[0])
 	}
@@ -98,17 +111,21 @@ const (
 // Map adds a port mapping on m and keeps it alive until c is closed.
 // This function is typically invoked in its own goroutine.
 func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, name string) {
-	log := log.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
+	if !m.SupportsMapping() {
+		panic("Port mapping is not supported")
+	}
+
+	logger := log.New("proto", protocol, "extport", extport, "intport", intport, "interface", m)
 	refresh := time.NewTimer(mapTimeout)
 	defer func() {
 		refresh.Stop()
-		log.Trace("Deleting port mapping")
+		logger.Trace("Deleting port mapping")
 		m.DeleteMapping(protocol, extport, intport)
 	}()
 	if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-		log.Debug("Couldn't add port mapping", "err", err)
+		logger.Debug("Couldn't add port mapping", "err", err)
 	} else {
-		log.Info("Mapped network port")
+		logger.Info("Mapped network port")
 	}
 	for {
 		select {
@@ -117,9 +134,9 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 				return
 			}
 		case <-refresh.C:
-			log.Trace("Refreshing port mapping")
+			logger.Trace("Refreshing port mapping")
 			if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {
-				log.Debug("Couldn't add port mapping", "err", err)
+				logger.Debug("Couldn't add port mapping", "err", err)
 			}
 			refresh.Reset(mapTimeout)
 		}
@@ -138,6 +155,7 @@ func (n ExtIP) String() string              { return fmt.Sprintf("ExtIP(%v)", ne
 
 func (ExtIP) AddMapping(string, int, int, string, time.Duration) error { return nil }
 func (ExtIP) DeleteMapping(string, int, int) error                     { return nil }
+func (ExtIP) SupportsMapping() bool                                    { return false }
 
 // Any returns a port mapper that tries to discover any supported
 // mechanism on the local network.
@@ -206,6 +224,10 @@ func (n *autodisc) DeleteMapping(protocol string, extport, intport int) error {
 		return err
 	}
 	return n.found.DeleteMapping(protocol, extport, intport)
+}
+
+func (n *autodisc) SupportsMapping() bool {
+	return true
 }
 
 func (n *autodisc) ExternalIP() (net.IP, error) {

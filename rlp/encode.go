@@ -17,9 +17,11 @@
 package rlp
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"sync"
 
@@ -601,15 +603,40 @@ func makeStructWriter(typ reflect.Type) (writer, error) {
 			return nil, structFieldError{typ, f.index, f.info.writerErr}
 		}
 	}
-	writer := func(val reflect.Value, w *encbuf) error {
-		lh := w.list()
-		for _, f := range fields {
-			if err := f.info.writer(val.Field(f.index), w); err != nil {
-				return err
+
+	var writer writer
+	firstOptionalField := firstOptionalField(fields)
+	if firstOptionalField == len(fields) {
+		// This is the writer function for structs without any optional fields.
+		writer = func(val reflect.Value, w *encbuf) error {
+			lh := w.list()
+			for _, f := range fields {
+				if err := f.info.writer(val.Field(f.index), w); err != nil {
+					return err
+				}
 			}
+			w.listEnd(lh)
+			return nil
 		}
-		w.listEnd(lh)
-		return nil
+	} else {
+		// If there are any "optional" fields, the writer needs to perform additional
+		// checks to determine the output list length.
+		writer = func(val reflect.Value, w *encbuf) error {
+			lastField := len(fields) - 1
+			for ; lastField >= firstOptionalField; lastField-- {
+				if !val.Field(fields[lastField].index).IsZero() {
+					break
+				}
+			}
+			lh := w.list()
+			for i := 0; i <= lastField; i++ {
+				if err := fields[i].info.writer(val.Field(fields[i].index), w); err != nil {
+					return err
+				}
+			}
+			w.listEnd(lh)
+			return nil
+		}
 	}
 	return writer, nil
 }
@@ -720,9 +747,110 @@ func putint(b []byte, i uint64) (size int) {
 
 // intsize computes the minimum number of bytes required to store i.
 func intsize(i uint64) (size int) {
-	for size = 1; ; size++ {
-		if i >>= 8; i == 0 {
-			return size
+	return (bits.Len64(i) + 7) / 8
+}
+
+func IntLenExcludingHead(i uint64) int {
+	if i < 0x80 {
+		return 0
+	}
+	return intsize(i)
+}
+
+func BigIntLenExcludingHead(i *big.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return (bitLen + 7) / 8
+}
+
+func Uint256LenExcludingHead(i *uint256.Int) int {
+	bitLen := i.BitLen()
+	if bitLen < 8 {
+		return 0
+	}
+	return (bitLen + 7) / 8
+}
+
+// precondition: len(buffer) >= 9
+func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
+	if 0 < i && i < 0x80 {
+		buffer[0] = byte(i)
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+
+	binary.BigEndian.PutUint64(buffer[1:], i)
+	size := intsize(i)
+	buffer[8-size] = 0x80 + byte(size)
+	_, err := w.Write(buffer[8-size : 9])
+	return err
+}
+
+func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
+	bitLen := 0 // treat nil as 0
+	if i != nil {
+		bitLen = i.BitLen()
+	}
+	if bitLen < 8 {
+		if bitLen > 0 {
+			buffer[0] = byte(i.Uint64())
+		} else {
+			buffer[0] = 0x80
+		}
+		_, err := w.Write(buffer[:1])
+		return err
+	}
+
+	size := (bitLen + 7) / 8
+	buffer[0] = 0x80 + byte(size)
+	i.FillBytes(buffer[1 : 1+size])
+	_, err := w.Write(buffer[:1+size])
+	return err
+}
+
+func EncodeString(s []byte, w io.Writer, buffer []byte) error {
+	switch len(s) {
+	case 0:
+		buffer[0] = 128
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
+		}
+	case 1:
+		if s[0] >= 128 {
+			buffer[0] = 129
+			if _, err := w.Write(buffer[:1]); err != nil {
+				return err
+			}
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
+		}
+	default:
+		if err := EncodeStringSizePrefix(len(s), w, buffer); err != nil {
+			return err
+		}
+		if _, err := w.Write(s); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
+	if size >= 56 {
+		beSize := (bits.Len(uint(size)) + 7) / 8
+		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
+		buffer[8-beSize] = byte(beSize) + 183
+		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
+			return err
+		}
+	} else {
+		buffer[0] = byte(size) + 128
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -53,7 +53,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 
 	var (
 		srv     = newTestServer()
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, false))
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
@@ -83,7 +83,7 @@ func TestWebsocketLargeCall(t *testing.T) {
 
 	var (
 		srv     = newTestServer()
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, false))
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
@@ -163,8 +163,8 @@ func TestClientWebsocketPing(t *testing.T) {
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
 	var (
-		srv     = NewServer(50)
-		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, false))
+		srv     = NewServer(50, false /* traceRequests */, true)
+		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()

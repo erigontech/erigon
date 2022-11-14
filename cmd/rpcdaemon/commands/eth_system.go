@@ -2,9 +2,10 @@ package commands
 
 import (
 	"context"
-	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -14,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -23,14 +25,14 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	execution, err := stages.GetStageProgress(tx, stages.Finish)
+	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
-	return hexutil.Uint64(execution), nil
+	return hexutil.Uint64(blockNum), nil
 }
 
-// Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
+// Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -113,15 +115,20 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
+	gasResult := big.NewInt(0)
+
+	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
 	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
-		tipcap.Add(tipcap, head.BaseFee)
+		gasResult.Add(tipcap, head.BaseFee)
 	}
-	return (*hexutil.Big)(tipcap), err
+
+	return (*hexutil.Big)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
@@ -135,7 +142,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -160,7 +167,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 
 	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -199,14 +206,12 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	blockNum, err := getBlockNumber(number, b.tx)
+	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
-
-	header := rawdb.ReadHeaderByNumber(b.tx, blockNum)
 	if header == nil {
-		return nil, fmt.Errorf("header not found: %d", blockNum)
+		return nil, nil
 	}
 	return header, nil
 }

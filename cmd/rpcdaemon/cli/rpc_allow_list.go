@@ -2,7 +2,7 @@ package cli
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 
@@ -27,7 +27,7 @@ func parseAllowListForRPC(path string) (rpc.AllowList, error) {
 		file.Close() //nolint: errcheck
 	}()
 
-	fileContents, err := ioutil.ReadAll(file)
+	fileContents, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}

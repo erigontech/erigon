@@ -105,7 +105,7 @@ func (s *ChangeSet) String() string {
 }
 
 // Encoded Method
-func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 	if len(dbKey) == 8 {
 		return DecodeAccounts(dbKey, dbValue)
 	} else {
@@ -153,11 +153,15 @@ func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint6
 	}
 	defer c.Close()
 	return ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
-		blockN, k, v = FromDBFormat(k, v)
+		var err error
+		blockN, k, v, err = FromDBFormat(k, v)
+		if err != nil {
+			return false, err
+		}
 		if blockN >= to {
 			return false, nil
 		}
-		if err := walker(blockN, k, v); err != nil {
+		if err = walker(blockN, k, v); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -166,14 +170,22 @@ func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint6
 func ForEach(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
 	var blockN uint64
 	return db.ForEach(bucket, startkey, func(k, v []byte) error {
-		blockN, k, v = FromDBFormat(k, v)
+		var err error
+		blockN, k, v, err = FromDBFormat(k, v)
+		if err != nil {
+			return err
+		}
 		return walker(blockN, k, v)
 	})
 }
 func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
 	var blockN uint64
 	return db.ForPrefix(bucket, startkey, func(k, v []byte) error {
-		blockN, k, v = FromDBFormat(k, v)
+		var err error
+		blockN, k, v, err = FromDBFormat(k, v)
+		if err != nil {
+			return err
+		}
 		return walker(blockN, k, v)
 	})
 }

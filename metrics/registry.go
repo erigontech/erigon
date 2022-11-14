@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 )
 
@@ -225,134 +224,13 @@ type Stoppable interface {
 	Stop()
 }
 
-type PrefixedRegistry struct {
-	underlying Registry
-	prefix     string
-}
-
-func NewPrefixedRegistry(prefix string) Registry {
-	return &PrefixedRegistry{
-		underlying: NewRegistry(),
-		prefix:     prefix,
-	}
-}
-
-func NewPrefixedChildRegistry(parent Registry, prefix string) Registry {
-	return &PrefixedRegistry{
-		underlying: parent,
-		prefix:     prefix,
-	}
-}
-
-// Call the given function for each registered metric.
-func (r *PrefixedRegistry) Each(fn func(string, interface{})) {
-	wrappedFn := func(prefix string) func(string, interface{}) {
-		return func(name string, iface interface{}) {
-			if strings.HasPrefix(name, prefix) {
-				fn(name, iface)
-			} else {
-				return
-			}
-		}
-	}
-
-	baseRegistry, prefix := findPrefix(r, "")
-	baseRegistry.Each(wrappedFn(prefix))
-}
-
-func findPrefix(registry Registry, prefix string) (Registry, string) {
-	switch r := registry.(type) {
-	case *PrefixedRegistry:
-		return findPrefix(r.underlying, r.prefix+prefix)
-	case *StandardRegistry:
-		return r, prefix
-	}
-	return nil, ""
-}
-
-// Get the metric by the given name or nil if none is registered.
-func (r *PrefixedRegistry) Get(name string) interface{} {
-	realName := r.prefix + name
-	return r.underlying.Get(realName)
-}
-
-// Gets an existing metric or registers the given one.
-// The interface can be the metric to register if not found in registry,
-// or a function returning the metric for lazy instantiation.
-func (r *PrefixedRegistry) GetOrRegister(name string, metric interface{}) interface{} {
-	realName := r.prefix + name
-	return r.underlying.GetOrRegister(realName, metric)
-}
-
-// Register the given metric under the given name. The name will be prefixed.
-func (r *PrefixedRegistry) Register(name string, metric interface{}) error {
-	realName := r.prefix + name
-	return r.underlying.Register(realName, metric)
-}
-
-// Run all registered healthchecks.
-func (r *PrefixedRegistry) RunHealthchecks() {
-	r.underlying.RunHealthchecks()
-}
-
-// GetAll metrics in the Registry
-func (r *PrefixedRegistry) GetAll() map[string]map[string]interface{} {
-	return r.underlying.GetAll()
-}
-
-// Unregister the metric with the given name. The name will be prefixed.
-func (r *PrefixedRegistry) Unregister(name string) {
-	realName := r.prefix + name
-	r.underlying.Unregister(realName)
-}
-
-// Unregister all metrics.  (Mostly for testing.)
-func (r *PrefixedRegistry) UnregisterAll() {
-	r.underlying.UnregisterAll()
-}
-
 var (
 	DefaultRegistry    = NewRegistry()
 	EphemeralRegistry  = NewRegistry()
 	AccountingRegistry = NewRegistry() // registry used in swarm
 )
 
-// Call the given function for each registered metric.
-func Each(f func(string, interface{})) {
-	DefaultRegistry.Each(f)
-}
-
 // Get the metric by the given name or nil if none is registered.
 func Get(name string) interface{} {
 	return DefaultRegistry.Get(name)
-}
-
-// Gets an existing metric or creates and registers a new one. Threadsafe
-// alternative to calling Get and Register on failure.
-func GetOrRegister(name string, i interface{}) interface{} {
-	return DefaultRegistry.GetOrRegister(name, i)
-}
-
-// Register the given metric under the given name.  Returns a DuplicateMetric
-// if a metric by the given name is already registered.
-func Register(name string, i interface{}) error {
-	return DefaultRegistry.Register(name, i)
-}
-
-// Register the given metric under the given name.  Panics if a metric by the
-// given name is already registered.
-func MustRegister(name string, i interface{}) {
-	if err := Register(name, i); err != nil {
-		panic(err)
-	}
-}
-
-// Run all registered healthchecks.
-func RunHealthchecks() {
-	DefaultRegistry.RunHealthchecks()
-}
-
-// Unregister the metric with the given name.
-func Unregister(name string) {
-	DefaultRegistry.Unregister(name)
 }

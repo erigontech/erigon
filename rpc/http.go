@@ -19,21 +19,26 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
+	jsoniter "github.com/json-iterator/go"
 )
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 5
 	contentType             = "application/json"
+	jwtTokenExpiry          = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -68,38 +73,6 @@ func (hc *httpConn) close() {
 
 func (hc *httpConn) closed() <-chan interface{} {
 	return hc.closeCh
-}
-
-// HTTPTimeouts represents the configuration params for the HTTP RPC server.
-type HTTPTimeouts struct {
-	// ReadTimeout is the maximum duration for reading the entire
-	// request, including the body.
-	//
-	// Because ReadTimeout does not let Handlers make per-request
-	// decisions on each request body's acceptable deadline or
-	// upload rate, most users will prefer to use
-	// ReadHeaderTimeout. It is valid to use them both.
-	ReadTimeout time.Duration
-
-	// WriteTimeout is the maximum duration before timing out
-	// writes of the response. It is reset whenever a new
-	// request's header is read. Like ReadTimeout, it does not
-	// let Handlers make decisions on a per-request basis.
-	WriteTimeout time.Duration
-
-	// IdleTimeout is the maximum amount of time to wait for the
-	// next request when keep-alives are enabled. If IdleTimeout
-	// is zero, the value of ReadTimeout is used. If both are
-	// zero, ReadHeaderTimeout is used.
-	IdleTimeout time.Duration
-}
-
-// DefaultHTTPTimeouts represents the default timeout values used if further
-// configuration is not provided.
-var DefaultHTTPTimeouts = HTTPTimeouts{
-	ReadTimeout:  30 * time.Second,
-	WriteTimeout: 30 * time.Minute,
-	IdleTimeout:  120 * time.Second,
 }
 
 // DialHTTPWithClient creates a new RPC client that connects to an RPC server over HTTP
@@ -177,7 +150,7 @@ func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) (io.ReadClos
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", hc.url, ioutil.NopCloser(bytes.NewReader(body)))
+	req, err := http.NewRequestWithContext(ctx, "POST", hc.url, io.NopCloser(bytes.NewReader(body)))
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +180,34 @@ type httpServerConn struct {
 }
 
 func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
-	body := io.LimitReader(r.Body, maxRequestContentLength)
-	conn := &httpServerConn{Reader: body, Writer: w, r: r}
+	conn := &httpServerConn{Writer: w, r: r}
+	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
+	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
+	// we however allow for non base64 encoded parameters to be passed
+	if r.Method == http.MethodGet && r.ContentLength == 0 {
+		// default id 1
+		id := `1`
+		id_up := r.URL.Query().Get("id")
+		if id_up != "" {
+			id = id_up
+		}
+		method_up := r.URL.Query().Get("method")
+		params, _ := url.QueryUnescape(r.URL.Query().Get("params"))
+		param := []byte(params)
+		if pb, err := base64.URLEncoding.DecodeString(params); err == nil {
+			param = pb
+		}
+		buf := new(bytes.Buffer)
+		json.NewEncoder(buf).Encode(jsonrpcMessage{
+			ID:     json.RawMessage(id),
+			Method: method_up,
+			Params: param,
+		})
+		conn.Reader = buf
+	} else {
+		// it's a post request or whatever, so just process it like normal
+		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
+	}
 	return NewCodec(conn)
 }
 
@@ -251,7 +250,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.close()
-	s.serveSingleRequest(ctx, codec)
+	var stream *jsoniter.Stream
+	if !s.disableStreaming {
+		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+	}
+	s.serveSingleRequest(ctx, codec, stream)
 }
 
 // validateRequest returns a non-zero response code and error message if the
@@ -264,8 +267,8 @@ func validateRequest(r *http.Request) (int, error) {
 		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
-	// Allow OPTIONS (regardless of content-type)
-	if r.Method == http.MethodOptions {
+	// Allow OPTIONS and GET (regardless of content-type)
+	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
 		return 0, nil
 	}
 	// Check content-type
@@ -279,4 +282,47 @@ func validateRequest(r *http.Request) (int, error) {
 	// Invalid content-type
 	err := fmt.Errorf("invalid content type, only %s is supported", contentType)
 	return http.StatusUnsupportedMediaType, err
+}
+
+func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
+	var tokenStr string
+	// Check if JWT signature is correct
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		tokenStr = strings.TrimPrefix(auth, "Bearer ")
+	}
+
+	if len(tokenStr) == 0 {
+		http.Error(w, "missing token", http.StatusForbidden)
+		return false
+	}
+
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	}
+	claims := jwt.RegisteredClaims{}
+	// We explicitly set only HS256 allowed, and also disables the
+	// claim-check: the RegisteredClaims internally requires 'iat' to
+	// be no later than 'now', but we allow for a bit of drift.
+	token, err := jwt.ParseWithClaims(tokenStr, &claims, keyFunc,
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithoutClaimsValidation())
+
+	switch {
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case !token.Valid:
+		http.Error(w, "invalid token", http.StatusForbidden)
+	case !claims.VerifyExpiresAt(time.Now(), false): // optional
+		http.Error(w, "token is expired", http.StatusForbidden)
+	case claims.IssuedAt == nil:
+		http.Error(w, "missing issued-at", http.StatusForbidden)
+	case time.Since(claims.IssuedAt.Time) > jwtTokenExpiry:
+		http.Error(w, "stale token", http.StatusForbidden)
+	case time.Until(claims.IssuedAt.Time) > jwtTokenExpiry:
+		http.Error(w, "future token", http.StatusForbidden)
+	default:
+		return true
+	}
+
+	return false
 }

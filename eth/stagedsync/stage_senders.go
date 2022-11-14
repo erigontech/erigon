@@ -10,6 +10,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -33,13 +35,15 @@ type SendersCfg struct {
 	bufferSize      int
 	numOfGoroutines int
 	readChLen       int
+	badBlockHalt    bool
 	tmpdir          string
 	prune           prune.Mode
 	chainConfig     *params.ChainConfig
-	snapshots       *snapshotsync.AllSnapshots
+	blockRetire     *snapshotsync.BlockRetire
+	hd              *headerdownload.HeaderDownload
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.AllSnapshots) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -50,14 +54,20 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
 		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
 		readChLen:       4,
+		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
 		prune:           prune,
-		snapshots:       snapshots,
+		blockRetire:     br,
+		hd:              hd,
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, quiet bool) error {
+	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
+		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
+	}
+
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -76,21 +86,18 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
+		to = cmp.Min(prevStageProgress, toBlock)
 	}
-	if to <= s.BlockNumber {
+	if to < s.BlockNumber {
 		return nil
 	}
 	logPrefix := s.LogPrefix()
-	if to > s.BlockNumber+16 {
+	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Started", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-
-	canonical := make([]common.Hash, to-s.BlockNumber)
-	currentHeaderIdx := uint64(0)
 
 	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
@@ -99,9 +106,8 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer canonicalC.Close()
 
 	startFrom := s.BlockNumber + 1
-	if cfg.snapshots != nil && startFrom < cfg.snapshots.BlocksAvailable() {
-		startFrom = cfg.snapshots.BlocksAvailable()
-	}
+	currentHeaderIdx := uint64(0)
+	canonical := make([]common.Hash, to-s.BlockNumber)
 
 	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
@@ -156,7 +162,11 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			case <-quitCh:
 				return
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", s.BlockNumber+uint64(j.index))
+				n := s.BlockNumber
+				if j != nil {
+					n += uint64(j.index)
+				}
+				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", n, "ch", fmt.Sprintf("%d/%d", len(jobs), cap(jobs)))
 			case j, ok = <-out:
 				if !ok {
 					return
@@ -200,7 +210,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer bodiesC.Close()
 
 Loop:
-	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
+	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
@@ -210,6 +220,7 @@ Loop:
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
+
 		if blockNumber > to {
 			break
 		}
@@ -218,7 +229,8 @@ Loop:
 			// non-canonical case
 			continue
 		}
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
+
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 
 		select {
 		case recoveryErr := <-errCh:
@@ -246,6 +258,13 @@ Loop:
 	}
 	if minBlockErr != nil {
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
+		if cfg.badBlockHalt {
+			return minBlockErr
+		}
+		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
+		if cfg.hd != nil {
+			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
+		}
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
@@ -353,12 +372,8 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	if !cfg.prune.TxIndex.Enabled() {
-		return nil
-	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -367,9 +382,12 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-
-	if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
-		return err
+	sn := cfg.blockRetire.Snapshots()
+	if !(sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce) && cfg.prune.TxIndex.Enabled() {
+		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
+			return err
+		}
 	}
 
 	if !useExternalTx {

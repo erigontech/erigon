@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
@@ -83,10 +83,20 @@ func (V4ID) NodeAddr(r *enr.Record) []byte {
 	if err != nil {
 		return nil
 	}
-	buf := make([]byte, 64)
-	math.ReadBits(pubkey.X, buf[:32])
-	math.ReadBits(pubkey.Y, buf[32:])
-	return crypto.Keccak256(buf)
+	id := PubkeyToIDV4((*ecdsa.PublicKey)(&pubkey))
+	return id[:]
+}
+
+// PubkeyToIDV4 derives the v4 node address from the given public key.
+func PubkeyToIDV4(key *ecdsa.PublicKey) ID {
+	return PubkeyEncoded(v4wire.EncodePubkey(key)).ID()
+}
+
+type PubkeyEncoded v4wire.Pubkey
+
+// ID returns the node ID corresponding to the public key.
+func (e PubkeyEncoded) ID() ID {
+	return ID(crypto.Keccak256Hash(e[:]))
 }
 
 // Secp256k1 is the "secp256k1" key, which holds a public key.

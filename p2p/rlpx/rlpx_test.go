@@ -268,12 +268,12 @@ var (
 
 func TestHandshakeForwardCompatibility(t *testing.T) {
 	var (
-		pubA          = crypto.FromECDSAPub(&keyA.PublicKey)[1:]
-		pubB          = crypto.FromECDSAPub(&keyB.PublicKey)[1:]
+		pubA          = crypto.MarshalPubkey(&keyA.PublicKey)
+		pubB          = crypto.MarshalPubkey(&keyB.PublicKey)
 		ephA, _       = crypto.HexToECDSA("869d6ecf5211f1cc60418a13b9d870b22959d0c16f02bec714c960dd2298a32d")
 		ephB, _       = crypto.HexToECDSA("e238eb8e04fee6511ab04c6dd3c89ce097b11f25d584863ac2b6d5b35b1847e4")
-		ephPubA       = crypto.FromECDSAPub(&ephA.PublicKey)[1:]
-		ephPubB       = crypto.FromECDSAPub(&ephB.PublicKey)[1:]
+		ephPubA       = crypto.MarshalPubkey(&ephA.PublicKey)
+		ephPubB       = crypto.MarshalPubkey(&ephB.PublicKey)
 		nonceA        = unhex("7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6")
 		nonceB        = unhex("559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd")
 		_, _, _, _    = pubA, pubB, ephPubA, ephPubB

@@ -8,8 +8,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -50,14 +50,13 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
-	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
 	if s.BlockNumber == headNumber {
 		return nil
 	}
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(headNumber, headHash) // Make sure we stop at head
+	endKey := dbutils.HeaderKey(headNumber+1, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
 	//todo do we need non canonical headers ?
 	logPrefix := s.LogPrefix()

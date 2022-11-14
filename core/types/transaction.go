@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -61,7 +62,7 @@ type Transaction interface {
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int) (Message, error)
+	AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash
@@ -97,13 +98,14 @@ type TransactionMisc struct {
 	from atomic.Value
 }
 
-type RawTransactions [][]byte
+// RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
+type BinaryTransactions [][]byte
 
-func (t RawTransactions) Len() int {
+func (t BinaryTransactions) Len() int {
 	return len(t)
 }
 
-func (t RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 
@@ -203,6 +205,11 @@ func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 		}
 	}
 	return result, nil
+}
+
+func TypedTransactionMarshalledAsRlpString(data []byte) bool {
+	// Unless it's a single byte, serialized RLP strings have their first byte in the [0x80, 0xc0) range
+	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
 }
 
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
@@ -441,8 +448,6 @@ func (t *TransactionsFixedOrder) Pop() {
 }
 
 // Message is a fully derived transaction and implements core.Message
-//
-// NOTE: In a future PR this will be removed.
 type Message struct {
 	to         *common.Address
 	from       common.Address
@@ -455,9 +460,10 @@ type Message struct {
 	data       []byte
 	accessList AccessList
 	checkNonce bool
+	isFree     bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -467,6 +473,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
+		isFree:     isFree,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -491,3 +498,10 @@ func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }
+func (m *Message) SetCheckNonce(checkNonce bool) {
+	m.checkNonce = checkNonce
+}
+func (m Message) IsFree() bool { return m.isFree }
+func (m *Message) SetIsFree(isFree bool) {
+	m.isFree = isFree
+}

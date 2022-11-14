@@ -2,6 +2,7 @@ package parlia
 
 import (
 	"bytes"
+	"math/rand"
 	"sort"
 	"testing"
 
@@ -20,4 +21,10 @@ func TestValidatorSetSort(t *testing.T) {
 	for i := 0; i < size-1; i++ {
 		assert.True(t, bytes.Compare(validators[i][:], validators[i+1][:]) < 0)
 	}
+}
+
+func randomAddress() common.Address {
+	addrBytes := make([]byte, 20)
+	rand.Read(addrBytes)
+	return common.BytesToAddress(addrBytes)
 }

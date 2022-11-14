@@ -17,7 +17,6 @@
 // Package ethstats implements the network stats reporting service.
 package ethstats
 
-/*
 import (
 	"context"
 	"encoding/json"
@@ -33,64 +32,37 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/downloader"
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/miner"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
 	// historyUpdateRange is the number of blocks a node should report upon login or
 	// history request.
 	historyUpdateRange = 50
-
-	// txChanSize is the size of channel listening to NewTxsEvent.
-	// The number is referenced from the size of tx pool.
-	txChanSize = 4096
-	// chainHeadChanSize is the size of channel listening to ChainHeadEvent.
-	chainHeadChanSize = 10
 )
-
-// backend encompasses the bare-minimum functionality needed for ethstats reporting
-type backend interface {
-	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
-	SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
-	CurrentHeader() *types.Header
-	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
-	GetTd(ctx context.Context, hash common.Hash) *big.Int
-	Stats() (pending int, queued int)
-	Downloader() *downloader.Downloader
-}
-
-// fullNodeBackend encompasses the functionality necessary for a full node
-// reporting to ethstats
-type fullNodeBackend interface {
-	backend
-	Miner() *miner.Miner
-	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
-	CurrentBlock() *types.Block
-	SuggestPrice(ctx context.Context) (*big.Int, error)
-}
 
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
 type Service struct {
-	server  *p2p.Server // Peer-to-peer server to retrieve networking infos
-	backend backend
-	engine  consensus.Engine // Consensus engine to retrieve variadic block fields
+	servers   []*sentry.GrpcServer // Peer-to-peer server to retrieve networking infos
+	chaindb   kv.RoDB
+	networkid uint64
+	engine    consensus.Engine // Consensus engine to retrieve variadic block fields
 
 	node string // Name of the node to display on the monitoring page
 	pass string // Password to authorize access to the monitoring page
 	host string // Remote address of the monitoring service
+
+	quitCh <-chan struct{}
+	headCh <-chan [][]byte
 
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
@@ -101,13 +73,14 @@ type Service struct {
 // websocket.
 //
 // From Gorilla websocket docs:
-//   Connections support one concurrent reader and one concurrent writer.
-//   Applications are responsible for ensuring that no more than one goroutine calls the write methods
-//     - NextWriter, SetWriteDeadline, WriteMessage, WriteJSON, EnableWriteCompression, SetCompressionLevel
-//   concurrently and that no more than one goroutine calls the read methods
-//     - NextReader, SetReadDeadline, ReadMessage, ReadJSON, SetPongHandler, SetPingHandler
-//   concurrently.
-//   The Close and WriteControl methods can be called concurrently with all other methods.
+//
+//	Connections support one concurrent reader and one concurrent writer.
+//	Applications are responsible for ensuring that no more than one goroutine calls the write methods
+//	  - NextWriter, SetWriteDeadline, WriteMessage, WriteJSON, EnableWriteCompression, SetCompressionLevel
+//	concurrently and that no more than one goroutine calls the read methods
+//	  - NextReader, SetReadDeadline, ReadMessage, ReadJSON, SetPongHandler, SetPingHandler
+//	concurrently.
+//	The Close and WriteControl methods can be called concurrently with all other methods.
 type connWrapper struct {
 	conn *websocket.Conn
 
@@ -121,6 +94,9 @@ func newConnectionWrapper(conn *websocket.Conn) *connWrapper {
 
 // WriteJSON wraps corresponding method on the websocket but is safe for concurrent calling
 func (w *connWrapper) WriteJSON(v interface{}) error {
+	if w.conn == nil {
+		return nil
+	}
 	w.wlock.Lock()
 	defer w.wlock.Unlock()
 
@@ -143,7 +119,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, backend backend, engine consensus.Engine, url string) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -151,14 +127,17 @@ func New(node *node.Node, backend backend, engine consensus.Engine, url string) 
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
 	ethstats := &Service{
-		backend: backend,
-		engine:  engine,
-		server:  node.Server(),
-		node:    parts[1],
-		pass:    parts[3],
-		host:    parts[4],
-		pongCh:  make(chan struct{}),
-		histCh:  make(chan []uint64, 1),
+		engine:    engine,
+		servers:   servers,
+		node:      parts[1],
+		pass:      parts[3],
+		host:      parts[4],
+		pongCh:    make(chan struct{}),
+		histCh:    make(chan []uint64, 1),
+		networkid: networkid,
+		chaindb:   chainDB,
+		headCh:    headCh,
+		quitCh:    quitCh,
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -182,56 +161,6 @@ func (s *Service) Stop() error {
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-	// Subscribe to chain events to execute updates on
-	chainHeadCh := make(chan core.ChainHeadEvent, chainHeadChanSize)
-	headSub := s.backend.SubscribeChainHeadEvent(chainHeadCh)
-	defer headSub.Unsubscribe()
-
-	txEventCh := make(chan core.NewTxsEvent, txChanSize)
-	txSub := s.backend.SubscribeNewTxsEvent(txEventCh)
-	defer txSub.Unsubscribe()
-
-	// Start a goroutine that exhausts the subscriptions to avoid events piling up
-	var (
-		quitCh = make(chan struct{})
-		headCh = make(chan *types.Block, 1)
-		txCh   = make(chan struct{}, 1)
-	)
-	go func() {
-		var lastTx mclock.AbsTime
-
-	HandleLoop:
-		for {
-			select {
-			// Notify of chain head events, but drop if too frequent
-			case head := <-chainHeadCh:
-				select {
-				case headCh <- head.Block:
-				default:
-				}
-
-			// Notify of new transaction events, but drop if too frequent
-			case <-txEventCh:
-				if time.Duration(mclock.Now()-lastTx) < time.Second {
-					continue
-				}
-				lastTx = mclock.Now()
-
-				select {
-				case txCh <- struct{}{}:
-				default:
-				}
-
-			// node stopped
-			case <-txSub.Err():
-				break HandleLoop
-			case <-headSub.Err():
-				break HandleLoop
-			}
-		}
-		close(quitCh)
-	}()
-
 	// Resolve the URL, defaulting to TLS, but falling back to none too
 	path := fmt.Sprintf("%s/api", s.host)
 	urls := []string{path}
@@ -246,7 +175,7 @@ func (s *Service) loop() {
 	// Loop reporting until termination
 	for {
 		select {
-		case <-quitCh:
+		case <-s.quitCh:
 			return
 		case <-errTimer.C:
 			// Establish a websocket connection to the server on any supported URL
@@ -258,15 +187,15 @@ func (s *Service) loop() {
 			header := make(http.Header)
 			header.Set("origin", "http://localhost")
 			for _, url := range urls {
-				c, _, e := dialer.Dial(url, header)
-				err = e
+				//nolint
+				c, _, err := dialer.Dial(url, header)
 				if err == nil {
 					conn = newConnectionWrapper(c)
 					break
 				}
 			}
-			if err != nil {
-				log.Warn("Stats server unreachable", "err", err)
+			if err != nil || conn == nil {
+				log.Warn("Stats server unreachable")
 				errTimer.Reset(10 * time.Second)
 				continue
 			}
@@ -279,19 +208,12 @@ func (s *Service) loop() {
 			}
 			go s.readLoop(conn)
 
-			// Send the initial stats so our node looks decent from the get go
-			if err = s.report(conn); err != nil {
-				log.Warn("Initial stats report failed", "err", err)
-				conn.Close()
-				errTimer.Reset(0)
-				continue
-			}
 			// Keep sending status updates until the connection breaks
 			fullReport := time.NewTicker(15 * time.Second)
 
 			for err == nil {
 				select {
-				case <-quitCh:
+				case <-s.quitCh:
 					fullReport.Stop()
 					// Make sure the connection is closed
 					conn.Close()
@@ -305,17 +227,11 @@ func (s *Service) loop() {
 					if err = s.reportHistory(conn, list); err != nil {
 						log.Warn("Requested history report failed", "err", err)
 					}
-				case head := <-headCh:
-					if err = s.reportBlock(conn, head); err != nil {
+				case <-s.headCh:
+					if err = s.reportBlock(conn); err != nil {
 						log.Warn("Block stats report failed", "err", err)
 					}
-					if err = s.reportPending(conn); err != nil {
-						log.Warn("Post-block transaction stats report failed", "err", err)
-					}
-				case <-txCh:
-					if err = s.reportPending(conn); err != nil {
-						log.Warn("Transaction stats report failed", "err", err)
-					}
+
 				}
 			}
 			fullReport.Stop()
@@ -333,7 +249,12 @@ func (s *Service) loop() {
 // unknown packets.
 func (s *Service) readLoop(conn *connWrapper) {
 	// If the read loop exists, close the connection
-	defer conn.Close()
+	defer func(conn *connWrapper) {
+		closeErr := conn.Close()
+		if closeErr != nil {
+			log.Warn("Failed to close connection", "err", closeErr)
+		}
+	}(conn)
 
 	for {
 		// Retrieve the next generic network packet and bail out on error
@@ -345,7 +266,7 @@ func (s *Service) readLoop(conn *connWrapper) {
 		// If the network packet is a system ping, respond to it directly
 		var ping string
 		if err := json.Unmarshal(blob, &ping); err == nil && strings.HasPrefix(ping, "primus::ping::") {
-			if err := conn.WriteJSON(strings.Replace(ping, "ping", "pong", -1)); err != nil {
+			if err := conn.WriteJSON(strings.ReplaceAll(ping, "ping", "pong")); err != nil {
 				log.Warn("Failed to respond to system ping message", "err", err)
 				return
 			}
@@ -442,23 +363,28 @@ type authMsg struct {
 // login tries to authorize the client at the remote server.
 func (s *Service) login(conn *connWrapper) error {
 	// Construct and send the login authentication
-	infos := s.server.NodeInfo()
+	// infos := s.server.NodeInfo()
 
-	var protocols []string
-	for _, proto := range s.server.Protocols {
-		protocols = append(protocols, fmt.Sprintf("%s/%d", proto.Name, proto.Version))
+	protocols := make([]string, 0, len(s.servers))
+	for _, srv := range s.servers {
+		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
 	}
-	var network string
-	if info := infos.Protocols["eth"]; info != nil {
-		network = fmt.Sprintf("%d", info.(*ethproto.NodeInfo).Network)
+	nodeName := "Erigon"
+	if len(s.servers) > 0 {
+		nodeInfo, err := s.servers[0].NodeInfo(context.TODO(), nil)
+		if err != nil {
+			return err
+		}
+		nodeName = nodeInfo.Name
 	}
+
 	auth := &authMsg{
 		ID: s.node,
 		Info: nodeInfo{
 			Name:     s.node,
-			Node:     infos.Name,
-			Port:     infos.Ports.Listener,
-			Network:  network,
+			Node:     nodeName,
+			Port:     0,
+			Network:  fmt.Sprintf("%d", s.networkid),
 			Protocol: strings.Join(protocols, ", "),
 			API:      "No",
 			Os:       runtime.GOOS,
@@ -489,7 +415,7 @@ func (s *Service) report(conn *connWrapper) error {
 	if err := s.reportLatency(conn); err != nil {
 		return err
 	}
-	if err := s.reportBlock(conn, nil); err != nil {
+	if err := s.reportBlock(conn); err != nil {
 		return err
 	}
 	if err := s.reportPending(conn); err != nil {
@@ -572,9 +498,25 @@ func (s uncleStats) MarshalJSON() ([]byte, error) {
 }
 
 // reportBlock retrieves the current chain head and reports it to the stats server.
-func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
+func (s *Service) reportBlock(conn *connWrapper) error {
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+
+	block := rawdb.ReadCurrentBlock(roTx)
+	if block == nil {
+		return nil
+	}
+
+	td, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return err
+	}
+
 	// Gather the block details from the header or block chain
-	details := s.assembleBlockStats(block)
+	details := s.assembleBlockStats(block, td)
 
 	// Assemble the block report and send it to the server
 	log.Trace("Sending new block to ethstats", "number", details.Number, "hash", details.Hash)
@@ -591,54 +533,42 @@ func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
 
 // assembleBlockStats retrieves any required metadata to report a single block
 // and assembles the block stats. If block is nil, the current head is processed.
-func (s *Service) assembleBlockStats(block *types.Block) *blockStats {
+func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
+	if td == nil {
+		td = common.Big0
+	}
 	// Gather the block infos from the local blockchain
-	var (
-		header *types.Header
-		td     *big.Int
-		txs    []txStats
-		uncles []*types.Header
-	)
-
-	// check if backend is a full node
-	fullBackend, ok := s.backend.(fullNodeBackend)
-	if ok {
-		if block == nil {
-			block = fullBackend.CurrentBlock()
-		}
-		header = block.Header()
-		td = fullBackend.GetTd(context.Background(), header.Hash())
-
-		txs = make([]txStats, len(block.Transactions()))
-		for i, tx := range block.Transactions() {
-			txs[i].Hash = tx.Hash()
-		}
-		uncles = block.Uncles()
+	txs := make([]txStats, 0, len(block.Transactions()))
+	for _, tx := range block.Transactions() {
+		txs = append(txs, txStats{tx.Hash()})
 	}
 
-	// Assemble and return the block stats
-	author, _ := s.engine.Author(header)
-
 	return &blockStats{
-		Number:     header.Number,
-		Hash:       header.Hash(),
-		ParentHash: header.ParentHash,
-		Timestamp:  new(big.Int).SetUint64(header.Time),
-		Miner:      author,
-		GasUsed:    header.GasUsed,
-		GasLimit:   header.GasLimit,
-		Diff:       header.Difficulty.String(),
+		Number:     block.Header().Number,
+		Hash:       block.Hash(),
+		ParentHash: block.Header().ParentHash,
+		Timestamp:  new(big.Int).SetUint64(block.Header().Time),
+		Miner:      block.Header().Coinbase,
+		GasUsed:    block.Header().GasUsed,
+		GasLimit:   block.Header().GasLimit,
+		Diff:       block.Header().Difficulty.String(),
 		TotalDiff:  td.String(),
 		Txs:        txs,
-		TxHash:     header.TxHash,
-		Root:       header.Root,
-		Uncles:     uncles,
+		TxHash:     block.Header().TxHash,
+		Root:       block.Header().Root,
+		Uncles:     block.Uncles(),
 	}
 }
 
 // reportHistory retrieves the most recent batch of blocks and reports it to the
 // stats server.
 func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+
 	// Figure out the indexes that need reporting
 	indexes := make([]uint64, 0, historyUpdateRange)
 	if len(list) > 0 {
@@ -646,31 +576,34 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		indexes = append(indexes, list...)
 	} else {
 		// No indexes requested, send back the top ones
-		head := s.backend.CurrentHeader().Number.Int64()
-		start := head - historyUpdateRange + 1
+		headHash := rawdb.ReadHeadBlockHash(roTx)
+		headNumber := rawdb.ReadHeaderNumber(roTx, headHash)
+		if headNumber == nil {
+			return nil
+		}
+		start := int(*headNumber - historyUpdateRange + 1)
 		if start < 0 {
 			start = 0
 		}
-		for i := uint64(start); i <= uint64(head); i++ {
+		for i := uint64(start); i <= *headNumber; i++ {
 			indexes = append(indexes, i)
 		}
 	}
 	// Gather the batch of blocks to report
 	history := make([]*blockStats, len(indexes))
 	for i, number := range indexes {
-		fullBackend, ok := s.backend.(fullNodeBackend)
 		// Retrieve the next block if it's known to us
-		var block *types.Block
-		if ok {
-			block, _ = fullBackend.BlockByNumber(context.Background(), rpc.BlockNumber(number)) // TODO ignore error here ?
-		} else {
-			if header, _ := s.backend.HeaderByNumber(context.Background(), rpc.BlockNumber(number)); header != nil {
-				block = types.NewBlockWithHeader(header)
-			}
+		block, err := rawdb.ReadBlockByNumber(roTx, number)
+		if err != nil {
+			return err
+		}
+		td, err := rawdb.ReadTd(roTx, block.Hash(), number)
+		if err != nil {
+			return err
 		}
 		// If we do have the block, add to the history and continue
 		if block != nil {
-			history[len(history)-1-i] = s.assembleBlockStats(block)
+			history[len(history)-1-i] = s.assembleBlockStats(block, td)
 			continue
 		}
 		// Ran out of blocks, cut the report short and send
@@ -693,77 +626,69 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	return conn.WriteJSON(report)
 }
 
-// pendStats is the information to report about pending transactions.
-type pendStats struct {
-	Pending int `json:"pending"`
-}
-
 // reportPending retrieves the current number of pending transactions and reports
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
-	// Retrieve the pending count from the local blockchain
-	pending, _ := s.backend.Stats()
-	// Assemble the transaction stats and send it to the server
-	log.Trace("Sending pending transactions to ethstats", "count", pending)
+	/*	// Retrieve the pending count from the local blockchain
+		pending, _ := s.backend.Stats()
+		// Assemble the transaction stats and send it to the server
+		log.Trace("Sending pending transactions to ethstats", "count", pending)
 
-	stats := map[string]interface{}{
-		"id": s.node,
-		"stats": &pendStats{
-			Pending: pending,
-		},
-	}
-	report := map[string][]interface{}{
-		"emit": {"pending", stats},
-	}
-	return conn.WriteJSON(report)
+		stats := map[string]interface{}{
+			"id": s.node,
+			"stats": &pendStats{
+				Pending: pending,
+			},
+		}
+		report := map[string][]interface{}{
+			"emit": {"pending", stats},
+		}
+		return conn.WriteJSON(report)*/
+	return nil
 }
 
 // nodeStats is the information to report about the local node.
 type nodeStats struct {
-	Active   bool `json:"active"`
-	Syncing  bool `json:"syncing"`
-	Mining   bool `json:"mining"`
-	Hashrate int  `json:"hashrate"`
-	GoodPeers    int  `json:"peers"`
-	GasPrice int  `json:"gasPrice"`
-	Uptime   int  `json:"uptime"`
+	Active    bool `json:"active"`
+	Syncing   bool `json:"syncing"`
+	Mining    bool `json:"mining"`
+	Hashrate  int  `json:"hashrate"`
+	GoodPeers int  `json:"peers"`
+	GasPrice  int  `json:"gasPrice"`
+	Uptime    int  `json:"uptime"`
 }
 
 // reportStats retrieves various stats about the node at the networking and
 // mining layer and reports it to the stats server.
 func (s *Service) reportStats(conn *connWrapper) error {
-	// Gather the syncing and mining infos from the local miner instance
-	var (
-		mining   bool
-		hashrate int
-		syncing  bool
-		gasprice int
-	)
-	// check if backend is a full node
-	fullBackend, ok := s.backend.(fullNodeBackend)
-	if ok {
-		mining = fullBackend.Miner().Mining()
-		hashrate = int(fullBackend.Miner().HashRate())
-
-		sync := fullBackend.Downloader().Progress()
-		syncing = fullBackend.CurrentHeader().Number.Uint64() >= sync.HighestBlock
-
-		price, _ := fullBackend.SuggestPrice(context.Background())
-		gasprice = int(price.Uint64())
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	if err != nil {
+		return err
 	}
-	// Assemble the node stats and send it to the server
-	log.Trace("Sending node details to ethstats")
-
+	defer roTx.Rollback()
+	sync, err := stages.GetStageProgress(roTx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	finishSync, err := stages.GetStageProgress(roTx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	// TODO(Giulio2002): peer tracking
+	peerCount := 0
+	for _, srv := range s.servers {
+		peerCount += srv.SimplePeerCount()
+	}
 	stats := map[string]interface{}{
 		"id": s.node,
 		"stats": &nodeStats{
-			Active:   true,
-			Mining:   mining,
-			Hashrate: hashrate,
-			GoodPeers:    s.server.PeerCount(),
-			GasPrice: gasprice,
-			Syncing:  syncing,
-			Uptime:   100,
+			Active:    true,
+			Mining:    false,
+			Hashrate:  0,
+			GoodPeers: peerCount,
+			GasPrice:  0,
+			Syncing:   sync != finishSync,
+			Uptime:    100,
 		},
 	}
 	report := map[string][]interface{}{
@@ -771,4 +696,3 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	}
 	return conn.WriteJSON(report)
 }
-*/

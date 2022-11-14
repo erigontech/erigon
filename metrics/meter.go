@@ -21,45 +21,6 @@ type Meter interface {
 	Stop()
 }
 
-// GetOrRegisterMeter returns an existing Meter or constructs and registers a
-// new StandardMeter.
-// Be sure to unregister the meter from the registry once it is of no use to
-// allow for garbage collection.
-func GetOrRegisterMeter(name string, r Registry) Meter {
-	if nil == r {
-		r = DefaultRegistry
-	}
-	return r.GetOrRegister(name, NewMeter).(Meter)
-}
-
-// GetOrRegisterMeterForced returns an existing Meter or constructs and registers a
-// new StandardMeter no matter the global switch is enabled or not.
-// Be sure to unregister the meter from the registry once it is of no use to
-// allow for garbage collection.
-func GetOrRegisterMeterForced(name string, r Registry) Meter {
-	if nil == r {
-		r = DefaultRegistry
-	}
-	return r.GetOrRegister(name, NewMeterForced).(Meter)
-}
-
-// NewMeter constructs a new StandardMeter and launches a goroutine.
-// Be sure to call Stop() once the meter is of no use to allow for garbage collection.
-func NewMeter() Meter {
-	if !Enabled {
-		return NilMeter{}
-	}
-	m := newStandardMeter()
-	arbiter.mu.Lock()
-	defer arbiter.mu.Unlock()
-	arbiter.meters[m] = struct{}{}
-	if !arbiter.started {
-		arbiter.started = true
-		go arbiter.tick()
-	}
-	return m
-}
-
 // NewMeterForced constructs a new StandardMeter and launches a goroutine no matter
 // the global switch is enabled or not.
 // Be sure to call Stop() once the meter is of no use to allow for garbage collection.
@@ -73,32 +34,6 @@ func NewMeterForced() Meter {
 		go arbiter.tick()
 	}
 	return m
-}
-
-// NewRegisteredMeter constructs and registers a new StandardMeter
-// and launches a goroutine.
-// Be sure to unregister the meter from the registry once it is of no use to
-// allow for garbage collection.
-func NewRegisteredMeter(name string, r Registry) Meter {
-	c := NewMeter()
-	if nil == r {
-		r = DefaultRegistry
-	}
-	r.Register(name, c)
-	return c
-}
-
-// NewRegisteredMeterForced constructs and registers a new StandardMeter
-// and launches a goroutine no matter the global switch is enabled or not.
-// Be sure to unregister the meter from the registry once it is of no use to
-// allow for garbage collection.
-func NewRegisteredMeterForced(name string, r Registry) Meter {
-	c := NewMeterForced()
-	if nil == r {
-		r = DefaultRegistry
-	}
-	r.Register(name, c)
-	return c
 }
 
 // MeterSnapshot is a read-only copy of another Meter.

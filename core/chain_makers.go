@@ -21,10 +21,13 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -109,8 +112,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	contractHasTEVM := func(_ common.Hash) (bool, error) { return false, nil }
-	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, contractHasTEVM)
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
@@ -123,8 +125,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
-	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, contractHasTEVM)
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -198,7 +199,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
-		parent.Seal(),
+		parent.Header().AuRaStep,
 	)
 }
 
@@ -217,23 +218,65 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Length   int
 	Headers  []*types.Header
 	Blocks   []*types.Block
 	Receipts []types.Receipts
-	TopBlock *types.Block // Convinience field to access the last block
+	TopBlock *types.Block // Convenience field to access the last block
+}
+
+func (cp *ChainPack) Length() int {
+	return len(cp.Blocks)
 }
 
 // OneBlock returns a ChainPack which contains just one
 // block with given index
-func (cp ChainPack) Slice(i, j int) *ChainPack {
+func (cp *ChainPack) Slice(i, j int) *ChainPack {
 	return &ChainPack{
-		Length:   j + 1 - i,
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
+}
+
+// Copy creates a deep copy of the ChainPack.
+func (cp *ChainPack) Copy() *ChainPack {
+	headers := make([]*types.Header, 0, len(cp.Headers))
+	for _, header := range cp.Headers {
+		headers = append(headers, types.CopyHeader(header))
+	}
+
+	blocks := make([]*types.Block, 0, len(cp.Blocks))
+	for _, block := range cp.Blocks {
+		blocks = append(blocks, block.Copy())
+	}
+
+	receipts := make([]types.Receipts, 0, len(cp.Receipts))
+	for _, receiptList := range cp.Receipts {
+		receiptListCopy := make(types.Receipts, 0, len(receiptList))
+		for _, receipt := range receiptList {
+			receiptListCopy = append(receiptListCopy, receipt.Copy())
+		}
+		receipts = append(receipts, receiptListCopy)
+	}
+
+	topBlock := cp.TopBlock.Copy()
+
+	return &ChainPack{
+		Headers:  headers,
+		Blocks:   blocks,
+		Receipts: receipts,
+		TopBlock: topBlock,
+	}
+}
+
+func (cp *ChainPack) NumberOfPoWBlocks() int {
+	for i, header := range cp.Headers {
+		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+			return i
+		}
+	}
+	return len(cp.Headers)
 }
 
 // GenerateChain creates a chain of n blocks. The first block's
@@ -255,7 +298,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
-	types.SetHeaderSealFlag(config.IsHeaderWithSeal())
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
@@ -279,13 +321,14 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		if config.DAOForkSupport && config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(b.header.Number) == 0 {
 			misc.ApplyDAOHardFork(ibs)
 		}
+		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs)
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -390,7 +433,33 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	tx.Rollback()
 
-	return &ChainPack{Length: n, Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+}
+
+func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, timestamp uint64, targetGasLimit *uint64) *types.Header {
+	header := &types.Header{
+		Root:       parent.Root,
+		ParentHash: parent.Hash(),
+		Number:     new(big.Int).Add(parent.Number, common.Big1),
+		Difficulty: common.Big0,
+		Time:       timestamp,
+	}
+
+	parentGasLimit := parent.GasLimit
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if chainConfig.IsLondon(header.Number.Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+		if !chainConfig.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+	}
+	if targetGasLimit != nil {
+		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+	} else {
+		header.GasLimit = parentGasLimit
+	}
+
+	return header
 }
 
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
@@ -401,29 +470,17 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	header := &types.Header{
-		Root:       common.Hash{},
-		ParentHash: parent.Hash(),
-		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(chain, time,
-			time-10,
-			parent.Difficulty(),
-			parent.NumberU64(),
-			parent.Hash(),
-			parent.UncleHash(),
-			parent.Seal(),
-		),
-		GasLimit: CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
-		Number:   new(big.Int).Add(parent.Number(), common.Big1),
-		Time:     time,
-	}
-	header.Seal = engine.GenerateSeal(chain, header, parent.Header(), nil)
-
-	if chain.Config().IsLondon(header.Number.Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
-		header.Eip1559 = true
-	}
-	header.WithSeal = chain.Config().IsHeaderWithSeal()
+	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	header.Coinbase = parent.Coinbase()
+	header.Difficulty = engine.CalcDifficulty(chain, time,
+		time-10,
+		parent.Difficulty(),
+		parent.NumberU64(),
+		parent.Hash(),
+		parent.UncleHash(),
+		parent.Header().AuRaStep,
+	)
+	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }

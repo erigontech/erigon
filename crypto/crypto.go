@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"os"
 
@@ -40,7 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-//SignatureLength indicates the byte length required to carry a signature with recovery id.
+// SignatureLength indicates the byte length required to carry a signature with recovery id.
 const SignatureLength = 64 + 1 // 64 bytes ECDSA signature + 1 byte recovery id
 
 // RecoveryIDOffset points to the byte offset within the signature that contains the recovery id.
@@ -173,8 +172,10 @@ func FromECDSA(priv *ecdsa.PrivateKey) []byte {
 	return math.PaddedBigBytes(priv.D, priv.Params().BitSize/8)
 }
 
-// UnmarshalPubkey converts bytes to a secp256k1 public key.
-func UnmarshalPubkey(pub []byte) (*ecdsa.PublicKey, error) {
+// UnmarshalPubkeyStd parses a public key from the given bytes in the standard "uncompressed" format.
+// The input slice must be 65 bytes long and have this format: [4, X..., Y...]
+// See MarshalPubkeyStd.
+func UnmarshalPubkeyStd(pub []byte) (*ecdsa.PublicKey, error) {
 	x, y := elliptic.Unmarshal(S256(), pub)
 	if x == nil {
 		return nil, errInvalidPubkey
@@ -182,11 +183,37 @@ func UnmarshalPubkey(pub []byte) (*ecdsa.PublicKey, error) {
 	return &ecdsa.PublicKey{Curve: S256(), X: x, Y: y}, nil
 }
 
-func FromECDSAPub(pub *ecdsa.PublicKey) []byte {
+// MarshalPubkeyStd converts a public key into the standard "uncompressed" format.
+// It returns a 65 bytes long slice that contains: [4, X..., Y...]
+// Returns nil if the given public key is not initialized.
+// See UnmarshalPubkeyStd.
+func MarshalPubkeyStd(pub *ecdsa.PublicKey) []byte {
 	if pub == nil || pub.X == nil || pub.Y == nil {
 		return nil
 	}
 	return elliptic.Marshal(S256(), pub.X, pub.Y)
+}
+
+// UnmarshalPubkey parses a public key from the given bytes in the 64 bytes "uncompressed" format.
+// The input slice must be 64 bytes long and have this format: [X..., Y...]
+// See MarshalPubkey.
+func UnmarshalPubkey(keyBytes []byte) (*ecdsa.PublicKey, error) {
+	keyBytes = append([]byte{0x4}, keyBytes...)
+	return UnmarshalPubkeyStd(keyBytes)
+}
+
+// MarshalPubkey converts a public key into a 64 bytes "uncompressed" format.
+// It returns a 64 bytes long slice that contains: [X..., Y...]
+// In the standard 65 bytes format the first byte is always constant (equal to 4),
+// so it can be cut off and trivially recovered later.
+// Returns nil if the given public key is not initialized.
+// See UnmarshalPubkey.
+func MarshalPubkey(pubkey *ecdsa.PublicKey) []byte {
+	keyBytes := MarshalPubkeyStd(pubkey)
+	if keyBytes == nil {
+		return nil
+	}
+	return keyBytes[1:]
 }
 
 // HexToECDSA parses a secp256k1 private key.
@@ -229,7 +256,7 @@ func readASCII(buf []byte, r *bufio.Reader) (n int, err error) {
 	for ; n < len(buf); n++ {
 		buf[n], err = r.ReadByte()
 		switch {
-		case err == io.EOF || buf[n] < '!':
+		case errors.Is(err, io.EOF) || buf[n] < '!':
 			return n, nil
 		case err != nil:
 			return n, err
@@ -243,7 +270,7 @@ func checkKeyFileEnd(r *bufio.Reader) error {
 	for i := 0; ; i++ {
 		b, err := r.ReadByte()
 		switch {
-		case err == io.EOF:
+		case errors.Is(err, io.EOF):
 			return nil
 		case err != nil:
 			return err
@@ -259,7 +286,7 @@ func checkKeyFileEnd(r *bufio.Reader) error {
 // restrictive permissions. The key data is saved hex-encoded.
 func SaveECDSA(file string, key *ecdsa.PrivateKey) error {
 	k := hex.EncodeToString(FromECDSA(key))
-	return ioutil.WriteFile(file, []byte(k), 0600)
+	return os.WriteFile(file, []byte(k), 0600)
 }
 
 // GenerateKey generates a new private key.
@@ -284,8 +311,8 @@ func ValidateSignatureValues(v byte, r, s *uint256.Int, homestead bool) bool {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
-	pubBytes := FromECDSAPub(&p)
-	return common.BytesToAddress(Keccak256(pubBytes[1:])[12:])
+	pubBytes := MarshalPubkey(&p)
+	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
 func zeroBytes(bytes []byte) {

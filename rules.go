@@ -1,8 +1,9 @@
-// +build gorules
+//go:build gorules
 
 package gorules
 
 // https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
+// to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
 	//quasilyterules "github.com/quasilyte/ruleguard-rules-test"
@@ -46,6 +47,12 @@ func closeCollector(m dsl.Matcher) {
 	m.Match(`$c := etl.NewCollector($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
+}
+
+func closeLockedDir(m dsl.Matcher) {
+	m.Match(`$c := dir.OpenRw($*_); $close`).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		Report(`Add "defer $c.Close()" after locked.OpenDir`)
 }
 
 func passValuesByContext(m dsl.Matcher) {

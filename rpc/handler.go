@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -36,21 +37,20 @@ import (
 //
 // The entry points for incoming messages are:
 //
-//    h.handleMsg(message)
-//    h.handleBatch(message)
+//	h.handleMsg(message)
+//	h.handleBatch(message)
 //
 // Outgoing calls use the requestOp struct. Register the request before sending it
 // on the connection:
 //
-//    op := &requestOp{ids: ...}
-//    h.addRequestOp(op)
+//	op := &requestOp{ids: ...}
+//	h.addRequestOp(op)
 //
 // Now send the request, then wait for the reply to be delivered through handleMsg:
 //
-//    if err := op.wait(...); err != nil {
-//        h.removeRequestOp(op) // timeout, etc.
-//    }
-//
+//	if err := op.wait(...); err != nil {
+//	    h.removeRequestOp(op) // timeout, etc.
+//	}
 type handler struct {
 	reg            *serviceRegistry
 	unsubscribeCb  *callback
@@ -64,11 +64,13 @@ type handler struct {
 	log            log.Logger
 	allowSubscribe bool
 
-	allowList AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
+	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
+	forbiddenList ForbiddenList
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
 	maxBatchConcurrency uint
+	traceRequests       bool
 }
 
 type callProc struct {
@@ -76,8 +78,41 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint) *handler {
+func HandleError(err error, stream *jsoniter.Stream) error {
+	if err != nil {
+		//return msg.errorResponse(err)
+		stream.WriteObjectField("error")
+		stream.WriteObjectStart()
+		stream.WriteObjectField("code")
+		ec, ok := err.(Error)
+		if ok {
+			stream.WriteInt(ec.ErrorCode())
+		} else {
+			stream.WriteInt(defaultErrorCode)
+		}
+		stream.WriteMore()
+		stream.WriteObjectField("message")
+		stream.WriteString(fmt.Sprintf("%v", err))
+		de, ok := err.(DataError)
+		if ok {
+			stream.WriteMore()
+			stream.WriteObjectField("data")
+			data, derr := json.Marshal(de.ErrorData())
+			if derr == nil {
+				stream.Write(data)
+			} else {
+				stream.WriteString(fmt.Sprintf("%v", derr))
+			}
+		}
+		stream.WriteObjectEnd()
+	}
+
+	return nil
+}
+
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
+	forbiddenList := newForbiddenList()
 	h := &handler{
 		reg:            reg,
 		idgen:          idgen,
@@ -90,9 +125,12 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
 		allowList:      allowList,
+		forbiddenList:  forbiddenList,
 
 		maxBatchConcurrency: maxBatchConcurrency,
+		traceRequests:       traceRequests,
 	}
+
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
 	}
@@ -172,19 +210,26 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+		needWriteStream := false
+		if stream == nil {
+			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+			needWriteStream = true
+		}
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			h.conn.writeJSON(cp.ctx, answer)
-		} else {
-			_ = stream.Flush()
+			buffer, _ := json.Marshal(answer)
+			stream.Write(buffer)
+		}
+		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+		} else {
+			stream.Write([]byte("\n"))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -337,7 +382,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 	switch {
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
-		h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		if h.traceRequests {
+			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		} else {
+			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+		}
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg, stream)
@@ -350,7 +399,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 					"err", resp.Error.Message)
 			}
 		}
-		h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		if h.traceRequests {
+			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		} else {
+			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+		}
 		return resp
 	case msg.hasValidID():
 		return msg.errorResponse(&invalidRequestError{"invalid request"})
@@ -360,9 +413,11 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 }
 
 func (h *handler) isMethodAllowedByGranularControl(method string) bool {
+	_, isForbidden := h.forbiddenList[method]
 	if len(h.allowList) == 0 {
-		return true
+		return !isForbidden
 	}
+
 	_, ok := h.allowList[method]
 	return ok
 }
@@ -435,58 +490,33 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsoniter.Stream) *jsonrpcMessage {
-	if callb.streamable {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("jsonrpc")
-		stream.WriteString("2.0")
-		stream.WriteMore()
-		if msg.ID != nil {
-			stream.WriteObjectField("id")
-			stream.Write(msg.ID)
-			stream.WriteMore()
-		}
-		stream.WriteObjectField("result")
-		_, err := callb.call(ctx, msg.Method, args, stream)
-		if err != nil {
-			return msg.errorResponse(err)
-			/*
-				stream.WriteMore()
-				stream.WriteObjectField("error")
-				stream.WriteObjectStart()
-				stream.WriteObjectField("code")
-				ec, ok := err.(Error)
-				if ok {
-					stream.WriteInt(ec.ErrorCode())
-				} else {
-					stream.WriteInt(defaultErrorCode)
-				}
-				stream.WriteMore()
-				stream.WriteObjectField("message")
-				stream.WriteString(fmt.Sprintf("%v", err))
-				de, ok := err.(DataError)
-				if ok {
-					stream.WriteMore()
-					stream.WriteObjectField("data")
-					data, derr := json.Marshal(de.ErrorData())
-					if derr == nil {
-						stream.Write(data)
-					} else {
-						stream.WriteString(fmt.Sprintf("%v", derr))
-					}
-				}
-				stream.WriteObjectEnd()
-			*/
-		}
-		stream.WriteObjectEnd()
-		stream.Flush()
-		return nil
-	} else {
+	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
 			return msg.errorResponse(err)
 		}
 		return msg.response(result)
 	}
+
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	if msg.ID != nil {
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+	}
+	stream.WriteObjectField("result")
+	_, err := callb.call(ctx, msg.Method, args, stream)
+	if err != nil {
+		stream.WriteNil()
+		stream.WriteMore()
+		HandleError(err, stream)
+	}
+	stream.WriteObjectEnd()
+	stream.Flush()
+	return nil
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

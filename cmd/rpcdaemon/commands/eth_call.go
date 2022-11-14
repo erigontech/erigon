@@ -10,27 +10,31 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
+)
+
+var (
+	latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -46,12 +50,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-
-	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -63,60 +62,52 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, nil
 	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.stateCache, contractHasTEVM)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	if err != nil {
+		return nil, err
+	}
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
 	}
 
 	// If the result contains a revert reason, try to unpack and return it.
 	if len(result.Revert()) > 0 {
-		return nil, ethapi.NewRevertError(result)
+		return nil, ethapi2.NewRevertError(result)
 	}
 
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
-	if blockLabel, ok := blockNrOrHash.Number(); ok {
-		blockNum, err := getBlockNumber(blockLabel, tx)
-		if err != nil {
-			return nil, err
-		}
-		return rawdb.ReadHeaderByNumber(tx, blockNum), nil
+// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
+	_, bNrOrHashHash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
 	}
-	if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err := rawdb.ReadHeaderByHash(tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			return nil, errors.New("header for hash not found")
-		}
-
-		if blockNrOrHash.RequireCanonical {
-			can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-			if err != nil {
-				return nil, err
-			}
-			if can != hash {
-				return nil, errors.New("hash is not currently canonical")
-			}
-		}
-
-		h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
-		if h == nil {
-			return nil, errors.New("header found, but block body is missing")
-		}
-		return h, nil
+	block := api.tryBlockFromLru(bNrOrHashHash)
+	if block != nil {
+		return block.Header(), nil
 	}
-	return nil, errors.New("invalid arguments; neither block nor hash specified")
+
+	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	// header can be nil
+	return header, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
-	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	if blockNrOrHash != nil {
-		bNrOrHash = *blockNrOrHash
+func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	var args ethapi2.CallArgs
+	// if we actually get CallArgs here, we use them
+	if argsOrNil != nil {
+		args = *argsOrNil
 	}
 
 	dbtx, err := api.db.BeginRo(ctx)
@@ -136,14 +127,34 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		args.From = new(common.Address)
 	}
 
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		h, err := HeaderByNumberOrHash(ctx, dbtx, bNrOrHash)
+		h, err := headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
 		if err != nil {
 			return 0, err
+		}
+		if h == nil {
+			// if a block number was supplied and there is no header return 0
+			if blockNrOrHash != nil {
+				return 0, nil
+			}
+
+			// block number not supplied, so we haven't found a pending block, read the latest block instead
+			h, err = headerByNumberOrHash(ctx, dbtx, latestNumOrHash, api)
+			if err != nil {
+				return 0, err
+			}
+			if h == nil {
+				return 0, nil
+			}
 		}
 		hi = h.GasLimit
 	}
@@ -198,37 +209,39 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		hi = api.GasCap
 	}
 	cap = hi
-	var lastBlockNum = rpc.LatestBlockNumber
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return 0, err
 	}
 
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(dbtx)
+	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(latestNumOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return 0, err
+	}
+
+	// try and get the block from the lru cache first then try DB before failing
+	block := api.tryBlockFromLru(latestCanHash)
+	if block == nil {
+		block, err = api.BaseAPI.blockWithSenders(dbtx, latestCanHash, latestCanBlockNumber)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if block == nil {
+		return 0, fmt.Errorf("could not find latest block in cache or db")
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, api.historyV3(dbtx), api._agg)
+	if err != nil {
+		return 0, err
 	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		numOrHash := rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}
-		blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(numOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
-		if err != nil {
-			return false, nil, err
-		}
-		block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
-		if err != nil {
-			return false, nil, err
-		}
-		if block == nil {
-			return false, nil, nil
-		}
-
-		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
-			api.GasCap, chainConfig, api.stateCache, contractHasTEVM)
+		result, err := transactions.DoCall(ctx, args, dbtx, latestNumOrHash, block, nil, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
@@ -240,6 +253,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		}
 		return result.Failed(), result, nil
 	}
+
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
@@ -257,6 +271,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 			hi = mid
 		}
 	}
+
 	// Reject the transaction as invalid if it still fails at the highest allowance
 	if hi == cap {
 		failed, result, err := executable(hi)
@@ -266,7 +281,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		if failed {
 			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 				if len(result.Revert()) > 0 {
-					return 0, ethapi.NewRevertError(result)
+					return 0, ethapi2.NewRevertError(result)
 				}
 				return 0, result.Err
 			}
@@ -283,8 +298,18 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
 }
 
+func (api *APIImpl) tryBlockFromLru(hash common.Hash) *types.Block {
+	var block *types.Block
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			block = it.(*types.Block)
+		}
+	}
+	return block
+}
+
 // accessListResult returns an optional accesslist
-// Its the result of the `debug_createAccessList` RPC call.
+// Its the result of the `eth_createAccessList` RPC call.
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
 	Accesslist *types.AccessList `json:"accessList"`
@@ -295,7 +320,12 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -306,11 +336,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 	if err != nil {
 		return nil, err
 	}
-	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
-	if api.TevmEnabled {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -322,16 +348,18 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		return nil, nil
 	}
 	var stateReader state.StateReader
-	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._agg, api.historyV3(tx))
+		if err != nil {
+			return nil, err
+		}
 	}
-	state := state.New(stateReader)
 
 	header := block.Header()
 	// If the gas amount is not set, extract this as it will depend on access
@@ -358,6 +386,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
 
@@ -367,6 +396,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, *args.From, to, precompiles)
 	}
 	for {
+		state := state.New(stateReader)
 		// Retrieve the current access list to expand
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
@@ -379,8 +409,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		baseFee, _ := uint256.FromBig(header.BaseFee)
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+
+		var msg types.Message
+
+		var baseFee *uint256.Int = nil
+		// check if EIP-1559
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+
+		msg, err = args.ToMessage(api.GasCap, baseFee)
 		if err != nil {
 			return nil, err
 		}
@@ -388,7 +426,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas())
@@ -401,8 +439,41 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: (hexutil.Uint64)(res.UsedGas)}, nil
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			if optimizeGas != nil && *optimizeGas {
+				optimizeToInAccessList(accessList, to)
+			}
+			return accessList, nil
 		}
 		prevTracer = tracer
 	}
+}
+
+// to address is warm already, so we can save by adding it to the access list
+// only if we are adding a lot of its storage slots as well
+func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
+	indexToRemove := -1
+
+	for i := 0; i < len(*accessList.Accesslist); i++ {
+		entry := (*accessList.Accesslist)[i]
+		if entry.Address != to {
+			continue
+		}
+
+		// https://eips.ethereum.org/EIPS/eip-2930#charging-less-for-accesses-in-the-access-list
+		accessListSavingPerSlot := params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929 - params.TxAccessListStorageKeyGas
+
+		numSlots := uint64(len(entry.StorageKeys))
+		if numSlots*accessListSavingPerSlot <= params.TxAccessListAddressGas {
+			indexToRemove = i
+		}
+	}
+
+	if indexToRemove >= 0 {
+		*accessList.Accesslist = removeIndex(*accessList.Accesslist, indexToRemove)
+	}
+}
+
+func removeIndex(s types.AccessList, index int) types.AccessList {
+	return append(s[:index], s[index+1:]...)
 }

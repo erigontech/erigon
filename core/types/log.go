@@ -41,6 +41,7 @@ type Log struct {
 	// but not secured by consensus.
 	// block in which the transaction was included
 	BlockNumber uint64 `json:"blockNumber" codec:"-"`
+
 	// hash of the transaction
 	TxHash common.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
 	// index of the transaction in the block
@@ -55,7 +56,105 @@ type Log struct {
 	Removed bool `json:"removed" codec:"-"`
 }
 
+type ErigonLog struct {
+	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
+	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
+	Data        []byte         `json:"data" gencodec:"required" codec:"3"`
+	BlockNumber uint64         `json:"blockNumber" codec:"-"`
+	TxHash      common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxIndex     uint           `json:"transactionIndex" codec:"-"`
+	BlockHash   common.Hash    `json:"blockHash" codec:"-"`
+	Index       uint           `json:"logIndex" codec:"-"`
+	Removed     bool           `json:"removed" codec:"-"`
+	Timestamp   uint64         `json:"timestamp" codec:"-"`
+}
+
+type ErigonLogs []*ErigonLog
+
 type Logs []*Log
+
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash) Logs {
+	topicMap := make(map[int]map[common.Hash]struct{}, 7)
+
+	//populate topic map
+	for idx, v := range topics {
+		for _, vv := range v {
+			if _, ok := topicMap[idx]; !ok {
+				topicMap[idx] = map[common.Hash]struct{}{}
+			}
+			topicMap[idx][vv] = struct{}{}
+		}
+	}
+
+	o := make(Logs, 0, len(logs))
+	for _, v := range logs {
+		// check address if addrMap is not empty
+		if len(addrMap) != 0 {
+			if _, ok := addrMap[v.Address]; !ok {
+				// not there? skip this log
+				continue
+			}
+		}
+
+		// If the to filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(v.Topics) {
+			continue
+		}
+		// the default state is to include the log
+		found := true
+		// if there are no topics provided, then match all
+		for idx, topicSet := range topicMap {
+			// if the topicSet is empty, match all as wildcard
+			if len(topicSet) == 0 {
+				continue
+			}
+			// the topicSet isnt empty, so the topic must be included.
+			if _, ok := topicSet[v.Topics[idx]]; !ok {
+				// the topic wasn't found, so we should skip this log
+				found = false
+				break
+			}
+		}
+		if found {
+			o = append(o, v)
+		}
+	}
+	return o
+}
+func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
+	result := make(Logs, 0, len(logs))
+	// populate a set of addresses
+Logs:
+	for _, log := range logs {
+		// empty address list means no filter
+		if len(addresses) > 0 {
+			// this is basically the includes function but done with a map
+			if _, ok := addresses[log.Address]; !ok {
+				continue
+			}
+		}
+		// If the to filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(log.Topics) {
+			continue
+		}
+		for i, sub := range topics {
+			match := len(sub) == 0 // empty rule set == wildcard
+			// iterate over the subtopics and look for any match.
+			for _, topic := range sub {
+				if log.Topics[i] == topic {
+					match = true
+					break
+				}
+			}
+			// there was no match, so this log is invalid.
+			if !match {
+				continue Logs
+			}
+		}
+		result = append(result, log)
+	}
+	return result
+}
 
 type logMarshaling struct {
 	Data        hexutil.Bytes
@@ -98,6 +197,30 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 		l.Address, l.Topics, l.Data = dec.Address, dec.Topics, dec.Data
 	}
 	return err
+}
+
+// Copy creates a deep copy of the Log.
+func (l *Log) Copy() *Log {
+	topics := make([]common.Hash, 0, len(l.Topics))
+	for _, topic := range l.Topics {
+		topicCopy := common.BytesToHash(topic.Bytes())
+		topics = append(topics, topicCopy)
+	}
+
+	data := make([]byte, len(l.Data))
+	copy(data, l.Data)
+
+	return &Log{
+		Address:     common.BytesToAddress(l.Address.Bytes()),
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: l.BlockNumber,
+		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
+		TxIndex:     l.TxIndex,
+		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
+		Index:       l.Index,
+		Removed:     l.Removed,
+	}
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of

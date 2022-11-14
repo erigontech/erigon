@@ -18,10 +18,12 @@ package vm
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 
@@ -128,6 +130,27 @@ type Tracer interface {
 	CaptureAccountWrite(account common.Address) error
 }
 
+// FlushableTracer is a Tracer extension whose accumulated traces has to be
+// flushed once the tracing is completed.
+type FlushableTracer interface {
+	Tracer
+	Flush(tx types.Transaction)
+}
+
+// StructLogRes stores a structured log emitted by the EVM while replaying a
+// transaction in debug mode
+type StructLogRes struct {
+	Pc      uint64             `json:"pc"`
+	Op      string             `json:"op"`
+	Gas     uint64             `json:"gas"`
+	GasCost uint64             `json:"gasCost"`
+	Depth   int                `json:"depth"`
+	Error   error              `json:"error,omitempty"`
+	Stack   *[]string          `json:"stack,omitempty"`
+	Memory  *[]string          `json:"memory,omitempty"`
+	Storage *map[string]string `json:"storage,omitempty"`
+}
+
 // StructLogger is an EVM state logger and implements Tracer.
 //
 // StructLogger can capture state based on the given Log configuration and also keeps
@@ -199,7 +222,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 				value   uint256.Int
 			)
 			env.IntraBlockState().GetState(contract.Address(), &address, &value)
-			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+			l.storage[contract.Address()][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == SSTORE && stack.Len() >= 2 {
@@ -260,6 +283,58 @@ func (l *StructLogger) Error() error { return l.err }
 
 // Output returns the VM return value captured by the trace.
 func (l *StructLogger) Output() []byte { return l.output }
+
+func (l *StructLogger) Flush(tx types.Transaction) {
+	w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
+	if err1 != nil {
+		panic(err1)
+	}
+	encoder := json.NewEncoder(w)
+	logs := FormatLogs(l.StructLogs())
+	if err2 := encoder.Encode(logs); err2 != nil {
+		panic(err2)
+	}
+	if err2 := w.Close(); err2 != nil {
+		panic(err2)
+	}
+}
+
+// FormatLogs formats EVM returned structured logs for json output
+func FormatLogs(logs []StructLog) []StructLogRes {
+	formatted := make([]StructLogRes, len(logs))
+	for index, trace := range logs {
+		formatted[index] = StructLogRes{
+			Pc:      trace.Pc,
+			Op:      trace.Op.String(),
+			Gas:     trace.Gas,
+			GasCost: trace.GasCost,
+			Depth:   trace.Depth,
+			Error:   trace.Err,
+		}
+		if trace.Stack != nil {
+			stack := make([]string, len(trace.Stack))
+			for i, stackValue := range trace.Stack {
+				stack[i] = fmt.Sprintf("%x", math.PaddedBigBytes(stackValue, 32))
+			}
+			formatted[index].Stack = &stack
+		}
+		if trace.Memory != nil {
+			memory := make([]string, 0, (len(trace.Memory)+31)/32)
+			for i := 0; i+32 <= len(trace.Memory); i += 32 {
+				memory = append(memory, fmt.Sprintf("%x", trace.Memory[i:i+32]))
+			}
+			formatted[index].Memory = &memory
+		}
+		if trace.Storage != nil {
+			storage := make(map[string]string)
+			for i, storageValue := range trace.Storage {
+				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
+			}
+			formatted[index].Storage = &storage
+		}
+	}
+	return formatted
+}
 
 // WriteTrace writes a formatted trace to the given writer
 func WriteTrace(writer io.Writer, logs []StructLog) {

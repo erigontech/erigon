@@ -3,157 +3,294 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/dustin/go-humanize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
+	"go.uber.org/atomic"
+	"golang.org/x/sync/semaphore"
 )
 
-type Client struct {
-	Cli                  *torrent.Client
-	pieceCompletionStore storage.PieceCompletion
+// Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
+type Downloader struct {
+	db                kv.RwDB
+	pieceCompletionDB storage.PieceCompletion
+	torrentClient     *torrent.Client
+	clientLock        *sync.RWMutex
+
+	cfg *downloadercfg.Cfg
+
+	statsLock *sync.RWMutex
+	stats     AggStats
+
+	folder storage.ClientImplCloser
 }
 
-func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
-	torrentConfig := DefaultTorrentConfig()
-	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-	torrentConfig.PeerID = peerID
+type AggStats struct {
+	MetadataReady, FilesTotal int32
+	PeersUnique               int32
+	ConnectionsTotal          uint64
 
-	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
+	Completed bool
+	Progress  float32
+
+	BytesCompleted, BytesTotal uint64
+
+	BytesDownload, BytesUpload uint64
+	UploadRate, DownloadRate   uint64
+}
+
+func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
+	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
+		return nil, err
+	}
+
+	// Application must never see partially-downloaded files
+	// To provide such consistent view - downloader does:
+	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
+	// and App only work with <datadir>/snapshot s folder
+	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
+		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
+	}
+	if err := moveFromTmp(cfg.DataDir); err != nil {
+		return nil, err
+	}
+
+	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("openClient: %w", err)
 	}
-	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
 
-	torrentClient, err := torrent.NewClient(torrentConfig)
+	peerID, err := readPeerID(db)
 	if err != nil {
-		log.Error("Fail to start torrnet client", "err", err)
-		return nil, fmt.Errorf("fail to start: %w", err)
+		return nil, fmt.Errorf("get peer id: %w", err)
+	}
+	cfg.PeerID = string(peerID)
+	if len(peerID) == 0 {
+		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
+			return nil, fmt.Errorf("save peer id: %w", err)
+		}
 	}
 
-	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", seeding, torrentClient.PeerID()))
+	d := &Downloader{
+		cfg:               cfg,
+		db:                db,
+		pieceCompletionDB: c,
+		folder:            m,
+		torrentClient:     torrentClient,
+		clientLock:        &sync.RWMutex{},
 
-	return &Client{
-		Cli:                  torrentClient,
-		pieceCompletionStore: progressStore,
-	}, nil
-}
-
-func DefaultTorrentConfig() *torrent.ClientConfig {
-	torrentConfig := torrent.NewDefaultClientConfig()
-	torrentConfig.ListenPort = 0
-
-	// debug
-	torrentConfig.Debug = false
-	torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
-
-	// enable dht
-	torrentConfig.NoDHT = true
-	torrentConfig.DisableTrackers = false
-	//torrentConfig.DisableWebtorrent = true
-	//torrentConfig.DisableWebseeds = true
-
-	// Increase default timeouts, because we often run on commodity networks
-	torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
-
-	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
-
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 100     // default: 500
-	torrentConfig.TorrentPeersLowWater = 50       // default: 50
-
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(32*1024*1024, 2*DefaultPieceSize)   // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(64*1024*1024, 2*DefaultPieceSize) // default: unlimited
-
-	return torrentConfig
-}
-
-func (cli *Client) SavePeerID(db kv.Putter) error {
-	return db.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), cli.PeerID())
-}
-
-func (cli *Client) Close() {
-	for _, tr := range cli.Cli.Torrents() {
-		tr.Drop()
+		statsLock: &sync.RWMutex{},
 	}
-	cli.pieceCompletionStore.Close()
-	cli.Cli.Close()
+	if err := d.addSegments(); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
-func (cli *Client) PeerID() []byte {
-	peerID := cli.Cli.PeerID()
+func (d *Downloader) SnapDir() string {
+	d.clientLock.RLock()
+	defer d.clientLock.RUnlock()
+	return d.cfg.DataDir
+}
+
+func (d *Downloader) ReCalcStats(interval time.Duration) {
+	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
+	torrents := d.torrentClient.Torrents()
+	connStats := d.torrentClient.ConnStats()
+	peers := make(map[torrent.PeerID]struct{}, 16)
+
+	d.statsLock.Lock()
+	defer d.statsLock.Unlock()
+	prevStats, stats := d.stats, d.stats
+
+	stats.Completed = true
+	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
+	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
+
+	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0, 0
+	for _, t := range torrents {
+		select {
+		case <-t.GotInfo():
+			stats.MetadataReady++
+			for _, peer := range t.PeerConns() {
+				stats.ConnectionsTotal++
+				peers[peer.PeerID] = struct{}{}
+			}
+			stats.BytesCompleted += uint64(t.BytesCompleted())
+			stats.BytesTotal += uint64(t.Length())
+			if !t.Complete.Bool() {
+				progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
+				log.Debug("[downloader] file not downloaded yet", "name", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress))
+			}
+		default:
+			log.Debug("[downloader] file has no metadata yet", "name", t.Name())
+		}
+
+		stats.Completed = stats.Completed && t.Complete.Bool()
+	}
+
+	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
+	stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
+
+	if stats.BytesTotal == 0 {
+		stats.Progress = 0
+	} else {
+		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
+		if stats.Progress == 100 && !stats.Completed {
+			stats.Progress = 99.99
+		}
+	}
+	stats.PeersUnique = int32(len(peers))
+	stats.FilesTotal = int32(len(torrents))
+
+	d.stats = stats
+}
+
+func moveFromTmp(snapDir string) error {
+	tmpDir := filepath.Join(snapDir, "tmp")
+	if !common.FileExist(tmpDir) {
+		return nil
+	}
+
+	snFs := os.DirFS(tmpDir)
+	paths, err := fs.ReadDir(snFs, ".")
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		if p.Name() == "." || p.Name() == ".." || p.Name() == "tmp" {
+			continue
+		}
+		src := filepath.Join(tmpDir, p.Name())
+		if err := os.Rename(src, filepath.Join(snapDir, p.Name())); err != nil {
+			if os.IsExist(err) {
+				_ = os.Remove(src)
+				continue
+			}
+			return err
+		}
+	}
+	_ = os.Remove(tmpDir)
+	return nil
+}
+
+func (d *Downloader) verify() error {
+	total := 0
+	for _, t := range d.torrentClient.Torrents() {
+		select {
+		case <-t.GotInfo():
+			total += t.NumPieces()
+		default:
+			continue
+		}
+	}
+	logInterval := 20 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	wg := &sync.WaitGroup{}
+	j := atomic.NewInt64(0)
+
+	for _, t := range d.torrentClient.Torrents() {
+		wg.Add(1)
+		go func(t *torrent.Torrent) {
+			defer wg.Done()
+			<-t.GotInfo()
+			for i := 0; i < t.NumPieces(); i++ {
+				j.Inc()
+				t.Piece(i).VerifyData()
+
+				select {
+				case <-logEvery.C:
+					log.Info("[snapshots] Verifying", "progress", fmt.Sprintf("%.2f%%", 100*float64(j.Load())/float64(total)))
+				default:
+				}
+				//<-t.Complete.On()
+			}
+		}(t)
+	}
+	wg.Wait()
+
+	return nil
+}
+
+func (d *Downloader) addSegments() error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	_, err := BuildTorrentFilesIfNeed(context.Background(), d.SnapDir())
+	if err != nil {
+		return err
+	}
+	files, err := seedableSegmentFiles(d.SnapDir())
+	if err != nil {
+		return fmt.Errorf("seedableSegmentFiles: %w", err)
+	}
+	files2, err := seedableHistorySnapshots(d.SnapDir())
+	if err != nil {
+		return fmt.Errorf("seedableHistorySnapshots: %w", err)
+	}
+	files = append(files, files2...)
+	wg := &sync.WaitGroup{}
+	i := atomic.NewInt64(0)
+	for _, f := range files {
+		wg.Add(1)
+		go func(f string) {
+			defer wg.Done()
+			_, err := AddSegment(f, d.cfg.DataDir, d.torrentClient)
+			if err != nil {
+				log.Warn("[snapshots] AddSegment", "err", err)
+				return
+			}
+
+			i.Inc()
+			select {
+			case <-logEvery.C:
+				log.Info("[snpshots] initializing", "files", fmt.Sprintf("%s/%d", i.String(), len(files)))
+			default:
+			}
+		}(f)
+	}
+	wg.Wait()
+	return nil
+}
+
+func (d *Downloader) Stats() AggStats {
+	d.statsLock.RLock()
+	defer d.statsLock.RUnlock()
+	return d.stats
+}
+
+func (d *Downloader) Close() {
+	d.torrentClient.Close()
+	if err := d.folder.Close(); err != nil {
+		log.Warn("[Snapshots] folder.close", "err", err)
+	}
+	if err := d.pieceCompletionDB.Close(); err != nil {
+		log.Warn("[Snapshots] pieceCompletionDB.close", "err", err)
+	}
+	d.db.Close()
+}
+
+func (d *Downloader) PeerID() []byte {
+	peerID := d.torrentClient.PeerID()
 	return peerID[:]
 }
 
-func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
-	interval := time.Second * 5
-	logEvery := time.NewTicker(interval)
-	defer logEvery.Stop()
-	var stats aggStats
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-logEvery.C:
-			torrents := torrentClient.Torrents()
-			allComplete := true
-			gotInfo := 0
-			for _, t := range torrents {
-				select {
-				case <-t.GotInfo(): // all good
-					gotInfo++
-				default:
-					t.AllowDataUpload()
-					t.AllowDataDownload()
-				}
-				allComplete = allComplete && t.Complete.Bool()
-			}
-			if gotInfo < len(torrents) {
-				log.Info(fmt.Sprintf("[torrent] Waiting for torrents metadata: %d/%d", gotInfo, len(torrents)))
-				continue
-			}
-
-			stats = calcStats(stats, interval, torrentClient)
-			if allComplete {
-				log.Info(fmt.Sprintf(
-					"[torrent] Seeding: ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-					humanize.Bytes(uint64(stats.readBytesPerSec)),
-					humanize.Bytes(uint64(stats.writeBytesPerSec)),
-					stats.peersCount,
-					stats.torrentsCount,
-				))
-				continue
-			}
-
-			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %.2f%%, ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-				stats.progress,
-				humanize.Bytes(uint64(stats.readBytesPerSec)),
-				humanize.Bytes(uint64(stats.writeBytesPerSec)),
-				stats.peersCount,
-				stats.torrentsCount,
-			))
-		}
-	}
-}
-
-func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t, ok := cli.Cli.Torrent(hash)
+func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
+	t, ok := d.torrentClient.Torrent(hash)
 	if !ok {
 		return nil
 	}
@@ -163,168 +300,121 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 	return nil
 }
 
-type aggStats struct {
-	readBytesPerSec  int64
-	writeBytesPerSec int64
-	peersCount       int64
-
-	progress      float32
-	torrentsCount int
-
-	bytesRead    int64
-	bytesWritten int64
+func (d *Downloader) Torrent() *torrent.Client {
+	d.clientLock.RLock()
+	defer d.clientLock.RUnlock()
+	return d.torrentClient
 }
 
-func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Client) (result aggStats) {
-	var aggBytesCompleted, aggLen int64
-	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
-	peers := map[torrent.PeerID]*torrent.PeerConn{}
-	torrents := client.Torrents()
-	for _, t := range torrents {
-		stats := t.Stats()
+func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+	snapDir := cfg.DataDir
+	db, err = mdbx.NewMDBX(log.New()).
+		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
+		Label(kv.DownloaderDB).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
+		SyncPeriod(15 * time.Second).
+		Path(filepath.Join(snapDir, "db")).
+		Open()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	c, err = NewMdbxPieceCompletion(db)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
+	}
+	m = storage.NewMMapWithCompletion(snapDir, c)
+	cfg.DefaultStorage = m
 
-		/*
-			var completedPieces, partialPieces int
-			psrs := t.PieceStateRuns()
-			for _, r := range psrs {
-				if r.Complete {
-					completedPieces += r.Length
-				}
-				if r.Partial {
-					partialPieces += r.Length
-				}
-			}
-			aggCompletedPieces += completedPieces
-			aggPartialPieces += partialPieces
-			aggNumPieces = t.NumPieces()
-		*/
-		result.bytesRead += stats.BytesRead.Int64() + stats.BytesReadData.Int64()
-		result.bytesWritten += stats.BytesWritten.Int64() + stats.BytesWrittenData.Int64()
-		aggBytesCompleted += t.BytesCompleted()
-		aggLen += t.Length()
-		for _, peer := range t.PeerConns() {
-			peers[peer.PeerID] = peer
+	for retry := 0; retry < 5; retry++ {
+		torrentClient, err = torrent.NewClient(cfg)
+		if err == nil {
+			break
 		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
 
-	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
-	result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
-
-	result.progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
-
-	result.peersCount = int64(len(peers))
-	result.torrentsCount = len(torrents)
-	return result
+	return db, c, m, torrentClient, nil
 }
 
-// AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
-// added first time - pieces verification process will start (disk IO heavy) - progress
-// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
-// Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client, preverifiedHashes snapshothashes.Preverified) error {
+func MainLoop(ctx context.Context, d *Downloader, silent bool) {
+	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
-	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
-		mi, err := metainfo.LoadFromFile(torrentFilePath)
-		if err != nil {
-			return err
-		}
-		mi.AnnounceList = Trackers
-
-		// skip non-preverified files
-		_, torrentFileName := filepath.Split(torrentFilePath)
-		segmentFileName := segmentFileNameFromTorrentFileName(torrentFileName)
-		hashString, ok := preverifiedHashes[segmentFileName]
-		if !ok {
-			return nil
-		}
-		expect := metainfo.NewHashFromHex(hashString)
-		if mi.HashInfoBytes() != expect {
-			return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", torrentFileName, mi.HashInfoBytes(), expect)
-		}
-
-		if _, err = torrentClient.AddTorrent(mi); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	pieces := 0
-	for _, t := range torrentClient.Torrents() {
-		pieces += t.NumPieces()
-	}
-	fmt.Printf("trackers: %d, pieces %d\n", len(Trackers), pieces)
-
-	//waitForChecksumVerify(ctx, torrentClient)
-	return nil
-}
-
-// ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
-	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	wg := &sync.WaitGroup{}
-	for _, infoHash := range preverifiedHashes {
-		if _, ok := torrentClient.Torrent(infoHash); ok {
-			continue
-		}
-		magnet := mi.Magnet(&infoHash, nil)
-		t, err := torrentClient.AddMagnet(magnet.String())
-		if err != nil {
-			return err
-		}
-		t.AllowDataDownload()
-		t.AllowDataUpload()
-
-		wg.Add(1)
-		go func(t *torrent.Torrent, infoHash metainfo.Hash) {
-			defer wg.Done()
-
-			select {
-			case <-ctx.Done():
-				t.Drop()
-				return
-			case <-t.GotInfo():
-				mi := t.Metainfo()
-				_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
-			}
-		}(t, infoHash)
-	}
-
-	wg.Wait()
-
-	return nil
-}
-
-//nolint
-func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
-	//TODO: tr.VerifyData() - find when to call it
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	go func() {
-		interval := time.Second * 5
-		logEvery := time.NewTicker(interval)
-		defer logEvery.Stop()
-
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				var aggBytesCompleted, aggLen int64
-				for _, t := range torrentClient.Torrents() {
-					aggBytesCompleted += t.BytesCompleted()
-					aggLen += t.Length()
+			torrents := d.Torrent().Torrents()
+			for _, t := range torrents {
+				<-t.GotInfo()
+				if t.Complete.Bool() {
+					continue
 				}
+				if err := sem.Acquire(ctx, 1); err != nil {
+					return
+				}
+				t.AllowDataDownload()
+				t.DownloadAll()
+				go func(t *torrent.Torrent) {
+					defer sem.Release(1)
+					//r := t.NewReader()
+					//r.SetReadahead(t.Length())
+					//_, _ = io.Copy(io.Discard, r) // enable streaming - it will prioritize sequential download
 
-				line := fmt.Sprintf(
-					"[torrent] verifying snapshots: %s/%s",
-					humanize.Bytes(uint64(aggBytesCompleted)),
-					humanize.Bytes(uint64(aggLen)),
-				)
-				log.Info(line)
+					<-t.Complete.On()
+				}(t)
 			}
+			time.Sleep(30 * time.Second)
 		}
 	}()
-	torrentClient.WaitAll() // wait for checksum verify
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	statInterval := 20 * time.Second
+	statEvery := time.NewTicker(statInterval)
+	defer statEvery.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-statEvery.C:
+			d.ReCalcStats(statInterval)
+
+		case <-logEvery.C:
+			if silent {
+				continue
+			}
+
+			stats := d.Stats()
+
+			if stats.MetadataReady < stats.FilesTotal {
+				log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+				continue
+			}
+
+			if stats.Completed {
+				log.Info("[Snapshots] Seeding",
+					"up", common2.ByteCount(stats.UploadRate)+"/s",
+					"peers", stats.PeersUnique,
+					"connections", stats.ConnectionsTotal,
+					"files", stats.FilesTotal)
+				continue
+			}
+
+			log.Info("[Snapshots] Downloading",
+				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common2.ByteCount(stats.BytesCompleted), common2.ByteCount(stats.BytesTotal)),
+				"download", common2.ByteCount(stats.DownloadRate)+"/s",
+				"upload", common2.ByteCount(stats.UploadRate)+"/s",
+				"peers", stats.PeersUnique,
+				"connections", stats.ConnectionsTotal,
+				"files", stats.FilesTotal)
+			if stats.PeersUnique == 0 {
+				ips := d.Torrent().BadPeerIPs()
+				if len(ips) > 0 {
+					log.Info("[Snapshots] Stats", "banned", ips)
+				}
+			}
+		}
+	}
 }

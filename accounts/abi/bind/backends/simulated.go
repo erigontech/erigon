@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
@@ -36,17 +37,15 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/bloombits"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -66,9 +65,8 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m               *stages.MockSentry
-	getHeader       func(hash common.Hash, number uint64) *types.Header
-	contractHasTEVM func(common.Hash) (bool, error)
+	m         *stages.MockSentry
+	getHeader func(hash common.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -78,8 +76,6 @@ type SimulatedBackend struct {
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
 	pendingReader   *state.PlainStateReader
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
-
-	events *filters.EventSystem // Event system for filtering log events live
 
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
@@ -91,7 +87,7 @@ type SimulatedBackend struct {
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
-	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
+	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -105,24 +101,25 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	backend.contractHasTEVM = ethdb.GetHasTEVM(olddb.NewObjectDatabase(m.DB))
-	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(alloc, params.AllEthashProtocolChanges, gasLimit)
+	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(func() {
 		b.m.DB.Close()
 	})
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.RwDB {
-	return b.m.DB
+func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
+func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
+	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
 }
+func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
@@ -137,7 +134,6 @@ func (b *SimulatedBackend) Commit() {
 	if err := b.m.InsertChain(&core.ChainPack{
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
-		Length:   1,
 		TopBlock: b.pendingBlock,
 	}); err != nil {
 		panic(err)
@@ -173,9 +169,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()))
+		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1))
 	}
-	return state.New(state.NewPlainState(db, uint64(blockNumber.Int64())))
+	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -266,7 +262,14 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if txn != nil {
 		return txn, true, nil
 	}
-	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash)
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, false, err
+	}
+	if blockNumber == nil {
+		return nil, false, ethereum.NotFound
+	}
+	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash, *blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
@@ -636,9 +639,16 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
+	const baseFeeUpperLimit = 880000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = u256.Num1
+	}
+	if call.FeeCap == nil {
+		call.FeeCap = uint256.NewInt(baseFeeUpperLimit)
+	}
+	if call.Tip == nil {
+		call.Tip = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
@@ -653,7 +663,8 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.contractHasTEVM)
+	header := block.Header()
+	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
@@ -682,11 +693,11 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
-		b.m.ChainConfig, b.getHeader, b.m.Engine,
+		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}, b.contractHasTEVM); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -711,94 +722,18 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 //
 // TODO(karalabe): Deprecate when the subscription one can return past data too.
 func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	var filter *filters.Filter
-	if query.BlockHash != nil {
-		// Block filter requested, construct a single-shot filter
-		filter = filters.NewBlockFilter(&filterBackend{b.m.DB, b}, *query.BlockHash, query.Addresses, query.Topics)
-	} else {
-		// Initialize unset filter boundaries to run from genesis to chain head
-		from := int64(0)
-		if query.FromBlock != nil {
-			from = query.FromBlock.Int64()
-		}
-		to := int64(-1)
-		if query.ToBlock != nil {
-			to = query.ToBlock.Int64()
-		}
-		// Construct the range filter
-		filter = filters.NewRangeFilter(&filterBackend{b.m.DB, b}, from, to, query.Addresses, query.Topics)
-	}
-	// Run the filter and return all the logs
-	logs, err := filter.Logs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]types.Log, len(logs))
-	for i, nLog := range logs {
-		res[i] = *nLog
-	}
-	return res, nil
+	return nil, nil
 }
 
 // SubscribeFilterLogs creates a background log filtering operation, returning a
 // subscription immediately, which can be used to stream the found events.
 func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
-	// Subscribe to contract events
-	sink := make(chan []*types.Log)
-
-	sub, err := b.events.SubscribeLogs(query, sink)
-	if err != nil {
-		return nil, err
-	}
-	// Since we're getting logs in batches, we need to flatten them into a plain stream
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case logs := <-sink:
-				for _, nlog := range logs {
-					select {
-					case ch <- *nlog:
-					case err := <-sub.Err():
-						return err
-					case <-quit:
-						return nil
-					}
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
+	return nil, nil
 }
 
 // SubscribeNewHead returns an event subscription for a new header.
 func (b *SimulatedBackend) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
-	// subscribe to a new head
-	sink := make(chan *types.Header)
-	sub := b.events.SubscribeNewHeads(sink)
-
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		defer sub.Unsubscribe()
-		for {
-			select {
-			case head := <-sink:
-				select {
-				case ch <- head:
-				case err := <-sub.Err():
-					return err
-				case <-quit:
-					return nil
-				}
-			case err := <-sub.Err():
-				return err
-			case <-quit:
-				return nil
-			}
-		}
-	}), nil
+	return nil, nil
 }
 
 // AdjustTime adds a time shift to the simulated clock.
@@ -842,6 +777,7 @@ func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
+func (m callMsg) IsFree() bool                 { return false }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
@@ -932,10 +868,6 @@ func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event
 }
 
 func (fb *filterBackend) BloomStatus() (uint64, uint64) { return 4096, 0 }
-
-func (fb *filterBackend) ServiceFilter(ctx context.Context, ms *bloombits.MatcherSession) {
-	panic("not supported")
-}
 
 func nullSubscription() event.Subscription {
 	return event.NewSubscription(func(quit <-chan struct{}) error {

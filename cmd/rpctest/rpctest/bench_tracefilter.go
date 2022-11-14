@@ -107,38 +107,40 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 					return
 				}
 			}
-			if len(accounts) > 1 {
-				from := accounts[0]
-				to := accounts[1]
-				reqGen.reqID++
-				request := reqGen.traceFilterUnion(prevBn, bn, from, to)
-				errCtx := fmt.Sprintf("traceFilterUnion fromBlock %d, toBlock %d, fromAddress %x, toAddress %x", prevBn, bn, from, to)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
-					fmt.Println(err)
-					return
+			/*
+				if len(accounts) > 1 {
+					from := accounts[0]
+					to := accounts[1]
+					reqGen.reqID++
+					request := reqGen.traceFilterUnion(prevBn, bn, from, to)
+					errCtx := fmt.Sprintf("traceFilterUnion fromBlock %d, toBlock %d, fromAddress %x, toAddress %x", prevBn, bn, from, to)
+					if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+						fmt.Println(err)
+						return
+					}
+					reqGen.reqID++
+					request = reqGen.traceFilterAfter(prevBn, bn, 1)
+					errCtx = fmt.Sprintf("traceFilterAfter fromBlock %d, toBlock %d, after %x", prevBn, bn, 1)
+					if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+						fmt.Println(err)
+						return
+					}
+					reqGen.reqID++
+					request = reqGen.traceFilterCount(prevBn, bn, 1)
+					errCtx = fmt.Sprintf("traceFilterCount fromBlock %d, toBlock %d, count %x", prevBn, bn, 1)
+					if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+						fmt.Println(err)
+						return
+					}
+					reqGen.reqID++
+					request = reqGen.traceFilterCountAfter(prevBn, bn, 1, 1)
+					errCtx = fmt.Sprintf("traceFilterCountAfter fromBlock %d, toBlock %d, count %x, after %x", prevBn, bn, 1, 1)
+					if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
+						fmt.Println(err)
+						return
+					}
 				}
-				reqGen.reqID++
-				request = reqGen.traceFilterAfter(prevBn, bn, 1)
-				errCtx = fmt.Sprintf("traceFilterAfter fromBlock %d, toBlock %d, after %x", prevBn, bn, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
-					fmt.Println(err)
-					return
-				}
-				reqGen.reqID++
-				request = reqGen.traceFilterCount(prevBn, bn, 1)
-				errCtx = fmt.Sprintf("traceFilterCount fromBlock %d, toBlock %d, count %x", prevBn, bn, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
-					fmt.Println(err)
-					return
-				}
-				reqGen.reqID++
-				request = reqGen.traceFilterCountAfter(prevBn, bn, 1, 1)
-				errCtx = fmt.Sprintf("traceFilterCountAfter fromBlock %d, toBlock %d, count %x, after %x", prevBn, bn, 1, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
-					fmt.Println(err)
-					return
-				}
-			}
+			*/
 		}
 		fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 		prevBn = bn

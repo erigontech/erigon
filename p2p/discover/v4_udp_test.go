@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
@@ -28,15 +29,15 @@ import (
 	"net"
 	"reflect"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/internal/testlog"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // shared test variables
@@ -60,6 +61,17 @@ type udpTest struct {
 }
 
 func newUDPTest(t *testing.T) *udpTest {
+	return newUDPTestContext(context.Background(), t)
+}
+
+func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
+	ctx = disableLookupSlowdown(ctx)
+
+	replyTimeout := contextGetReplyTimeout(ctx)
+	if replyTimeout == 0 {
+		replyTimeout = 50 * time.Millisecond
+	}
+
 	test := &udpTest{
 		t:          t,
 		pipe:       newpipe(),
@@ -74,10 +86,21 @@ func newUDPTest(t *testing.T) *udpTest {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	test.udp, _ = ListenV4(test.pipe, ln, Config{
+	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
+
+		ReplyTimeout: replyTimeout,
+
+		PingBackDelay: time.Nanosecond,
+
+		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
+
+		TableRevalidateInterval: time.Hour,
 	})
+	if err != nil {
+		panic(err)
+	}
 	test.table = test.udp.tab
 	// Wait for initial refresh so the table doesn't send unexpected findnode.
 	<-test.table.initDone
@@ -102,10 +125,14 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr *
 
 	enc, _, err := v4wire.Encode(key, data)
 	if err != nil {
-		test.t.Errorf("%s encode error: %w", data.Name(), err)
+		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
-	if err = test.udp.handlePacket(addr, enc); err != wantError {
+
+	err = test.udp.handlePacket(addr, enc)
+	if (wantError == nil) && (err != nil) {
+		test.t.Errorf("handlePacket error: %q", err)
+	} else if (wantError != nil) && (err != wantError) {
 		test.t.Errorf("error mismatch: got %q, want %q", err, wantError)
 	}
 }
@@ -124,7 +151,7 @@ func (test *udpTest) waitPacketOut(validate interface{}) (closed bool) {
 	}
 	p, _, hash, err := v4wire.Decode(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %w", err)
+		test.t.Errorf("sent packet decode error: %v", err)
 		return false
 	}
 	fn := reflect.ValueOf(validate)
@@ -166,8 +193,15 @@ func (req testPacket) Kind() byte   { return byte(req) }
 func (req testPacket) Name() string { return "" }
 
 func TestUDPv4_responseTimeouts(t *testing.T) {
+	if runtime.GOOS == `darwin` {
+		t.Skip("unstable test on darwin")
+	}
 	t.Parallel()
-	test := newUDPTest(t)
+
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, respTimeout)
+
+	test := newUDPTestContext(ctx, t)
 	defer test.close()
 
 	rand.Seed(time.Now().UnixNano())
@@ -261,7 +295,8 @@ func TestUDPv4_findnode(t *testing.T) {
 	// put a few nodes into the table. their exact
 	// distribution shouldn't matter much, although we need to
 	// take care not to overflow any bucket.
-	nodes := &nodesByDistance{target: testTarget.ID()}
+	testTargetID := enode.PubkeyEncoded(testTarget).ID()
+	nodes := &nodesByDistance{target: testTargetID}
 	live := make(map[enode.ID]bool)
 	numCandidates := 2 * bucketSize
 	for i := 0; i < numCandidates; i++ {
@@ -279,11 +314,11 @@ func TestUDPv4_findnode(t *testing.T) {
 
 	// ensure there's a bond with the test node,
 	// findnode won't be accepted otherwise.
-	remoteID := v4wire.EncodePubkey(&test.remotekey.PublicKey).ID()
+	remoteID := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 	test.table.db.UpdateLastPongReceived(remoteID, test.remoteaddr.IP, time.Now())
 
 	// check that closest neighbors are returned.
-	expected := test.table.findnodeByID(testTarget.ID(), bucketSize, true)
+	expected := test.table.findnodeByID(testTargetID, bucketSize, true)
 	test.packetIn(nil, &v4wire.Findnode{Target: testTarget, Expiration: futureExp})
 	waitNeighbors := func(want []*node) {
 		test.waitPacketOut(func(p *v4wire.Neighbors, to *net.UDPAddr, hash []byte) {
@@ -291,11 +326,12 @@ func TestUDPv4_findnode(t *testing.T) {
 				t.Errorf("wrong number of results: got %d, want %d", len(p.Nodes), bucketSize)
 			}
 			for i, n := range p.Nodes {
-				if n.ID.ID() != want[i].ID() {
+				nodeID := enode.PubkeyEncoded(n.ID).ID()
+				if nodeID != want[i].ID() {
 					t.Errorf("result mismatch at %d:\n  got:  %v\n  want: %v", i, n, expected.entries[i])
 				}
-				if !live[n.ID.ID()] {
-					t.Errorf("result includes dead node %v", n.ID.ID())
+				if !live[nodeID] {
+					t.Errorf("result includes dead node %v", nodeID)
 				}
 			}
 		})
@@ -319,7 +355,7 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 	// queue a pending findnode request
 	resultc, errc := make(chan []*node), make(chan error)
 	go func() {
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		ns, err := test.udp.findnode(rid, test.remoteaddr, testTarget)
 		if err != nil && len(ns) == 0 {
 			errc <- err
@@ -443,7 +479,7 @@ func TestUDPv4_successfulPing(t *testing.T) {
 	// pong packet.
 	select {
 	case n := <-added:
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		if n.ID() != rid {
 			t.Errorf("node has wrong ID: got %v, want %v", n.ID(), rid)
 		}
@@ -475,13 +511,13 @@ func TestUDPv4_EIP868(t *testing.T) {
 	// Perform endpoint proof and check for sequence number in packet tail.
 	test.packetIn(nil, &v4wire.Ping{Expiration: futureExp})
 	test.waitPacketOut(func(p *v4wire.Pong, addr *net.UDPAddr, hash []byte) {
-		if p.ENRSeq() != wantNode.Seq() {
-			t.Errorf("wrong sequence number in pong: %d, want %d", p.ENRSeq(), wantNode.Seq())
+		if p.ENRSeq != wantNode.Seq() {
+			t.Errorf("wrong sequence number in pong: %d, want %d", p.ENRSeq, wantNode.Seq())
 		}
 	})
 	test.waitPacketOut(func(p *v4wire.Ping, addr *net.UDPAddr, hash []byte) {
-		if p.ENRSeq() != wantNode.Seq() {
-			t.Errorf("wrong sequence number in ping: %d, want %d", p.ENRSeq(), wantNode.Seq())
+		if p.ENRSeq != wantNode.Seq() {
+			t.Errorf("wrong sequence number in ping: %d, want %d", p.ENRSeq, wantNode.Seq())
 		}
 		test.packetIn(nil, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash})
 	})
@@ -506,6 +542,9 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 	t.Parallel()
 
+	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
+
 	// Start the network.
 	nodes := make([]*UDPv4, 4)
 	for i := range nodes {
@@ -514,9 +553,18 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 			bn := nodes[0].Self()
 			cfg.Bootnodes = []*enode.Node{bn}
 		}
-		nodes[i] = startLocalhostV4(t, cfg)
-		defer nodes[i].Close()
+		cfg.ReplyTimeout = 50 * time.Millisecond
+		cfg.PingBackDelay = time.Nanosecond
+		cfg.TableRevalidateInterval = time.Hour
+
+		nodes[i] = startLocalhostV4(ctx, t, cfg)
 	}
+
+	defer func() {
+		for _, node := range nodes {
+			node.Close()
+		}
+	}()
 
 	// Run through the iterator on all nodes until
 	// they have all found each other.
@@ -538,14 +586,13 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 
 	// Wait for all status reports.
-	timeout := time.NewTimer(30 * time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	for received := 0; received < len(nodes); {
 		select {
 		case <-timeout.C:
-			for _, node := range nodes {
-				node.Close()
-			}
+			t.Fatalf("Failed to converge within timeout")
+			return
 		case err := <-status:
 			received++
 			if err != nil {
@@ -556,7 +603,7 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 }
 
-func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
+func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
@@ -583,20 +630,35 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV4(socket, ln, cfg)
+	udp, err := ListenV4(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
 }
 
+func contextWithReplyTimeout(ctx context.Context, value time.Duration) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.ReplyTimeout", value)
+}
+
+func contextGetReplyTimeout(ctx context.Context) time.Duration {
+	value, _ := ctx.Value("p2p.discover.Config.ReplyTimeout").(time.Duration)
+	return value
+}
+
+func contextWithPrivateKeyGenerator(ctx context.Context, value func() (*ecdsa.PrivateKey, error)) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.PrivateKeyGenerator", value)
+}
+
+func contextGetPrivateKeyGenerator(ctx context.Context) func() (*ecdsa.PrivateKey, error) {
+	value, _ := ctx.Value("p2p.discover.Config.PrivateKeyGenerator").(func() (*ecdsa.PrivateKey, error))
+	return value
+}
+
 // dgramPipe is a fake UDP socket. It queues all sent datagrams.
 type dgramPipe struct {
-	mu      *sync.Mutex
-	cond    *sync.Cond
-	closing chan struct{}
-	closed  bool
-	queue   []dgram
+	queue  chan dgram
+	closed chan struct{}
 }
 
 type dgram struct {
@@ -605,11 +667,9 @@ type dgram struct {
 }
 
 func newpipe() *dgramPipe {
-	mu := new(sync.Mutex)
 	return &dgramPipe{
-		closing: make(chan struct{}),
-		cond:    &sync.Cond{L: mu},
-		mu:      mu,
+		make(chan dgram, 1000),
+		make(chan struct{}),
 	}
 }
 
@@ -617,30 +677,24 @@ func newpipe() *dgramPipe {
 func (c *dgramPipe) WriteToUDP(b []byte, to *net.UDPAddr) (n int, err error) {
 	msg := make([]byte, len(b))
 	copy(msg, b)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return 0, errors.New("closed")
-	}
-	c.queue = append(c.queue, dgram{*to, b})
-	c.cond.Signal()
+
+	n = 0
+	err = errors.New("closed")
+	defer recover()
+
+	c.queue <- dgram{*to, b}
 	return len(b), nil
 }
 
 // ReadFromUDP just hangs until the pipe is closed.
 func (c *dgramPipe) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
-	<-c.closing
+	<-c.closed
 	return 0, nil, io.EOF
 }
 
 func (c *dgramPipe) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.closed {
-		close(c.closing)
-		c.closed = true
-	}
-	c.cond.Broadcast()
+	close(c.queue)
+	close(c.closed)
 	return nil
 }
 
@@ -649,29 +703,16 @@ func (c *dgramPipe) LocalAddr() net.Addr {
 }
 
 func (c *dgramPipe) receive() (dgram, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-	var timedOut bool
-	timer := time.AfterFunc(3*time.Second, func() {
-		c.mu.Lock()
-		timedOut = true
-		c.mu.Unlock()
-		c.cond.Broadcast()
-	})
-	defer timer.Stop()
-
-	for len(c.queue) == 0 && !c.closed && !timedOut {
-		c.cond.Wait()
-	}
-	if c.closed {
+	select {
+	case p, isOpen := <-c.queue:
+		if isOpen {
+			return p, nil
+		}
 		return dgram{}, errClosed
-	}
-	if timedOut {
+	case <-ctx.Done():
 		return dgram{}, errTimeout
 	}
-	p := c.queue[0]
-	copy(c.queue, c.queue[1:])
-	c.queue = c.queue[:len(c.queue)-1]
-	return p, nil
 }

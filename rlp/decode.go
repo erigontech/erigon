@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/holiman/uint256"
 )
 
@@ -60,7 +62,7 @@ var (
 	}
 )
 
-func IsDecodeError(err error) bool {
+func IsInvalidRLPError(err error) bool {
 	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
@@ -70,7 +72,17 @@ func IsDecodeError(err error) bool {
 		errors.Is(err, ErrValueTooLarge) ||
 		errors.Is(err, ErrMoreThanOneValue) ||
 		errors.Is(err, ErrWrongTxTypePrefix) ||
-		errors.Is(err, ErrUnknownTxTypePrefix)
+		errors.Is(err, ErrUnknownTxTypePrefix) ||
+		// internal errors
+		errors.Is(err, errNotInList) ||
+		errors.Is(err, errNotAtEOL) ||
+		errors.Is(err, errUintOverflow) ||
+		// stream errors
+		strings.Contains(err.Error(), "rlp: input list has too many elements") ||
+		strings.Contains(err.Error(), "rlp: expected input string or byte") ||
+		strings.Contains(err.Error(), "rlp: expected input list") ||
+		strings.Contains(err.Error(), "rlp: non-canonical size information") ||
+		strings.Contains(err.Error(), "rlp: non-canonical integer (leading zero bytes)")
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
@@ -91,9 +103,12 @@ type Decoder interface {
 // Note that Decode does not set an input limit for all readers and may be vulnerable to
 // panics cause by huge value sizes. If you need an input limit, use
 //
-//     NewStream(r, limit).Decode(val)
+//	NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, 0)
@@ -105,7 +120,10 @@ func Decode(r io.Reader, val interface{}) error {
 func DecodeBytes(b []byte, val interface{}) error {
 	r := bytes.NewReader(b)
 
-	stream := streamPool.Get().(*Stream)
+	stream, ok := streamPool.Get().(*Stream)
+	if !ok {
+		log.Warn("Failed to type convert to Stream pointer")
+	}
 	defer streamPool.Put(stream)
 
 	stream.Reset(r, uint64(len(b)))
@@ -434,9 +452,16 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		if _, err := s.List(); err != nil {
 			return wrapStreamError(err, typ)
 		}
-		for _, f := range fields {
+		for i, f := range fields {
 			err := f.info.decoder(s, val.Field(f.index))
 			if err == EOL {
+				if f.optional {
+					// The field is optional, so reaching the end of the list before
+					// reaching the last field is acceptable. All remaining undecoded
+					// fields are zeroed.
+					zeroFields(val, fields[i:])
+					break
+				}
 				return &decodeError{msg: "too few elements", typ: typ}
 			} else if err != nil {
 				return addErrorContext(err, "."+typ.Field(f.index).Name)
@@ -445,6 +470,13 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		return wrapStreamError(s.ListEnd(), typ)
 	}
 	return dec, nil
+}
+
+func zeroFields(structval reflect.Value, fields []field) {
+	for _, f := range fields {
+		fv := structval.Field(f.index)
+		fv.Set(reflect.Zero(fv.Type()))
+	}
 }
 
 // makePtrDecoder creates a decoder that decodes into the pointer's element type.
@@ -967,18 +999,18 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 	}
 	s.byteval = 0
 	switch {
-	case b < 0x80:
+	case b < 0x80: //128
 		// For a single byte whose value is in the [0x00, 0x7F] range, that byte
 		// is its own RLP encoding.
 		s.byteval = b
 		return Byte, 0, nil
-	case b < 0xB8:
+	case b < 0xB8: //184
 		// Otherwise, if a string is 0-55 bytes long,
 		// the RLP encoding consists of a single byte with value 0x80 plus the
 		// length of the string followed by the string. The range of the first
 		// byte is thus [0x80, 0xB7].
 		return String, uint64(b - 0x80), nil
-	case b < 0xC0:
+	case b < 0xC0: //192
 		// If a string is more than 55 bytes long, the
 		// RLP encoding consists of a single byte with value 0xB7 plus the length
 		// of the length of the string in binary form, followed by the length of
@@ -990,7 +1022,7 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 			err = ErrCanonSize
 		}
 		return String, size, err
-	case b < 0xF8:
+	case b < 0xF8: //248
 		// If the total payload of a list
 		// (i.e. the combined length of all its items) is 0-55 bytes long, the
 		// RLP encoding consists of a single byte with value 0xC0 plus the length
@@ -1004,7 +1036,7 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 		// form, followed by the length of the payload, followed by
 		// the concatenation of the RLP encodings of the items. The
 		// range of the first byte is thus [0xF8, 0xFF].
-		size, err = s.readUint(b - 0xF7)
+		size, err = s.readUint(b - 0xF7) //247
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
@@ -1047,7 +1079,7 @@ func (s *Stream) readFull(buf []byte) (err error) {
 		nn, err = s.r.Read(buf[n:])
 		n += nn
 	}
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		if n < len(buf) {
 			err = io.ErrUnexpectedEOF
 		} else {
@@ -1064,7 +1096,7 @@ func (s *Stream) readByte() (byte, error) {
 		return 0, err
 	}
 	b, err := s.r.ReadByte()
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		err = io.ErrUnexpectedEOF
 	}
 	return b, err

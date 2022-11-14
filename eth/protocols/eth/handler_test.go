@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -44,90 +43,7 @@ var (
 	testAddr = crypto.PubkeyToAddress(testKey.PublicKey)
 )
 
-// testBackend is a mock implementation of the live Ethereum message handler. Its
-// purpose is to allow testing the request/reply workflows and wire serialization
-// in the `eth` protocol without actually doing any data processing.
-type testBackend struct {
-	db          kv.RwDB
-	headBlock   *types.Block
-	genesis     *types.Block
-	chainConfig *params.ChainConfig
-}
-
-// newTestBackend creates an empty chain and wraps it into a mock backend.
-func newTestBackend(t *testing.T, blocks int) *testBackend {
-	return newTestBackendWithGenerator(t, blocks, nil)
-}
-
-// newTestBackend creates a chain with a number of explicitly defined blocks and
-// wraps it into a mock backend.
-func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *testBackend {
-	// Create a database pre-initialize with a genesis block
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := stages.MockWithGenesis(t, &core.Genesis{
-		Config: params.TestChainConfig,
-		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, key)
-
-	headBlock := m.Genesis
-	if blocks > 0 {
-		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
-		if err := m.InsertChain(chain); err != nil {
-			t.Fatalf("generate chain: %v", err)
-		}
-		headBlock = chain.TopBlock
-	}
-	txconfig := core.DefaultTxPoolConfig
-	txconfig.Journal = "" // Don't litter the disk with test journals
-
-	b := &testBackend{
-		db:          m.DB,
-		headBlock:   headBlock,
-		genesis:     m.Genesis,
-		chainConfig: params.TestChainConfig,
-	}
-	return b
-}
-
-func (b *testBackend) DB() kv.RwDB        { return b.db }
-func (b *testBackend) TxPool() eth.TxPool { return nil }
-func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
-	// Normally the backend would do peer mainentance and handshakes. All that
-	// is omitted and we will just give control back to the handler.
-	return handler(peer)
-}
-func (b *testBackend) PeerInfo(enode.ID) interface{} { panic("not implemented") }
-
-func (b *testBackend) AcceptTxs() bool {
-	panic("data processing tests should be done in the handler package")
-}
-func (b *testBackend) Handle(*eth.Peer, eth.Packet) error {
-	panic("data processing tests should be done in the handler package")
-}
-func (b *testBackend) GetBlockHashesFromHash(tx kv.Tx, hash common.Hash, max uint64) []common.Hash {
-	// Get the origin header from which to fetch
-	header, _ := rawdb.ReadHeaderByHash(tx, hash)
-	if header == nil {
-		return nil
-	}
-	// Iterate the headers until enough is collected or the genesis reached
-	chain := make([]common.Hash, 0, max)
-	for i := uint64(0); i < max; i++ {
-		next := header.ParentHash
-		if header = rawdb.ReadHeader(tx, next, header.Number.Uint64()-1); header == nil {
-			break
-		}
-		chain = append(chain, next)
-		if header.Number.Sign() == 0 {
-			break
-		}
-	}
-	return chain
-}
-
-func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
-
-func testGetBlockReceipts(t *testing.T, protocol uint) {
+func TestGetBlockReceipts(t *testing.T) {
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -202,10 +118,14 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	m.ReceiveWg.Wait()
-	sent := m.SentMessage(0)
-	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-	require.Equal(t, expect, sent.Data)
+	if m.HistoryV3 {
+		// GetReceiptsMsg disabled for historyV3
+	} else {
+		m.ReceiveWg.Wait()
+		sent := m.SentMessage(0)
+		require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+		require.Equal(t, expect, sent.Data)
+	}
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
@@ -214,7 +134,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.Block
 	m := stages.MockWithGenesis(t, &core.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, testKey)
+	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
 		err := m.InsertChain(chain)

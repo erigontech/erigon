@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare tx so it works with our test
-	signer1 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock.Uint64())
+	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("01"), 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
@@ -61,7 +62,7 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("01"), 1))
 
-	signer2 := types.MakeSigner(params.MainnetChainConfig, params.MainnetChainConfig.BerlinBlock.Uint64())
+	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("02"), 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
@@ -108,18 +109,18 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{}, nil)
-	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
+	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil), nil)
+	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, false /* quiet */)
 	assert.NoError(t, err)
 
 	{
-		found := rawdb.ReadBodyWithTransactions(tx, common.HexToHash("01"), 1)
+		found := rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("02"), 2)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("03"), 3)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))
@@ -137,15 +138,14 @@ func TestSenders(t *testing.T) {
 		assert.Equal(t, 0, len(senders))
 	}
 	{
-		txs, err := rawdb.CanonicalTransactions(tx, 0, 2)
+		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(txs))
-		txs, err = rawdb.CanonicalTransactions(tx, 2, 3)
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(txs))
-		txs, err = rawdb.CanonicalTransactions(tx, 0, 1024)
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
 		assert.NoError(t, err)
-		assert.Equal(t, 5, len(txs))
+		assert.Equal(t, 3, len(txs))
 	}
-
 }

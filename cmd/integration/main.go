@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/integration/commands"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 )
 
 func main() {
 	rootCmd := commands.RootCommand()
-	ctx, _ := utils.RootContext()
+	ctx, _ := common.RootContext()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)

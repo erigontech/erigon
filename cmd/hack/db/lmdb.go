@@ -5,14 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	// "errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -212,7 +210,7 @@ type mdbx_db struct {
 	txnID     uint64 /* txnid of last committed modification */
 }
 
-//nolint // database size-related parameters, used as placeholder, doesn't have any meaning in this code
+// nolint // database size-related parameters, used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
 	grow_pv   uint16 //nolint
 	shrink_pv uint16 //nolint
@@ -384,7 +382,7 @@ func (m *mdbx_meta) readMeta(page []byte) error {
 	m.txnID_b = _64(page, pos)
 	pos += 8
 
-	pos += (3 * 8) // pagesRetired, x, y
+	pos += 3 * 8 // pagesRetired, x, y
 
 	return nil
 }
@@ -502,7 +500,7 @@ func generate2(tx kv.RwTx, entries int) error {
 func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
+		if err := tx.CreateBucket(k); err != nil {
 			return false, err
 		}
 	}
@@ -773,13 +771,13 @@ func checkReader(tx kv.Tx, errorCh chan error) (bool, error) {
 }
 
 func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
-	dir, err := ioutil.TempDir(".", "db-vis")
+	dir, err := os.MkdirTemp(".", "db-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	var db kv.RwDB
-	db, err = kv2.NewMDBX(logger).Path(dir).WithTablessCfg(func(kv.TableCfg) kv.TableCfg {
+	db, err = kv2.NewMDBX(logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {
@@ -941,7 +939,7 @@ func Defrag() error {
 func TextInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
 	fmt.Fprint(visStream, "digraph lmdb {\nrankdir=LR\n")
-	datafile := path.Join(chaindata, MdbxDataFile)
+	datafile := filepath.Join(chaindata, MdbxDataFile)
 
 	f, err := os.Open(datafile)
 	if err != nil {

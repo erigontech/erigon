@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"sort"
@@ -30,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/rs/cors"
 )
@@ -57,7 +57,7 @@ type rpcHandler struct {
 
 type httpServer struct {
 	log      log.Logger
-	timeouts rpc.HTTPTimeouts
+	timeouts rpccfg.HTTPTimeouts
 	mux      http.ServeMux // registered handlers go here
 
 	mu       sync.Mutex
@@ -81,8 +81,8 @@ type httpServer struct {
 	handlerNames map[string]string
 }
 
-func newHTTPServer(log log.Logger, timeouts rpc.HTTPTimeouts) *httpServer {
-	h := &httpServer{log: log, timeouts: timeouts, handlerNames: make(map[string]string)}
+func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
+	h := &httpServer{log: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
 	h.wsHandler.Store((*rpcHandler)(nil))
@@ -125,8 +125,8 @@ func (h *httpServer) start() error {
 	}
 
 	// Initialize the server.
-	h.server = &http.Server{Handler: h}
-	if h.timeouts != (rpc.HTTPTimeouts{}) {
+	h.server = &http.Server{Handler: h} // nolint
+	if h.timeouts != (rpccfg.HTTPTimeouts{}) {
 		CheckTimeouts(&h.timeouts)
 		h.server.ReadTimeout = h.timeouts.ReadTimeout
 		h.server.WriteTimeout = h.timeouts.WriteTimeout
@@ -223,23 +223,6 @@ func checkPath(r *http.Request, path string) bool {
 	return len(r.URL.Path) >= len(path) && r.URL.Path[:len(path)] == path
 }
 
-// validatePrefix checks if 'path' is a valid configuration value for the RPC prefix option.
-func validatePrefix(what, path string) error {
-	if path == "" {
-		return nil
-	}
-	if path[0] != '/' {
-		return fmt.Errorf(`%s RPC path prefix %q does not contain leading "/"`, what, path)
-	}
-	if strings.ContainsAny(path, "?#") {
-		// This is just to avoid confusion. While these would match correctly (i.e. they'd
-		// match if URL-escaped into path), it's not easy to understand for users when
-		// setting that on the command line.
-		return fmt.Errorf("%s RPC path prefix %q contains URL meta-characters", what, path)
-	}
-	return nil
-}
-
 // stop shuts down the HTTP server.
 func (h *httpServer) stop() {
 	h.mu.Lock()
@@ -282,7 +265,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50)
+	srv := rpc.NewServer(50, false /* traceRequests */, true)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
@@ -315,29 +298,17 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50)
+	srv := rpc.NewServer(50, false /* traceRequests */, true)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
 	}
 	h.wsConfig = config
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, false),
+		Handler: srv.WebsocketHandler(config.Origins, nil, false),
 		server:  srv,
 	})
 	return nil
-}
-
-// stopWS disables JSON-RPC over WebSocket and also stops the server if it only serves WebSocket.
-func (h *httpServer) stopWS() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.disableWS() {
-		if !h.rpcAllowed() {
-			h.doStop()
-		}
-	}
 }
 
 // disableWS disables the WebSocket handler. This is internal, the caller must hold h.mu.
@@ -440,7 +411,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var gzPool = sync.Pool{
 	New: func() interface{} {
-		w := gzip.NewWriter(ioutil.Discard)
+		w := gzip.NewWriter(io.Discard)
 		return w
 	},
 }
@@ -482,7 +453,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 // and then registers all of the APIs exposed by the services.
 func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool) error {
 	if bad, available := checkModuleAvailability(modules, apis); len(bad) > 0 {
-		log.Error("Unavailable modules in HTTP API list", "unavailable", bad, "available", available)
+		log.Error("Non-existing modules in HTTP API list, please remove it", "non-existing", bad, "existing", available)
 	}
 	// Generate the whitelist based on the allowed modules
 	whitelist := make(map[string]bool)

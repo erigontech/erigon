@@ -18,9 +18,11 @@ package tests
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -56,51 +58,67 @@ type ttFork struct {
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
-func (tt *TransactionTest) Run(config *params.ChainConfig) error {
-	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, isHomestead bool, isIstanbul bool) (*common.Address, *common.Hash, uint64, error) {
+func (tt *TransactionTest) Run(chainID *big.Int) error {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *params.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpData), 0))
 		if err != nil {
 			return nil, nil, 0, err
 		}
-		sender, err := tx.Sender(signer)
+		msg, err := tx.AsMessage(signer, nil, rules)
 		if err != nil {
 			return nil, nil, 0, err
 		}
+		sender := msg.From()
+
 		// Intrinsic gas
-		requiredGas, err := core.IntrinsicGas(tx.GetData(), tx.GetAccessList(), tx.GetTo() == nil, isHomestead, isIstanbul)
+		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 		if err != nil {
 			return nil, nil, 0, err
 		}
-		if requiredGas > tx.GetGas() {
-			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", tx.GetGas(), requiredGas)
+		if requiredGas > msg.Gas() {
+			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)
 		}
+
+		if rules.IsLondon {
+			// EIP-1559 gas fee cap
+			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.Tip(), nil, false /* isFree */)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			// A corollary check of the following assert from EIP-1559:
+			// signer.balance >= transaction.gas_limit * transaction.max_fee_per_gas
+			_, overflow := new(uint256.Int).MulOverflow(uint256.NewInt(msg.Gas()), msg.FeeCap())
+			if overflow {
+				return nil, nil, 0, errors.New("GasLimitPriceProductOverflow")
+			}
+		}
+
 		// EIP-2681: Limit account nonce to 2^64-1
-		if tx.GetNonce()+1 < tx.GetNonce() {
-			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, tx.GetNonce())
+		if msg.Nonce()+1 < msg.Nonce() {
+			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, msg.Nonce())
 		}
 		h := tx.Hash()
 		return &sender, &h, requiredGas, nil
 	}
 
 	for _, testcase := range []struct {
-		name        string
-		signer      *types.Signer
-		fork        ttFork
-		isHomestead bool
-		isIstanbul  bool
+		name   string
+		signer *types.Signer
+		fork   ttFork
+		config *params.ChainConfig
 	}{
-		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, false, false},
-		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, true, false},
-		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, true, false},
-		{"EIP158", types.LatestSignerForChainID(config.ChainID), tt.Forks.EIP158, true, false},
-		{"Byzantium", types.LatestSignerForChainID(config.ChainID), tt.Forks.Byzantium, true, false},
-		{"Constantinople", types.LatestSignerForChainID(config.ChainID), tt.Forks.Constantinople, true, false},
-		{"ConstantinopleFix", types.LatestSignerForChainID(config.ChainID), tt.Forks.ConstantinopleFix, true, false},
-		{"Istanbul", types.LatestSignerForChainID(config.ChainID), tt.Forks.Istanbul, true, true},
-		{"Berlin", types.LatestSignerForChainID(config.ChainID), tt.Forks.Berlin, true, true},
-		{"London", types.LatestSignerForChainID(config.ChainID), tt.Forks.London, true, true},
+		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, Forks["Frontier"]},
+		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, Forks["Homestead"]},
+		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, Forks["EIP150"]},
+		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, Forks["EIP158"]},
+		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, Forks["Byzantium"]},
+		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, Forks["Constantinople"]},
+		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, Forks["ConstantinopleFix"]},
+		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, Forks["Istanbul"]},
+		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, Forks["Berlin"]},
+		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, Forks["London"]},
 	} {
-		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, testcase.isHomestead, testcase.isIstanbul)
+		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, testcase.config.Rules(0))
 
 		if testcase.fork.Exception != "" {
 			if err == nil {
@@ -113,15 +131,15 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 			return fmt.Errorf("got error, expected none: %w", err)
 		}
 		if sender == nil {
-			return fmt.Errorf("sender was nil, should be %x", common.Address(testcase.fork.Sender))
+			return fmt.Errorf("sender was nil, should be %x", testcase.fork.Sender)
 		}
-		if *sender != common.Address(testcase.fork.Sender) {
+		if *sender != testcase.fork.Sender {
 			return fmt.Errorf("sender mismatch: got %x, want %x", sender, testcase.fork.Sender)
 		}
 		if txhash == nil {
-			return fmt.Errorf("txhash was nil, should be %x", common.Hash(testcase.fork.Hash))
+			return fmt.Errorf("txhash was nil, should be %x", testcase.fork.Hash)
 		}
-		if *txhash != common.Hash(testcase.fork.Hash) {
+		if *txhash != testcase.fork.Hash {
 			return fmt.Errorf("hash mismatch: got %x, want %x", *txhash, testcase.fork.Hash)
 		}
 		if new(big.Int).SetUint64(intrinsicGas).Cmp((*big.Int)(testcase.fork.IntrinsicGas)) != 0 {

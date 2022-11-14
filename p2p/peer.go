@@ -118,14 +118,15 @@ type Peer struct {
 
 	// events receives message send / receive events if set
 	events *event.Feed
+	pubkey [64]byte
 }
 
 // NewPeer returns a peer for testing purposes.
-func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
+func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil)
+	peer := newPeer(log.Root(), conn, nil, pubkey)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -133,6 +134,10 @@ func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 // ID returns the node's unique identifier.
 func (p *Peer) ID() enode.ID {
 	return p.rw.node.ID()
+}
+
+func (p *Peer) Pubkey() [64]byte {
+	return p.pubkey
 }
 
 // Node returns the peer's node descriptor.
@@ -204,7 +209,7 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
 		rw:       conn,
@@ -213,7 +218,8 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		disc:     make(chan DiscReason),
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
-		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
+		log:      logger.New("id", conn.node.ID(), "conn", conn.flags),
+		pubkey:   pubkey,
 	}
 	return p
 }
@@ -314,11 +320,11 @@ func (p *Peer) handle(msg Msg) error {
 		msg.Discard()
 		go SendItems(p.rw, pongMsg)
 	case msg.Code == discMsg:
-		var reason [1]DiscReason
 		// This is the last message. We don't need to discard or
 		// check errors because, the connection will be closed after it.
-		_ = rlp.Decode(msg.Payload, &reason)
-		return fmt.Errorf("peer has: %w", reason[0])
+		var m struct{ R DiscReason }
+		rlp.Decode(msg.Payload, &m)
+		return m.R
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
 		msg.Discard()
@@ -484,7 +490,7 @@ type PeerInfo struct {
 // Info gathers and returns a collection of metadata known about a peer.
 func (p *Peer) Info() *PeerInfo {
 	// Gather the protocol capabilities
-	var caps []string
+	caps := make([]string, 0, len(p.Caps()))
 	for _, cap := range p.Caps() {
 		caps = append(caps, cap.String())
 	}
@@ -509,7 +515,7 @@ func (p *Peer) Info() *PeerInfo {
 	for _, proto := range p.running {
 		protoInfo := interface{}("unknown")
 		if query := proto.Protocol.PeerInfo; query != nil {
-			if metadata := query(p.ID()); metadata != nil {
+			if metadata := query(p.Pubkey()); metadata != nil {
 				protoInfo = metadata
 			} else {
 				protoInfo = "handshake"

@@ -6,43 +6,45 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
-	viewID             uint64 // mdbx's txID
-	chainConfig        *params.ChainConfig
+	plainStateID       uint64
 	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
-func NewAccumulator(chainConfig *params.ChainConfig) *Accumulator {
-	return &Accumulator{chainConfig: chainConfig}
+func NewAccumulator() *Accumulator {
+	return &Accumulator{}
 }
 
 type StateChangeConsumer interface {
 	SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch)
 }
 
-func (a *Accumulator) Reset(viewID uint64) {
+func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
-	a.viewID = viewID
+	a.plainStateID = plainStateID
 }
-func (a *Accumulator) ChainConfig() *params.ChainConfig { return a.chainConfig }
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64) {
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, blockGasLimit uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee}
+	sc := &remote.StateChangeBatch{StateVersionID: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+}
+
+func (a *Accumulator) SetStateID(stateID uint64) {
+	a.plainStateID = stateID
 }
 
 // StartChange begins accumulation of changes for a new block
@@ -74,6 +76,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -81,7 +84,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 		accountChange.Action = remote.Action_UPSERT
 	case remote.Action_CODE:
 		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_DELETE:
+	case remote.Action_REMOVE:
 		panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -104,7 +107,8 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	accountChange.Data = nil
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
-	accountChange.Action = remote.Action_DELETE
+	accountChange.Action = remote.Action_REMOVE
+	delete(a.storageChangeIndex, address)
 }
 
 // ChangeCode adds code to the latest change
@@ -115,6 +119,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_CODE})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -122,7 +127,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		accountChange.Action = remote.Action_CODE
 	case remote.Action_UPSERT:
 		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_DELETE:
+	case remote.Action_REMOVE:
 		panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -136,9 +141,10 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_STORAGE})
 		a.accountChangeIndex[address] = i
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	if accountChange.Action == remote.Action_DELETE {
+	if accountChange.Action == remote.Action_REMOVE {
 		panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -156,4 +162,15 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	storageChange := accountChange.StorageChanges[j]
 	storageChange.Location = gointerfaces.ConvertHashToH256(location)
 	storageChange.Data = data
+}
+
+func (a *Accumulator) CopyAndReset(target *Accumulator) {
+	target.changes = a.changes
+	a.changes = nil
+	target.latestChange = a.latestChange
+	a.latestChange = nil
+	target.accountChangeIndex = a.accountChangeIndex
+	a.accountChangeIndex = nil
+	target.storageChangeIndex = a.storageChangeIndex
+	a.storageChangeIndex = nil
 }

@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
@@ -20,18 +21,20 @@ import (
 //
 // Idempotency is expected
 // Best practices to achieve Idempotency:
-// - in dbutils/bucket.go add suffix for existing bucket variable, create new bucket with same variable name.
-//	Example:
-//		- SyncStageProgress = []byte("SSP1")
-//		+ SyncStageProgressOld1 = []byte("SSP1")
-//		+ SyncStageProgress = []byte("SSP2")
-// - in the beginning of migration: check that old bucket exists, clear new bucket
-// - in the end:drop old bucket (not in defer!).
-// - if you need migrate multiple buckets - create separate migration for each bucket
-// - write test - and check that it's safe to apply same migration twice
+//   - in dbutils/bucket.go add suffix for existing bucket variable, create new bucket with same variable name.
+//     Example:
+//   - SyncStageProgress = []byte("SSP1")
+//   - SyncStageProgressOld1 = []byte("SSP1")
+//   - SyncStageProgress = []byte("SSP2")
+//   - in the beginning of migration: check that old bucket exists, clear new bucket
+//   - in the end:drop old bucket (not in defer!).
+//   - if you need migrate multiple buckets - create separate migration for each bucket
+//   - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
+		txsBeginEnd,
+		resetBlocks4,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -40,12 +43,12 @@ var migrations = map[kv.Label][]Migration{
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) error
+	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) error
 }
 
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migration commit function was not called")
+	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
@@ -116,20 +119,10 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
-	if len(m.Migrations) == 0 {
-		return nil
-	}
-
-	var applied map[string][]byte
-	var existingVersion []byte
+func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		applied, err = AppliedMigrations(tx, false)
-		if err != nil {
-			return fmt.Errorf("reading applied migrations: %w", err)
-		}
-		existingVersion, err = tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
+		existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 		if err != nil {
 			return fmt.Errorf("reading DB schema version: %w", err)
 		}
@@ -154,7 +147,31 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
+		return fmt.Errorf("migrator.VerifyVersion: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Migrator) Apply(db kv.RwDB, dataDir string) error {
+	if len(m.Migrations) == 0 {
+		return nil
+	}
+	dirs := datadir.New(dataDir)
+
+	var applied map[string][]byte
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		applied, err = AppliedMigrations(tx, false)
+		if err != nil {
+			return fmt.Errorf("reading applied migrations: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return err
+	}
+	if err := m.VerifyVersion(db); err != nil {
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 
 	// migration names must be unique, protection against people's mistake
@@ -181,10 +198,11 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
 			return err
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply: %w", err)
 		}
 
-		if err := v.Up(db, path.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
+		dirs.Tmp = filepath.Join(dirs.DataDir, "migrations", v.Name)
+		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					if err := tx.Put(kv.Migrations, []byte("_progress_"+v.Name), key); err != nil {
@@ -204,14 +222,14 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 				return err
 			}
 
-			err = tx.Delete(kv.Migrations, []byte("_progress_"+v.Name), nil)
+			err = tx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
 			if err != nil {
 				return err
 			}
 
 			return nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 
 		if !callbackCalled {
@@ -230,7 +248,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
 	return nil

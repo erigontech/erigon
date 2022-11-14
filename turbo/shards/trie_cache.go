@@ -212,9 +212,7 @@ func (sc *StateCache) SetAccountHashesRead(prefix []byte, hasState, hasTree, has
 	assertSubset(hasTree, hasState)
 	assertSubset(hasHash, hasState)
 	cpy := make([]common.Hash, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		cpy[i] = hashes[i]
-	}
+	copy(cpy, hashes)
 	ai := AccountHashItem{
 		addrHashPrefix: common.CopyBytes(prefix),
 		hasState:       hasState,
@@ -238,9 +236,7 @@ func (sc *StateCache) SetAccountHashWrite(prefix []byte, hasState, hasTree, hasH
 		hasHash:        hasHash,
 		hashes:         make([]common.Hash, len(hashes)),
 	}
-	for i := 0; i < len(hashes); i++ {
-		ai.hashes[i] = hashes[i]
-	}
+	copy(ai.hashes, hashes)
 	var awi AccountHashWriteItem
 	awi.ai = &ai
 	sc.setWrite(&ai, &awi, false /* delete */)
@@ -256,9 +252,7 @@ func (sc *StateCache) SetAccountHashDelete(prefix []byte) {
 
 func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		cpy[i] = hashes[i]
-	}
+	copy(cpy, hashes)
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
@@ -273,9 +267,7 @@ func (sc *StateCache) SetStorageHashRead(addrHash common.Hash, incarnation uint6
 
 func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		cpy[i] = hashes[i]
-	}
+	copy(cpy, hashes)
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
@@ -292,9 +284,7 @@ func (sc *StateCache) SetStorageHashWrite(addrHash common.Hash, incarnation uint
 
 func (sc *StateCache) SetStorageHashDelete(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasTree, hasHash uint16, hashes []common.Hash) {
 	cpy := make([]common.Hash, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		cpy[i] = hashes[i]
-	}
+	copy(cpy, hashes)
 	ai := StorageHashItem{
 		addrHash:      addrHash,
 		incarnation:   incarnation,
