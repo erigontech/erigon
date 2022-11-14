@@ -222,11 +222,16 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
-	latest, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, err
+	var latest uint64
+	var err error
+	if crit.ToBlock != nil && crit.ToBlock.Sign() >= 0 {
+		latest = crit.ToBlock.Uint64()
+	} else {
+		latest, err = rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(0, latest+1)
