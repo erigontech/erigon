@@ -47,4 +47,11 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	}
 	require.NotNil(t, actual)
 	assert.EqualValues(expectedErigonLogs, actual)
+
+	actualWithToBlocks, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{ToBlock: new(big.Int).SetInt64(10)}, uint64(len(expectedLogs)))
+	if err != nil {
+		t.Errorf("calling erigon_getLatestLogs: %v", err)
+	}
+	require.NotNil(t, actualWithToBlocks)
+	assert.EqualValues(expectedErigonLogs, actualWithToBlocks)
 }
