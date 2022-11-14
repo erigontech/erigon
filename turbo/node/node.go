@@ -3,6 +3,9 @@ package node
 
 import (
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -11,9 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/urfave/cli"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.
@@ -52,7 +52,7 @@ type Params struct {
 
 func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	// If we're running a known preset, log it for convenience.
-	chain := ctx.GlobalString(utils.ChainFlag.Name)
+	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
 	case networkname.SepoliaChainName:
 		log.Info("Starting Erigon on Sepolia testnet...")
@@ -77,7 +77,7 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	case networkname.BorDevnetChainName:
 		log.Info("Starting Erigon on Bor Devnet...")
 	case "", networkname.MainnetChainName:
-		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
+		if !ctx.IsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Erigon on Ethereum mainnet...")
 		}
 	default:
