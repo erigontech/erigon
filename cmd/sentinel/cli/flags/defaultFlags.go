@@ -12,5 +12,8 @@ var LightClientDefaultFlags = []cli.Flag{
 	&LightClientServerPort,
 	&LightClientServerProtocol,
 	&LightClientDiscovery,
+<<<<<<< HEAD
 	&ChaindataFlag,
+=======
+>>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 }
