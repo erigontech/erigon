@@ -18,6 +18,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -25,8 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 func main() {
@@ -40,14 +41,14 @@ func main() {
 	}
 }
 
-func runLightClientNode(cliCtx *cli.Context) {
+func runLightClientNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	lcCfg, err := lcCli.SetUpLightClientCfg(cliCtx)
 	if err != nil {
 		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
-	log.Info("[LightClient]", "chain", cliCtx.GlobalString(flags.LightClientChain.Name))
+	log.Info("[LightClient]", "chain", cliCtx.String(flags.LightClientChain.Name))
 	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
@@ -67,7 +68,7 @@ func runLightClientNode(cliCtx *cli.Context) {
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
-		return
+		return err
 	}
 	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
 	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, 0, true)
@@ -76,7 +77,8 @@ func runLightClientNode(cliCtx *cli.Context) {
 	}
 	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
-		return
+		return err
 	}
 	lc.Start()
+	return nil
 }

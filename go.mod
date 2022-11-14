@@ -69,7 +69,7 @@ require (
 	github.com/torquem-ch/mdbx-go v0.26.2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli v1.22.9
+	github.com/urfave/cli/v2 v2.23.5
 	github.com/valyala/fastjson v1.6.3
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.10.0
@@ -155,6 +155,7 @@ require (
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/supranational/blst v0.3.10 // indirect
 	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
+	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect

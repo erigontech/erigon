@@ -20,6 +20,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+	"go.uber.org/zap/buffer"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
@@ -31,10 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/common"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
-	"github.com/urfave/cli"
-	"go.uber.org/zap/buffer"
-
-	"github.com/ledgerwatch/log/v3"
 )
 
 func main() {
@@ -73,7 +73,7 @@ func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*consensusrpc.Reques
 	}, nil
 }
 
-func runSentinelNode(cliCtx *cli.Context) {
+func runSentinelNode(cliCtx *cli.Context) error {
 	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
 	ctx := context.Background()
 
@@ -90,14 +90,14 @@ func runSentinelNode(cliCtx *cli.Context) {
 	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
-		return
+		return err
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 
 	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
 	if err != nil {
 		log.Error("Could not compute fork digeest", "err", err)
-		return
+		return err
 	}
 	log.Info("Fork digest", "data", digest)
 
@@ -184,8 +184,10 @@ func runSentinelNode(cliCtx *cli.Context) {
 	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
+		return err
 	}
 	sendRequest(ctx, s, req)
+	return nil
 }
 
 func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
