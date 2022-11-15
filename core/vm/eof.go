@@ -211,6 +211,15 @@ func parseTypeSection(code []byte) (out []Annotation) {
 	return
 }
 
+func parseArg(b []byte) (int16, error) {
+	if len(b) < 2 {
+		return 0, fmt.Errorf("argument missing")
+	}
+	arg := int16(b[0]) << 8
+	arg += int16(b[1])
+	return arg, nil
+}
+
 // hasEOFByte returns true if code starts with 0xEF byte
 func hasEOFByte(code []byte) bool {
 	return len(code) != 0 && code[0] == eofFormatByte

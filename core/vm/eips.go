@@ -277,6 +277,8 @@ func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 // enable4750 applies EIP-4750 (CALLF and RETF opcodes)
 func enable4750(jt *JumpTable) {
+	jt[JUMP].legacyOnly = true
+	jt[JUMPI].legacyOnly = true
 	jt[CALLF] = &operation{
 		execute:     opCallf,
 		constantGas: GasMidStep,
