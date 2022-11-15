@@ -74,7 +74,7 @@ jobs:
           vulncheck-version: latest
           package: ./...
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          fail-on-vuln: true
+          fail-on-vuln: false
 
       - name: Test
         run: make test
