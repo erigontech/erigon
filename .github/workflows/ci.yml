@@ -78,6 +78,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-vuln: false
 
+      - name: Upload govulncheck Sarif Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: sarif-report
+          path: govulncheck-report.sarif
+
       - name: Test
         run: make test
 
