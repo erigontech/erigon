@@ -362,7 +362,7 @@ func parseHeaderUnchecked(code []byte) (typeSize uint16, codeSize []uint16, data
 
 // parseTypeSection parses an EOF type section.
 func parseTypeSection(code []byte) (out []Annotation) {
-	for i := 0; i < len(code); i += 2 {
+	for i := 0; i < len(code)-1; i += 2 {
 		sig := Annotation{
 			Input:  code[i],
 			Output: code[i+1],
