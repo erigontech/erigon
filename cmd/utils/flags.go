@@ -502,10 +502,10 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	P2pProtocolVersionFlag = cli.IntFlag{
+	P2pProtocolVersionFlag = cli.UintSliceFlag{
 		Name:  "p2p.protocol",
 		Usage: "Version of eth p2p protocol",
-		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
+		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -951,7 +951,7 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.Int(ListenPortFlag.Name))
 	}
 	if ctx.IsSet(P2pProtocolVersionFlag.Name) {
-		cfg.ProtocolVersion = uint(ctx.Int(P2pProtocolVersionFlag.Name))
+		cfg.ProtocolVersion = ctx.UintSlice(P2pProtocolVersionFlag.Name)
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
