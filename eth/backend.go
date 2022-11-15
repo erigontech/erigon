@@ -784,6 +784,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		mineEvery := time.NewTicker(cfg.Recommit)
 		defer mineEvery.Stop()
 
+		// Listen on a new head subscription. This allows us to maintain the block time by
+		// triggering mining after the block is passed through all stages.
 		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
 		defer closeNewHeadCh()
 
