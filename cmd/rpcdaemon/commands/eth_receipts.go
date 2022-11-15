@@ -274,6 +274,45 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 	return result, nil
 }
 
+// The Topic list restricts matches to particular event topics. Each event has a list
+// of topics. Topics matches specific orders of that list. An empty element slice matches nothing.
+// Non-empty elements represent that matches all of the contained topics.
+//
+// Examples:
+// {} or nil          matches nothing
+// {{A}}              matches topic A in first position
+// {{}, {B}}          matches nothing OR B in first position
+// {{A}, {B}}         matches topic A in first position OR B in first position
+// {{A, B}, {C, D}}   matches topic (A in first position AND B in second position) OR (C in first position AND D in second position)
+func getTopicsBitmapOrdered(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
+	var result *roaring.Bitmap
+	for _, sub := range topics {
+		var bitmapForORing *roaring.Bitmap
+		for _, topic := range sub {
+			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
+			if err != nil {
+				return nil, err
+			}
+			if bitmapForORing == nil {
+				bitmapForORing = m
+				continue
+			}
+			bitmapForORing.And(m)
+		}
+
+		if bitmapForORing == nil {
+			continue
+		}
+		if result == nil {
+			result = bitmapForORing
+			continue
+		}
+
+		result = roaring.Or(bitmapForORing, result)
+	}
+	return result, nil
+}
+
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
