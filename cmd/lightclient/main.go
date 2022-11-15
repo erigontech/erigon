@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -50,6 +51,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
 	log.Info("[LightClient]", "chain", cliCtx.String(flags.LightClientChain.Name))
 	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
+	db := memdb.New()
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),
@@ -58,7 +60,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		NetworkConfig: lcCfg.NetworkCfg,
 		BeaconConfig:  lcCfg.BeaconCfg,
 		NoDiscovery:   lcCfg.NoDiscovery,
-	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
+	}, db, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
@@ -71,7 +73,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		return err
 	}
 	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
-	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, 0, true)
+	lc, err := lightclient.NewLightClient(ctx, db, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, 0, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 	}
