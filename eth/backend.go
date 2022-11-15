@@ -781,19 +781,27 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
-		mineEvery := time.NewTicker(3 * time.Second)
+		mineEvery := time.NewTicker(cfg.Recommit)
 		defer mineEvery.Stop()
+
+		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
+		defer closeNewHeadCh()
 
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
 		for {
-			mineEvery.Reset(3 * time.Second)
+			mineEvery.Reset(cfg.Recommit)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
+				log.Debug("Start mining new block based on txpool notif")
+				hasWork = true
+			case <-newHeadCh:
+				log.Debug("Start mining new block based on new head channel")
 				hasWork = true
 			case <-mineEvery.C:
+				log.Debug("Start mining new block based on ticker")
 				hasWork = true
 			case err := <-errc:
 				works = false
