@@ -551,6 +551,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		for {
 			select {
 			case b := <-backend.minedBlocks:
+				// Add mined header and block body before broadcast. This is because the broadcast call
+				// will trigger the staged sync which will require headers and blocks to be available
+				// in their respective cache in the download stage. If not found, it would cause a
+				// liveness issue for the chain.
+				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+					log.Error("add mined block to header downloader", "err", err)
+				}
+				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
+					log.Error("add mined block to body downloader", "err", err)
+				}
+
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
@@ -564,12 +575,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 						Hash:   b.Hash(),
 					},
 				})
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					log.Error("add mined block to header downloader", "err", err)
-				}
-				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
-					log.Error("add mined block to body downloader", "err", err)
-				}
 
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
