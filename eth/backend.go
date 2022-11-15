@@ -803,7 +803,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				log.Debug("Start mining new block based on new head channel")
 				hasWork = true
 			case <-mineEvery.C:
-				log.Debug("Start mining new block based on ticker")
+				log.Debug("Start mining new block based on miner.recommit")
 				hasWork = true
 			case err := <-errc:
 				works = false
