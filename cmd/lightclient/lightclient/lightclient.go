@@ -20,10 +20,12 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -39,13 +41,13 @@ type LightClient struct {
 	verbose           bool
 	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
+	db                kv.RwDB
 	sentinel          consensusrpc.SentinelClient
 	execution         remote.ETHBACKENDServer
 	store             *LightClientStore
-	lastValidated     *cltypes.LightClientUpdate
 }
 
-func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
 	execution remote.ETHBACKENDServer, sentinel consensusrpc.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
@@ -59,6 +61,7 @@ func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, 
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
+		db:                db,
 	}, err
 }
 
@@ -67,6 +70,12 @@ func (l *LightClient) Start() {
 		log.Error("No trusted setup")
 		return
 	}
+	tx, err := l.db.BeginRw(l.ctx)
+	if err != nil {
+		log.Error("Could not open MDBX transaction", "err", err)
+		return
+	}
+	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
 	go l.chainTip.StartLoop()
 	for {
@@ -126,18 +135,42 @@ func (l *LightClient) Start() {
 		}
 		// log new validated segment
 		if len(updates) > 0 {
-			l.lastValidated = updates[len(updates)-1]
+			lastValidated := updates[len(updates)-1]
+			// Save to Database
+			if lastValidated.HasNextSyncCommittee() {
+				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
+					log.Warn("Could not write lightclient update to db", "err", err)
+				}
+				// Process it as a full LightClientUpdate
+			} else if lastValidated.IsFinalityUpdate() {
+				if err := rawdb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lastValidated.AttestedHeader,
+					FinalizedHeader: lastValidated.FinalizedHeader,
+					FinalityBranch:  lastValidated.FinalityBranch,
+					SyncAggregate:   lastValidated.SyncAggregate,
+					SignatureSlot:   lastValidated.SignatureSlot,
+				}); err != nil {
+					log.Warn("Could not write finality lightclient update to db", "err", err)
+				}
+			} else if err := rawdb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
+				AttestedHeader: lastValidated.AttestedHeader,
+				SyncAggregate:  lastValidated.SyncAggregate,
+				SignatureSlot:  lastValidated.SignatureSlot,
+			}); err != nil {
+				log.Warn("Could not write optimistic lightclient update to db", "err", err)
+			}
+
 			if l.verbose {
 				log.Info("[LightClient] Validated Chain Segments",
 					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", l.lastValidated.AttestedHeader.Slot)
+					"to", lastValidated.AttestedHeader.Slot)
 			}
 			prev, curr := l.chainTip.GetLastBlocks()
 			if prev == nil {
 				continue
 			}
 			// Skip if we went out of sync and weird network stuff happen
-			if prev.Slot != l.lastValidated.AttestedHeader.Slot {
+			if prev.Slot != lastValidated.AttestedHeader.Slot {
 				continue
 			}
 			// Validate update against block N-1
@@ -146,7 +179,7 @@ func (l *LightClient) Start() {
 				log.Warn("[LightClient] Could not retrive body root of block N-1", "err", err)
 				continue
 			}
-			if !bytes.Equal(prevRoot[:], l.lastValidated.AttestedHeader.BodyRoot[:]) {
+			if !bytes.Equal(prevRoot[:], lastValidated.AttestedHeader.BodyRoot[:]) {
 				log.Warn("[LightClient] Could validate block N-1")
 				continue
 			}
