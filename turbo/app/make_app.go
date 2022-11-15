@@ -2,7 +2,7 @@
 package app
 
 import (
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
@@ -16,9 +16,9 @@ import (
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
 // The application exits when `action` returns.
 // Parameters:
-// * action: the main function for the application. receives `*cli.Context` with parsed command-line flags. Returns no error, if some error could not be recovered from write to the log or panic.
+// * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
-func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
+func MakeApp(action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	app := cli2.NewApp(params.GitCommit, "", "erigon experimental cli")
 	app.Action = action
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
@@ -29,19 +29,8 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 		debug.Exit()
 		return nil
 	}
-	app.Commands = []cli.Command{initCommand, importCommand, snapshotCommand}
+	app.Commands = []*cli.Command{&initCommand, &importCommand, &snapshotCommand}
 	return app
-}
-
-func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error {
-	return func(ctx *cli.Context) error {
-		for _, name := range ctx.FlagNames() {
-			if ctx.IsSet(name) {
-				ctx.GlobalSet(name, ctx.String(name))
-			}
-		}
-		return action(ctx)
-	}
 }
 
 func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
@@ -54,8 +43,8 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
-	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
-		nodeConfig.Dirs = datadir.New(ctx.GlobalString(utils.DataDirFlag.Name))
+	if ctx.IsSet(utils.DataDirFlag.Name) {
+		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
 	return &nodeConfig
 }

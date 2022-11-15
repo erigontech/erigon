@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
@@ -77,7 +77,7 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 }
 
 // runNode configures, creates and serves an erigon node
-func runNode(ctx *cli.Context) {
+func runNode(ctx *cli.Context) error {
 	logger := log.New()
 
 	// Initializing the node and providing the current git commit there
@@ -89,13 +89,14 @@ func runNode(ctx *cli.Context) {
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {
 		log.Error("Devnet startup", "err", err)
-		return
+		return err
 	}
 
 	err = ethNode.Serve()
 	if err != nil {
 		log.Error("error while serving Devnet node", "err", err)
 	}
+	return err
 }
 
 // miningNodeArgs returns custom args for starting a mining node

@@ -2,7 +2,7 @@ package logging
 
 import (
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -46,11 +46,11 @@ var (
 )
 
 var Flags = []cli.Flag{
-	LogJsonFlag,
-	LogConsoleJsonFlag,
-	LogDirJsonFlag,
-	LogVerbosityFlag,
-	LogConsoleVerbosityFlag,
-	LogDirPathFlag,
-	LogDirVerbosityFlag,
+	&LogJsonFlag,
+	&LogConsoleJsonFlag,
+	&LogDirJsonFlag,
+	&LogVerbosityFlag,
+	&LogConsoleVerbosityFlag,
+	&LogDirPathFlag,
+	&LogDirVerbosityFlag,
 }

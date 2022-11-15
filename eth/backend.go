@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,6 +154,16 @@ type Ethereum struct {
 	downloader              *downloader.Downloader
 
 	agg *libstate.Aggregator22
+}
+
+func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
+	idx := strings.LastIndexByte(addr, ':')
+	if idx < 0 {
+		return "", 0, errors.New("invalid address format")
+	}
+	host = addr[:idx]
+	port, err = strconv.Atoi(addr[idx+1:])
+	return
 }
 
 // New creates a new Ethereum object (including the
@@ -297,12 +308,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		cfg := stack.Config().P2P
-		cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[cfg.ProtocolVersion])
-		server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, cfg.ProtocolVersion)
 
-		backend.sentryServers = append(backend.sentryServers, server)
-		sentries = []direct.SentryClient{direct.NewSentryClientDirect(cfg.ProtocolVersion, server)}
+		refCfg := stack.Config().P2P
+		listenHost, listenPort, err := splitAddrIntoHostAndPort(refCfg.ListenAddr)
+		if err != nil {
+			return nil, err
+		}
+		for _, protocol := range refCfg.ProtocolVersion {
+			cfg := refCfg
+			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
+			listenPort++
+
+			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
+			backend.sentryServers = append(backend.sentryServers, server)
+			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+		}
 
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
@@ -453,6 +474,28 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockReader, chainConfig, assembleBlockPOS, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 
+	var creds credentials.TransportCredentials
+	if stack.Config().PrivateApiAddr != "" {
+		if stack.Config().TLSConnection {
+			creds, err = grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			if err != nil {
+				return nil, err
+			}
+		}
+		backend.privateAPI, err = privateapi.StartGrpc(
+			kvRPC,
+			ethBackendRPC,
+			backend.txPool2GrpcServer,
+			miningRPC,
+			stack.Config().PrivateApiAddr,
+			stack.Config().PrivateApiRateLimit,
+			creds,
+			stack.Config().HealthCheck)
+		if err != nil {
+			return nil, fmt.Errorf("private api: %w", err)
+		}
+	}
+
 	// If we choose not to run a consensus layer, run our embedded.
 	if !config.CL && clparams.Supported(config.NetworkID) {
 		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
@@ -460,13 +503,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
-			IpAddr:        "127.0.0.1",
-			Port:          4000,
-			TCPPort:       4001,
+			IpAddr:        config.LightClientDiscoveryAddr,
+			Port:          int(config.LightClientDiscoveryPort),
+			TCPPort:       uint(config.LightClientDiscoveryTCPPort),
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
-		}, &service.ServerConfig{Network: "tcp", Addr: "localhost:7777"})
+		}, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds)
 		if err != nil {
 			return nil, err
 		}
@@ -487,28 +530,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		go lc.Start()
-	}
-
-	if stack.Config().PrivateApiAddr != "" {
-		var creds credentials.TransportCredentials
-		if stack.Config().TLSConnection {
-			creds, err = grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
-			if err != nil {
-				return nil, err
-			}
-		}
-		backend.privateAPI, err = privateapi.StartGrpc(
-			kvRPC,
-			ethBackendRPC,
-			backend.txPool2GrpcServer,
-			miningRPC,
-			stack.Config().PrivateApiAddr,
-			stack.Config().PrivateApiRateLimit,
-			creds,
-			stack.Config().HealthCheck)
-		if err != nil {
-			return nil, fmt.Errorf("private api: %w", err)
-		}
 	}
 
 	if currentBlock == nil {
