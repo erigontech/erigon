@@ -22,6 +22,8 @@ concurrency:
 
 jobs:
   tests:
+    permissions:
+      security-events: write
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -75,6 +77,11 @@ jobs:
           package: ./...
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-vuln: false
+
+      - name: Upload govulncheck sarif report
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: govulncheck.sarif
 
       - name: Test
         run: make test
