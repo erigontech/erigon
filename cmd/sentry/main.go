@@ -81,7 +81,7 @@ var rootCmd = &cobra.Command{
 			staticPeers,
 			trustedPeers,
 			uint(port),
-			uint(protocol),
+			protocol,
 		)
 		if err != nil {
 			return err
