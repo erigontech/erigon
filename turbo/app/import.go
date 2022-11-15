@@ -30,7 +30,7 @@ const (
 )
 
 var importCommand = cli.Command{
-	Action:    importChain,
+	Action:    MigrateFlags(importChain),
 	Name:      "import",
 	Usage:     "Import a blockchain file",
 	ArgsUsage: "<filename> (<filename 2> ... <filename N>) ",
