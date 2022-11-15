@@ -7,7 +7,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
 	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -31,11 +33,44 @@ func main() {
 }
 
 func runConsensusLayerNode(cliCtx *cli.Context) {
-	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
 	ctx := context.Background()
+	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
 
+	// Fetch the checkpoint state.
+	cpState, err := getCheckpointState(ctx)
+	if err != nil {
+		log.Error("Could not get checkpoint", "err", err)
+		return
+	}
+
+	log.Info("Starting sync from checkpoint.")
+
+	// Compute the fork digest of the chain.
+	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
+	if err != nil {
+		log.Error("Could not compute fork digeest", "err", err)
+		return
+	}
+	log.Info("Fork digest", "data", digest)
+
+	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", lcCfg)
+	s, err := startSentinel(cliCtx, *lcCfg)
+	if err != nil {
+		log.Error("Could not start sentinel service", "err", err)
+	}
+
+	// Get checkpoint block by root.
+	cpBlock, err := clcore.GetCheckpointBlock(ctx, s, cpState, digest)
+	if err != nil {
+		log.Error("[Head sync] Failed", "reason", err)
+		return
+	}
+	log.Info("Retrieved root block.", "block", cpBlock)
+}
+
+func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {
 	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),
@@ -47,17 +82,13 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
-		return
+		return nil, err
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+	return s, nil
+}
 
-	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
-	if err != nil {
-		log.Error("Could not compute fork digeest", "err", err)
-		return
-	}
-	log.Info("Fork digest", "data", digest)
-
+func getCheckpointState(ctx context.Context) (*cltypes.BeaconState, error) {
 	db, err := mdbx.NewTemporaryMdbx()
 
 	// Checkpoint sync.
@@ -71,30 +102,23 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
-		return
+		return nil, err
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		log.Error("[DB] Failed", "reason", err)
-		return
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	if err := cldb.WriteBeaconState(tx, state); err != nil {
 		log.Error("[DB] Failed", "reason", err)
-		return
+		return nil, err
 	}
 	if _, err = cldb.ReadBeaconState(tx, state.Slot); err != nil {
 		log.Error("[DB] Failed", "reason", err)
-		return
+		return nil, err
 	}
 	log.Info("Checkpoint sync successful: hurray!")
-
-	log.Info("Starting sync from checkpoint.")
-	blocks, err := clcore.GetBlocksFromCheckpoint(ctx, &s, state, digest)
-	if err != nil {
-		log.Error("[Head sync] Failed", "reason", err)
-		return
-	}
-	log.Info("Retrieved most recent %d blocks.", len(blocks))
+	return state, nil
 }
