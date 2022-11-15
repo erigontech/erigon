@@ -79,6 +79,7 @@ jobs:
           fail-on-vuln: false
 
       - name: Upload govulncheck Sarif Report
+        run: echo govulncheck > govulncheck-report.sarif
         uses: actions/upload-artifact@v3
         with:
           name: sarif-report
