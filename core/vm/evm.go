@@ -400,12 +400,15 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
-			evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+			c, err := ParseEOF1Container(ret)
+			if err != nil {
+				err = ErrInvalidEOFCode
+			}
+			evmInterpreter, ok := evm.Interpreter().(*EVMInterpreter)
 			if !ok {
 				return nil, common.Address{}, gas, ErrInvalidInterpreter
 			}
-			_, err := ParseAndValidateEOF1Container(ret, evmInterpreter.jt)
-			if err != nil {
+			if err := c.ValidateCode(evmInterpreter.jt); err != nil {
 				err = ErrInvalidEOFCode
 			}
 		} else if evm.chainRules.IsLondon {
@@ -460,12 +463,15 @@ func (evm *EVM) mustParseContainer(code []byte) *EOF1Container {
 func (evm *EVM) parseContainer(code []byte) (*EOF1Container, error) {
 	var container *EOF1Container
 	if evm.chainRules.IsShanghai && hasEOFMagic(code) {
-		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+		c, err := ParseEOF1Container(code)
+		if err != nil {
+			return nil, err
+		}
+		evmInterpreter, ok := evm.Interpreter().(*EVMInterpreter)
 		if !ok {
 			return nil, ErrInvalidInterpreter
 		}
-		c, err := ParseAndValidateEOF1Container(code, evmInterpreter.jt)
-		if err != nil {
+		if err := c.ValidateCode(evmInterpreter.jt); err != nil {
 			return nil, err
 		}
 		container = c

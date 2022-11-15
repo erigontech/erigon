@@ -328,7 +328,7 @@ func TestInvalidInstructions(t *testing.T) {
 		// RJUMP to push data.
 		{"EF0001010006005C0001600100", ErrEOF1InvalidRelativeOffset},
 	} {
-		if _, err := ParseAndValidateEOF1Container(common.FromHex(test.code), &shanghaiInstructionSet); err == nil {
+		if _, err := parseEOF(common.FromHex(test.code), &shanghaiInstructionSet); err == nil {
 			t.Errorf("test %d: expected invalid code: %v", i, test.code)
 		} else if !strings.HasPrefix(err.Error(), test.err.Error()) {
 			t.Errorf("test %d: want error: \"%v\" have error: \"%v\"", i, test.err, err.Error())
@@ -354,7 +354,7 @@ func TestValidateUndefinedInstructions(t *testing.T) {
 			continue
 		}
 		code[7] = byte(opcode)
-		_, err := ParseAndValidateEOF1Container(code, jt)
+		_, err := parseEOF(code, jt)
 		if !jt[opcode].undefined {
 			if err != nil {
 				t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
@@ -384,7 +384,7 @@ func TestValidateTerminatingInstructions(t *testing.T) {
 			continue
 		}
 		code[7] = byte(opcode)
-		_, err := ParseAndValidateEOF1Container(code, jt)
+		_, err := parseEOF(code, jt)
 		if opcode.isTerminating() {
 			if err != nil {
 				t.Errorf("opcode %v expected to be valid terminating instruction", opcode)
@@ -411,7 +411,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeTruncatedPush[5] = byte(len(codeTruncatedPush) - 7)
 		codeTruncatedPush[7] = byte(opcode)
 
-		if _, err := ParseAndValidateEOF1Container(codeTruncatedPush, jt); err == nil {
+		if _, err := parseEOF(codeTruncatedPush, jt); err == nil {
 			t.Errorf("code %v has truncated PUSH, expected to be invalid", common.Bytes2Hex(codeTruncatedPush))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeTruncatedPush), err)
@@ -422,7 +422,7 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeNotTerminated[5] = byte(len(codeNotTerminated) - 7)
 		codeNotTerminated[7] = byte(opcode)
 
-		if _, err := ParseAndValidateEOF1Container(codeNotTerminated, jt); err == nil {
+		if _, err := parseEOF(codeNotTerminated, jt); err == nil {
 			t.Errorf("code %v does not have terminating instruction, expected to be invalid", common.Bytes2Hex(codeNotTerminated))
 		} else if !strings.HasPrefix(err.Error(), ErrEOF1TerminatingInstructionMissing.Error()) {
 			t.Errorf("code %v unexpected validation error: %v", common.Bytes2Hex(codeNotTerminated), err)
@@ -433,8 +433,19 @@ func TestValidateTruncatedPush(t *testing.T) {
 		codeValid[5] = byte(len(codeValid) - 7)
 		codeValid[7] = byte(opcode)
 
-		if _, err := ParseAndValidateEOF1Container(codeValid, jt); err != nil {
+		if _, err := parseEOF(codeValid, jt); err != nil {
 			t.Errorf("code %v instruction validation failure, error: %v", common.Bytes2Hex(code), err)
 		}
 	}
+}
+
+func parseEOF(b []byte, jt *JumpTable) (*EOF1Container, error) {
+	c, err := ParseEOF1Container(b)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ValidateCode(jt); err != nil {
+		return nil, err
+	}
+	return c, nil
 }

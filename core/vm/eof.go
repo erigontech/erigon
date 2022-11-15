@@ -78,33 +78,14 @@ type EOF1Container struct {
 }
 
 // ParseEOF1Container parses an EOF v1 container from the provided byte slice.
-func ParseEOF1Container(b []byte) (*EOF1Container, error) {
-	var c EOF1Container
-	err := c.UnmarshalBinary(b)
-	return &c, err
-}
-
-// ParseEOF1Container parses and validates an EOF v1 container from the
-// provided byte slice.
-func ParseAndValidateEOF1Container(b []byte, jt *JumpTable) (*EOF1Container, error) {
-	c, err := ParseEOF1Container(b)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.ValidateCode(jt); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
-// UnmarshalBinary decodes an EOF v1 container.
 //
 // This function ensures that the container is well-formed (e.g. size values
 // are correct, sections are ordered correctly, etc), but it does not perform
 // code validation on the container.
-func (c *EOF1Container) UnmarshalBinary(b []byte) error {
+func ParseEOF1Container(b []byte) (*EOF1Container, error) {
+	var c EOF1Container
 	if err := c.parseHeader(b); err != nil {
-		return err
+		return nil, err
 	}
 	idx := c.HeaderSize()
 	// Read type section if it exists.
@@ -120,7 +101,7 @@ func (c *EOF1Container) UnmarshalBinary(b []byte) error {
 	// Set data offset.
 	c.dataOffset = uint64(idx)
 	c.data = b
-	return nil
+	return &c, nil
 }
 
 // HeaderSize returns the total size of the EOF1 header.
