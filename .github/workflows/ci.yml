@@ -78,11 +78,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-vuln: false
 
-      - name: Upload govulncheck sarif report
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: govulncheck.sarif
-
       - name: Test
         run: make test
 
