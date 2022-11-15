@@ -421,6 +421,13 @@ const (
 
 	// Erigon-CL
 	BeaconState = "BeaconState"
+
+	// LightClientStore => LightClientStore object
+	// LightClientFinalityUpdate => latest finality update
+	// LightClientOptimisticUpdate => latest optimistic update
+	LightClient = "LightClient"
+	// Period (one every 27 hours) => LightClientUpdate
+	LightClientUpdates = "LightClientUpdates"
 )
 
 // Keys
@@ -448,6 +455,10 @@ var (
 	CurrentBodiesSnapshotHash   = []byte("CurrentBodiesSnapshotHash")
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 	PlainStateVersion           = []byte("PlainStateVersion")
+
+	LightClientStore            = []byte("LightClientStore")
+	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
+	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -561,6 +572,8 @@ var ChaindataTables = []string{
 	VerkleTrie,
 
 	BeaconState,
+	LightClient,
+	LightClientUpdates,
 }
 
 const (

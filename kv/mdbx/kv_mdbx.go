@@ -183,7 +183,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, fmt.Errorf("db verbosity set: %w", err)
 		}
 	}
-	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
+	if err = env.SetOption(mdbx.OptMaxDB, 200); err != nil {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
