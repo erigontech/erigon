@@ -20,15 +20,12 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"io"
 	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"text/tabwriter"
-	"text/template"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -58,32 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
-
-func init() {
-	cli.AppHelpTemplate = `{{.Name}} {{if .Flags}}[global options] {{end}}command{{if .Flags}} [command options]{{end}} [arguments...]
-
-VERSION:
-   {{.Version}}
-
-COMMANDS:
-   {{range .Commands}}{{.Name}}{{with .ShortName}}, {{.}}{{end}}{{ "\t" }}{{.Usage}}
-   {{end}}{{if .Flags}}
-GLOBAL OPTIONS:
-   {{range .Flags}}{{.}}
-   {{end}}{{end}}
-`
-	cli.HelpPrinter = printHelp
-}
-
-func printHelp(out io.Writer, templ string, data interface{}) {
-	funcMap := template.FuncMap{"join": strings.Join}
-	t := template.Must(template.New("help").Funcs(funcMap).Parse(templ))
-	w := tabwriter.NewWriter(out, 38, 8, 2, ' ', 0)
-	if err := t.Execute(w, data); err != nil {
-		panic(err)
-	}
-	w.Flush()
-}
 
 // These are all the command line flags we support.
 // If you add to this list, please remember to include the
