@@ -14,7 +14,7 @@ import (
 )
 
 var initCommand = cli.Command{
-	Action:    initGenesis,
+	Action:    MigrateFlags(initGenesis),
 	Name:      "init",
 	Usage:     "Bootstrap and initialize a new genesis block",
 	ArgsUsage: "<genesisPath>",
