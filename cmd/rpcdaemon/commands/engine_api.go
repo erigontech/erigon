@@ -19,8 +19,16 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// ExecutionPayload represents an execution payload (aka slot/block)
-type ExecutionPayload struct {
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#withdrawalv1
+type Withdrawal struct {
+	Index          hexutil.Uint64 `json:"index"          gencodec:"required"`
+	ValidatorIndex hexutil.Uint64 `json:"validatorIndex" gencodec:"required"`
+	Address        common.Address `json:"address"        gencodec:"required"`
+	Amount         *hexutil.Big   `json:"amount"         gencodec:"required"`
+}
+
+// ExecutionPayloadV1 represents an execution payload (aka block) without withdrawals
+type ExecutionPayloadV1 struct {
 	ParentHash    common.Hash     `json:"parentHash"    gencodec:"required"`
 	FeeRecipient  common.Address  `json:"feeRecipient"  gencodec:"required"`
 	StateRoot     common.Hash     `json:"stateRoot"     gencodec:"required"`
@@ -37,6 +45,25 @@ type ExecutionPayload struct {
 	Transactions  []hexutil.Bytes `json:"transactions"  gencodec:"required"`
 }
 
+// ExecutionPayloadV2 represents an execution payload (aka block) with withdrawals
+type ExecutionPayloadV2 struct {
+	ParentHash    common.Hash     `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address  `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash     `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash     `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutil.Bytes   `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash     `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64  `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64  `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64  `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64  `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutil.Bytes   `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big    `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash     `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutil.Bytes `json:"transactions"  gencodec:"required"`
+	Withdrawals   []Withdrawal    `json:"withdrawals"   gencodec:"required"`
+}
+
 // PayloadAttributes represent the attributes required to start assembling a payload
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
@@ -44,11 +71,19 @@ type ForkChoiceState struct {
 	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
 }
 
-// PayloadAttributes represent the attributes required to start assembling a payload
-type PayloadAttributes struct {
+// PayloadAttributesV1 represent the attributes required to start assembling a payload without withdrawals
+type PayloadAttributesV1 struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
 	PrevRandao            common.Hash    `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
+}
+
+// PayloadAttributesV2 represent the attributes required to start assembling a payload with withdrawals
+type PayloadAttributesV2 struct {
+	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
+	PrevRandao            common.Hash    `json:"prevRandao"            gencodec:"required"`
+	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
+	Withdrawals           []Withdrawal   `json:"withdrawals"           gencodec:"required"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -60,10 +95,13 @@ type TransitionConfiguration struct {
 
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
-	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
-	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
-	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error)
+	NewPayloadV1(context.Context, *ExecutionPayloadV1) (map[string]interface{}, error)
+	NewPayloadV2(context.Context, *ExecutionPayloadV2) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV1) (map[string]interface{}, error)
+	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV2) (map[string]interface{}, error)
+	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV1, error)
+	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV2, error)
+	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -74,35 +112,97 @@ type EngineImpl struct {
 	internalCL bool
 }
 
-func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} {
+func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *remote.EnginePayloadStatus) (map[string]interface{}, error) {
 	json := map[string]interface{}{
 		"status": x.Status.String(),
-	}
-	if x.LatestValidHash != nil && x.Status != remote.EngineStatus_ACCEPTED {
-		json["latestValidHash"] = common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
 	}
 	if x.ValidationError != "" {
 		json["validationError"] = x.ValidationError
 	}
+	if x.LatestValidHash == nil || x.Status == remote.EngineStatus_ACCEPTED {
+		return json, nil
+	}
 
-	return json
+	latestValidHash := common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
+	if latestValidHash == (common.Hash{}) {
+		json["latestValidHash"] = common.Hash{}
+		return json, nil
+	}
+
+	// Per the Engine API spec latestValidHash should be set to 0x0000000000000000000000000000000000000000000000000000000000000000
+	// if it refers to a PoW block.
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if isValidHashPos {
+		json["latestValidHash"] = latestValidHash
+	} else {
+		json["latestValidHash"] = common.Hash{}
+	}
+	return json, nil
 }
 
-func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+// Engine API specifies that payloadId is 8 bytes
+func addPayloadId(json map[string]interface{}, payloadId uint64) {
+	if payloadId != 0 {
+		encodedPayloadId := make([]byte, 8)
+		binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
+		json["payloadId"] = hexutil.Bytes(encodedPayloadId)
+	}
+}
+
+func convertWithdrawalsFromJson(in []Withdrawal) ([]*types2.Withdrawal, error) {
+	out := make([]*types2.Withdrawal, 0, len(in))
+	for _, w := range in {
+		amount, overflow := uint256.FromBig((*big.Int)(w.Amount))
+		if overflow {
+			log.Warn("Withdrawal amount overflow")
+			return nil, fmt.Errorf("invalid request")
+		}
+		out = append(out, &types2.Withdrawal{
+			Index:          uint64(w.Index),
+			ValidatorIndex: uint64(w.ValidatorIndex),
+			Address:        gointerfaces.ConvertAddressToH160(w.Address),
+			Amount:         gointerfaces.ConvertUint256IntToH256(amount),
+		})
+	}
+	return out, nil
+}
+
+func convertWithdrawalsToJson(in []*types2.Withdrawal) []Withdrawal {
+	out := make([]Withdrawal, 0, len(in))
+	for _, w := range in {
+		amount := gointerfaces.ConvertH256ToUint256Int(w.Amount).ToBig()
+		out = append(out, Withdrawal{
+			Index:          hexutil.Uint64(w.Index),
+			ValidatorIndex: hexutil.Uint64(w.ValidatorIndex),
+			Address:        gointerfaces.ConvertH160toAddress(w.Address),
+			Amount:         (*hexutil.Big)(amount),
+		})
+	}
+	return out
+}
+
+func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV1) (map[string]interface{}, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
-	log.Debug("Received ForkchoiceUpdated", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
+	log.Debug("Received ForkchoiceUpdatedV1", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
 		"build", payloadAttributes != nil)
 
-	var prepareParameters *remote.EnginePayloadAttributes
-	if payloadAttributes != nil {
-		prepareParameters = &remote.EnginePayloadAttributes{
-			Timestamp:             uint64(payloadAttributes.Timestamp),
-			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-		}
+	attributes := &remote.EnginePayloadAttributes{
+		Timestamp:             uint64(payloadAttributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
 	reply, err := e.api.EngineForkchoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 		ForkchoiceState: &remote.EngineForkChoiceState{
@@ -110,49 +210,78 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 		},
-		PayloadAttributes: prepareParameters,
+		PayloadAttributes: attributes,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	payloadStatus := convertPayloadStatus(reply.PayloadStatus)
-	if reply.PayloadStatus.Status == remote.EngineStatus_INVALID && payloadStatus["latestValidHash"] != nil {
-		tx, err := e.db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		defer tx.Rollback()
-		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
-		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
-		if err != nil {
-			return nil, err
-		}
-		if !isValidHashPos {
-			payloadStatus["latestValidHash"] = common.Hash{}
-		}
+	payloadStatus, err := convertPayloadStatus(ctx, e.db, reply.PayloadStatus)
+	if err != nil {
+		return nil, err
 	}
+
 	json := map[string]interface{}{
 		"payloadStatus": payloadStatus,
 	}
-	if reply.PayloadId != 0 {
-		encodedPayloadId := make([]byte, 8)
-		binary.BigEndian.PutUint64(encodedPayloadId, reply.PayloadId)
-		json["payloadId"] = hexutil.Bytes(encodedPayloadId)
-	}
+	addPayloadId(json, reply.PayloadId)
 
 	return json, nil
 }
 
-// NewPayloadV1 processes new payloads (blocks) from the beacon chain.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
-func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV2) (map[string]interface{}, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
-	log.Debug("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
+	log.Debug("Received ForkchoiceUpdatedV2", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
+		"build", payloadAttributes != nil)
+
+	attributes := &remote.EnginePayloadAttributes{
+		Timestamp:             uint64(payloadAttributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+	}
+	withdrawals, err := convertWithdrawalsFromJson(payloadAttributes.Withdrawals)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := e.api.EngineForkchoiceUpdatedV2(ctx, &remote.EngineForkChoiceUpdatedRequestV2{
+		ForkchoiceState: &remote.EngineForkChoiceState{
+			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
+			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
+		},
+		PayloadAttributes: &remote.EnginePayloadAttributesV2{
+			Attributes:  attributes,
+			Withdrawals: withdrawals,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payloadStatus, err := convertPayloadStatus(ctx, e.db, reply.PayloadStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	json := map[string]interface{}{
+		"payloadStatus": payloadStatus,
+	}
+	addPayloadId(json, reply.PayloadId)
+
+	return json, nil
+}
+
+// NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
+func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayloadV1) (map[string]interface{}, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+	log.Debug("Received NewPayloadV1", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
@@ -186,37 +315,72 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		Transactions:  transactions,
 	})
 	if err != nil {
-		log.Warn("NewPayload", "err", err)
+		log.Warn("NewPayloadV1", "err", err)
 		return nil, err
 	}
-	payloadStatus := convertPayloadStatus(res)
-	if payloadStatus["latestValidHash"] != nil {
-		tx, err := e.db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		defer tx.Rollback()
-		latestValidHash := payloadStatus["latestValidHash"].(common.Hash)
-		isValidHashPos, err := rawdb.IsPosBlock(tx, latestValidHash)
-		if err != nil {
-			return nil, err
-		}
-		if !isValidHashPos {
-			payloadStatus["latestValidHash"] = common.Hash{}
-		}
-	}
-	return payloadStatus, nil
+	return convertPayloadStatus(ctx, e.db, res)
 }
 
-func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
+// NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv2
+func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayloadV2) (map[string]interface{}, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+	log.Debug("Received NewPayloadV2", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
+
+	var baseFee *uint256.Int
+	if payload.BaseFeePerGas != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
+		if overflow {
+			log.Warn("NewPayload BaseFeePerGas overflow")
+			return nil, fmt.Errorf("invalid request")
+		}
+	}
+
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([][]byte, len(payload.Transactions))
+	for i, transaction := range payload.Transactions {
+		transactions[i] = transaction
+	}
+	ep := &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
+		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom),
+		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
+		BlockNumber:   uint64(payload.BlockNumber),
+		GasLimit:      uint64(payload.GasLimit),
+		GasUsed:       uint64(payload.GasUsed),
+		Timestamp:     uint64(payload.Timestamp),
+		ExtraData:     payload.ExtraData,
+		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
+		Transactions:  transactions,
+	}
+	withdrawals, err := convertWithdrawalsFromJson(payload.Withdrawals)
+	if err != nil {
+		return nil, err
+	}
+	res, err := e.api.EngineNewPayloadV2(ctx, &types2.ExecutionPayloadV2{Payload: ep, Withdrawals: withdrawals})
+	if err != nil {
+		log.Warn("NewPayloadV2", "err", err)
+		return nil, err
+	}
+	return convertPayloadStatus(ctx, e.db, res)
+}
+
+func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV1, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetPayload", "payloadId", decodedPayloadId)
+	log.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
 	payload, err := e.api.EngineGetPayloadV1(ctx, decodedPayloadId)
 	if err != nil {
@@ -234,7 +398,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 	for i, transaction := range payload.Transactions {
 		transactions[i] = transaction
 	}
-	return &ExecutionPayload{
+	return &ExecutionPayloadV1{
 		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
 		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
 		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
@@ -252,40 +416,83 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 	}, nil
 }
 
-// Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
-// Can also be used to ping the execution layer (heartbeats).
-// See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#engine_exchangetransitionconfigurationv1
-func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig TransitionConfiguration) (TransitionConfiguration, error) {
+func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV2, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return TransitionConfiguration{}, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	log.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
+
+	ep, err := e.api.EngineGetPayloadV2(ctx, decodedPayloadId)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := ep.Payload
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
+
+	var baseFee *big.Int
+	if payload.BaseFeePerGas != nil {
+		baseFee = gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+	}
+
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([]hexutil.Bytes, len(payload.Transactions))
+	for i, transaction := range payload.Transactions {
+		transactions[i] = transaction
+	}
+	return &ExecutionPayloadV2{
+		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
+		LogsBloom:     bloom[:],
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payload.PrevRandao),
+		BlockNumber:   hexutil.Uint64(payload.BlockNumber),
+		GasLimit:      hexutil.Uint64(payload.GasLimit),
+		GasUsed:       hexutil.Uint64(payload.GasUsed),
+		Timestamp:     hexutil.Uint64(payload.Timestamp),
+		ExtraData:     payload.ExtraData,
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
+		Transactions:  transactions,
+		Withdrawals:   convertWithdrawalsToJson(ep.Withdrawals),
+	}, nil
+}
+
+// Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
+// Can also be used to ping the execution layer (heartbeats).
+// See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
+func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *TransitionConfiguration) (*TransitionConfiguration, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
 
 	tx, err := e.db.BeginRo(ctx)
-
 	if err != nil {
-		return TransitionConfiguration{}, err
+		return nil, err
 	}
-
 	defer tx.Rollback()
 
 	chainConfig, err := e.BaseAPI.chainConfig(tx)
-
 	if err != nil {
-		return TransitionConfiguration{}, err
+		return nil, err
 	}
 
 	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
 
 	if terminalTotalDifficulty == nil {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
+		return nil, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
 	}
 
 	if terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
+		return nil, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	return TransitionConfiguration{
+	return &TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       common.Hash{},
 		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
