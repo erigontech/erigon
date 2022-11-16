@@ -561,6 +561,40 @@ func BenchmarkOpMstore(bench *testing.B) {
 	}
 }
 
+func TestOpTstore(t *testing.T) {
+	var (
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		stack          = stack.New()
+		mem            = NewMemory()
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		scopeContext   = ScopeContext{mem, stack, nil}
+		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
+	)
+
+	env.interpreter = evmInterpreter
+	pc := uint64(0)
+	// push the value to the stack
+	stack.Push(new(uint256.Int).SetBytes(value))
+	// push the location to the stack
+	stack.Push(new(uint256.Int))
+	opTstore(&pc, evmInterpreter, &scopeContext)
+	// there should be no elements on the stack after TSTORE
+	if stack.Len() != 0 {
+		t.Fatal("stack wrong size")
+	}
+	// push the location to the stack
+	stack.Push(new(uint256.Int))
+	opTload(&pc, evmInterpreter, &scopeContext)
+	// there should be one element on the stack after TLOAD
+	if stack.Len() != 1 {
+		t.Fatal("stack wrong size")
+	}
+	val := stack.Peek()
+	if !bytes.Equal(val.Bytes(), value) {
+		t.Fatal("incorrect element read from transient storage")
+	}
+}
+
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
