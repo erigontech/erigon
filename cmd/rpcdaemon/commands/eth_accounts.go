@@ -119,3 +119,26 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	return hexutil.Encode(common.LeftPadBytes(res, 32)), err
 }
+
+// Exist returns whether an account for a given address exists in the database.
+func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+	tx, err1 := api.db.BeginRo(ctx)
+	if err1 != nil {
+		return false, err1
+	}
+	defer tx.Rollback()
+
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	if err != nil {
+		return false, err
+	}
+	acc, err := reader.ReadAccountData(address)
+	if err != nil {
+		return false, err
+	}
+	if acc == nil {
+		return false, nil
+	}
+
+	return true, nil
+}
