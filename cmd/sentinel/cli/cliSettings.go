@@ -21,6 +21,7 @@ type LightClientCliCfg struct {
 	LogLvl         uint                        `json:"logLevel"`
 	NoDiscovery    bool                        `json:"noDiscovery"`
 	CheckpointUri  string                      `json:"checkpointUri"`
+	Chaindata      string                      `json:"chaindata"`
 }
 
 func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
@@ -41,6 +42,7 @@ func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
 	cfg.LogLvl = ctx.Uint(flags.LightClientVerbosity.Name)
 	cfg.NoDiscovery = !ctx.Bool(flags.LightClientDiscovery.Name)
 	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
 	return cfg, nil
 }
 

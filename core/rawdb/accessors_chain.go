@@ -32,7 +32,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -1869,46 +1868,4 @@ func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
 		return verkle.New(), nil
 	}
 	return verkle.ParseNode(encoded, 0, root[:])
-}
-
-func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error {
-	key := make([]byte, 4)
-	binary.BigEndian.PutUint32(key, uint32(update.SignatureSlot/8192))
-
-	encoded, err := update.MarshalSSZ()
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.LightClientUpdates, key, encoded)
-}
-
-func WriteLightClientFinalityUpdate(tx kv.RwTx, update *cltypes.LightClientFinalityUpdate) error {
-	encoded, err := update.MarshalSSZ()
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.LightClient, kv.LightClientFinalityUpdate, encoded)
-}
-
-func WriteLightClientOptimisticUpdate(tx kv.RwTx, update *cltypes.LightClientOptimisticUpdate) error {
-	encoded, err := update.MarshalSSZ()
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.LightClient, kv.LightClientOptimisticUpdate, encoded)
-}
-
-func ReadLightClientUpdate(tx kv.RwTx, period uint32) (*cltypes.LightClientUpdate, error) {
-	key := make([]byte, 4)
-	binary.BigEndian.PutUint32(key, period)
-
-	encoded, err := tx.GetOne(kv.LightClientUpdates, key)
-	if err != nil {
-		return nil, err
-	}
-	update := &cltypes.LightClientUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
-		return nil, err
-	}
-	return update, nil
 }
