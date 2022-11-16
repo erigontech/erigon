@@ -168,7 +168,7 @@ func ExecuteBlockEphemerallyForBSC(
 
 		// We need repack this block because transactions and receipts might be changed by consensus, and
 		// it won't pass receipts hash or bloom verification
-		newBlock = types.NewBlock(block.Header(), outTxs, block.Uncles(), outReceipts, nil /* withdrawals */)
+		newBlock = types.NewBlock(block.Header(), outTxs, block.Uncles(), outReceipts, block.Withdrawals())
 		// Update receipts
 		if !vmConfig.NoReceipts {
 			receipts = outReceipts
