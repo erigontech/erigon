@@ -82,6 +82,14 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	if block.Hash() != params.GnosisGenesisHash {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
+
+	block, _, err = core.DefaultChiadoGenesisBlock().ToBlock()
+	if err != nil {
+		t.Errorf("error: %v", err)
+	}
+	if block.Hash() != params.ChiadoGenesisHash {
+		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
+	}
 }
 
 func TestSokolHeaderRLP(t *testing.T) {
