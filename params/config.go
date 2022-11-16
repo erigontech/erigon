@@ -955,6 +955,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return BorMainnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
+	case genesisHash == ChiadoGenesisHash:
+		return ChiadoChainConfig
 	default:
 		return nil
 	}
