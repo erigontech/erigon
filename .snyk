@@ -1,0 +1,29 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.25.0
+# ignores vulnerabilities until expiry date; change duration by modifying expiry date
+ignore:
+  'snyk:lic:golang:github.com:ledgerwatch:erigon:LGPL-3.0':
+    - '*':
+        reason: 'As open source org, we have no issues with licenses'
+        created: 2022-11-11T10:02:38.349Z
+  'snyk:lic:golang:github.com:anacrolix:torrent:MPL-2.0':
+    - '*':
+        reason: 'As open source org, we have no issues with licenses'
+        created: 2022-11-11T10:02:57.012Z
+  'snyk:lic:golang:github.com:anacrolix:dht:v2:MPL-2.0':
+    - '*':
+        reason: 'As open source org, we have no issues with licenses'
+        created: 2022-11-11T10:03:09.061Z
+  'snyk:lic:golang:github.com:ledgerwatch:trackerslist:GPL-2.0':
+    - '*':
+        reason: 'As open source org, we have no issues with licenses'
+        created: 2022-11-11T10:03:36.780Z
+  'SNYK-GOLANG-GITHUBCOMANACROLIXTORRENTSTORAGE-1018706':
+    - '*':
+        reason: 'This has been fixed on master branch, but not released yet. Please check https://security.snyk.io/vuln/SNYK-GOLANG-GITHUBCOMANACROLIXTORRENTSTORAGE-1018706'
+        created: 2022-11-11T10:37:07.676Z
+  'SNYK-GOLANG-GITHUBCOMTENDERMINTTENDERMINTCRYPTOMULTISIG-564992':
+    - '*':
+        reason: 'This has been fixed for replace github.com/tendermint/tendermint, but Erigon replaces that with github.com/bnb-chain/tendermint v0.31.12 and the latter is not updated (fix not released yet). Please check https://security.snyk.io/vuln/SNYK-GOLANG-GITHUBCOMTENDERMINTTENDERMINTCRYPTOMULTISIG-564992'
+        created: 2022-11-11T10:37:25.225Z
+patch: {}

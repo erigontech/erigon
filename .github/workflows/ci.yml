@@ -22,13 +22,15 @@ concurrency:
 
 jobs:
   tests:
+    permissions:
+      security-events: write
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
-    steps:      
+    steps:
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
@@ -66,6 +68,16 @@ jobs:
         with:
           version: v1.50
 
+      - name: Running govulncheck
+        if: matrix.os == 'ubuntu-20.04'
+        uses: Templum/govulncheck-action@v0.0.6
+        with:
+          go-version: 1.19
+          vulncheck-version: latest
+          package: ./...
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-vuln: false
+
       - name: Test
         run: make test
 
@@ -79,7 +91,7 @@ jobs:
         os: [ windows-2022 ]
     runs-on: ${{ matrix.os }}
 
-    steps:      
+    steps:
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
