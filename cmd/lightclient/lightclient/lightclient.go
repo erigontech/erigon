@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -138,12 +138,12 @@ func (l *LightClient) Start() {
 			lastValidated := updates[len(updates)-1]
 			// Save to Database
 			if lastValidated.HasNextSyncCommittee() {
-				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
+				if err := cldb.WriteLightClientUpdate(tx, lastValidated); err != nil {
 					log.Warn("Could not write lightclient update to db", "err", err)
 				}
-				// Process it as a full LightClientUpdate
-			} else if lastValidated.IsFinalityUpdate() {
-				if err := rawdb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
+			}
+			if lastValidated.IsFinalityUpdate() {
+				if err := cldb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
 					AttestedHeader:  lastValidated.AttestedHeader,
 					FinalizedHeader: lastValidated.FinalizedHeader,
 					FinalityBranch:  lastValidated.FinalityBranch,
@@ -152,13 +152,25 @@ func (l *LightClient) Start() {
 				}); err != nil {
 					log.Warn("Could not write finality lightclient update to db", "err", err)
 				}
-			} else if err := rawdb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
+			}
+			if err := cldb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
 				AttestedHeader: lastValidated.AttestedHeader,
 				SyncAggregate:  lastValidated.SyncAggregate,
 				SignatureSlot:  lastValidated.SignatureSlot,
 			}); err != nil {
 				log.Warn("Could not write optimistic lightclient update to db", "err", err)
 			}
+
+			if err := tx.Commit(); err != nil {
+				log.Error("[LightClient] could not commit to database", "err", err)
+				return
+			}
+			tx, err = l.db.BeginRw(l.ctx)
+			if err != nil {
+				log.Error("[LightClient] could not begin database transaction", "err", err)
+				return
+			}
+			defer tx.Rollback()
 
 			if l.verbose {
 				log.Info("[LightClient] Validated Chain Segments",
