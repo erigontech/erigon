@@ -190,7 +190,7 @@ func buildTorrentIfNeed(fName, root string) (err error) {
 // AddSegment - add existing .seg file, create corresponding .torrent if need
 func AddSegment(originalFileName, snapDir string, client *torrent.Client) (bool, error) {
 	fPath := filepath.Join(snapDir, originalFileName)
-	if !dir.FileExist(fPath + ".torrent") {
+	if !dir2.FileExist(fPath + ".torrent") {
 		return false, nil
 	}
 	_, err := AddTorrentFile(fPath+".torrent", client)
