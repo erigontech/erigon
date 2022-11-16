@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ import (
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
@@ -153,6 +155,16 @@ type Ethereum struct {
 	downloader              *downloader.Downloader
 
 	agg *libstate.Aggregator22
+}
+
+func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
+	idx := strings.LastIndexByte(addr, ':')
+	if idx < 0 {
+		return "", 0, errors.New("invalid address format")
+	}
+	host = addr[:idx]
+	port, err = strconv.Atoi(addr[idx+1:])
+	return
 }
 
 // New creates a new Ethereum object (including the
@@ -297,12 +309,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		cfg := stack.Config().P2P
-		cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[cfg.ProtocolVersion])
-		server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, cfg.ProtocolVersion)
 
-		backend.sentryServers = append(backend.sentryServers, server)
-		sentries = []direct.SentryClient{direct.NewSentryClientDirect(cfg.ProtocolVersion, server)}
+		refCfg := stack.Config().P2P
+		listenHost, listenPort, err := splitAddrIntoHostAndPort(refCfg.ListenAddr)
+		if err != nil {
+			return nil, err
+		}
+		for _, protocol := range refCfg.ProtocolVersion {
+			cfg := refCfg
+			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
+			listenPort++
+
+			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
+			backend.sentryServers = append(backend.sentryServers, server)
+			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+		}
 
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
@@ -488,12 +510,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
-		}, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds)
+		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds)
 		if err != nil {
 			return nil, err
 		}
 
-		lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
+		lc, err := lightclient.NewLightClient(ctx, memdb.New(), genesisCfg, beaconCfg, ethBackendRPC, client, currentBlockNumber, false)
 		if err != nil {
 			return nil, err
 		}

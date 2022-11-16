@@ -20,15 +20,12 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"io"
 	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"text/tabwriter"
-	"text/template"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -58,32 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
-
-func init() {
-	cli.AppHelpTemplate = `{{.Name}} {{if .Flags}}[global options] {{end}}command{{if .Flags}} [command options]{{end}} [arguments...]
-
-VERSION:
-   {{.Version}}
-
-COMMANDS:
-   {{range .Commands}}{{.Name}}{{with .ShortName}}, {{.}}{{end}}{{ "\t" }}{{.Usage}}
-   {{end}}{{if .Flags}}
-GLOBAL OPTIONS:
-   {{range .Flags}}{{.}}
-   {{end}}{{end}}
-`
-	cli.HelpPrinter = printHelp
-}
-
-func printHelp(out io.Writer, templ string, data interface{}) {
-	funcMap := template.FuncMap{"join": strings.Join}
-	t := template.Must(template.New("help").Funcs(funcMap).Parse(templ))
-	w := tabwriter.NewWriter(out, 38, 8, 2, ' ', 0)
-	if err := t.Execute(w, data); err != nil {
-		panic(err)
-	}
-	w.Flush()
-}
 
 // These are all the command line flags we support.
 // If you add to this list, please remember to include the
@@ -502,10 +473,10 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	P2pProtocolVersionFlag = cli.IntFlag{
+	P2pProtocolVersionFlag = cli.UintSliceFlag{
 		Name:  "p2p.protocol",
 		Usage: "Version of eth p2p protocol",
-		Value: int(nodecfg.DefaultConfig.P2P.ProtocolVersion),
+		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -951,7 +922,7 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.Int(ListenPortFlag.Name))
 	}
 	if ctx.IsSet(P2pProtocolVersionFlag.Name) {
-		cfg.ProtocolVersion = uint(ctx.Int(P2pProtocolVersionFlag.Name))
+		cfg.ProtocolVersion = ctx.UintSlice(P2pProtocolVersionFlag.Name)
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))

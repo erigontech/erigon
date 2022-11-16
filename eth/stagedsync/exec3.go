@@ -605,7 +605,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 	}
 }
 
-func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs, workerCount int, fillWorkers []*exec3.FillWorker, agg *state2.Aggregator22) (bitmap *roaring64.Bitmap, err error) {
+func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs, workerCount int, fillWorkers []*exec3.FillWorker, agg *state2.Aggregator22, doneCount *atomic2.Uint64) (bitmap *roaring64.Bitmap, err error) {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -614,7 +614,6 @@ func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs 
 	bigStep := big.NewInt(0x100000000)
 	bigStep.Div(bigStep, bigCount)
 	bigCurrent := big.NewInt(0)
-	doneCount := atomic2.NewUint64(0)
 	for i := 0; i < workerCount; i++ {
 		fromKey = toKey
 		if i == workerCount-1 {
@@ -824,8 +823,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
+	doneCount := atomic2.NewUint64(0)
 	fillWorkers := make([]*exec3.FillWorker, workerCount)
-	bitmap, err := reconstituteStateStep1(ctx, db, txNum, dirs, workerCount, fillWorkers, agg)
+	bitmap, err := reconstituteStateStep1(ctx, db, txNum, dirs, workerCount, fillWorkers, agg, doneCount)
 	if err != nil {
 		return err
 	}
@@ -1066,7 +1066,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		plainContractCollectors[i] = etl.NewCollector(fmt.Sprintf("plainContract %d", i), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer plainContractCollectors[i].Close()
 	}
-	doneCount := atomic2.NewUint64(0)
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])

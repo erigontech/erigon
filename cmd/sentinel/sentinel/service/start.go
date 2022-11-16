@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/log/v3"
@@ -19,9 +20,9 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig, creds credentials.TransportCredentials) (consensusrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials) (consensusrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := sentinel.New(context.Background(), cfg)
+	sent, err := sentinel.New(context.Background(), cfg, db)
 	if err != nil {
 		return nil, err
 	}
