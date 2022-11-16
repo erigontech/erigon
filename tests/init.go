@@ -227,7 +227,7 @@ var Forks = map[string]*params.ChainConfig{
 		MergeNetsplitBlock:      big.NewInt(0),
 		TerminalTotalDifficulty: big.NewInt(0),
 	},
-	"ArrowGlacierToMergeAtDiffC0000": {
+	"Shanghai": {
 		ChainID:                 big.NewInt(1),
 		HomesteadBlock:          big.NewInt(0),
 		TangerineWhistleBlock:   big.NewInt(0),
@@ -240,6 +240,7 @@ var Forks = map[string]*params.ChainConfig{
 		BerlinBlock:             big.NewInt(0),
 		LondonBlock:             big.NewInt(0),
 		ArrowGlacierBlock:       big.NewInt(0),
+		ShanghaiBlock:           big.NewInt(0),
 		TerminalTotalDifficulty: big.NewInt(0xC0000),
 	},
 }
