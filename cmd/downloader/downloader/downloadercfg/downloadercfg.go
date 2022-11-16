@@ -9,7 +9,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
@@ -51,12 +50,13 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.Seed = true
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
-	torrentConfig.ExtendedHandshakeClientVersion = "erigon: " + params.VersionWithCommit(params.GitCommit, "")
 	return torrentConfig
 }
 
-func New(snapDir string, verbosity lg.Level, dbg bool, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
+func New(snapDir string, version string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
+	torrentConfig.ExtendedHandshakeClientVersion = version
+
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
 	torrentConfig.DataDir = snapDir

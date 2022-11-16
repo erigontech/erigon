@@ -2,6 +2,7 @@ package downloadergrpc
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
@@ -60,6 +60,7 @@ func Strings2Proto(in []string) []*prototypes.H160 {
 
 func String2Proto(in string) *prototypes.H160 {
 	var infoHash [20]byte
-	copy(infoHash[:], common.FromHex(in))
+	inHex, _ := hex.DecodeString(in)
+	copy(infoHash[:], inHex)
 	return gointerfaces.ConvertAddressToH160(infoHash)
 }
