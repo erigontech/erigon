@@ -2231,6 +2231,16 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint256.Int) bool {
 		if effectiveTip.Cmp(&thanEffectiveTip) != 0 {
 			return effectiveTip.Cmp(&thanEffectiveTip) > 0
 		}
+		// Compare nonce and cumulative balance. Just as a side note, it doesn't
+		// matter if they're from same sender or not because we're comparing
+		// nonce distance of the sender from state's nonce and not the actual
+		// value of nonce.
+		if mt.nonceDistance != than.nonceDistance {
+			return mt.nonceDistance < than.nonceDistance
+		}
+		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
+			return mt.cumulativeBalanceDistance < than.cumulativeBalanceDistance
+		}
 	case BaseFeeSubPool:
 		if mt.minFeeCap.Cmp(&than.minFeeCap) != 0 {
 			return mt.minFeeCap.Cmp(&than.minFeeCap) > 0
