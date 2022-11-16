@@ -17,8 +17,6 @@
 package vm
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"sort"
 
@@ -233,11 +231,14 @@ func enable4200(jt *JumpTable) {
 // opRjump implements the RJUMP opcode
 func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		idx            = scope.Contract.Container.codeOffsets[scope.ActiveSection] + *pc + 1
-		arg            = scope.Contract.Code[idx : idx+2]
-		relativeOffset int16
+		code = scope.Contract.Container.CodeAt(int(scope.ActiveSection))
+		idx  = *pc + 1
 	)
-	binary.Read(bytes.NewReader(arg), binary.BigEndian, &relativeOffset)
+
+	relativeOffset, err := parseArg(code[idx : idx+2])
+	if err != nil {
+		return nil, err
+	}
 
 	// Move PC past the RJUMP instruction and its immediate argument.
 	*pc += 2 + 1
@@ -257,22 +258,7 @@ func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		*pc += 2
 		return nil, nil
 	}
-
-	var (
-		idx            = scope.Contract.Container.codeOffsets[scope.ActiveSection] + *pc + 1
-		arg            = scope.Contract.Code[idx : idx+2]
-		relativeOffset int16
-	)
-	binary.Read(bytes.NewReader(arg), binary.BigEndian, &relativeOffset)
-
-	// Move PC past the RJUMP instruction and its immediate argument.
-	*pc += 2 + 1
-
-	// Calculate the new PC given the relative offset. Already validated,
-	// so no need to verify casts.
-	*pc = uint64(int64(*pc)+int64(relativeOffset)) - 1 // pc will also be increased by interpreter loop
-
-	return nil, nil
+	return opRjump(pc, interpreter, scope)
 }
 
 // enable4750 applies EIP-4750 (CALLF and RETF opcodes)
@@ -298,11 +284,11 @@ func enable4750(jt *JumpTable) {
 // opCallf implements the CALLF opcode.
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		idx     = scope.Contract.Container.codeOffsets[scope.ActiveSection] + *pc + 1
-		arg     = scope.Contract.Code[idx : idx+2]
-		section int16
+		code = scope.Contract.Container.CodeAt(int(scope.ActiveSection))
+		idx  = *pc + 1
 	)
-	if err := binary.Read(bytes.NewReader(arg), binary.BigEndian, &section); err != nil {
+	section, err := parseArg(code[idx : idx+2])
+	if err != nil {
 		return nil, err
 	}
 	caller := scope.RetStack[len(scope.RetStack)-1]

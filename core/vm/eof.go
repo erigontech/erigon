@@ -97,6 +97,16 @@ func (c *EOF1Container) ValidateCode(jt *JumpTable) error {
 	return nil
 }
 
+// CodeAt returns the code section at the specified index.
+func (c *EOF1Container) CodeAt(section int) []byte {
+	if len(c.codeOffsets) <= section {
+		return nil
+	}
+	idx := c.codeOffsets[section]
+	size := uint64(c.codeSize[section])
+	return c.data[idx : idx+size]
+}
+
 // parseEOF1Header attempts to parse an EOF1-formatted code header.
 func (c *EOF1Container) parseHeader(b []byte) (int, error) {
 	if !hasEOFMagic(b) || !isEOFVersion1(b) {
@@ -211,6 +221,7 @@ func parseTypeSection(code []byte) (out []Annotation) {
 	return
 }
 
+// parseArg returns the int16 located at b[0:2].
 func parseArg(b []byte) (int16, error) {
 	if len(b) < 2 {
 		return 0, fmt.Errorf("argument missing")
