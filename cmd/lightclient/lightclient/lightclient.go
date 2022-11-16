@@ -141,7 +141,6 @@ func (l *LightClient) Start() {
 				if err := cldb.WriteLightClientUpdate(tx, lastValidated); err != nil {
 					log.Warn("Could not write lightclient update to db", "err", err)
 				}
-				// Process it as a full LightClientUpdate
 			}
 			if lastValidated.IsFinalityUpdate() {
 				if err := cldb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
@@ -171,6 +170,7 @@ func (l *LightClient) Start() {
 				log.Error("[LightClient] could not begin database transaction", "err", err)
 				return
 			}
+			defer tx.Rollback()
 
 			if l.verbose {
 				log.Info("[LightClient] Validated Chain Segments",
