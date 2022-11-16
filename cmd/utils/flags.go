@@ -1447,12 +1447,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, dbg, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, _, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, dbg, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
+		version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, version, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
