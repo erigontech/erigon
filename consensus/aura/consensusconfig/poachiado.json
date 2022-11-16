@@ -27,7 +27,6 @@
     "0": "0x3000000000000000000000000000000000000001"
   },
   "posdaoTransition": 0,
-  "twoThirdsMajorityTransition": 0,
   "blockGasLimitContractTransitions": {
     "0": "0x4000000000000000000000000000000000000001"
   },
