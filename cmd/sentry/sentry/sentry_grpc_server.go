@@ -504,7 +504,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
+			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
