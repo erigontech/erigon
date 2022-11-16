@@ -284,7 +284,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 }
 
 func (s *EthBackendServer) EngineNewPayloadV2(ctx context.Context, req *types2.ExecutionPayloadV2) (*remote.EnginePayloadStatus, error) {
-	return s.engineNewPayload(req.Payload, convertWithdrawalsFromRpc(req.Withdrawals))
+	return s.engineNewPayload(req.Payload, ConvertWithdrawalsFromRpc(req.Withdrawals))
 }
 
 // engineNewPayload validates and possibly executes payload
@@ -506,7 +506,10 @@ func (s *EthBackendServer) EngineGetPayloadV2(ctx context.Context, req *remote.E
 	if err != nil {
 		return nil, err
 	}
-	withdrawals := convertWithdrawalsToRpc(block.Withdrawals())
+	withdrawals, err := ConvertWithdrawalsToRpc(block.Withdrawals())
+	if err != nil {
+		return nil, err
+	}
 	return &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, nil
 }
 
@@ -651,7 +654,7 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 
 	var withdrawals []*types.Withdrawal
 	if reqWithdrawals != nil {
-		withdrawals = convertWithdrawalsFromRpc(reqWithdrawals)
+		withdrawals = ConvertWithdrawalsFromRpc(reqWithdrawals)
 	}
 
 	param := core.BlockBuilderParameters{
@@ -703,7 +706,7 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return fmt.Errorf("no logs filter available")
 }
 
-func convertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
+func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	out := make([]*types.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types.Withdrawal{
@@ -716,11 +719,14 @@ func convertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	return out
 }
 
-func convertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) ([]*types2.Withdrawal, error) {
 	out := make([]*types2.Withdrawal, 0, len(in))
 	for _, w := range in {
 		var amount uint256.Int
-		amount.SetFromBig(w.Amount)
+		overflow := amount.SetFromBig(w.Amount)
+		if overflow {
+			return nil, errors.New("withdrawal amount overflow")
+		}
 		out = append(out, &types2.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
@@ -728,5 +734,5 @@ func convertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 			Amount:         gointerfaces.ConvertUint256IntToH256(&amount),
 		})
 	}
-	return out
+	return out, nil
 }

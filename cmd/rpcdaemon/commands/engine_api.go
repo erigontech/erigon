@@ -15,17 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 )
-
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#withdrawalv1
-type Withdrawal struct {
-	Index          hexutil.Uint64 `json:"index"          gencodec:"required"`
-	ValidatorIndex hexutil.Uint64 `json:"validatorIndex" gencodec:"required"`
-	Address        common.Address `json:"address"        gencodec:"required"`
-	Amount         *hexutil.Big   `json:"amount"         gencodec:"required"`
-}
 
 // ExecutionPayloadV1 represents an execution payload (aka block) without withdrawals
 type ExecutionPayloadV1 struct {
@@ -47,21 +40,21 @@ type ExecutionPayloadV1 struct {
 
 // ExecutionPayloadV2 represents an execution payload (aka block) with withdrawals
 type ExecutionPayloadV2 struct {
-	ParentHash    common.Hash     `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address  `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash     `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash     `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes   `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash     `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64  `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64  `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64  `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64  `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes   `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big    `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash     `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes `json:"transactions"  gencodec:"required"`
-	Withdrawals   []Withdrawal    `json:"withdrawals"   gencodec:"required"`
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -80,10 +73,10 @@ type PayloadAttributesV1 struct {
 
 // PayloadAttributesV2 represent the attributes required to start assembling a payload with withdrawals
 type PayloadAttributesV2 struct {
-	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
-	PrevRandao            common.Hash    `json:"prevRandao"            gencodec:"required"`
-	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
-	Withdrawals           []Withdrawal   `json:"withdrawals"           gencodec:"required"`
+	Timestamp             hexutil.Uint64      `json:"timestamp"             gencodec:"required"`
+	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
+	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal `json:"withdrawals"           gencodec:"required"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -159,38 +152,6 @@ func addPayloadId(json map[string]interface{}, payloadId uint64) {
 	}
 }
 
-func convertWithdrawalsFromJson(in []Withdrawal) ([]*types2.Withdrawal, error) {
-	out := make([]*types2.Withdrawal, 0, len(in))
-	for _, w := range in {
-		amount, overflow := uint256.FromBig((*big.Int)(w.Amount))
-		if overflow {
-			log.Warn("Withdrawal amount overflow")
-			return nil, fmt.Errorf("invalid request")
-		}
-		out = append(out, &types2.Withdrawal{
-			Index:          uint64(w.Index),
-			ValidatorIndex: uint64(w.ValidatorIndex),
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         gointerfaces.ConvertUint256IntToH256(amount),
-		})
-	}
-	return out, nil
-}
-
-func convertWithdrawalsToJson(in []*types2.Withdrawal) []Withdrawal {
-	out := make([]Withdrawal, 0, len(in))
-	for _, w := range in {
-		amount := gointerfaces.ConvertH256ToUint256Int(w.Amount).ToBig()
-		out = append(out, Withdrawal{
-			Index:          hexutil.Uint64(w.Index),
-			ValidatorIndex: hexutil.Uint64(w.ValidatorIndex),
-			Address:        gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:         (*hexutil.Big)(amount),
-		})
-	}
-	return out
-}
-
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV1) (map[string]interface{}, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
@@ -242,7 +203,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *F
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
-	withdrawals, err := convertWithdrawalsFromJson(payloadAttributes.Withdrawals)
+	withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	if err != nil {
 		return nil, err
 	}
@@ -361,8 +322,9 @@ func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload
 		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
 		Transactions:  transactions,
 	}
-	withdrawals, err := convertWithdrawalsFromJson(payload.Withdrawals)
+	withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	if err != nil {
+		log.Warn("NewPayloadV2", "err", err)
 		return nil, err
 	}
 	res, err := e.api.EngineNewPayloadV2(ctx, &types2.ExecutionPayloadV2{Payload: ep, Withdrawals: withdrawals})
@@ -458,7 +420,7 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) 
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
-		Withdrawals:   convertWithdrawalsToJson(ep.Withdrawals),
+		Withdrawals:   privateapi.ConvertWithdrawalsFromRpc(ep.Withdrawals),
 	}, nil
 }
 
