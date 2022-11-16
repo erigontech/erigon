@@ -12,4 +12,5 @@ var LightClientDefaultFlags = []cli.Flag{
 	&LightClientServerPort,
 	&LightClientServerProtocol,
 	&LightClientDiscovery,
+	&ChaindataFlag,
 }

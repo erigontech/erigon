@@ -48,4 +48,9 @@ var (
 		Usage: "turn off or on the lightclient finding peers",
 		Value: true,
 	}
+	ChaindataFlag = cli.StringFlag{
+		Name:  "chaindata",
+		Usage: "chaindata of database",
+		Value: "",
+	}
 )

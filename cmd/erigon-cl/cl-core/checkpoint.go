@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -41,4 +43,21 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState,
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
 	return beaconState, nil
+}
+
+func RetrieveTrustedRoot(tx kv.Tx, ctx context.Context, uri string) ([32]byte, error) {
+	var update *cltypes.LightClientFinalityUpdate
+	var err error
+	if update, err = cldb.ReadLightClientFinalityUpdate(tx); err != nil {
+		return [32]byte{}, err
+	}
+	if update != nil {
+		return update.FinalizedHeader.HashTreeRoot()
+	}
+
+	bs, err := RetrieveBeaconState(ctx, uri)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return bs.FinalizedCheckpoint.Root, nil
 }
