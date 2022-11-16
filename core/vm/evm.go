@@ -400,15 +400,15 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
-			c, err := ParseEOF1Container(ret)
-			if err != nil {
-				err = ErrInvalidEOFCode
-			}
 			evmInterpreter, ok := evm.Interpreter().(*EVMInterpreter)
 			if !ok {
 				return nil, common.Address{}, gas, ErrInvalidInterpreter
 			}
-			if err := c.ValidateCode(evmInterpreter.jt); err != nil {
+
+			c, err := ParseEOF1Container(ret)
+			if err != nil {
+				err = ErrInvalidEOFCode
+			} else if err := c.ValidateCode(evmInterpreter.jt); err != nil {
 				err = ErrInvalidEOFCode
 			}
 		} else if evm.chainRules.IsLondon {
