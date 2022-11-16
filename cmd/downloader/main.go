@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
@@ -115,7 +116,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context) error {
 	dirs := datadir.New(datadirCli)
-	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -134,7 +135,8 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
+	cfg, err := downloadercfg.New(dirs.Snap, version, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
