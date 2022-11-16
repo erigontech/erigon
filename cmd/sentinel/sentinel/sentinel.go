@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -46,6 +47,7 @@ type Sentinel struct {
 	cfg        *SentinelConfig
 	peers      *peers.Peers
 	MetadataV2 *cltypes.MetadataV2
+	db         kv.RoDB
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -160,10 +162,12 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
+	db kv.RoDB,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
+		db:  db,
 	}
 
 	// Setup discovery

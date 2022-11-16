@@ -13,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -25,7 +27,6 @@ import (
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -262,6 +263,7 @@ type APIImpl struct {
 	ethBackend rpchelper.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
+	gasCache   *GasPriceCache
 	db         kv.RoDB
 	GasCap     uint64
 }
@@ -278,6 +280,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		ethBackend: eth,
 		txPool:     txPool,
 		mining:     mining,
+		gasCache:   NewGasPriceCache(),
 		GasCap:     gascap,
 	}
 }
@@ -407,4 +410,34 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.B
 	var buf bytes.Buffer
 	err := txs[index].MarshalBinary(&buf)
 	return buf.Bytes(), err
+}
+
+type GasPriceCache struct {
+	latestPrice *big.Int
+	latestHash  common.Hash
+	mtx         sync.Mutex
+}
+
+func NewGasPriceCache() *GasPriceCache {
+	return &GasPriceCache{
+		latestPrice: big.NewInt(0),
+		latestHash:  common.Hash{},
+	}
+}
+
+func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
+	var hash common.Hash
+	var price *big.Int
+	c.mtx.Lock()
+	hash = c.latestHash
+	price = c.latestPrice
+	c.mtx.Unlock()
+	return hash, price
+}
+
+func (c *GasPriceCache) SetLatest(hash common.Hash, price *big.Int) {
+	c.mtx.Lock()
+	c.latestPrice = price
+	c.latestHash = hash
+	c.mtx.Unlock()
 }

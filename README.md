@@ -142,6 +142,10 @@ Don't start services as separated processes unless you have clear reason for it:
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 
+### Embedded Consensus Layer
+
+By default the Engine API is disabled in favour of Erigon native Embedded Consensus Layer, if you want to either stake or sync an external Consensus Layer, run Erigon with flag `--externalcl`.
+
 ### Optional stages
 
 There is an optional stage that can be enabled through flags:
@@ -517,13 +521,14 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 | Port  | Protocol  |        Purpose         | Expose  |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP |  eth/66 or 67 peering  | Public  |
+| 30303 | TCP & UDP |     eth/66 peering     | Public  |
+| 30304 | TCP & UDP |     eth/67 peering     | Public  |
 | 9090  |    TCP    |    gRPC Connections    | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) | Public  |
 | 6060  |    TCP    |    Metrics or Pprof    | Private |
 | 8551  |    TCP    | Engine API (JWT auth)  | Private |
 
-Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
@@ -547,6 +552,15 @@ port.
 Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will be exposed to the internet on 30303.
 Port
 9091 is for internal gRCP connections (e.g erigon -> sentry).
+
+#### `sentinel` ports
+
+| Port  | Protocol  |     Purpose      | Expose  |
+|:-----:|:---------:|:----------------:|:-------:|
+| 4000  |    UDP    |     Peering      | Public  |
+| 4001  |    TCP    |     Peering      | Public  |
+| 7777  |    TCP    | gRPC Connections | Private |
+
 
 #### Other ports
 

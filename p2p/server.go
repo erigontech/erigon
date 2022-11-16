@@ -140,7 +140,7 @@ type Config struct {
 	ListenAddr string
 
 	// eth/66, eth/67, etc
-	ProtocolVersion uint
+	ProtocolVersion []uint
 
 	SentryAddr []string
 

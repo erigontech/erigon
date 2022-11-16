@@ -6,10 +6,12 @@ import (
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -18,9 +20,9 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (consensusrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials) (consensusrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := sentinel.New(context.Background(), cfg)
+	sent, err := sentinel.New(context.Background(), cfg, db)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +53,11 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig) (c
 	log.Info("Sentinel started", "enr", sent.String())
 
 	server := NewSentinelServer(ctx, sent)
-	go StartServe(server, srvCfg)
+	if creds == nil {
+		creds = insecure.NewCredentials()
+	}
+
+	go StartServe(server, srvCfg, creds)
 	timeOutTimer := time.NewTimer(5 * time.Second)
 WaitingLoop:
 	for {
@@ -64,7 +70,8 @@ WaitingLoop:
 			}
 		}
 	}
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, err
 	}
@@ -72,13 +79,13 @@ WaitingLoop:
 	return consensusrpc.NewSentinelClient(conn), nil
 }
 
-func StartServe(server *SentinelServer, srvCfg *ServerConfig) {
+func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.TransportCredentials) {
 	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}
 	// Create a gRPC server
-	gRPCserver := grpc.NewServer()
+	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
 	// Regiser our server as a gRPC server
 	consensusrpc.RegisterSentinelServer(gRPCserver, server)
