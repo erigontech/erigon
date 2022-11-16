@@ -30,5 +30,6 @@
   "twoThirdsMajorityTransition": 0,
   "blockGasLimitContractTransitions": {
     "0": "0x4000000000000000000000000000000000000001"
-  }
+  },
+  "registrar": "0x6000000000000000000000000000000000000000"
 }
