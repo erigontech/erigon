@@ -160,10 +160,13 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	log.Debug("Received ForkchoiceUpdatedV1", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
 		"build", payloadAttributes != nil)
 
-	attributes := &remote.EnginePayloadAttributes{
-		Timestamp:             uint64(payloadAttributes.Timestamp),
-		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+	var attributes *remote.EnginePayloadAttributes
+	if payloadAttributes != nil {
+		attributes = &remote.EnginePayloadAttributes{
+			Timestamp:             uint64(payloadAttributes.Timestamp),
+			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		}
 	}
 	reply, err := e.api.EngineForkchoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 		ForkchoiceState: &remote.EngineForkChoiceState{
@@ -198,14 +201,18 @@ func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *F
 	log.Debug("Received ForkchoiceUpdatedV2", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
 		"build", payloadAttributes != nil)
 
-	attributes := &remote.EnginePayloadAttributes{
-		Timestamp:             uint64(payloadAttributes.Timestamp),
-		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-	}
-	withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
-	if err != nil {
-		return nil, err
+	var attributesV2 *remote.EnginePayloadAttributesV2
+	if payloadAttributes != nil {
+		attributes := &remote.EnginePayloadAttributes{
+			Timestamp:             uint64(payloadAttributes.Timestamp),
+			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		}
+		withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+		if err != nil {
+			return nil, err
+		}
+		attributesV2 = &remote.EnginePayloadAttributesV2{Attributes: attributes, Withdrawals: withdrawals}
 	}
 	reply, err := e.api.EngineForkchoiceUpdatedV2(ctx, &remote.EngineForkChoiceUpdatedRequestV2{
 		ForkchoiceState: &remote.EngineForkChoiceState{
@@ -213,10 +220,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *F
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 		},
-		PayloadAttributes: &remote.EnginePayloadAttributesV2{
-			Attributes:  attributes,
-			Withdrawals: withdrawals,
-		},
+		PayloadAttributes: attributesV2,
 	})
 	if err != nil {
 		return nil, err

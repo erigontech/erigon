@@ -575,7 +575,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 }
 
 func (s *EthBackendServer) EngineForkChoiceUpdatedV2(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequestV2) (*remote.EngineForkChoiceUpdatedReply, error) {
-	return s.engineForkChoiceUpdated(ctx, req.ForkchoiceState, req.PayloadAttributes.Attributes, req.PayloadAttributes.Withdrawals)
+	return s.engineForkChoiceUpdated(ctx, req.ForkchoiceState, req.PayloadAttributes.GetAttributes(), req.PayloadAttributes.GetWithdrawals())
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
