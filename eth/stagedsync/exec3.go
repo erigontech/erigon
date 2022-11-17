@@ -189,7 +189,7 @@ func Exec3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 	applyWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	taskCh := make(chan *state.TxTask, 1024)
-	defer close(taskCh)
+	//defer close(taskCh)
 
 	var applyLoop func(ctx context.Context)
 	if parallel {
@@ -220,9 +220,6 @@ func Exec3(ctx context.Context,
 	} else {
 		applyLoop = func(ctx context.Context) {
 			defer applyWg.Done()
-			defer func() {
-				fmt.Printf("exit worker\n")
-			}()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
@@ -239,17 +236,11 @@ func Exec3(ctx context.Context,
 						return
 					}
 					execWorkers[0].RunTxTask(txTask)
-					if txTask.Error == nil {
-						if err := rs.Apply(tx, txTask, agg); err != nil {
-							panic(fmt.Errorf("State22.Apply: %w", err))
-						}
-						outputTxNum.Inc()
-						outputBlockNum.Store(txTask.BlockNum)
-						//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-					} else {
-						err := fmt.Errorf("rolled back %d block %d txIndex %d, err = %v", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, txTask.Error)
-						panic(err)
+					if err := rs.Apply(tx, txTask, agg); err != nil {
+						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
+					outputTxNum.Inc()
+					outputBlockNum.Store(txTask.BlockNum)
 				}
 			}
 		}
@@ -645,6 +636,8 @@ loop:
 	if parallel {
 		wg.Wait()
 	} else {
+		close(taskCh)
+		applyWg.Wait()
 		if err = rs.Flush(applyTx); err != nil {
 			return err
 		}
