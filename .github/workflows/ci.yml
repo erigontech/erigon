@@ -68,25 +68,6 @@ jobs:
         with:
           version: v1.50
 
-      - name: Running govulncheck
-        if: matrix.os == 'ubuntu-20.04'
-        uses: Templum/govulncheck-action@v0.0.7
-        continue-on-error: true
-        env:
-          DEBUG: "true"
-        with:
-          go-version: 1.19
-          vulncheck-version: latest
-          package: ./...
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          fail-on-vuln: false
-
-      - name: Upload govulncheck report
-        uses: actions/upload-artifact@v3
-        with:
-          name: raw-report
-          path: raw-report.json
-
       - name: Test
         run: make test
 
