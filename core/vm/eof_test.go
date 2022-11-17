@@ -107,7 +107,7 @@ func TestEOFContainer(t *testing.T) {
 			wantDataOffset:  17,
 		},
 		{
-			code:            "EF00010300040100080100020000000201600160025e0001000149",
+			code:            "EF0001030004010008010002000000020160016002b000010001b1",
 			wantCodeSize:    []int{8, 2},
 			wantDataSize:    0,
 			wantTypeSize:    4,

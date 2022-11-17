@@ -122,8 +122,6 @@ const (
 	JUMPDEST OpCode = 0x5b
 	RJUMP    OpCode = 0x5c
 	RJUMPI   OpCode = 0x5d
-	CALLF    OpCode = 0x5e
-	RETF     OpCode = 0x49
 	PUSH0    OpCode = 0x5f
 )
 
@@ -204,11 +202,10 @@ const (
 	LOG4
 )
 
-// unofficial opcodes used for parsing.
+// 0xb0 range - control flow ops.
 const (
-	PUSH OpCode = 0xb0 + iota
-	DUP
-	SWAP
+	CALLF OpCode = 0xb0 + iota
+	RETF
 )
 
 // 0xf0 range - closures.
@@ -390,10 +387,6 @@ var opCodeToString = map[OpCode]string{
 	REVERT:       "REVERT",
 	INVALID:      "INVALID",
 	SELFDESTRUCT: "SELFDESTRUCT",
-
-	PUSH: "PUSH",
-	DUP:  "DUP",
-	SWAP: "SWAP",
 }
 
 func (op OpCode) String() string {
