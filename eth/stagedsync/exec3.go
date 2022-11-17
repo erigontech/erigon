@@ -23,6 +23,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -439,6 +440,20 @@ func Exec3(ctx context.Context,
 		applyWg.Add(1)
 		go applyLoop(ctx)
 	}
+
+	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+		if err = chainDb.View(ctx, func(tx kv.Tx) error {
+			h, err = blockReader.Header(ctx, tx, hash, number)
+			if err != nil {
+				return err
+			}
+			return nil
+
+		}); err != nil {
+			panic(err)
+		}
+		return h
+	}
 	var b *types.Block
 	var blockNum uint64
 loop:
@@ -470,8 +485,15 @@ loop:
 			}()
 		}
 
-		signer := *types.MakeSigner(chainConfig, blockNum)
+		f := core.GetHashFn(header, getHeaderFunc)
+		getHashFnMute := &sync.Mutex{}
+		getHashFn := func(n uint64) common2.Hash {
+			getHashFnMute.Lock()
+			defer getHashFnMute.Unlock()
+			return f(n)
+		}
 
+		signer := *types.MakeSigner(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -486,6 +508,7 @@ loop:
 				BlockHash:    b.Hash(),
 				SkipAnalysis: skipAnalysis,
 				Final:        txIndex == len(txs),
+				GetHashFn:    getHashFn,
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
