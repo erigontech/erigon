@@ -12,22 +12,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const blocksPerRequest = 1024
-
-// Debug function to recieve test packets on the req/resp domain.
-func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consensusrpc.RequestData) {
-	newReqTicker := time.NewTicker(1000 * time.Millisecond)
-	for {
-		select {
-		case <-ctx.Done():
-		case <-newReqTicker.C:
-			go func() {
-
-			}()
-		}
-	}
-}
-
 func GetCheckpointBlock(ctx context.Context, sc consensusrpc.SentinelClient, cp *cltypes.BeaconState, fd [4]byte) (*cltypes.SignedBeaconBlockBellatrix, error) {
 	// Request for blocks by root given the finalized checkpoint root.
 	finalizedRootSlice := [][32]byte{cp.FinalizedCheckpoint.Root}
