@@ -387,6 +387,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
 
+	if args.From == nil {
+		args.From = &common.Address{}
+	}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
 
