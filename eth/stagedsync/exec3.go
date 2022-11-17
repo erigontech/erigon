@@ -226,12 +226,16 @@ func Exec3(ctx context.Context,
 				panic(err)
 			}
 			defer tx.Rollback()
+			execWorkers[0].ResetTx(tx)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case <-ctx.Done():
 					return
-				case txTask := <-taskCh:
+				case txTask, ok := <-taskCh:
+					if !ok { // no more tasks
+						return
+					}
 					execWorkers[0].RunTxTask(txTask)
 					if txTask.Error == nil {
 						if err := rs.Apply(tx, txTask, agg); err != nil {
@@ -540,97 +544,99 @@ loop:
 		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
-		}
 
+			select {
+			case <-logEvery.C:
+				stepsInDB := idxStepsInDB(applyTx)
+				progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				if rs.SizeEstimate() < commitThreshold {
+					// too much steps in db will slow-down everything: flush and prune
+					// it means better spend time for pruning, before flushing more data to db
+					// also better do it now - instead of before Commit() - because Commit does block execution
+					if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
+						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+					} else if stepsInDB > 2 {
+						t := time.Now()
+						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+							panic(err)
+						}
+
+						if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
+							rs.SizeEstimate() < uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
+							break
+						}
+					}
+
+					// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
+					if err := agg.Flush(applyTx); err != nil {
+						panic(err)
+					}
+					break
+				}
+
+				close(taskCh)
+				applyWg.Wait()
+				taskCh = make(chan *state.TxTask, 1024)
+
+				var t1, t2, t3, t4 time.Duration
+				commitStart := time.Now()
+				if err := func() error {
+					rwsLock.Lock()
+					defer rwsLock.Unlock()
+					rwsReceiveCond.Signal()
+					lock.Lock() // This is to prevent workers from starting work on any new txTask
+					defer lock.Unlock()
+
+					t1 = time.Since(commitStart)
+					tt := time.Now()
+					if err := rs.Flush(applyTx); err != nil {
+						return err
+					}
+					t2 = time.Since(tt)
+
+					tt = time.Now()
+					if err := agg.Flush(applyTx); err != nil {
+						return err
+					}
+					t3 = time.Since(tt)
+
+					if err = execStage.Update(applyTx, outputBlockNum.Load()); err != nil {
+						return err
+					}
+
+					applyTx.CollectMetrics()
+					//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
+					tt = time.Now()
+					if !useExternalTx {
+						if err = applyTx.Commit(); err != nil {
+							return err
+						}
+						t4 = time.Since(tt)
+						execWorkers[0].ResetTx(nil)
+						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(applyTx)
+
+						applyWg.Add(1)
+						go applyLoop(ctx)
+					}
+
+					return nil
+				}(); err != nil {
+					return err
+				}
+				log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
+			}
+		}
+		// Check for interrupts
 		select {
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)
 			break loop
-		case <-logEvery.C:
-			stepsInDB := idxStepsInDB(applyTx)
-			progress.Log(execStage.LogPrefix(), rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
-			if rs.SizeEstimate() < commitThreshold {
-				// too much steps in db will slow-down everything: flush and prune
-				// it means better spend time for pruning, before flushing more data to db
-				// also better do it now - instead of before Commit() - because Commit does block execution
-				if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-					if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
-						panic(err)
-					}
-				} else if stepsInDB > 2 {
-					t := time.Now()
-					if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
-						panic(err)
-					}
-
-					if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
-						rs.SizeEstimate() < uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
-						break
-					}
-				}
-
-				// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
-				if err := agg.Flush(applyTx); err != nil {
-					panic(err)
-				}
-				break
-			}
-
-			close(taskCh)
-			applyWg.Wait()
-			taskCh = make(chan *state.TxTask, 1024)
-
-			var t1, t2, t3, t4 time.Duration
-			commitStart := time.Now()
-			if err := func() error {
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				rwsReceiveCond.Signal()
-				lock.Lock() // This is to prevent workers from starting work on any new txTask
-				defer lock.Unlock()
-
-				t1 = time.Since(commitStart)
-				tt := time.Now()
-				if err := rs.Flush(applyTx); err != nil {
-					return err
-				}
-				t2 = time.Since(tt)
-
-				tt = time.Now()
-				if err := agg.Flush(applyTx); err != nil {
-					return err
-				}
-				t3 = time.Since(tt)
-
-				if err = execStage.Update(applyTx, outputBlockNum.Load()); err != nil {
-					return err
-				}
-
-				applyTx.CollectMetrics()
-				//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-				tt = time.Now()
-				if !useExternalTx {
-					if err = applyTx.Commit(); err != nil {
-						return err
-					}
-					t4 = time.Since(tt)
-					execWorkers[0].ResetTx(nil)
-					if applyTx, err = chainDb.BeginRw(ctx); err != nil {
-						return err
-					}
-					agg.SetTx(applyTx)
-
-					applyWg.Add(1)
-					go applyLoop(ctx)
-				}
-
-				return nil
-			}(); err != nil {
-				return err
-			}
-			log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
-
 		default:
 		}
 
