@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -125,6 +127,14 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
 	}
+	for _, w := range withdrawals {
+		var amount uint256.Int
+		overflow := amount.SetFromBig(w.Amount)
+		if overflow {
+			return nil, nil, errors.New("withdrawal amount overflow")
+		}
+		state.AddBalance(w.Address, &amount)
+	}
 	return txs, r, nil
 }
 
@@ -135,6 +145,7 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall, call)
 	}
+	s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
 	return types.NewBlock(header, txs, uncles, receipts, withdrawals), txs, receipts, nil
 }
 
@@ -191,7 +202,19 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return errInvalidUncleHash
 	}
 
-	return misc.VerifyEip1559Header(chain.Config(), parent, header)
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		return err
+	}
+
+	// Verify existence / non-existence of withdrawalsHash
+	shanghai := chain.Config().IsShanghai(header.Number.Uint64())
+	if shanghai && header.WithdrawalsHash == nil {
+		return fmt.Errorf("missing withdrawalsHash")
+	}
+	if !shanghai && header.WithdrawalsHash != nil {
+		return fmt.Errorf("invalid withdrawalsHash: have %s, expected nil", header.WithdrawalsHash)
+	}
+	return nil
 }
 
 func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
