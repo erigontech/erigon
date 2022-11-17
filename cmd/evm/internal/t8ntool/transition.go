@@ -231,8 +231,13 @@ func Main(ctx *cli.Context) error {
 
 	// Sanity check, to not `panic` in state_transition
 	if prestate.Env.Random != nil && !eip1559 {
-		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chainrules"))
+		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chain rules"))
 	}
+
+	if chainConfig.IsShanghai(prestate.Env.Number) && prestate.Env.Withdrawals == nil {
+		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+	}
+
 	if env := prestate.Env; env.Difficulty == nil {
 		// If difficulty was not provided by caller, we need to calculate it.
 		switch {
@@ -258,7 +263,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, nil /* withdrawals */)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
 	getHash := func(num uint64) common.Hash {
