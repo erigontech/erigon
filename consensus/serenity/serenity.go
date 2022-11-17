@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -128,12 +126,7 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
 	}
 	for _, w := range withdrawals {
-		var amount uint256.Int
-		overflow := amount.SetFromBig(w.Amount)
-		if overflow {
-			return nil, nil, errors.New("withdrawal amount overflow")
-		}
-		state.AddBalance(w.Address, &amount)
+		state.AddBalance(w.Address, &w.Amount)
 	}
 	return txs, r, nil
 }

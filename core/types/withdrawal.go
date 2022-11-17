@@ -20,7 +20,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -35,7 +36,7 @@ type Withdrawal struct {
 	Index     uint64         `json:"index"`          // monotonically increasing identifier issued by consensus layer
 	Validator uint64         `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   common.Address `json:"address"`        // target address for withdrawn ether
-	Amount    *big.Int       `json:"amount"`         // value of withdrawal in wei
+	Amount    uint256.Int    `json:"amount"`         // value of withdrawal in wei
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -45,7 +46,7 @@ func (obj *Withdrawal) EncodingSize() int {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
 	encodingSize++
-	encodingSize += rlp.BigIntLenExcludingHead(obj.Amount)
+	encodingSize += rlp.Uint256LenExcludingHead(&obj.Amount)
 	return encodingSize
 }
 
@@ -72,11 +73,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := rlp.EncodeBigInt(obj.Amount, w, b[:]); err != nil {
-		return err
-	}
-
-	return nil
+	return obj.Amount.EncodeRLP(w)
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
@@ -104,7 +101,7 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
-	obj.Amount = new(big.Int).SetBytes(b)
+	obj.Amount.SetBytes(b)
 
 	return s.ListEnd()
 }
@@ -126,13 +123,4 @@ func (s Withdrawals) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
 	rlp.Encode(w, s[i])
-}
-
-// CopyWithdrawal creates a deep copy of a withdrawal object.
-func CopyWithdrawal(obj *Withdrawal) *Withdrawal {
-	cpy := *obj
-	if cpy.Amount = new(big.Int); obj.Amount != nil {
-		cpy.Amount.Set(obj.Amount)
-	}
-	return &cpy
 }

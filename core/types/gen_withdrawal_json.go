@@ -4,7 +4,8 @@ package types
 
 import (
 	"encoding/json"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -18,13 +19,13 @@ func (w Withdrawal) MarshalJSON() ([]byte, error) {
 		Index     hexutil.Uint64 `json:"index"`
 		Validator hexutil.Uint64 `json:"validatorIndex"`
 		Address   common.Address `json:"address"`
-		Amount    *hexutil.Big   `json:"amount"`
+		Amount    uint256.Int    `json:"amount"`
 	}
 	var enc Withdrawal
 	enc.Index = hexutil.Uint64(w.Index)
 	enc.Validator = hexutil.Uint64(w.Validator)
 	enc.Address = w.Address
-	enc.Amount = (*hexutil.Big)(w.Amount)
+	enc.Amount = w.Amount
 	return json.Marshal(&enc)
 }
 
@@ -34,7 +35,7 @@ func (w *Withdrawal) UnmarshalJSON(input []byte) error {
 		Index     *hexutil.Uint64 `json:"index"`
 		Validator *hexutil.Uint64 `json:"validatorIndex"`
 		Address   *common.Address `json:"address"`
-		Amount    *hexutil.Big    `json:"amount"`
+		Amount    *uint256.Int    `json:"amount"`
 	}
 	var dec Withdrawal
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -50,7 +51,7 @@ func (w *Withdrawal) UnmarshalJSON(input []byte) error {
 		w.Address = *dec.Address
 	}
 	if dec.Amount != nil {
-		w.Amount = (*big.Int)(dec.Amount)
+		w.Amount = *dec.Amount
 	}
 	return nil
 }

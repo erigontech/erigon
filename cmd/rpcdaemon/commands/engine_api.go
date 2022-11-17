@@ -208,10 +208,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *F
 			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 		}
-		withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
-		if err != nil {
-			return nil, err
-		}
+		withdrawals := privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 		attributesV2 = &remote.EnginePayloadAttributesV2{Attributes: attributes, Withdrawals: withdrawals}
 	}
 	reply, err := e.api.EngineForkchoiceUpdatedV2(ctx, &remote.EngineForkChoiceUpdatedRequestV2{
@@ -326,11 +323,7 @@ func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload
 		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
 		Transactions:  transactions,
 	}
-	withdrawals, err := privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
-	if err != nil {
-		log.Warn("NewPayloadV2", "err", err)
-		return nil, err
-	}
+	withdrawals := privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	res, err := e.api.EngineNewPayloadV2(ctx, &types2.ExecutionPayloadV2{Payload: ep, Withdrawals: withdrawals})
 	if err != nil {
 		log.Warn("NewPayloadV2", "err", err)

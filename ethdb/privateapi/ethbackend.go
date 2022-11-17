@@ -506,10 +506,7 @@ func (s *EthBackendServer) EngineGetPayloadV2(ctx context.Context, req *remote.E
 	if err != nil {
 		return nil, err
 	}
-	withdrawals, err := ConvertWithdrawalsToRpc(block.Withdrawals())
-	if err != nil {
-		return nil, err
-	}
+	withdrawals := ConvertWithdrawalsToRpc(block.Withdrawals())
 	return &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, nil
 }
 
@@ -713,26 +710,21 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 			Index:     w.Index,
 			Validator: w.ValidatorIndex,
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    gointerfaces.ConvertH256ToUint256Int(w.Amount).ToBig(),
+			Amount:    *gointerfaces.ConvertH256ToUint256Int(w.Amount),
 		})
 	}
 	return out
 }
 
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) ([]*types2.Withdrawal, error) {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	out := make([]*types2.Withdrawal, 0, len(in))
 	for _, w := range in {
-		var amount uint256.Int
-		overflow := amount.SetFromBig(w.Amount)
-		if overflow {
-			return nil, errors.New("withdrawal amount overflow")
-		}
 		out = append(out, &types2.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         gointerfaces.ConvertUint256IntToH256(&amount),
+			Amount:         gointerfaces.ConvertUint256IntToH256(&w.Amount),
 		})
 	}
-	return out, nil
+	return out
 }
