@@ -112,13 +112,13 @@ func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *remote.EnginePaylo
 	if x.ValidationError != "" {
 		json["validationError"] = x.ValidationError
 	}
-	if x.LatestValidHash == nil || x.Status == remote.EngineStatus_ACCEPTED {
+	if x.LatestValidHash == nil || (x.Status != remote.EngineStatus_VALID && x.Status != remote.EngineStatus_INVALID) {
 		return json, nil
 	}
 
 	latestValidHash := common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
-	if latestValidHash == (common.Hash{}) {
-		json["latestValidHash"] = common.Hash{}
+	if latestValidHash == (common.Hash{}) || x.Status == remote.EngineStatus_VALID {
+		json["latestValidHash"] = latestValidHash
 		return json, nil
 	}
 
