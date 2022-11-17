@@ -220,11 +220,11 @@ func Exec3(ctx context.Context,
 	} else {
 		applyLoop = func(ctx context.Context) {
 			defer applyWg.Done()
-			//tx, err := chainDb.BeginRo(ctx)
-			//if err != nil {
-			//	panic(err)
-			//}
-			//defer tx.Rollback()
+			tx, err := chainDb.BeginRo(ctx)
+			if err != nil {
+				panic(err)
+			}
+			defer tx.Rollback()
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -233,7 +233,7 @@ func Exec3(ctx context.Context,
 				case txTask := <-taskCh:
 					execWorkers[0].RunTxTask(txTask)
 					if txTask.Error == nil {
-						if err := rs.Apply(execWorkers[0].Tx(), txTask, agg); err != nil {
+						if err := rs.Apply(tx, txTask, agg); err != nil {
 							panic(fmt.Errorf("State22.Apply: %w", err))
 						}
 						outputTxNum.Inc()
