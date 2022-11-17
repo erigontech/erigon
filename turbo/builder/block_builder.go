@@ -14,18 +14,14 @@ type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
-	emptyHeader *types.Header
-	withdrawals []*types.Withdrawal
-	interrupt   int32
-	syncCond    *sync.Cond
-	block       *types.Block
-	err         error
+	interrupt int32
+	syncCond  *sync.Cond
+	block     *types.Block
+	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters, emptyHeader *types.Header, withdrawals []*types.Withdrawal) *BlockBuilder {
+func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters) *BlockBuilder {
 	b := new(BlockBuilder)
-	b.emptyHeader = emptyHeader
-	b.withdrawals = withdrawals
 	b.syncCond = sync.NewCond(new(sync.Mutex))
 
 	go func() {
@@ -48,7 +44,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 	return b
 }
 
-func (b *BlockBuilder) Stop() *types.Block {
+func (b *BlockBuilder) Stop() (*types.Block, error) {
 	atomic.StoreInt32(&b.interrupt, 1)
 
 	b.syncCond.L.Lock()
@@ -57,12 +53,7 @@ func (b *BlockBuilder) Stop() *types.Block {
 		b.syncCond.Wait()
 	}
 
-	if b.err != nil {
-		log.Error("BlockBuilder", "err", b.err)
-		return types.NewBlock(b.emptyHeader, nil, nil, nil, b.withdrawals)
-	}
-
-	return b.block
+	return b.block, b.err
 }
 
 func (b *BlockBuilder) Block() *types.Block {

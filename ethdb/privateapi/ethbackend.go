@@ -534,7 +534,11 @@ func (s *EthBackendServer) engineGetPayload(req *remote.EngineGetPayloadRequest)
 		return nil, nil, &UnknownPayloadErr
 	}
 
-	block := builder.Stop()
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, nil, err
+	}
 
 	var baseFeeReply *types2.H256
 	if block.Header().BaseFee != nil {
@@ -648,10 +652,6 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
-	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, payloadAttributes.Timestamp, nil)
-	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(payloadAttributes.SuggestedFeeRecipient)
-	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(payloadAttributes.PrevRandao)
-
 	var withdrawals []*types.Withdrawal
 	if reqWithdrawals != nil {
 		withdrawals = ConvertWithdrawalsFromRpc(reqWithdrawals)
@@ -660,13 +660,13 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 	param := core.BlockBuilderParameters{
 		ParentHash:            forkChoice.HeadBlockHash,
 		Timestamp:             payloadAttributes.Timestamp,
-		PrevRandao:            emptyHeader.MixDigest,
-		SuggestedFeeRecipient: emptyHeader.Coinbase,
-		PayloadId:             s.payloadId,
+		PrevRandao:            gointerfaces.ConvertH256ToHash(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(payloadAttributes.SuggestedFeeRecipient),
 		Withdrawals:           withdrawals,
+		PayloadId:             s.payloadId,
 	}
 
-	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param, emptyHeader, withdrawals)
+	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
 	log.Debug("BlockBuilder added", "payload", s.payloadId)
 
 	return &remote.EngineForkChoiceUpdatedReply{
