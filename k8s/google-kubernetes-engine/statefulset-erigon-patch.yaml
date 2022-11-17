@@ -1,0 +1,70 @@
+---
+- op: replace
+  path: /spec/replicas
+  value: 3
+- op: add
+  path: /spec/template/spec/containers/0/resources/limits
+  value:
+    cpu: '9'
+    memory: 110Gi
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/cpu
+  value: '9'
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/memory
+  value: 110Gi
+- op: replace
+  path: /spec/template/spec/containers/0/args
+  value:
+    - '--chain=mainnet'
+    - '--datadir=/home/erigon/.local/share/erigon'
+    - '--db.pagesize=64KB'
+    - '--healthcheck'
+    - '--http'
+    - '--http.addr=0.0.0.0'
+    - '--http.api=eth,erigon,web3,net,debug,ots,trace,txpool'
+    - '--http.corsdomain=*'
+    - '--http.vhosts=*'
+    - '--log.console.verbosity=1'
+    - '--log.json'
+    - '--metrics'
+    - '--metrics.addr=0.0.0.0'
+    - '--metrics.port=6060'
+    - '--nat=none'
+    - '--torrent.download.rate=3000mb'
+    - '--torrent.download.slots=200'
+    - '--ws'
+    - '--ws.compression'
+- op: replace
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - mountPath: /home/erigon/.local/share/erigon
+      name: mainnet
+- op: add
+  path: /spec/template/spec/initContainers/-
+  value:
+    command:
+      - sh
+      - '-c'
+      - chown 1000 -R /home/erigon/.local/share/erigon
+    image: busybox
+    name: chown-datadir
+    securityContext:
+      capabilities:
+        add:
+          - CHOWN
+    volumeMounts:
+      - mountPath: /home/erigon/.local/share/erigon
+        name: mainnet
+- op: add
+  path: /spec/volumeClaimTemplates/-
+  value:
+    metadata:
+      name: mainnet
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 3000Gi
+      storageClassName: premium-rwo
