@@ -65,14 +65,17 @@ var (
 	ErrEOF1UndefinedInstruction          = errors.New("undefined instruction")
 	ErrEOF1TerminatingInstructionMissing = errors.New("code section doesn't end with terminating instruction")
 	ErrEOF1InvalidRelativeOffset         = errors.New("relative offset points to immediate argument")
-	ErrEOF1TypeSectionMissing            = errors.New("no type section")
-	ErrEOF1TypeSectionInvalidSize        = errors.New("invalid type section size")
 	ErrEOF1CodeSectionOverflow           = errors.New("too many code sections")
-	ErrEOF1MultipleTypeSections          = errors.New("multiple type sections")
-	ErrEOF1TypeSectionHeaderAfterOthers  = errors.New("type section header after other section header")
-	ErrEOF1TypeSectionSizeMissing        = errors.New("can't read type section size")
-	ErrEOF1EmptyTypeSection              = errors.New("type section size is 0")
-	ErrEOF1InvalidCallfSection           = errors.New("invalid section in CALLF immediate")
+
+	ErrEOF1TypeSectionDuplicate         = errors.New("multiple type sections")
+	ErrEOF1TypeSectionMissing           = errors.New("no type section")
+	ErrEOF1TypeSectionInvalidSize       = errors.New("invalid type section size")
+	ErrEOF1TypeSectionHeaderAfterOthers = errors.New("type section header after other section header")
+	ErrEOF1TypeSectionSizeMissing       = errors.New("can't read type section size")
+	ErrEOF1TypeSectionEmpty             = errors.New("type section size is 0")
+	ErrEOF1TypeSectionFirstEntryNonZero = errors.New("first entry of type section must have 0 input and 0 output")
+
+	ErrEOF1InvalidCallfSection = errors.New("invalid section in CALLF immediate")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

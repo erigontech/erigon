@@ -257,6 +257,10 @@ func TestEOFContainer(t *testing.T) {
 			code:    "EF00010100020F0004006000AABBCCDD",
 			wantErr: ErrEOF1UnknownSection,
 		},
+		{
+			code:    "0xEF000103000401000801000201000801000200303030303030303030303000300030303030303030003000",
+			wantErr: ErrEOF1TypeSectionInvalidSize,
+		},
 	} {
 		var (
 			code = common.FromHex(test.code)

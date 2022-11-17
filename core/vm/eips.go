@@ -231,7 +231,7 @@ func enable4200(jt *JumpTable) {
 // opRjump implements the RJUMP opcode
 func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		code = scope.Contract.Container.CodeAt(int(scope.ActiveSection))
+		code = scope.Contract.Container.CodeAt(scope.ActiveSection)
 		idx  = *pc + 1
 	)
 
@@ -284,7 +284,7 @@ func enable4750(jt *JumpTable) {
 // opCallf implements the CALLF opcode.
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		code = scope.Contract.Container.CodeAt(int(scope.ActiveSection))
+		code = scope.Contract.Container.CodeAt(scope.ActiveSection)
 		idx  = *pc + 1
 	)
 	section, err := parseArg(code[idx : idx+2])

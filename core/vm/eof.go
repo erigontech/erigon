@@ -71,9 +71,12 @@ func ParseEOF1Container(b []byte) (*EOF1Container, error) {
 		return nil, err
 	}
 	// Read type section if it exists.
-	if typeSize := c.typeSize; typeSize != 0 {
-		c.types = parseTypeSection(b[idx : idx+int(typeSize)])
-		idx += int(typeSize)
+	if ts := int(c.typeSize); ts != 0 {
+		c.types = parseTypeSection(b[idx : idx+int(ts)])
+		if c.types[0].Input != 0 || c.types[0].Output != 0 {
+			return nil, ErrEOF1TypeSectionFirstEntryNonZero
+		}
+		idx += ts
 	}
 	// Calculate starting offset for each code section.
 	for _, size := range c.codeSize {
@@ -98,8 +101,8 @@ func (c *EOF1Container) ValidateCode(jt *JumpTable) error {
 }
 
 // CodeAt returns the code section at the specified index.
-func (c *EOF1Container) CodeAt(section int) []byte {
-	if len(c.codeOffsets) <= section {
+func (c *EOF1Container) CodeAt(section uint64) []byte {
+	if len(c.codeOffsets) <= int(section) {
 		return nil
 	}
 	idx := c.codeOffsets[section]
@@ -133,7 +136,7 @@ outer:
 			}
 			// Only 1 type section is allowed.
 			if typeRead != 0 {
-				return i, ErrEOF1MultipleTypeSections
+				return i, ErrEOF1TypeSectionDuplicate
 			}
 			// Size must be present.
 			if c.typeSize, err = parseSectionSize(b, i+1); err != nil {
@@ -193,6 +196,10 @@ outer:
 	// Must have type section if more than one code section.
 	if len(c.codeSize) > 1 && c.typeSize == 0 {
 		return i, ErrEOF1TypeSectionMissing
+	}
+	// If type section, ensure type section size is 2n the number of code sections.
+	if c.typeSize != 0 && len(c.codeSize) != int(c.typeSize/2) {
+		return i, ErrEOF1TypeSectionInvalidSize
 	}
 	// Declared section sizes must correspond to real size (trailing bytes are not allowed.)
 	if i+int(c.typeSize)+totalCodeSize+int(c.dataSize) != len(b) {
