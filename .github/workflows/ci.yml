@@ -22,8 +22,6 @@ concurrency:
 
 jobs:
   tests:
-    permissions:
-      security-events: write
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
