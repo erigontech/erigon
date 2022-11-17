@@ -412,6 +412,10 @@ loop:
 		if err != nil {
 			return err
 		}
+		if b == nil {
+			// TODO: panic here and see that overall prodcess deadlock
+			return fmt.Errorf("nil block %d", blockNum)
+		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
