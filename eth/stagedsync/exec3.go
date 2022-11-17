@@ -137,7 +137,7 @@ func Exec3(ctx context.Context,
 	ctx = context.Background()
 	queueSize := workerCount * 4
 	var wg sync.WaitGroup
-	execWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), parallel, chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
+	execWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
 		execWorkers[0].ResetTx(applyTx)
@@ -615,10 +615,7 @@ loop:
 						return err
 					}
 					t4 = time.Since(tt)
-					for i := 0; i < len(execWorkers); i++ {
-						execWorkers[i].ResetTx(nil)
-					}
-
+					execWorkers[0].ResetTx(nil)
 					if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 						return err
 					}

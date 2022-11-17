@@ -25,7 +25,6 @@ type Worker22 struct {
 	wg          *sync.WaitGroup
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
-	background  bool
 	blockReader services.FullBlockReader
 	rs          *state.State22
 	stateWriter *state.StateWriter22
@@ -44,14 +43,13 @@ type Worker22 struct {
 	posa     consensus.PoSA
 }
 
-func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *state.TxTask, engine consensus.Engine) *Worker22 {
+func NewWorker22(lock sync.Locker, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *state.TxTask, engine consensus.Engine) *Worker22 {
 	ctx := context.Background()
 	w := &Worker22{
 		lock:        lock,
 		chainDb:     chainDb,
 		wg:          wg,
 		rs:          rs,
-		background:  background,
 		blockReader: blockReader,
 		stateWriter: state.NewStateWriter22(rs),
 		stateReader: state.NewStateReader22(rs),
@@ -77,7 +75,7 @@ func NewWorker22(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wa
 
 func (rw *Worker22) Tx() kv.Tx { return rw.chainTx }
 func (rw *Worker22) ResetTx(chainTx kv.Tx) {
-	if rw.background && rw.chainTx != nil {
+	if rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
 	}
@@ -100,7 +98,7 @@ func (rw *Worker22) Run() {
 func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	if rw.background && rw.chainTx == nil {
+	if rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
 			panic(err)
@@ -174,6 +172,7 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
@@ -181,7 +180,7 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		if txTask.Tx.IsStarkNet() {
 			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			blockContext := core.NewEVMBlockContext(header, txTask.GetHashFn, rw.engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
@@ -298,12 +297,12 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker22, resultCh chan *state.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker22, resultCh chan *state.TxTask, clear func()) {
 	queueSize := workerCount * 64
 	reconWorkers = make([]*Worker22, workerCount)
 	resultCh = make(chan *state.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker22(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker22(lock, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
 		for _, w := range reconWorkers {
