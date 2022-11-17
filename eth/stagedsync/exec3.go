@@ -140,7 +140,6 @@ func Exec3(ctx context.Context,
 	execWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
 	defer clear()
 	if !parallel {
-		execWorkers[0].ResetTx(applyTx)
 		agg.SetTx(applyTx)
 		_maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
@@ -221,12 +220,15 @@ func Exec3(ctx context.Context,
 	} else {
 		applyLoop = func(ctx context.Context) {
 			defer applyWg.Done()
+			defer func() {
+				fmt.Printf("exit worker\n")
+			}()
 			tx, err := chainDb.BeginRo(ctx)
 			if err != nil {
 				panic(err)
 			}
 			defer tx.Rollback()
-			execWorkers[0].ResetTx(tx)
+			execWorkers[0].ResetTx(nil)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -254,11 +256,6 @@ func Exec3(ctx context.Context,
 	}
 
 	if parallel {
-		//chainDb.Update(ctx, func(tx kv.RwTx) error {
-		//	agg.SetTx(tx)
-		//	return agg.Prune(ctx, ethconfig.HistoryV3AggregationStep)
-		//})
-
 		// Go-routine gathering results from the workers
 		go func() {
 			tx, err := chainDb.BeginRw(ctx)
@@ -614,7 +611,7 @@ loop:
 							return err
 						}
 						t4 = time.Since(tt)
-						execWorkers[0].ResetTx(nil)
+						//execWorkers[0].ResetTx(nil)
 						if applyTx, err = chainDb.BeginRw(ctx); err != nil {
 							return err
 						}
@@ -629,6 +626,7 @@ loop:
 					return err
 				}
 				log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
+			default:
 			}
 		}
 		// Check for interrupts
