@@ -3,6 +3,7 @@ package exec3
 import (
 	"context"
 	"math/big"
+	"runtime/debug"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -307,6 +308,9 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 		reconWorkers[i] = NewWorker22(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
+		if rec := recover(); rec != nil {
+			log.Error("Some panic happen", "panic", rec, "stack", debug.Stack())
+		}
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
