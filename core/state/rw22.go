@@ -40,6 +40,7 @@ type TxTask struct {
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
+	GetHashFn          func(n uint64) common.Hash
 	TxAsMessage        types.Message
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
