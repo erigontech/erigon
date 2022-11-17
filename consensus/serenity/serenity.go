@@ -205,7 +205,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return fmt.Errorf("missing withdrawalsHash")
 	}
 	if !shanghai && header.WithdrawalsHash != nil {
-		return fmt.Errorf("invalid withdrawalsHash: have %s, expected nil", header.WithdrawalsHash)
+		return consensus.ErrUnexpectedWithdrawals
 	}
 	return nil
 }
