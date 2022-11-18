@@ -93,7 +93,7 @@ type State22 struct {
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
-	txsDone      *atomic.Uint64
+	txsDone      atomic.Uint64
 	finished     bool
 }
 
