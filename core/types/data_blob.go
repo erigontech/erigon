@@ -9,9 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/kzg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/protolambda/go-kzg/bls"
 	"github.com/protolambda/ztyp/codec"
 	"github.com/protolambda/ztyp/tree"
 )
@@ -58,14 +56,8 @@ func (p *KZGCommitment) UnmarshalText(text []byte) error {
 	return hexutil.UnmarshalFixedText("KZGCommitment", text, p[:])
 }
 
-func (p *KZGCommitment) Point() (*bls.G1Point, error) {
-	return bls.FromCompressedG1(p[:])
-}
-
-func (kzg KZGCommitment) ComputeVersionedHash() common.Hash {
-	h := crypto.Keccak256Hash(kzg[:])
-	h[0] = params.BlobCommitmentVersionKZG
-	return h
+func (c KZGCommitment) ComputeVersionedHash() common.Hash {
+	return common.Hash(kzg.KZGToVersionedHash(kzg.KZGCommitment(c)))
 }
 
 // Compressed BLS12-381 G1 element
@@ -110,6 +102,7 @@ func (p *KZGProof) UnmarshalText(text []byte) error {
 	return hexutil.UnmarshalFixedText("KZGProof", text, p[:])
 }
 
+// BLSFieldElement is the raw bytes representation of a field element
 type BLSFieldElement [32]byte
 
 func (p BLSFieldElement) MarshalText() ([]byte, error) {
@@ -213,18 +206,6 @@ func (blob *Blob) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// Parse blob into Fr elements array
-func (blob *Blob) Parse() (out []bls.Fr, err error) {
-	out = make([]bls.Fr, params.FieldElementsPerBlob)
-	for i, chunk := range blob {
-		ok := bls.FrFrom32(&out[i], chunk)
-		if !ok {
-			return nil, errors.New("internal error commitments")
-		}
-	}
-	return out, nil
-}
-
 type BlobKzgs []KZGCommitment
 
 // kzg.KZGCommitmentSequence interface
@@ -234,19 +215,6 @@ func (bk BlobKzgs) Len() int {
 
 func (bk BlobKzgs) At(i int) kzg.KZGCommitment {
 	return kzg.KZGCommitment(bk[i])
-}
-
-// Extract the crypto material underlying these commitments
-func (li BlobKzgs) Parse() ([]*bls.G1Point, error) {
-	out := make([]*bls.G1Point, len(li))
-	for i, c := range li {
-		p, err := c.Point()
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse commitment %d: %v", i, err)
-		}
-		out[i] = p
-	}
-	return out, nil
 }
 
 func (li *BlobKzgs) Deserialize(dr *codec.DecodingReader) error {
@@ -267,7 +235,7 @@ func (li BlobKzgs) ByteLength() uint64 {
 	return uint64(len(li)) * 48
 }
 
-func (li *BlobKzgs) FixedLength() uint64 {
+func (li BlobKzgs) FixedLength() uint64 {
 	return 0
 }
 
@@ -293,19 +261,6 @@ func (blobs Blobs) Len() int {
 // kzg.BlobSequence interface
 func (blobs Blobs) At(i int) kzg.Blob {
 	return blobs[i]
-}
-
-// Extract the crypto material underlying these blobs
-func (blobs Blobs) Parse() ([][]bls.Fr, error) {
-	out := make([][]bls.Fr, len(blobs))
-	for i, b := range blobs {
-		blob, err := b.Parse()
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse blob %d: %v", i, err)
-		}
-		out[i] = blob
-	}
-	return out, nil
 }
 
 func (a *Blobs) Deserialize(dr *codec.DecodingReader) error {
@@ -356,7 +311,7 @@ func (blobs Blobs) ComputeCommitmentsAndAggregatedProof() (commitments []KZGComm
 			return nil, nil, KZGProof{}, errors.New("could not convert blob to commitment")
 		}
 		commitments[i] = KZGCommitment(c)
-		versionedHashes[i] = commitments[i].ComputeVersionedHash()
+		versionedHashes[i] = common.Hash(kzg.KZGToVersionedHash(c))
 	}
 
 	var kzgProof KZGProof
