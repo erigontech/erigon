@@ -111,6 +111,12 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
+		{
+			Name:   "locality_index",
+			Action: doLocalityIndex,
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
+		},
 	},
 }
 
@@ -148,14 +154,39 @@ func preloadFileAsync(name string) {
 	}()
 }
 
+func doLocalityIndex(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
+	defer chainDB.Close()
+
+	dir.MustExist(dirs.SnapHistory)
+
+	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
+	if err != nil {
+		return err
+	}
+	err = agg.ReopenFiles()
+	if err != nil {
+		return err
+	}
+
+	err = agg.BuildLocalityIndex(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func doDecompressSpeed(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
 	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args.First()
-
-	compress.SetDecompressionTableCondensity(9)
 
 	preloadFileAsync(f)
 
