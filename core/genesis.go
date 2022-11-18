@@ -101,12 +101,14 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 }
 
 // GenesisAccount is an account in the state of the genesis block.
+// Either use "constructor" for deployment code or "code" directly for the final code.
 type GenesisAccount struct {
-	Code       []byte                      `json:"code,omitempty"`
-	Storage    map[common.Hash]common.Hash `json:"storage,omitempty"`
-	Balance    *big.Int                    `json:"balance" gencodec:"required"`
-	Nonce      uint64                      `json:"nonce,omitempty"`
-	PrivateKey []byte                      `json:"secretKey,omitempty"` // for tests
+	Constructor []byte                      `json:"constructor,omitempty"` // deployment code
+	Code        []byte                      `json:"code,omitempty"`        // final contract code
+	Storage     map[common.Hash]common.Hash `json:"storage,omitempty"`
+	Balance     *big.Int                    `json:"balance" gencodec:"required"`
+	Nonce       uint64                      `json:"nonce,omitempty"`
+	PrivateKey  []byte                      `json:"secretKey,omitempty"` // for tests
 }
 
 // field type overrides for gencodec
@@ -315,11 +317,42 @@ func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
+
+	head := &types.Header{
+		Number:     new(big.Int).SetUint64(g.Number),
+		Nonce:      types.EncodeNonce(g.Nonce),
+		Time:       g.Timestamp,
+		ParentHash: g.ParentHash,
+		Extra:      g.ExtraData,
+		GasLimit:   g.GasLimit,
+		GasUsed:    g.GasUsed,
+		Difficulty: g.Difficulty,
+		MixDigest:  g.Mixhash,
+		Coinbase:   g.Coinbase,
+		BaseFee:    g.BaseFee,
+		AuRaStep:   g.AuRaStep,
+		AuRaSeal:   g.AuRaSeal,
+	}
+	if g.GasLimit == 0 {
+		head.GasLimit = params.GenesisGasLimit
+	}
+	if g.Difficulty == nil {
+		head.Difficulty = params.GenesisDifficulty
+	}
+	if g.Config != nil && (g.Config.IsLondon(0)) {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
+			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
+	}
+
 	var root common.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
+		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
 		tmpDB := mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).MustOpen()
 		defer tmpDB.Close()
@@ -344,7 +377,14 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				statedb.SetState(addr, &key, *val)
 			}
 
-			if len(account.Code) > 0 || len(account.Storage) > 0 {
+			if len(account.Constructor) > 0 {
+				_, err := SysCreate(addr, account.Constructor, *g.Config, statedb, head)
+				if err != nil {
+					panic(err)
+				}
+			}
+
+			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
@@ -358,35 +398,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}()
 	wg.Wait()
 
-	head := &types.Header{
-		Number:     new(big.Int).SetUint64(g.Number),
-		Nonce:      types.EncodeNonce(g.Nonce),
-		Time:       g.Timestamp,
-		ParentHash: g.ParentHash,
-		Extra:      g.ExtraData,
-		GasLimit:   g.GasLimit,
-		GasUsed:    g.GasUsed,
-		Difficulty: g.Difficulty,
-		MixDigest:  g.Mixhash,
-		Coinbase:   g.Coinbase,
-		Root:       root,
-		BaseFee:    g.BaseFee,
-		AuRaStep:   g.AuRaStep,
-		AuRaSeal:   g.AuRaSeal,
-	}
-	if g.GasLimit == 0 {
-		head.GasLimit = params.GenesisGasLimit
-	}
-	if g.Difficulty == nil {
-		head.Difficulty = params.GenesisDifficulty
-	}
-	if g.Config != nil && (g.Config.IsLondon(0)) {
-		if g.BaseFee != nil {
-			head.BaseFee = g.BaseFee
-		} else {
-			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
-		}
-	}
+	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }

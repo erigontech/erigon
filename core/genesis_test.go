@@ -2,13 +2,17 @@ package core
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -51,25 +55,25 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 	block, _, err = DefaultRopstenGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Hash() != params.RopstenGenesisHash {
-		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
+		t.Errorf("wrong Ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
 	}
 
 	block, _, err = DefaultSokolGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.SokolGenesisStateRoot {
-		t.Errorf("wrong sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
+		t.Errorf("wrong Sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
 	}
 	if block.Hash() != params.SokolGenesisHash {
-		t.Errorf("wrong sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
+		t.Errorf("wrong Sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
 	}
 
 	block, _, err = DefaultFermionGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.FermionGenesisStateRoot {
-		t.Errorf("wrong fermion genesis state root, got %v, want %v", block.Root(), params.FermionGenesisStateRoot)
+		t.Errorf("wrong Fermion genesis state root, got %v, want %v", block.Root(), params.FermionGenesisStateRoot)
 	}
 	if block.Hash() != params.FermionGenesisHash {
-		t.Errorf("wrong fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
+		t.Errorf("wrong Fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
 	}
 
 	block, _, err = DefaultGnosisGenesisBlock().ToBlock()
@@ -152,4 +156,45 @@ func TestSokolHeaderRLP(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expect, res)
 	}
+}
+
+func TestAllocConstructor(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
+	// This deployment code initially sets contract's 0th storage to 0x2a
+	// and its 1st storage to 0x01c9.
+	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
+
+	funds := big.NewInt(1000000000)
+	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	genSpec := &Genesis{
+		Config: params.AllProtocolChanges,
+		Alloc: GenesisAlloc{
+			address: {Constructor: deploymentCode, Balance: funds},
+		},
+	}
+	db := memdb.NewTestDB(t)
+	defer db.Close()
+	_, _, err := CommitGenesisBlock(db, genSpec)
+	require.NoError(err)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	state := state.New(state.NewPlainState(tx, 1))
+	balance := state.GetBalance(address)
+	assert.Equal(funds, balance.ToBig())
+	code := state.GetCode(address)
+	assert.Equal(common.FromHex("5f355f55"), code)
+
+	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
+	storage0 := &uint256.Int{}
+	state.GetState(address, &key0, storage0)
+	assert.Equal(uint256.NewInt(0x2a), storage0)
+	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	storage1 := &uint256.Int{}
+	state.GetState(address, &key1, storage1)
+	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
