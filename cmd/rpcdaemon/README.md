@@ -317,6 +317,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_getBlockByTimestamp                 | Yes     | Erigon only                          |
 | erigon_BlockNumber                         | Yes     | Erigon only                          |
 | erigon_getLatestLogs                       | Yes     | Erigon only                          |
+| erigon_getRelevantLogs                     | Yes     | Erigon only                          |
 |                                            |         |                                      |
 | bor_getSnapshot                            | Yes     | Bor only                             |
 | bor_getAuthor                              | Yes     | Bor only                             |
