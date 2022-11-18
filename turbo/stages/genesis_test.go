@@ -84,13 +84,13 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	}
 
 	/*
-	block, _, err = core.DefaultChiadoGenesisBlock().ToBlock()
-	if err != nil {
-		t.Errorf("error: %v", err)
-	}
-	if block.Hash() != params.ChiadoGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
-	}
+		block, _, err = core.DefaultChiadoGenesisBlock().ToBlock()
+		if err != nil {
+			t.Errorf("error: %v", err)
+		}
+		if block.Hash() != params.ChiadoGenesisHash {
+			t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
+		}
 	*/
 }
 
