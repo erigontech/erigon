@@ -464,9 +464,6 @@ func (api *ErigonImpl) GetRelevantLogs(ctx context.Context, crit filters.FilterC
 			}
 			// found one block that match
 			count++
-			if count == blockCount {
-				return nil
-			}
 			return nil
 		})
 		if err != nil {
