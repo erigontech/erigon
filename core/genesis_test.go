@@ -30,7 +30,7 @@ func TestDefaultBSCGenesisBlock(t *testing.T) {
 		if network == networkname.ChiadoChainName {
 			continue
 		}
-		
+
 		check(network)
 	}
 }
