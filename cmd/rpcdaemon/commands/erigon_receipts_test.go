@@ -88,7 +88,7 @@ func TestErigonGetRelevantLogs(t *testing.T) {
 			expectedLogs[i].Topics[0],
 		})
 	}
-	actual, err := api.GetRelevantLogs(context.Background(), filters.FilterCriteria{}, blockCount)
+	actual, err := api.GetRelevantLogs(context.Background(), filters.FilterCriteria{Topics: containsTopics}, blockCount)
 	if err != nil {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
