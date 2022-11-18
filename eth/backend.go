@@ -573,6 +573,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		for {
 			select {
 			case b := <-backend.minedBlocks:
+				// Add mined header and block body before broadcast. This is because the broadcast call
+				// will trigger the staged sync which will require headers and blocks to be available
+				// in their respective cache in the download stage. If not found, it would cause a
+				// liveness issue for the chain.
+				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+					log.Error("add mined block to header downloader", "err", err)
+				}
+				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
+					log.Error("add mined block to body downloader", "err", err)
+				}
+
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
@@ -586,12 +597,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 						Hash:   b.Hash(),
 					},
 				})
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					log.Error("add mined block to header downloader", "err", err)
-				}
-				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
-					log.Error("add mined block to body downloader", "err", err)
-				}
 
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
@@ -798,19 +803,29 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
-		mineEvery := time.NewTicker(3 * time.Second)
+		mineEvery := time.NewTicker(cfg.Recommit)
 		defer mineEvery.Stop()
+
+		// Listen on a new head subscription. This allows us to maintain the block time by
+		// triggering mining after the block is passed through all stages.
+		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
+		defer closeNewHeadCh()
 
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
 		for {
-			mineEvery.Reset(3 * time.Second)
+			mineEvery.Reset(cfg.Recommit)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
+				log.Debug("Start mining new block based on txpool notif")
+				hasWork = true
+			case <-newHeadCh:
+				log.Debug("Start mining new block based on new head channel")
 				hasWork = true
 			case <-mineEvery.C:
+				log.Debug("Start mining new block based on miner.recommit")
 				hasWork = true
 			case err := <-errc:
 				works = false
