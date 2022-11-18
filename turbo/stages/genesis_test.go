@@ -60,7 +60,7 @@ func TestSetupGenesis(t *testing.T) {
 				return core.CommitGenesisBlock(db, new(core.Genesis))
 			},
 			wantErr:    core.ErrGenesisNoConfig,
-			wantConfig: params.AllEthashProtocolChanges,
+			wantConfig: params.AllProtocolChanges,
 		},
 		{
 			name: "no block in DB, genesis == nil",
