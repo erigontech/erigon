@@ -131,8 +131,9 @@ const btreeOverhead = 16
 
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.get(table, key)
+	v := rs.get(table, key)
+	rs.lock.RUnlock()
+	return v
 }
 
 func (rs *State22) get(table string, key []byte) []byte {
@@ -264,12 +265,11 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	agg.SetTxNum(txTask.TxNum)
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
 		increase := txTask.BalanceIncreaseSet[addr]
@@ -377,18 +377,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 	}
 
-	for addrS, enc0 := range txTask.AccountPrevs {
-		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
-			return err
-		}
-	}
-	for compositeS, val := range txTask.StoragePrevs {
-		composite := []byte(compositeS)
-		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
-			return err
-		}
-	}
-
 	k := make([]byte, 20+8)
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
@@ -418,6 +406,33 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
+	if txTask.WriteLists != nil {
+		for table, list := range txTask.WriteLists {
+			for i, key := range list.Keys {
+				rs.put(table, key, list.Vals[i])
+			}
+		}
+	}
+	return nil
+}
+
+func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	agg.SetTxNum(txTask.TxNum)
+	if err := rs.appplyState(roTx, txTask, agg); err != nil {
+		return err
+	}
+
+	for addrS, enc0 := range txTask.AccountPrevs {
+		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
+			return err
+		}
+	}
+	for compositeS, val := range txTask.StoragePrevs {
+		composite := []byte(compositeS)
+		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
+			return err
+		}
+	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
 			if err := agg.AddTraceFrom(addr[:]); err != nil {
@@ -439,13 +454,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		for _, topic := range log.Topics {
 			if err := agg.AddLogTopic(topic[:]); err != nil {
 				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
-			}
-		}
-	}
-	if txTask.WriteLists != nil {
-		for table, list := range txTask.WriteLists {
-			for i, key := range list.Keys {
-				rs.put(table, key, list.Vals[i])
 			}
 		}
 	}
