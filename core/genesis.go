@@ -32,6 +32,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -44,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -125,11 +127,12 @@ type genesisSpecMarshaling struct {
 }
 
 type genesisAccountMarshaling struct {
-	Code       hexutil.Bytes
-	Balance    *math.HexOrDecimal256
-	Nonce      math.HexOrDecimal64
-	Storage    map[storageJSON]storageJSON
-	PrivateKey hexutil.Bytes
+	Constructor hexutil.Bytes
+	Code        hexutil.Bytes
+	Balance     *math.HexOrDecimal256
+	Nonce       math.HexOrDecimal64
+	Storage     map[storageJSON]storageJSON
+	PrivateKey  hexutil.Bytes
 }
 
 // storageJSON represents a 256 bit byte array, but allows less than 256 bits when
@@ -313,6 +316,17 @@ func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
 	}
 }
 
+func sortedAllocKeys(m GenesisAlloc) []string {
+	keys := make([]string, len(m))
+	i := 0
+	for k := range m {
+		keys[i] = string(k.Bytes())
+		i++
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
@@ -363,7 +377,26 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		defer tx.Rollback()
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
-		for addr, account := range g.Alloc {
+
+		/*
+			hasConstructorAllocation := false
+			for _, account := range g.Alloc {
+				if len(account.Constructor) > 0 {
+					hasConstructorAllocation = true
+					break
+				}
+			}
+			// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
+			if hasConstructorAllocation && g.Config.Aura != nil {
+				statedb.CreateAccount(common.Address{}, false)
+			}
+		*/
+
+		keys := sortedAllocKeys(g.Alloc)
+		for _, key := range keys {
+			addr := common.BytesToAddress([]byte(key))
+			account := g.Alloc[addr]
+
 			balance, overflow := uint256.FromBig(account.Balance)
 			if overflow {
 				panic("overflow at genesis allocs")
