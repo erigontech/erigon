@@ -351,7 +351,10 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
-		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
+		if err = ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	quit := ctx.Done()

@@ -159,12 +159,12 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 				if err = c.Delete(item.key); err != nil {
 					return false
 				}
-				//fmt.Printf("Flush [%x]=>\n", ks)
+				//fmt.Printf("Flush [%x]=>\n", item.key)
 			} else {
 				if err = c.Put(item.key, item.val); err != nil {
 					return false
 				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
+				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 			}
 			return true
 		})
