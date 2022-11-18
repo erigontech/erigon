@@ -548,7 +548,7 @@ func NonCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uin
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
-	blockKey := make([]byte, dbutils.NumberLength+common.HashLength)
+	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)
 	for i := from; i < to+1; i++ {
 		binary.BigEndian.PutUint64(encNum, i)
@@ -1527,7 +1527,7 @@ func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	})
 }
 func ReadEpoch(tx kv.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
-	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(kv.Epoch, k)
@@ -1560,7 +1560,7 @@ func FindEpochBeforeOrEqualNumber(tx kv.Tx, n uint64) (blockNum uint64, blockHas
 }
 
 func WriteEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
-	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.Put(kv.Epoch, k, transitionProof)

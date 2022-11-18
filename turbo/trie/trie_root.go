@@ -383,7 +383,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		r.saveValueStorage(false, hasTree, storageValue, hash)
 	case SHashStreamItem:
 		if len(storageKey) == 0 { // this is ready-to-use storage root - no reason to call GenStructStep, also GenStructStep doesn't support empty prefixes
-			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+common.HashLength)), hash...)
+			r.hb.hashStack = append(append(r.hb.hashStack, byte(80+length.Hash)), hash...)
 			r.hb.nodeStack = append(r.hb.nodeStack, nil)
 			r.accData.FieldSet |= AccountFieldStorageOnly
 			break
@@ -920,7 +920,7 @@ func (c *AccTrieCursor) _hasState() bool { return (1<<c.childID[c.lvl])&c.hasSta
 func (c *AccTrieCursor) _hasTree() bool  { return (1<<c.childID[c.lvl])&c.hasTree[c.lvl] != 0 }
 func (c *AccTrieCursor) _hasHash() bool  { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
 func (c *AccTrieCursor) _hash(i int8) []byte {
-	return c.v[c.lvl][common.HashLength*int(i) : common.HashLength*(int(i)+1)]
+	return c.v[c.lvl][length.Hash*int(i) : length.Hash*(int(i)+1)]
 }
 
 func (c *AccTrieCursor) _consume() (bool, error) {
@@ -1189,7 +1189,7 @@ func (c *StorageTrieCursor) _hasState() bool { return (1<<c.childID[c.lvl])&c.ha
 func (c *StorageTrieCursor) _hasHash() bool  { return (1<<c.childID[c.lvl])&c.hasHash[c.lvl] != 0 }
 func (c *StorageTrieCursor) _hasTree() bool  { return (1<<c.childID[c.lvl])&c.hasTree[c.lvl] != 0 }
 func (c *StorageTrieCursor) _hash(i int8) []byte {
-	return c.v[c.lvl][int(i)*common.HashLength : (int(i)+1)*common.HashLength]
+	return c.v[c.lvl][int(i)*length.Hash : (int(i)+1)*length.Hash]
 }
 
 func (c *StorageTrieCursor) _nextSiblingInMem() bool {
@@ -1417,20 +1417,20 @@ func keyIsBefore(k1, k2 []byte) bool {
 
 func UnmarshalTrieNodeTyped(v []byte) (hasState, hasTree, hasHash uint16, hashes []common.Hash, rootHash common.Hash) {
 	hasState, hasTree, hasHash, v = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
-	if bits.OnesCount16(hasHash)+1 == len(v)/common.HashLength {
+	if bits.OnesCount16(hasHash)+1 == len(v)/length.Hash {
 		rootHash.SetBytes(common.CopyBytes(v[:32]))
 		v = v[32:]
 	}
-	hashes = make([]common.Hash, len(v)/common.HashLength)
+	hashes = make([]common.Hash, len(v)/length.Hash)
 	for i := 0; i < len(hashes); i++ {
-		hashes[i].SetBytes(common.CopyBytes(v[i*common.HashLength : (i+1)*common.HashLength]))
+		hashes[i].SetBytes(common.CopyBytes(v[i*length.Hash : (i+1)*length.Hash]))
 	}
 	return
 }
 
 func UnmarshalTrieNode(v []byte) (hasState, hasTree, hasHash uint16, hashes, rootHash []byte) {
 	hasState, hasTree, hasHash, hashes = binary.BigEndian.Uint16(v), binary.BigEndian.Uint16(v[2:]), binary.BigEndian.Uint16(v[4:]), v[6:]
-	if bits.OnesCount16(hasHash)+1 == len(hashes)/common.HashLength {
+	if bits.OnesCount16(hasHash)+1 == len(hashes)/length.Hash {
 		rootHash = hashes[:32]
 		hashes = hashes[32:]
 	}
@@ -1438,13 +1438,13 @@ func UnmarshalTrieNode(v []byte) (hasState, hasTree, hasHash uint16, hashes, roo
 }
 
 func MarshalTrieNodeTyped(hasState, hasTree, hasHash uint16, h []common.Hash, buf []byte) []byte {
-	buf = buf[:6+len(h)*common.HashLength]
+	buf = buf[:6+len(h)*length.Hash]
 	meta, hashes := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
 	binary.BigEndian.PutUint16(meta[2:], hasTree)
 	binary.BigEndian.PutUint16(meta[4:], hasHash)
 	for i := 0; i < len(h); i++ {
-		copy(hashes[i*common.HashLength:(i+1)*common.HashLength], h[i].Bytes())
+		copy(hashes[i*length.Hash:(i+1)*length.Hash], h[i].Bytes())
 	}
 	return buf
 }
@@ -1469,14 +1469,14 @@ func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte,
 }
 
 func CastTrieNodeValue(hashes, rootHash []byte) []common.Hash {
-	to := make([]common.Hash, len(hashes)/common.HashLength+len(rootHash)/common.HashLength)
+	to := make([]common.Hash, len(hashes)/length.Hash+len(rootHash)/length.Hash)
 	i := 0
 	if len(rootHash) > 0 {
 		to[0].SetBytes(common.CopyBytes(rootHash))
 		i++
 	}
-	for j := 0; j < len(hashes)/common.HashLength; j++ {
-		to[i].SetBytes(common.CopyBytes(hashes[j*common.HashLength : (j+1)*common.HashLength]))
+	for j := 0; j < len(hashes)/length.Hash; j++ {
+		to[i].SetBytes(common.CopyBytes(hashes[j*length.Hash : (j+1)*length.Hash]))
 		i++
 	}
 	return to
