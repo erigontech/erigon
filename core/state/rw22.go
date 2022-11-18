@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -92,7 +93,7 @@ type State22 struct {
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
-	txsDone      uint64
+	txsDone      *atomic.Uint64
 	finished     bool
 }
 
@@ -221,7 +222,7 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txDoneIncrement()
+	rs.txsDone.Add(1)
 	return count
 }
 
@@ -229,12 +230,6 @@ func (rs *State22) queuePush(t *TxTask) {
 	rs.queueLock.Lock()
 	heap.Push(&rs.queue, t)
 	rs.queueLock.Unlock()
-}
-
-func (rs *State22) txDoneIncrement() {
-	rs.lock.Lock()
-	rs.txsDone++
-	rs.lock.Unlock()
 }
 
 func (rs *State22) AddWork(txTask *TxTask) {
@@ -555,12 +550,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *State22) DoneCount() uint64 {
-	rs.lock.RLock()
-	r := rs.txsDone
-	rs.lock.RUnlock()
-	return r
-}
+func (rs *State22) DoneCount() uint64 { return rs.txsDone.Load() }
 
 func (rs *State22) SizeEstimate() uint64 {
 	rs.lock.RLock()
