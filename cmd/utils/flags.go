@@ -29,14 +29,15 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -1447,16 +1448,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, _, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, version, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
+		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader)
 	}
 
 	nodeConfig.Http.Snap = cfg.Snapshot

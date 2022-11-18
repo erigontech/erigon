@@ -3,11 +3,10 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221116074006-679b8dfa1d53
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221118002912-bd6e399a6c0e
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221026024915-f6abfe5c120e
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
-	github.com/ledgerwatch/trackerslist v1.0.0
 )
 
 require (
@@ -15,8 +14,6 @@ require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.23.0
-	github.com/anacrolix/go-libutp v1.2.0
-	github.com/anacrolix/log v0.13.2-0.20220711050817-613cb738ef30
 	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.47.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
@@ -89,6 +86,8 @@ require (
 )
 
 require (
+	github.com/anacrolix/go-libutp v1.2.0 // indirect
+	github.com/anacrolix/log v0.13.2-0.20220711050817-613cb738ef30 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/containerd/cgroups v1.0.4 // indirect
@@ -112,6 +111,7 @@ require (
 	github.com/klauspost/compress v1.15.10 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
+	github.com/ledgerwatch/trackerslist v1.0.0 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
