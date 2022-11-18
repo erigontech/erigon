@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -51,7 +53,17 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
 	log.Info("[LightClient]", "chain", cliCtx.String(flags.LightClientChain.Name))
 	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
-	db := memdb.New()
+	var db kv.RwDB
+	if lcCfg.Chaindata == "" {
+		log.Info("chaindata is in-memory")
+		db = memdb.New()
+	} else {
+		db, err = mdbx.Open(lcCfg.Chaindata, log.Root(), false)
+		if err != nil {
+			return err
+		}
+	}
+
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        lcCfg.Addr,
 		Port:          int(lcCfg.Port),
@@ -66,18 +78,25 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	}
 	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
 
-	bs, err := clcore.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	finalizedRoot, err := clcore.RetrieveTrustedRoot(tx, ctx, lcCfg.CheckpointUri)
+	if err != nil {
+		return err
+	}
+	tx.Rollback()
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
 	lc, err := lightclient.NewLightClient(ctx, db, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, 0, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 	}
-	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+	if err := lc.BootstrapCheckpoint(ctx, finalizedRoot); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return err
 	}

@@ -69,8 +69,8 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Test HistoryV3
-        run: make test3
+#      - name: Test HistoryV3
+#        run: make test3
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}

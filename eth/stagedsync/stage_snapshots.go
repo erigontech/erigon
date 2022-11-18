@@ -25,8 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
@@ -325,7 +325,7 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	}
 	dbEmpty := len(snInDB) == 0
 	var missingSnapshots []snapshotsync.Range
-	var existingFiles []snap.FileInfo
+	var existingFiles []snaptype.FileInfo
 	if !dbEmpty {
 		existingFiles, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
