@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -78,7 +79,7 @@ func (s *PlainState) GetBlockNr() uint64 {
 
 func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := btree.New(16)
-	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
+	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
 	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
 	if err != nil {
@@ -89,8 +90,8 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 		log.Error("Error decoding account", "err", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(k[common.AddressLength:], acc.Incarnation)
-	copy(k[common.AddressLength+common.IncarnationLength:], startLocation[:])
+	binary.BigEndian.PutUint64(k[length.Addr:], acc.Incarnation)
+	copy(k[length.Addr+length.Incarnation:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}

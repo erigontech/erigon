@@ -84,17 +84,17 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
-	for idx, tx := range block.Transactions() {
+	for idx, txn := range block.Transactions() {
 		select {
 		default:
 		case <-ctx.Done():
 			stream.WriteNil()
 			return ctx.Err()
 		}
-		ibs.Prepare(tx.Hash(), block.Hash(), idx)
-		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
+		ibs.Prepare(txn.Hash(), block.Hash(), idx)
+		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		txCtx := vm.TxContext{
-			TxHash:   tx.Hash(),
+			TxHash:   txn.Hash(),
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),
 		}

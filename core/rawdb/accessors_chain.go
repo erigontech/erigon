@@ -31,6 +31,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -635,9 +636,9 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	if err != nil {
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
-	senders := make([]common.Address, len(data)/common.AddressLength)
+	senders := make([]common.Address, len(data)/length.Addr)
 	for i := 0; i < len(senders); i++ {
-		copy(senders[i][:], data[i*common.AddressLength:])
+		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil
 }
@@ -696,9 +697,9 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 }
 
 func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []common.Address) error {
-	data := make([]byte, common.AddressLength*len(senders))
+	data := make([]byte, length.Addr*len(senders))
 	for i, sender := range senders {
-		copy(data[i*common.AddressLength:], sender[:])
+		copy(data[i*length.Addr:], sender[:])
 	}
 	if err := db.Put(kv.Senders, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block senders: %w", err)
