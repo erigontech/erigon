@@ -1,0 +1,24 @@
+{
+  "ChainName": "chiado",
+  "chainId": 10200,
+  "consensus": "aura",
+  "homesteadBlock": 0,
+  "eip150Block": 0,
+  "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "eip155Block": 0,
+  "byzantiumBlock": 0,
+  "constantinopleBlock": 0,
+  "petersburgBlock": 0,
+  "istanbulBlock": 0,
+  "posdaoBlock": 0,
+  "berlinBlock": 0,
+  "londonBlock": 0,
+  "eip1559FeeCollectorTransition": 0,
+  "eip1559FeeCollector": "0x1559000000000000000000000000000000000000",
+  "terminalTotalDifficulty": 231707791542740786049188744689299064356246512,
+  "aura": {
+    "DBPath": "",
+    "InMemory": false,
+    "Etherbase": "0x0000000000000000000000000000000000000000"
+  }
+}
