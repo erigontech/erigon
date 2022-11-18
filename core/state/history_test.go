@@ -314,7 +314,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 
 	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength+length.Addr)
+		expectedKey := make([]byte, length.Hash+length.Addr)
 		copy(expectedKey[:length.Addr], addr.Bytes())
 		copy(expectedKey[length.Addr:], keyHash.Bytes())
 		return expectedKey
@@ -475,7 +475,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 
 	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength+length.Addr)
+		expectedKey := make([]byte, length.Hash+length.Addr)
 		copy(expectedKey[:length.Addr], addr.Bytes())
 		copy(expectedKey[length.Addr:], keyHash.Bytes())
 		return expectedKey
