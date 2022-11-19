@@ -1,6 +1,6 @@
 package flags
 
-import "github.com/urfave/cli"
+import "github.com/urfave/cli/v2"
 
 var (
 	LightClientPort = cli.IntFlag{
@@ -43,8 +43,14 @@ var (
 		Usage: "sets the chain specs for the lightclient",
 		Value: "mainnet",
 	}
-	LightClientDiscovery = cli.BoolTFlag{
+	LightClientDiscovery = cli.BoolFlag{
 		Name:  "lc.discover",
 		Usage: "turn off or on the lightclient finding peers",
+		Value: true,
+	}
+	ChaindataFlag = cli.StringFlag{
+		Name:  "chaindata",
+		Usage: "chaindata of database",
+		Value: "",
 	}
 )

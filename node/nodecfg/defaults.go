@@ -45,7 +45,7 @@ var DefaultConfig = Config{
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
-		ProtocolVersion: 66, // eth/66 by default
+		ProtocolVersion: []uint{66, 67},
 		MaxPeers:        100,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),

@@ -1,4 +1,4 @@
-package snap
+package snaptype
 
 import (
 	"errors"
@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"golang.org/x/exp/slices"
 )
 
@@ -144,7 +143,7 @@ type FileInfo struct {
 	T         Type
 }
 
-func (f FileInfo) TorrentFileExists() bool { return common.FileExist(f.Path + ".torrent") }
+func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2SegmentSize }
 func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
 
@@ -214,46 +213,4 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 	})
 
 	return res, nil
-}
-
-func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
-	preverified := snapcfg.KnownCfg(chainName, nil, nil).Preverified
-	keep := map[string]struct{}{}
-	for _, p := range preverified {
-		ext := filepath.Ext(p.Name)
-		withoutExt := p.Name[0 : len(p.Name)-len(ext)]
-		keep[withoutExt] = struct{}{}
-	}
-	list, err := Segments(snapDir)
-	if err != nil {
-		return err
-	}
-	for _, f := range list {
-		_, fname := filepath.Split(f.Path)
-		ext := filepath.Ext(fname)
-		withoutExt := fname[0 : len(fname)-len(ext)]
-		if _, ok := keep[withoutExt]; !ok {
-			_ = os.Remove(f.Path)
-			_ = os.Remove(f.Path + ".torrent")
-		} else {
-			if f.T == Transactions {
-				idxPath := IdxFileName(f.From, f.To, Transactions2Block.String())
-				idxExt := filepath.Ext(idxPath)
-				keep[idxPath[0:len(idxPath)-len(idxExt)]] = struct{}{}
-			}
-		}
-	}
-	list, err = IdxFiles(snapDir)
-	if err != nil {
-		return err
-	}
-	for _, f := range list {
-		_, fname := filepath.Split(f.Path)
-		ext := filepath.Ext(fname)
-		withoutExt := fname[0 : len(fname)-len(ext)]
-		if _, ok := keep[withoutExt]; !ok {
-			_ = os.Remove(f.Path)
-		}
-	}
-	return nil
 }

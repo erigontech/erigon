@@ -23,6 +23,28 @@ func WriteMap() bool {
 }
 
 var (
+	mergeTr     int
+	mergeTrOnce sync.Once
+)
+
+func MergeTr() int {
+	mergeTrOnce.Do(func() {
+		v, _ := os.LookupEnv("MERGE_THRESHOLD")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			if i < 0 || i > 4 {
+				panic(i)
+			}
+			mergeTr = i
+		}
+	})
+	return mergeTr
+}
+
+var (
 	mdbxReaadahead     bool
 	mdbxReaadaheadOnce sync.Once
 )

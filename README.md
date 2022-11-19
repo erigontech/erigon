@@ -521,13 +521,14 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 | Port  | Protocol  |        Purpose         | Expose  |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP |  eth/66 or 67 peering  | Public  |
+| 30303 | TCP & UDP |     eth/66 peering     | Public  |
+| 30304 | TCP & UDP |     eth/67 peering     | Public  |
 | 9090  |    TCP    |    gRPC Connections    | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) | Public  |
 | 6060  |    TCP    |    Metrics or Pprof    | Private |
 | 8551  |    TCP    | Engine API (JWT auth)  | Private |
 
-Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
@@ -572,6 +573,28 @@ Optional flags can be enabled that enable pprof or metrics (or both) - however, 
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
+Hetzner may want strict firewall rules, like: 
+```
+0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks       RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)    RFC 6598, Section 7
+127.0.0.0/8           Loopback                   RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                 RFC 3927
+172.16.0.0/12         Private-Use Networks       RFC 1918
+192.0.0.0/24          IETF Protocol Assignments  RFC 5736
+192.0.2.0/24          TEST-NET-1                 RFC 5737
+192.88.99.0/24        6to4 Relay Anycast         RFC 3068
+192.168.0.0/16        Private-Use Networks       RFC 1918
+198.18.0.0/15         Network Interconnect
+                      Device Benchmark Testing   RFC 2544
+198.51.100.0/24       TEST-NET-2                 RFC 5737
+203.0.113.0/24        TEST-NET-3                 RFC 5737
+224.0.0.0/4           Multicast                  RFC 3171
+240.0.0.0/4           Reserved for Future Use    RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
+                                                 RFC 922, Section 7
+```
 
 ### How to get diagnostic for bug report?
 

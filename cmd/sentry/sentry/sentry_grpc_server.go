@@ -504,7 +504,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
+			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -824,25 +824,27 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
-	amount := uint64(0)
+	peerInfos := make([]*PeerInfo, 0, 32) // 32 gives capacity for 1024 peers, well beyond default
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		amount++
+		peerInfos = append(peerInfos, peerInfo)
 		return true
 	})
-	if req.MaxPeers < amount {
-		amount = req.MaxPeers
+	rand.Shuffle(len(peerInfos), func(i int, j int) {
+		peerInfos[i], peerInfos[j] = peerInfos[j], peerInfos[i]
+	})
+	peersToSendCount := len(peerInfos)
+	if peersToSendCount > 0 {
+		peerCountConstrained := math.Min(float64(len(peerInfos)), float64(req.MaxPeers))
+		// Ensure we have at least 1 peer during our sqrt operation
+		peersToSendCount = int(math.Max(math.Sqrt(peerCountConstrained), 1.0))
 	}
 
-	// Send the block to a subset of our peers
-	sendToAmount := int(math.Sqrt(float64(amount)))
-	i := 0
 	var lastErr error
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+	// Send the block to a subset of our peers at random
+	for _, peerInfo := range peerInfos[:peersToSendCount] {
 		ss.writePeer("sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
-		i++
-		return i < sendToAmount
-	})
+	}
 	return reply, lastErr
 }
 

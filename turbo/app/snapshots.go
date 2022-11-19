@@ -21,8 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snaptype"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 )
 
 const ASSERT = false
@@ -50,17 +50,17 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 var snapshotCommand = cli.Command{
 	Name:        "snapshots",
 	Description: `Managing snapshots (historical data partitions)`,
-	Subcommands: []cli.Command{
+	Subcommands: []*cli.Command{
 		{
 			Name:   "create",
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: joinFlags([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotToFlag,
-				SnapshotSegmentSizeFlag,
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotToFlag,
+				&SnapshotSegmentSizeFlag,
 			}, debug.Flags, logging.Flags),
 		},
 		{
@@ -69,9 +69,9 @@ var snapshotCommand = cli.Command{
 			Usage:  "Create all indices for snapshots",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: joinFlags([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotRebuildFlag,
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotRebuildFlag,
 			}, debug.Flags, logging.Flags),
 		},
 		{
@@ -80,10 +80,10 @@ var snapshotCommand = cli.Command{
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: joinFlags([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotToFlag,
-				SnapshotEveryFlag,
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotToFlag,
+				&SnapshotEveryFlag,
 			}, debug.Flags, logging.Flags),
 		},
 		{
@@ -97,19 +97,19 @@ var snapshotCommand = cli.Command{
 			Name:   "compress",
 			Action: doCompress,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  joinFlags([]cli.Flag{utils.DataDirFlag}, debug.Flags, logging.Flags),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 	},
 }
@@ -133,7 +133,7 @@ var (
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
 		Usage: "Amount of blocks in each segment",
-		Value: snap.Erigon2SegmentSize,
+		Value: snaptype.Erigon2SegmentSize,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -150,10 +150,10 @@ func preloadFileAsync(name string) {
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 
 	compress.SetDecompressionTableCondensity(9)
 
@@ -189,10 +189,10 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 func doRam(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	runtime.ReadMemStats(&m)
@@ -247,10 +247,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 
 	preloadFileAsync(f)
 
@@ -296,10 +296,10 @@ func doCompress(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo)
 	if err != nil {

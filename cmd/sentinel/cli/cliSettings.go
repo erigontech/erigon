@@ -3,9 +3,10 @@ package cli
 import (
 	"fmt"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
-	"github.com/urfave/cli"
 )
 
 type LightClientCliCfg struct {
@@ -20,26 +21,28 @@ type LightClientCliCfg struct {
 	LogLvl         uint                        `json:"logLevel"`
 	NoDiscovery    bool                        `json:"noDiscovery"`
 	CheckpointUri  string                      `json:"checkpointUri"`
+	Chaindata      string                      `json:"chaindata"`
 }
 
 func SetUpLightClientCfg(ctx *cli.Context) (*LightClientCliCfg, error) {
 	cfg := &LightClientCliCfg{}
-	chainName := ctx.GlobalString(flags.LightClientChain.Name)
+	chainName := ctx.String(flags.LightClientChain.Name)
 	var err error
 	var network clparams.NetworkType
 	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, network, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
 	}
-	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.GlobalString(flags.LightClientServerAddr.Name), ctx.GlobalInt(flags.LightClientServerPort.Name))
-	cfg.ServerProtocol = ServerProtocolFromInt(ctx.GlobalUint(flags.LightClientServerProtocol.Name))
+	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.LightClientServerAddr.Name), ctx.Int(flags.LightClientServerPort.Name))
+	cfg.ServerProtocol = ServerProtocolFromInt(ctx.Uint(flags.LightClientServerProtocol.Name))
 
-	cfg.Port = uint(ctx.GlobalInt(flags.LightClientPort.Name))
-	cfg.Addr = ctx.GlobalString(flags.LightClientAddr.Name)
+	cfg.Port = uint(ctx.Int(flags.LightClientPort.Name))
+	cfg.Addr = ctx.String(flags.LightClientAddr.Name)
 
-	cfg.LogLvl = ctx.GlobalUint(flags.LightClientVerbosity.Name)
-	cfg.NoDiscovery = !ctx.GlobalBoolT(flags.LightClientDiscovery.Name)
+	cfg.LogLvl = ctx.Uint(flags.LightClientVerbosity.Name)
+	cfg.NoDiscovery = !ctx.Bool(flags.LightClientDiscovery.Name)
 	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
 	return cfg, nil
 }
 
