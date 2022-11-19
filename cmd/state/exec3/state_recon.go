@@ -164,9 +164,9 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
+func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	it := fw.ac.IterateAccountsReconTxsInc(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -180,9 +180,9 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	}
 }
 
-func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
+func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	it := fw.ac.IterateStorageReconTxsInc(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -196,9 +196,9 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 	}
 }
 
-func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
+func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
+	it := fw.ac.IterateCodeReconTxsInc(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {

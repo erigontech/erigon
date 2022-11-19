@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -605,67 +605,16 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 	}
 }
 
-func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs, workerCount int, fillWorkers []*exec3.FillWorker, agg *state2.Aggregator22) (bitmap *roaring64.Bitmap, err error) {
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	var fromKey, toKey []byte
-	bigCount := big.NewInt(int64(workerCount))
-	bigStep := big.NewInt(0x100000000)
-	bigStep.Div(bigStep, bigCount)
-	bigCurrent := big.NewInt(0)
+func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs, agg *state2.Aggregator22, step int) (bitmap *roaring64.Bitmap, err error) {
 	doneCount := atomic2.NewUint64(0)
-	for i := 0; i < workerCount; i++ {
-		fromKey = toKey
-		if i == workerCount-1 {
-			toKey = nil
-		} else {
-			bigCurrent.Add(bigCurrent, bigStep)
-			toKey = make([]byte, 4)
-			bigCurrent.FillBytes(toKey)
-		}
-		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
-		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
-	}
+	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, nil /* fromKey */, nil /* toKey */)
 
-	doneCount.Store(0)
-	accountCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		accountCollectorsX[i] = etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		accountCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapAccounts(accountCollectorsX[i])
-	}
 	t := time.Now()
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	log.Info("Scan accounts history", "took", time.Since(t))
-
-	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer accountCollectorX.Close()
+	doneCount.Store(0)
+	fillWorker.ResetProgress()
+	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	accountCollectorX.LogLvl(log.LvlDebug)
-	for i := 0; i < workerCount; i++ {
-		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return accountCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return nil, err
-		}
-		accountCollectorsX[i].Close()
-		accountCollectorsX[i] = nil
-	}
+	fillWorker.BitmapAccounts(accountCollectorX, step)
 
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -674,45 +623,14 @@ func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs 
 	}
 	accountCollectorX.Close()
 	accountCollectorX = nil //nolint
-	doneCount.Store(0)
-	storageCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		storageCollectorsX[i] = etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		storageCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapStorage(storageCollectorsX[i])
-	}
-	t = time.Now()
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	log.Info("Scan storage history", "took", time.Since(t))
+	log.Info("Scan accounts history", "took", time.Since(t))
 
-	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer storageCollectorX.Close()
+	t = time.Now()
+	doneCount.Store(0)
+	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	storageCollectorX.LogLvl(log.LvlDebug)
-	for i := 0; i < workerCount; i++ {
-		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return storageCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return nil, err
-		}
-		storageCollectorsX[i].Close()
-		storageCollectorsX[i] = nil //nolint
-	}
-	storageCollectorsX = nil //nolint
+	fillWorker.ResetProgress()
+	fillWorker.BitmapStorage(storageCollectorX, step)
 
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -720,119 +638,39 @@ func reconstituteStateStep1(ctx context.Context, db kv.RwDB, txNum uint64, dirs 
 		return nil, err
 	}
 	storageCollectorX.Close()
-	doneCount.Store(0)
-	codeCollectorsX := make([]*etl.Collector, workerCount)
-	for i := 0; i < workerCount; i++ {
-		fillWorkers[i].ResetProgress()
-		codeCollectorsX[i] = etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/4))
-		codeCollectorsX[i].LogLvl(log.LvlDebug)
-		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
-	}
-	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
-			}
-		}
-		p *= 100.0
-		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer codeCollectorX.Close()
-	codeCollectorX.LogLvl(log.LvlDebug)
+	storageCollectorX = nil
+	log.Info("Scan storage history", "took", time.Since(t))
 
-	bitmap = roaring64.New()
-	for i := 0; i < workerCount; i++ {
-		bitmap.Or(fillWorkers[i].Bitmap())
-		if err = codeCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return codeCollectorX.Collect(k, v)
-		}, etl.TransformArgs{}); err != nil {
-			return nil, err
-		}
-		codeCollectorsX[i].Close()
-		codeCollectorsX[i] = nil
-	}
+	t = time.Now()
+	doneCount.Store(0)
+	fillWorker.ResetProgress()
+	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	codeCollectorX.LogLvl(log.LvlDebug)
+	fillWorker.BitmapCode(codeCollectorX, step)
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
 		return nil, err
 	}
 	codeCollectorX.Close()
-	return bitmap, nil
+	codeCollectorX = nil
+	log.Info("Scan code history", "took", time.Since(t))
+	return fillWorker.Bitmap(), nil
 }
 
-func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
-	blockReader services.FullBlockReader,
-	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
-	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
-	defer agg.EnableMadvNormal().DisableReadAhead()
-	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
-
-	var ok bool
-	var blockNum uint64 // First block which is not covered by the history snapshot files
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
-	}
-	fmt.Printf("Max blockNum = %d\n", blockNum)
-	if blockNum == 0 {
-		return fmt.Errorf("not enough transactions in the history data")
-	}
-	blockNum--
-	var txNum uint64
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		txNum, err = rawdb.TxNums.Max(tx, blockNum)
-		if err != nil {
-			return err
-		}
-		txNum++
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
-
-	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
-	dir.Recreate(reconDbPath)
-	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
-	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
-		Flags(func(u uint) uint {
-			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
-		}).
-		WriteMergeThreshold(8192).
-		PageSize(uint64(16 * datasize.KB)).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
-		Open()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	defer os.RemoveAll(reconDbPath)
-
-	fillWorkers := make([]*exec3.FillWorker, workerCount)
-	bitmap, err := reconstituteStateStep1(ctx, db, txNum, dirs, workerCount, fillWorkers, agg)
+func reconstituteStep(step int, last bool,
+	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
+	agg *libstate.Aggregator22, chainDb kv.RwDB, rs *state.ReconState, blockReader services.FullBlockReader,
+	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	batchSize datasize.ByteSize, s *StageState, workCh chan *state.TxTask, blockNum uint64,
+) error {
+	log.Info("Step of incremental reconstitution", "step", step, "last", last)
+	bitmap, err := reconstituteStateStep1(ctx, db, txNum, dirs, agg, step)
 	if err != nil {
 		return err
 	}
 
 	var wg sync.WaitGroup
-	workCh := make(chan *state.TxTask, workerCount*4)
-	rs := state.NewReconState(workCh)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -940,8 +778,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}()
 
-	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
-
 	var inputTxNum uint64
 	var b *types.Block
 	var txKey [8]byte
@@ -1004,35 +840,137 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = rs.Flush(tx); err != nil {
 			return err
 		}
-		//if err = agg.Flush(); err != nil {
-		//	return err
-		//}
 		return nil
 	}); err != nil {
 		return err
 	}
+	return nil
+}
+
+func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
+	blockReader services.FullBlockReader,
+	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
+	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	defer agg.EnableMadvNormal().DisableReadAhead()
+	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+
+	var ok bool
+	var blockNum uint64 // First block which is not covered by the history snapshot files
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
+	}
+	fmt.Printf("Max blockNum = %d\n", blockNum)
+	if blockNum == 0 {
+		return fmt.Errorf("not enough transactions in the history data")
+	}
+	blockNum--
+	var txNum uint64
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		txNum, err = rawdb.TxNums.Max(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		txNum++
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
+
+	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
+	dir.Recreate(reconDbPath)
+	reconDbPath = filepath.Join(reconDbPath, "mdbx.dat")
+	db, err := kv2.NewMDBX(log.New()).Path(reconDbPath).
+		Flags(func(u uint) uint {
+			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
+		}).
+		WriteMergeThreshold(8192).
+		PageSize(uint64(16 * datasize.KB)).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
+		Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	defer os.RemoveAll(reconDbPath)
+
+	workCh := make(chan *state.TxTask, workerCount*4)
+	rs := state.NewReconState(workCh)
+	numSteps := agg.Steps()
+	// Incremental reconstitution, step by step (snapshot range by snapshot range)
+	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
+	for step := 0; step < numSteps; step++ {
+		if err := reconstituteStep(step, step+1 == numSteps, workerCount, ctx, db,
+			txNum, dirs, agg, chainDb, rs, blockReader, chainConfig, logger, genesis,
+			engine, batchSize, s, workCh, blockNum,
+		); err != nil {
+			return err
+		}
+	}
+
 	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	defer plainStateCollector.Close()
 	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2))
 	defer codeCollector.Close()
 	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	defer plainContractCollector.Close()
+	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
-			return plainStateCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return plainStateCollector.Collect(transposedKey, v)
+		}); err != nil {
+			return err
+		}
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateD, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.PlainStateD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return plainStateCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
-			return codeCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return codeCollector.Collect(transposedKey, v)
+		}); err != nil {
+			return err
+		}
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeD, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.CodeD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return codeCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
-			return plainContractCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return plainContractCollector.Collect(transposedKey, v)
+		}); err != nil {
+			return err
+		}
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractD, nil, math.MaxUint32)
+		if err = roTx.ForEach(kv.PlainContractD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return plainContractCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
@@ -1045,10 +983,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = tx.ClearBucket(kv.PlainStateR); err != nil {
 			return err
 		}
+		if err = tx.ClearBucket(kv.PlainStateD); err != nil {
+			return err
+		}
 		if err = tx.ClearBucket(kv.CodeR); err != nil {
 			return err
 		}
+		if err = tx.ClearBucket(kv.CodeD); err != nil {
+			return err
+		}
 		if err = tx.ClearBucket(kv.PlainContractR); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(kv.PlainContractD); err != nil {
 			return err
 		}
 		return nil
@@ -1067,6 +1014,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		defer plainContractCollectors[i].Close()
 	}
 	doneCount := atomic2.NewUint64(0)
+	fillWorkers := make([]*exec3.FillWorker, workerCount)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	for i := 0; i < workerCount; i++ {
 		fillWorkers[i].ResetProgress()
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
@@ -1158,15 +1108,24 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = tx.ClearBucket(kv.PlainContractCode); err != nil {
 			return err
 		}
-		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = plainStateCollector.Load(tx, kv.PlainState, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			//TODO leave the latest for each key or nothing if val is empty
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollector.Close()
-		if err = codeCollector.Load(tx, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = codeCollector.Load(tx, kv.Code, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			//TODO leave the latest for each key or nothing if val is empty
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollector.Close()
-		if err = plainContractCollector.Load(tx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = plainContractCollector.Load(tx, kv.PlainContractCode, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			//TODO leave the latest for each key or nothing if val is empty
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainContractCollector.Close()

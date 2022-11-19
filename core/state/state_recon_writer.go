@@ -83,6 +83,22 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	}
 }
 
+func (rs *ReconState) Delete(table string, key1, key2 []byte, txNum uint64) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	t, ok := rs.changes[table]
+	if !ok {
+		t = btree.NewG[reconPair](32, ReconnLess)
+		rs.changes[table] = t
+	}
+	item := reconPair{key1: key1, key2: key2, val: nil, txNum: txNum}
+	old, ok := t.ReplaceOrInsert(item)
+	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2))
+	if ok {
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
+	}
+}
+
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -103,9 +119,6 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	for table, t := range rs.changes {
 		var err error
 		t.Ascend(func(item reconPair) bool {
-			if len(item.val) == 0 {
-				return true
-			}
 			var composite []byte
 			if item.key2 == nil {
 				composite = make([]byte, 8+len(item.key1))
@@ -116,8 +129,14 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 			}
 			binary.BigEndian.PutUint64(composite, item.txNum)
 			copy(composite[8:], item.key1)
-			if err = rwTx.Put(table, composite, item.val); err != nil {
-				return false
+			if len(item.val) == 0 {
+				if err = rwTx.Put(table, composite[:8], composite[8:]); err != nil {
+					return false
+				}
+			} else {
+				if err = rwTx.Put(table, composite, item.val); err != nil {
+					return false
+				}
 			}
 			return true
 		})
