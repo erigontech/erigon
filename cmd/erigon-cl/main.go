@@ -68,8 +68,6 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 		return
 	}
 	log.Info("Retrieved root block.", "block", cpBlock)
-	log.Info("Block slot.", "block", cpBlock.Block.Slot)
-	log.Info("Block epoch.", "block", cpState.FinalizedCheckpoint.Epoch)
 }
 
 func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {
