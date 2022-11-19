@@ -74,6 +74,7 @@ var (
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 )
 
 var (
@@ -159,6 +160,8 @@ var (
 	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
 
 	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
+
+	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
@@ -880,6 +883,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return BorDevnetChainConfig
 	case networkname.GnosisChainName:
 		return GnosisChainConfig
+	case networkname.ChiadoChainName:
+		return ChiadoChainConfig
 	default:
 		return nil
 	}
@@ -915,6 +920,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &BorDevnetGenesisHash
 	case networkname.GnosisChainName:
 		return &GnosisGenesisHash
+	case networkname.ChiadoChainName:
+		return &ChiadoGenesisHash
 	default:
 		return nil
 	}
@@ -948,6 +955,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return BorMainnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
+	case genesisHash == ChiadoGenesisHash:
+		return ChiadoChainConfig
 	default:
 		return nil
 	}
