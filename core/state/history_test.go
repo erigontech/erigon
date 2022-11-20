@@ -10,6 +10,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -118,7 +119,7 @@ func TestMutationCommit(t *testing.T) {
 
 		resAccStorage := make(map[common.Hash]uint256.Int)
 		err = tx.ForPrefix(kv.PlainState, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
-			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt(0).SetBytes(v)
+			resAccStorage[common.BytesToHash(k[length.Addr+8:])] = *uint256.NewInt(0).SetBytes(v)
 			return nil
 		})
 		if err != nil {
@@ -313,9 +314,9 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 
 	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength+common.AddressLength)
-		copy(expectedKey[:common.AddressLength], addr.Bytes())
-		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
+		expectedKey := make([]byte, length.Hash+length.Addr)
+		copy(expectedKey[:length.Addr], addr.Bytes())
+		copy(expectedKey[length.Addr:], keyHash.Bytes())
 		return expectedKey
 	}
 
@@ -474,9 +475,9 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 
 	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
-		expectedKey := make([]byte, common.HashLength+common.AddressLength)
-		copy(expectedKey[:common.AddressLength], addr.Bytes())
-		copy(expectedKey[common.AddressLength:], keyHash.Bytes())
+		expectedKey := make([]byte, length.Hash+length.Addr)
+		copy(expectedKey[:length.Addr], addr.Bytes())
+		copy(expectedKey[length.Addr:], keyHash.Bytes())
 		return expectedKey
 	}
 
@@ -548,7 +549,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 
 	//walk and collect walkAsOf result
 	startKey := make([]byte, 60)
-	copy(startKey[:common.AddressLength], addr1.Bytes())
+	copy(startKey[:length.Addr], addr1.Bytes())
 
 	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))

@@ -201,7 +201,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
-		compositeKey := make([]byte, common.HashLength+common.HashLength)
+		compositeKey := make([]byte, length.Hash+length.Hash)
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
 		for it.HasNext() {
@@ -215,7 +215,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 				return err
 			}
 			copy(compositeKey, addrHash[:])
-			copy(compositeKey[common.HashLength:], secKey[:])
+			copy(compositeKey[length.Hash:], secKey[:])
 			if len(v) != 0 {
 				v = nonEmptyMarker
 			}
