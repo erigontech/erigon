@@ -1097,7 +1097,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneTxLookup(p, tx, cfg, ctx)
+		err = stagedsync.PruneTxLookup(p, tx, cfg, ctx, true)
 		if err != nil {
 			return err
 		}
