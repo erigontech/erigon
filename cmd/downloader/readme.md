@@ -87,7 +87,7 @@ Erigon does:
 Downloader does:
 
 - Read .torrent files, download everything described by .torrent files
-- Use https://github.com/ngosang/trackerslist see [./trackers/embed.go](./trackers/embed.go)
+- Use https://github.com/ngosang/trackerslist see [./trackers/embed.go](../../../erigon-lib/downloader/trackers/embed.go)
 - automatically seeding
 
 Technical details:
