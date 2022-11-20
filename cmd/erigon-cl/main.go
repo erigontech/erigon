@@ -32,7 +32,7 @@ func main() {
 	}
 }
 
-func runConsensusLayerNode(cliCtx *cli.Context) {
+func runConsensusLayerNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
 
@@ -40,7 +40,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 	cpState, err := getCheckpointState(ctx)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
-		return
+		return err
 	}
 
 	log.Info("Starting sync from checkpoint.")
@@ -48,8 +48,8 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 	// Compute the fork digest of the chain.
 	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
 	if err != nil {
-		log.Error("Could not compute fork digeest", "err", err)
-		return
+		log.Error("Could not compute fork digest", "err", err)
+		return err
 	}
 	log.Info("Fork digest", "data", digest)
 
@@ -65,9 +65,10 @@ func runConsensusLayerNode(cliCtx *cli.Context) {
 	cpBlock, err := clcore.GetCheckpointBlock(ctx, s, cpState, digest)
 	if err != nil {
 		log.Error("[Head sync] Failed", "reason", err)
-		return
+		return err
 	}
 	log.Info("Retrieved root block.", "block", cpBlock)
+	return nil
 }
 
 func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {
@@ -79,7 +80,7 @@ func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensu
 		NetworkConfig: lcCfg.NetworkCfg,
 		BeaconConfig:  lcCfg.BeaconCfg,
 		NoDiscovery:   lcCfg.NoDiscovery,
-	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
+	}, nil, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 		return nil, err
