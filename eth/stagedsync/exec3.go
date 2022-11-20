@@ -17,6 +17,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -42,8 +42,8 @@ import (
 
 var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix}
 }
 
 type Progress struct {
@@ -52,9 +52,12 @@ type Progress struct {
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
 	commitThreshold    uint64
+
+	workersCount int
+	logPrefix    string
 }
 
-func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
@@ -67,7 +70,7 @@ func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rw
 	if count > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
 	}
-	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
+	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"inBlk", atomic.LoadUint64(&inputBlockNum),
@@ -77,7 +80,7 @@ func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rw
 		"resultQueue", fmt.Sprintf("%d/%d", rwsLen, queueSize),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"workers", workersCount,
+		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
@@ -118,29 +121,11 @@ func Exec3(ctx context.Context,
 	var block, stageProgress uint64
 	var outputTxNum, maxTxNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var inputTxNum uint64
-	var inputBlockNum, outputBlockNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
-	var count uint64
-	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
-	var resultsSize = atomic2.NewInt64(0)
-	var lock sync.RWMutex
-	var rws state.TxTaskQueue
-	var rwsLock sync.RWMutex
-
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
 	}
-
-	// erigon3 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
-	// too keep consistency
-	// will improve it in future versions
-	interruptCh := ctx.Done()
-	ctx = context.Background()
-	queueSize := workerCount * 4
-	var wg sync.WaitGroup
-	execWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
-	defer clear()
-	if !parallel {
+	if !parallel || useExternalTx {
 		agg.SetTx(applyTx)
 		_maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
@@ -178,9 +163,27 @@ func Exec3(ctx context.Context,
 		}
 	}
 
+	var inputBlockNum, outputBlockNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var count uint64
+	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var resultsSize = atomic2.NewInt64(0)
+	var lock sync.RWMutex
+	var rws state.TxTaskQueue
+	var rwsLock sync.RWMutex
+
+	// erigon3 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
+	// too keep consistency
+	// will improve it in future versions
+	interruptCh := ctx.Done()
+	ctx = context.Background()
+	queueSize := workerCount * 4
+	var wg sync.WaitGroup
+	execWorkers, resultCh, clear := exec3.NewWorkersPool(lock.RLocker(), chainDb, &wg, rs, blockReader, chainConfig, logger, genesis, engine, workerCount)
+	defer clear()
+
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
-	progress := NewProgress(block, commitThreshold)
+	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
@@ -228,7 +231,7 @@ func Exec3(ctx context.Context,
 			defer tx.Rollback()
 			execWorkers[0].ResetTx(nil)
 
-			for outputTxNum.Load() < maxTxNum.Load() {
+			for {
 				select {
 				case <-ctx.Done():
 					return
@@ -273,7 +276,7 @@ func Exec3(ctx context.Context,
 					rwsLock.RUnlock()
 
 					stepsInDB := idxStepsInDB(tx)
-					progress.Log(execStage.LogPrefix(), workerCount, rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 					if rs.SizeEstimate() < commitThreshold {
 						// too much steps in db will slow-down everything: flush and prune
 						// it means better spend time for pruning, before flushing more data to db
@@ -541,7 +544,7 @@ loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := idxStepsInDB(applyTx)
-				progress.Log(execStage.LogPrefix(), workerCount, rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					// too much steps in db will slow-down everything: flush and prune
 					// it means better spend time for pruning, before flushing more data to db

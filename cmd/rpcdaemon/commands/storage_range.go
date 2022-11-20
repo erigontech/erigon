@@ -5,7 +5,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -23,7 +22,11 @@ type StorageEntry struct {
 	Value common.Hash  `json:"value"`
 }
 
-func StorageRangeAt(stateReader *state.PlainState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+type walker interface {
+	ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error
+}
+
+func StorageRangeAt(stateReader walker, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
 
