@@ -215,7 +215,9 @@ func Exec3(ctx context.Context,
 						defer rwsLock.Unlock()
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {
+							rwsReceiveCond.Signal()
+						})
 						syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					}()
 				}
@@ -328,12 +330,13 @@ func Exec3(ctx context.Context,
 									drained = true
 								}
 							}
-							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
+							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {})
 							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 							if rws.Len() == 0 {
 								break
 							}
 						}
+						rwsReceiveCond.Signal()
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
 						// Drain results channel because read sets do not carry over
@@ -689,7 +692,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 }
 
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, rwsReceiveCond *sync.Cond) {
+	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
@@ -700,7 +703,6 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
-			rwsReceiveCond.Signal()
 			if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
