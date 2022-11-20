@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -62,12 +63,30 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 
 	// Get checkpoint block by root.
-	cpBlock, err := clcore.GetCheckpointBlock(ctx, s, cpState, digest)
+	cpBlock, err := clcore.GetCheckpointBlock(ctx, s, cpState)
 	if err != nil {
 		log.Error("[Head sync] Failed", "reason", err)
 		return err
 	}
 	log.Info("Retrieved root block.", "block", cpBlock)
+
+	// Get status object.
+	status, err := clcore.GetStatus(ctx, s, &cltypes.Status{
+		ForkDigest:     digest,
+		FinalizedRoot:  cpState.FinalizedCheckpoint.Root,
+		FinalizedEpoch: cpState.FinalizedCheckpoint.Epoch,
+		HeadRoot:       cpState.FinalizedCheckpoint.Root,
+		HeadSlot:       cpBlock.Block.Slot,
+	})
+	if err != nil {
+		log.Error("[Head sync] Failed, status not fetched", "reason", err)
+		return err
+	}
+	log.Info("Retrieved status.", "status", status)
+	log.Info("Current finalized root.", "root", hex.EncodeToString(status.FinalizedRoot[:]))
+	log.Info("Current finalized epoch.", "epoch", status.FinalizedEpoch)
+	log.Info("Current head root.", "root", hex.EncodeToString(status.HeadRoot[:]))
+	log.Info("Current head slot.", "slot", status.HeadSlot)
 	return nil
 }
 
