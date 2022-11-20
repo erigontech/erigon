@@ -49,7 +49,7 @@ func (c *ConsensusHandlers) lightClientFinalityUpdateHandler(stream network.Stre
 		return
 	}
 
-	ssz_snappy.EncodeAndWrite(stream, update)
+	ssz_snappy.EncodeAndWrite(stream, update, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) lightClientOptimisticUpdateHandler(stream network.Stream) {
@@ -79,7 +79,7 @@ func (c *ConsensusHandlers) lightClientOptimisticUpdateHandler(stream network.St
 		return
 	}
 
-	ssz_snappy.EncodeAndWrite(stream, update)
+	ssz_snappy.EncodeAndWrite(stream, update, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) lightClientUpdatesByRange(stream network.Stream) {
