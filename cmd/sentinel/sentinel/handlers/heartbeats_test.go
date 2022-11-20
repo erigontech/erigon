@@ -51,7 +51,7 @@ func initializeNetwork(t *testing.T, ctx context.Context) (*ConsensusHandlers, h
 	h2pi := h2.Peerstore().PeerInfo(h2.ID())
 	require.NoError(t, h1.Connect(ctx, h2pi))
 
-	return NewConsensusHandlers(h2, &peers.Peers{}, testLocalMetadataV2), h1, h2
+	return NewConsensusHandlers(ctx, nil, h2, &peers.Peers{}, nil, nil, testLocalMetadataV2), h1, h2
 }
 
 func TestHeartbeatHandlers(t *testing.T) {
