@@ -720,11 +720,7 @@ var (
 	}
 )
 
-<<<<<<< HEAD
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
-=======
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsEnabledExpensiveFlag, &MetricsHTTPFlag, &MetricsPortFlag}
->>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 
 // setNodeKey loads a node key from command line flags if provided,
 // otherwise it tries to load it from datadir,
@@ -922,11 +918,7 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.Int(ListenPortFlag.Name))
 	}
 	if ctx.IsSet(P2pProtocolVersionFlag.Name) {
-<<<<<<< HEAD
 		cfg.ProtocolVersion = ctx.UintSlice(P2pProtocolVersionFlag.Name)
-=======
-		cfg.ProtocolVersion = uint(ctx.Int(P2pProtocolVersionFlag.Name))
->>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
@@ -1453,21 +1445,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-<<<<<<< HEAD
 		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
-=======
-		lvl, dbg, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
->>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 		if err != nil {
 			panic(err)
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
-<<<<<<< HEAD
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
 		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
-=======
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, lvl, dbg, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
->>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 		if err != nil {
 			panic(err)
 		}

@@ -111,10 +111,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GpoPercentileFlag,
 	&utils.InsecureUnlockAllowedFlag,
 	&utils.MetricsEnabledFlag,
-<<<<<<< HEAD
-=======
 	&utils.MetricsEnabledExpensiveFlag,
->>>>>>> 878967894 (Upgrade urfave/cli to v2 (#6047))
 	&utils.MetricsHTTPFlag,
 	&utils.MetricsPortFlag,
 	&utils.HistoryV3Flag,
