@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -22,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	atomic2 "go.uber.org/atomic"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -93,7 +93,7 @@ type State22 struct {
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
-	txsDone      atomic.Uint64
+	txsDone      atomic2.Uint64
 	finished     bool
 }
 
