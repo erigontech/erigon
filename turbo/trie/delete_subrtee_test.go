@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -83,7 +84,7 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 }
 
 func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
+	compositeKey := make([]byte, 0, length.Hash+length.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey

@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -568,16 +569,16 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 
 func decodeAddress(s string) (common.Address, error) {
 	b, err := hexutil.Decode(s)
-	if err == nil && len(b) != common.AddressLength {
-		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for address", len(b), common.AddressLength)
+	if err == nil && len(b) != length.Addr {
+		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for address", len(b), length.Addr)
 	}
 	return common.BytesToAddress(b), err
 }
 
 func decodeTopic(s string) (common.Hash, error) {
 	b, err := hexutil.Decode(s)
-	if err == nil && len(b) != common.HashLength {
-		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for topic", len(b), common.HashLength)
+	if err == nil && len(b) != length.Hash {
+		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for topic", len(b), length.Hash)
 	}
 	return common.BytesToHash(b), err
 }

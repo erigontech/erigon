@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -27,9 +28,9 @@ type BlockProvider func() (nextBlock uint64, hasMore bool, err error)
 
 // Standard key format for call from/to indexes [address + block]
 func callIndexKey(addr common.Address, block uint64) []byte {
-	key := make([]byte, common.AddressLength+8)
-	copy(key[:common.AddressLength], addr.Bytes())
-	binary.BigEndian.PutUint64(key[common.AddressLength:], block)
+	key := make([]byte, length.Addr+8)
+	copy(key[:length.Addr], addr.Bytes())
+	binary.BigEndian.PutUint64(key[length.Addr:], block)
 	return key
 }
 

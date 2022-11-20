@@ -720,6 +720,17 @@ func DefaultGnosisGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultChiadoGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.ChiadoChainConfig,
+		Timestamp:  0,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/chiado.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -788,6 +799,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultBorDevnetGenesisBlock()
 	case networkname.GnosisChainName:
 		return DefaultGnosisGenesisBlock()
+	case networkname.ChiadoChainName:
+		return DefaultChiadoGenesisBlock()
 	default:
 		return nil
 	}

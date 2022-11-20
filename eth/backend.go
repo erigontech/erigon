@@ -32,8 +32,12 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
+	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -55,9 +59,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
@@ -88,7 +89,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -152,7 +152,7 @@ type Ethereum struct {
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engineapi.ForkValidator
-	downloader              *downloader.Downloader
+	downloader              *downloader3.Downloader
 
 	agg *libstate.Aggregator22
 }
@@ -914,12 +914,12 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader.New(downloaderCfg)
+			s.downloader, err = downloader3.New(downloaderCfg)
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			go downloader.MainLoop(ctx, s.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+			go downloader3.MainLoop(ctx, s.downloader, true)
+			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("new server: %w", err)
 			}
