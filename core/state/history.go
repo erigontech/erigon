@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -44,8 +45,8 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 		return nil, ethdb.ErrKeyNotFound
 	}
 	if storage {
-		if !bytes.Equal(k[:common.AddressLength], key[:common.AddressLength]) ||
-			!bytes.Equal(k[common.AddressLength:common.AddressLength+common.HashLength], key[common.AddressLength+common.IncarnationLength:]) {
+		if !bytes.Equal(k[:length.Addr], key[:length.Addr]) ||
+			!bytes.Equal(k[length.Addr:length.Addr+length.Hash], key[length.Addr+length.Incarnation:]) {
 			return nil, ethdb.ErrKeyNotFound
 		}
 	} else {
@@ -101,14 +102,14 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 
 // startKey is the concatenation of address and incarnation (BigEndian 8 byte)
 func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, startLocation common.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
-	var startkey = make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
+	var startkey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	copy(startkey, address.Bytes())
-	binary.BigEndian.PutUint64(startkey[common.AddressLength:], incarnation)
-	copy(startkey[common.AddressLength+common.IncarnationLength:], startLocation.Bytes())
+	binary.BigEndian.PutUint64(startkey[length.Addr:], incarnation)
+	copy(startkey[length.Addr+length.Incarnation:], startLocation.Bytes())
 
-	var startkeyNoInc = make([]byte, common.AddressLength+common.HashLength)
+	var startkeyNoInc = make([]byte, length.Addr+length.Hash)
 	copy(startkeyNoInc, address.Bytes())
-	copy(startkeyNoInc[common.AddressLength:], startLocation.Bytes())
+	copy(startkeyNoInc[length.Addr:], startLocation.Bytes())
 
 	//for storage
 	mCursor, err := tx.Cursor(kv.PlainState)
@@ -119,10 +120,10 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 	mainCursor := ethdb.NewSplitCursor(
 		mCursor,
 		startkey,
-		8*(common.AddressLength+common.IncarnationLength),
-		common.AddressLength,                                            /* part1end */
-		common.AddressLength+common.IncarnationLength,                   /* part2start */
-		common.AddressLength+common.IncarnationLength+common.HashLength, /* part3start */
+		8*(length.Addr+length.Incarnation),
+		length.Addr,                    /* part1end */
+		length.Addr+length.Incarnation, /* part2start */
+		length.Addr+length.Incarnation+length.Hash, /* part3start */
 	)
 
 	//for historic data
@@ -134,10 +135,10 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 	var hCursor = ethdb.NewSplitCursor(
 		shCursor,
 		startkeyNoInc,
-		8*common.AddressLength,
-		common.AddressLength,                   /* part1end */
-		common.AddressLength,                   /* part2start */
-		common.AddressLength+common.HashLength, /* part3start */
+		8*length.Addr,
+		length.Addr,             /* part1end */
+		length.Addr,             /* part2start */
+		length.Addr+length.Hash, /* part3start */
 	)
 	csCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 	if err != nil {
@@ -185,10 +186,10 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 
 			if ok {
 				// Extract value from the changeSet
-				csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
+				csKey := make([]byte, 8+length.Addr+length.Incarnation)
 				copy(csKey, dbutils.EncodeBlockNumber(changeSetBlock))
 				copy(csKey[8:], address[:]) // address + incarnation
-				binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
+				binary.BigEndian.PutUint64(csKey[8+length.Addr:], incarnation)
 				kData := csKey
 				data, err3 := csCursor.SeekBothRange(csKey, hLoc)
 				if err3 != nil {
@@ -197,7 +198,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 				if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hLoc) {
 					return fmt.Errorf("inconsistent storage changeset and history kData %x, csKey %x, data %x, hLoc %x", kData, csKey, data, hLoc)
 				}
-				data = data[common.HashLength:]
+				data = data[length.Hash:]
 				if len(data) > 0 { // Skip deleted entries
 					goOn, err = walker(hAddr, hLoc, data)
 				}
@@ -241,10 +242,10 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 	var hCursor = ethdb.NewSplitCursor(
 		ahCursor,
 		startAddress.Bytes(),
-		0,                      /* fixedBits */
-		common.AddressLength,   /* part1end */
-		common.AddressLength,   /* part2start */
-		common.AddressLength+8, /* part3start */
+		0,             /* fixedBits */
+		length.Addr,   /* part1end */
+		length.Addr,   /* part2start */
+		length.Addr+8, /* part3start */
 	)
 	csCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
@@ -256,7 +257,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 	if err1 != nil {
 		return err1
 	}
-	for k != nil && len(k) > common.AddressLength {
+	for k != nil && len(k) > length.Addr {
 		k, v, err1 = mainCursor.Next()
 		if err1 != nil {
 			return err1
@@ -301,7 +302,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 				if !bytes.Equal(kData, csKey) || !bytes.HasPrefix(data, hK) {
 					return fmt.Errorf("inconsistent account history and changesets, kData %x, csKey %x, data %x, hK %x", kData, csKey, data, hK)
 				}
-				data = data[common.AddressLength:]
+				data = data[length.Addr:]
 				if len(data) > 0 { // Skip accounts did not exist
 					goOn, err = walker(hK, data)
 				}
@@ -318,7 +319,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 				if err1 != nil {
 					return err1
 				}
-				for k != nil && len(k) > common.AddressLength {
+				for k != nil && len(k) > length.Addr {
 					k, v, err1 = mainCursor.Next()
 					if err1 != nil {
 						return err1

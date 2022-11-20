@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
@@ -793,7 +794,7 @@ func HashWithModifications(
 ) (common.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength)+len(sKeys)*(4*common.HashLength+2*common.IncarnationLength)),
+		keyBytes:  make([]byte, len(aKeys)*(2*length.Hash)+len(sKeys)*(4*length.Hash+2*length.Incarnation)),
 		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,

@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
@@ -581,23 +582,23 @@ func CalculateStateRoot(tx kv.RwTx) (*common.Hash, error) {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
 		}
 		var newK []byte
-		if len(k) == common.AddressLength {
-			newK = make([]byte, common.HashLength)
+		if len(k) == length.Addr {
+			newK = make([]byte, length.Hash)
 		} else {
-			newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+			newK = make([]byte, length.Hash*2+length.Incarnation)
 		}
 		h.Sha.Reset()
 		//nolint:errcheck
-		h.Sha.Write(k[:common.AddressLength])
+		h.Sha.Write(k[:length.Addr])
 		//nolint:errcheck
-		h.Sha.Read(newK[:common.HashLength])
-		if len(k) > common.AddressLength {
-			copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+		h.Sha.Read(newK[:length.Hash])
+		if len(k) > length.Addr {
+			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
 			h.Sha.Reset()
 			//nolint:errcheck
-			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
-			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+			h.Sha.Read(newK[length.Hash+length.Incarnation:])
 			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}

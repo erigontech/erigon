@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 )
@@ -39,13 +40,13 @@ func MakeTopics(query ...[]interface{}) ([][]common.Hash, error) {
 			case common.Hash:
 				copy(topic[:], rule[:])
 			case common.Address:
-				copy(topic[common.HashLength-common.AddressLength:], rule[:])
+				copy(topic[length.Hash-common.AddressLength:], rule[:])
 			case *big.Int:
 				blob := rule.Bytes()
-				copy(topic[common.HashLength-len(blob):], blob)
+				copy(topic[length.Hash-len(blob):], blob)
 			case bool:
 				if rule {
-					topic[common.HashLength-1] = 1
+					topic[length.Hash-1] = 1
 				}
 			case int8:
 				copy(topic[:], genIntType(int64(rule), 1))
@@ -57,16 +58,16 @@ func MakeTopics(query ...[]interface{}) ([][]common.Hash, error) {
 				copy(topic[:], genIntType(rule, 8))
 			case uint8:
 				blob := new(big.Int).SetUint64(uint64(rule)).Bytes()
-				copy(topic[common.HashLength-len(blob):], blob)
+				copy(topic[length.Hash-len(blob):], blob)
 			case uint16:
 				blob := new(big.Int).SetUint64(uint64(rule)).Bytes()
-				copy(topic[common.HashLength-len(blob):], blob)
+				copy(topic[length.Hash-len(blob):], blob)
 			case uint32:
 				blob := new(big.Int).SetUint64(uint64(rule)).Bytes()
-				copy(topic[common.HashLength-len(blob):], blob)
+				copy(topic[length.Hash-len(blob):], blob)
 			case uint64:
 				blob := new(big.Int).SetUint64(rule).Bytes()
-				copy(topic[common.HashLength-len(blob):], blob)
+				copy(topic[length.Hash-len(blob):], blob)
 			case string:
 				hash := crypto.Keccak256Hash([]byte(rule))
 				copy(topic[:], hash[:])
@@ -99,14 +100,14 @@ func MakeTopics(query ...[]interface{}) ([][]common.Hash, error) {
 }
 
 func genIntType(rule int64, size uint) []byte {
-	var topic [common.HashLength]byte
+	var topic [length.Hash]byte
 	if rule < 0 {
 		// if a rule is negative, we need to put it into two's complement.
-		// extended to common.HashLength bytes.
-		topic = [common.HashLength]byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}
+		// extended to length.Hash bytes.
+		topic = [length.Hash]byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}
 	}
 	for i := uint(0); i < size; i++ {
-		topic[common.HashLength-i-1] = byte(rule >> (i * 8))
+		topic[length.Hash-i-1] = byte(rule >> (i * 8))
 	}
 	return topic[:]
 }

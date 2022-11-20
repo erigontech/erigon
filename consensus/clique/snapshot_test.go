@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -56,7 +57,7 @@ func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) 
 	}
 	sort.Sort(clique.SignersAscending(auths))
 	for i, auth := range auths {
-		copy(header.Extra[clique.ExtraVanity+i*common.AddressLength:], auth.Bytes())
+		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.Bytes())
 	}
 }
 
@@ -404,11 +405,11 @@ func TestClique(t *testing.T) {
 			}
 			// Create the genesis block with the initial set of signers
 			genesis := &core.Genesis{
-				ExtraData: make([]byte, clique.ExtraVanity+common.AddressLength*len(signers)+clique.ExtraSeal),
+				ExtraData: make([]byte, clique.ExtraVanity+length.Addr*len(signers)+clique.ExtraSeal),
 				Config:    params.AllCliqueProtocolChanges,
 			}
 			for j, signer := range signers {
-				copy(genesis.ExtraData[clique.ExtraVanity+j*common.AddressLength:], signer[:])
+				copy(genesis.ExtraData[clique.ExtraVanity+j*length.Addr:], signer[:])
 			}
 
 			// Assemble a chain of headers from the cast votes
@@ -446,7 +447,7 @@ func TestClique(t *testing.T) {
 				}
 				header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
 				if auths := tt.votes[j].checkpoint; auths != nil {
-					header.Extra = make([]byte, clique.ExtraVanity+len(auths)*common.AddressLength+clique.ExtraSeal)
+					header.Extra = make([]byte, clique.ExtraVanity+len(auths)*length.Addr+clique.ExtraSeal)
 					accounts.checkpoint(header, auths)
 				}
 				header.Difficulty = clique.DiffInTurn // Ignored, we just need a valid number
