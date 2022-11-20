@@ -93,7 +93,7 @@ type State22 struct {
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
-	txsDone      atomic2.Uint64
+	txsDone      *atomic2.Uint64
 	finished     bool
 }
 
@@ -110,6 +110,7 @@ func NewState22() *State22 {
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[statePair]{},
+		txsDone:      atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
