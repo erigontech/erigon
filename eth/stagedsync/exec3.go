@@ -216,6 +216,7 @@ func Exec3(ctx context.Context,
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
 						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
+						syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					}()
 				}
 			}
@@ -325,6 +326,7 @@ func Exec3(ctx context.Context,
 								}
 							}
 							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
+							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 							if rws.Len() == 0 {
 								break
 							}
@@ -467,6 +469,17 @@ loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+
+		f := core.GetHashFn(header, getHeaderFunc)
+		getHashFnMute := &sync.Mutex{}
+		getHashFn := func(n uint64) common2.Hash {
+			getHashFnMute.Lock()
+			defer getHashFnMute.Unlock()
+			return f(n)
+		}
+
+		signer := *types.MakeSigner(chainConfig, blockNum)
+
 		if parallel {
 			func() {
 				rwsLock.RLock()
@@ -483,15 +496,6 @@ loop:
 			}()
 		}
 
-		f := core.GetHashFn(header, getHeaderFunc)
-		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
-			getHashFnMute.Lock()
-			defer getHashFnMute.Unlock()
-			return f(n)
-		}
-
-		signer := *types.MakeSigner(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -693,7 +697,6 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
-			syncMetrics[stages.Execution].Set(txTask.BlockNum)
 			rwsReceiveCond.Signal()
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
