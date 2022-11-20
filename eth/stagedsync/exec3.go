@@ -42,8 +42,8 @@ import (
 
 var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix}
 }
 
 type Progress struct {
@@ -52,9 +52,12 @@ type Progress struct {
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
 	commitThreshold    uint64
+
+	workersCount int
+	logPrefix    string
 }
 
-func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
@@ -67,7 +70,7 @@ func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rw
 	if count > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
 	}
-	log.Info(fmt.Sprintf("[%s] Transaction replay", logPrefix),
+	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"inBlk", atomic.LoadUint64(&inputBlockNum),
@@ -77,7 +80,7 @@ func (p *Progress) Log(logPrefix string, workersCount int, rs *state.State22, rw
 		"resultQueue", fmt.Sprintf("%d/%d", rwsLen, queueSize),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		"workers", workersCount,
+		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
@@ -180,7 +183,7 @@ func Exec3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
-	progress := NewProgress(block, commitThreshold)
+	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
@@ -273,7 +276,7 @@ func Exec3(ctx context.Context,
 					rwsLock.RUnlock()
 
 					stepsInDB := idxStepsInDB(tx)
-					progress.Log(execStage.LogPrefix(), workerCount, rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 					if rs.SizeEstimate() < commitThreshold {
 						// too much steps in db will slow-down everything: flush and prune
 						// it means better spend time for pruning, before flushing more data to db
@@ -541,7 +544,7 @@ loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := idxStepsInDB(applyTx)
-				progress.Log(execStage.LogPrefix(), workerCount, rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					// too much steps in db will slow-down everything: flush and prune
 					// it means better spend time for pruning, before flushing more data to db
