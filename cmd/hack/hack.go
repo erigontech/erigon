@@ -1099,6 +1099,8 @@ func chainConfig(name string) error {
 		chainConfig = params.BorMainnetChainConfig
 	case "gnosis":
 		chainConfig = params.GnosisChainConfig
+	case "chiado":
+		chainConfig = params.ChiadoChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}

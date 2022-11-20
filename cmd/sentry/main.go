@@ -5,10 +5,10 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
