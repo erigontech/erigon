@@ -1,6 +1,9 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
-GOBUILD = env GO111MODULE=on go build -trimpath
+BUILD_TAGS = nosqlite,noboltdb,disable_libutp
+GOBUILD = env GO111MODULE=on go build -trimpath -tags $(BUILD_TAGS)
+GOTEST = go test -trimpath -tags $(BUILD_TAGS)
+GOTEST_NOFUZZ = go test -trimpath -tags $(BUILD_TAGS),nofuzz
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 
@@ -16,6 +19,7 @@ endif
 
 PROTOC_INCLUDE = build/include/google
 
+
 default: gen
 
 gen: grpc mocks
@@ -25,7 +29,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v21.9/protoc-21.9-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -74,7 +78,13 @@ lintci-deps-clean: golangci-lint-clean
 
 # download and build golangci-lint (https://golangci-lint.run)
 $(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.50.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.50.1
 
 golangci-lint-clean:
 	rm -f "$(GOBIN)/golangci-lint"
+
+test:
+	$(GOTEST) --count 1 -p 2 ./...
+
+test-no-fuzz:
+	$(GOTEST_NOFUZZ) --count 1 -p 2 ./...

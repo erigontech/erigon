@@ -12,7 +12,8 @@ on:
       - alpha
 env:
   CGO_ENABLED: "1"
-  CGO_CXXFLAGS: "-std=c++17"
+  CGO_CXXFLAGS: "-g -O2 -std=c++17"
+  GO111MODULE: "on"
 jobs:
   tests:
     strategy:
@@ -23,7 +24,7 @@ jobs:
     steps:
       - name: configure Pagefile
         if: matrix.os == 'windows-2022'
-        uses: al-cheb/configure-pagefile-action@v1.2
+        uses: al-cheb/configure-pagefile-action@v1.3
         with:
           minimum-size: 8GB
       - uses: actions/checkout@v3
@@ -57,7 +58,4 @@ jobs:
 
       - name: Test win
         if: matrix.os == 'windows-2022'
-        run: go test --tags nofuzz --count 1 -p 2 ./...
-      - name: Test
-        if: matrix.os != 'windows-2022'
-        run: go test --count 1 -p 2 ./...
+        run: make test-no-fuzz
