@@ -213,7 +213,7 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
 		rs.queuePush(triggered)
-		rs.receiveWork.Broadcast()
+		rs.receiveWork.Signal()
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -251,7 +251,7 @@ func (rs *State22) AddWork(txTask *TxTask) {
 		txTask.CodePrevs = nil
 	*/
 	rs.queuePush(txTask)
-	rs.receiveWork.Broadcast()
+	rs.receiveWork.Signal()
 }
 
 func (rs *State22) Finish() {
@@ -412,12 +412,15 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggrega
 	return nil
 }
 
-func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	agg.SetTxNum(txTask.TxNum)
 	if err := rs.appplyState(roTx, txTask, agg); err != nil {
 		return err
 	}
+	return nil
+}
 
+func (rs *State22) ApplyHistory(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err

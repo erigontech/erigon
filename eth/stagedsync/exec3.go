@@ -240,7 +240,10 @@ func Exec3(ctx context.Context,
 						return
 					}
 					execWorkers[0].RunTxTask(txTask)
-					if err := rs.Apply(tx, txTask, agg); err != nil {
+					if err := rs.ApplyState(tx, txTask, agg); err != nil {
+						panic(fmt.Errorf("State22.Apply: %w", err))
+					}
+					if err := rs.ApplyHistory(tx, txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
 					outputTxNum.Inc()
@@ -691,13 +694,16 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.Apply(applyTx, txTask, agg); err != nil {
+			if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
 			rwsReceiveCond.Signal()
+			if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+				panic(fmt.Errorf("State22.Apply: %w", err))
+			}
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
