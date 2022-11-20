@@ -215,8 +215,7 @@ func Exec3(ctx context.Context,
 						defer rwsLock.Unlock()
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-						rwsReceiveCond.Signal()
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
 					}()
 				}
 			}
@@ -325,12 +324,11 @@ func Exec3(ctx context.Context,
 									drained = true
 								}
 							}
-							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
+							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, rwsReceiveCond)
 							if rws.Len() == 0 {
 								break
 							}
 						}
-						rwsReceiveCond.Signal()
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
 						// Drain results channel because read sets do not carry over
@@ -684,7 +682,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 }
 
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64) {
+	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, rwsReceiveCond *sync.Cond) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
@@ -696,6 +694,7 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
 			syncMetrics[stages.Execution].Set(txTask.BlockNum)
+			rwsReceiveCond.Signal()
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)

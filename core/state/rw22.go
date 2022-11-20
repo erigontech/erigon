@@ -213,7 +213,7 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
 		rs.queuePush(triggered)
-		rs.receiveWork.Signal()
+		rs.receiveWork.Broadcast()
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -251,7 +251,7 @@ func (rs *State22) AddWork(txTask *TxTask) {
 		txTask.CodePrevs = nil
 	*/
 	rs.queuePush(txTask)
-	rs.receiveWork.Signal()
+	rs.receiveWork.Broadcast()
 }
 
 func (rs *State22) Finish() {
