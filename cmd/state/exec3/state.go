@@ -31,7 +31,6 @@ type Worker22 struct {
 	stateWriter *state.StateWriter22
 	stateReader *state.StateReader22
 	chainConfig *params.ChainConfig
-	getHeader   func(hash common.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -61,13 +60,6 @@ func NewWorker22(lock sync.Locker, chainDb kv.RoDB, wg *sync.WaitGroup, rs *stat
 		genesis:  genesis,
 		resultCh: resultCh,
 		engine:   engine,
-	}
-	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
 	}
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
@@ -173,7 +165,6 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
@@ -181,7 +172,7 @@ func (rw *Worker22) RunTxTask(txTask *state.TxTask) {
 		if txTask.Tx.IsStarkNet() {
 			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(header, txTask.GetHashFn, rw.engine, nil /* author */)
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}

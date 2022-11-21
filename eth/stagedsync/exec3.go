@@ -205,6 +205,7 @@ func Exec3(ctx context.Context,
 			}
 			defer tx.Rollback()
 
+			notifyReceived := func() { rwsReceiveCond.Signal() }
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case <-ctx.Done():
@@ -215,9 +216,7 @@ func Exec3(ctx context.Context,
 						defer rwsLock.Unlock()
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {
-							rwsReceiveCond.Signal()
-						})
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived)
 						syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					}()
 				}
@@ -475,6 +474,7 @@ loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, blockNum)
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -483,8 +483,6 @@ loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-
-		signer := *types.MakeSigner(chainConfig, blockNum)
 
 		if parallel {
 			func() {
@@ -1039,6 +1037,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var inputTxNum uint64
 	var b *types.Block
 	var txKey [8]byte
+	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+		if err = chainDb.View(ctx, func(tx kv.Tx) error {
+			h, err = blockReader.Header(ctx, tx, hash, number)
+			if err != nil {
+				return err
+			}
+			return nil
+
+		}); err != nil {
+			panic(err)
+		}
+		return h
+	}
 	for bn = uint64(0); bn <= blockNum; bn++ {
 		t = time.Now()
 		rules := chainConfig.Rules(bn)
@@ -1050,6 +1061,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, bn)
+
+		f := core.GetHashFn(header, getHeaderFunc)
+		getHashFnMute := &sync.Mutex{}
+		getHashFn := func(n uint64) common2.Hash {
+			getHashFnMute.Lock()
+			defer getHashFnMute.Unlock()
+			return f(n)
+		}
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
@@ -1066,6 +1085,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					BlockHash:    b.Hash(),
 					SkipAnalysis: skipAnalysis,
 					Final:        txIndex == len(txs),
+					GetHashFn:    getHashFn,
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]

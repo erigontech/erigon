@@ -341,7 +341,6 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		}
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
@@ -349,7 +348,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		if txTask.Tx.IsStarkNet() {
 			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(txTask.Header, txTask.GetHashFn, rw.engine, nil /* author */)
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}

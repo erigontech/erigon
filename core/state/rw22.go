@@ -261,43 +261,9 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
-	emptyRemoval := txTask.Rules.IsSpuriousDragon
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-
-	for addr := range txTask.BalanceIncreaseSet {
-		addrBytes := addr.Bytes()
-		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addrBytes)
-		if enc0 == nil {
-			var err error
-			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
-			if err != nil {
-				return err
-			}
-		}
-		var a accounts.Account
-		if err := a.DecodeForStorage(enc0); err != nil {
-			return err
-		}
-		if len(enc0) > 0 {
-			// Need to convert before balance increase
-			enc0 = accounts.Serialise2(&a)
-		}
-		a.Balance.Add(&a.Balance, &increase)
-		var enc1 []byte
-		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
-			enc1 = []byte{}
-		} else {
-			enc1 = make([]byte, a.EncodingLengthForStorage())
-			a.EncodeForStorage(enc1)
-		}
-		rs.put(kv.PlainState, addrBytes, enc1)
-		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
-			return err
-		}
-	}
+func (rs *State22) appplyState1(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
 
 	if len(txTask.AccountDels) > 0 {
 		cursor, err := roTx.Cursor(kv.PlainState)
@@ -402,6 +368,47 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggrega
 			return err
 		}
 	}
+	return nil
+}
+
+func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	emptyRemoval := txTask.Rules.IsSpuriousDragon
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	for addr := range txTask.BalanceIncreaseSet {
+		addrBytes := addr.Bytes()
+		increase := txTask.BalanceIncreaseSet[addr]
+		enc0 := rs.get(kv.PlainState, addrBytes)
+		if enc0 == nil {
+			var err error
+			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
+			if err != nil {
+				return err
+			}
+		}
+		var a accounts.Account
+		if err := a.DecodeForStorage(enc0); err != nil {
+			return err
+		}
+		if len(enc0) > 0 {
+			// Need to convert before balance increase
+			enc0 = accounts.Serialise2(&a)
+		}
+		a.Balance.Add(&a.Balance, &increase)
+		var enc1 []byte
+		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
+			enc1 = []byte{}
+		} else {
+			enc1 = make([]byte, a.EncodingLengthForStorage())
+			a.EncodeForStorage(enc1)
+		}
+		rs.put(kv.PlainState, addrBytes, enc1)
+		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
+			return err
+		}
+	}
+
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
@@ -414,6 +421,9 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggrega
 
 func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
 	agg.SetTxNum(txTask.TxNum)
+	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
+		return err
+	}
 	if err := rs.appplyState(roTx, txTask, agg); err != nil {
 		return err
 	}
