@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -61,11 +60,11 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 		ctx:           ctx,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(PingProtocolV1):                curryStreamHandler(ssz_snappy.NewStreamCodec, c.pingHandler),
-		protocol.ID(GoodbyeProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(StatusProtocolV1):              curryStreamHandler(ssz_snappy.NewStreamCodec, c.statusHandler),
-		protocol.ID(MetadataProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
-		protocol.ID(MetadataProtocolV2):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
+		protocol.ID(PingProtocolV1):                c.pingHandler,
+		protocol.ID(GoodbyeProtocolV1):             c.goodbyeHandler,
+		protocol.ID(StatusProtocolV1):              c.statusHandler,
+		protocol.ID(MetadataProtocolV1):            c.metadataV1Handler,
+		protocol.ID(MetadataProtocolV2):            c.metadataV2Handler,
 		protocol.ID(BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
 		protocol.ID(LightClientFinalityUpdateV1):   c.lightClientFinalityUpdateHandler,
