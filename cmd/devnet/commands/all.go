@@ -23,10 +23,25 @@ func ExecuteAllMethods() {
 	checkTxPoolContent(0, 0)
 	fmt.Println()
 
+	/*
+	* Cannot run contract tx after running regular tx because contract tx simulates a new backend
+	* and it expects the nonce to be 0.
+	* So it is best to run them separately by commenting and uncommenting the different code blocks.
+	 */
+
 	// send a token from the dev address to the recipient address
-	hash, err := callSendTx(sendValue, recipientAddress, models.DevAddress)
+	//nonContractHash, err := callSendTx(sendValue, recipientAddress, models.DevAddress)
+	//if err != nil {
+	//	fmt.Printf("callSendTx error: %v\n", err)
+	//	return
+	//}
+	//fmt.Println()
+
+	// initiate a contract transaction
+	fmt.Println("INITIATING A CONTRACT TRANSACTION...")
+	contractHash, err := callContractTx()
 	if err != nil {
-		fmt.Printf("callSendTx error: %v\n", err)
+		fmt.Printf("callContractTx error: %v\n", err)
 		return
 	}
 	fmt.Println()
@@ -38,7 +53,7 @@ func ExecuteAllMethods() {
 
 	// look for the transaction hash in the newly mined block
 	fmt.Println("LOOKING FOR TRANSACTION IN THE LATEST BLOCK...")
-	callSubscribeToNewHeads(*hash)
+	callSubscribeToNewHeads(*contractHash)
 	fmt.Println()
 
 	// confirm that the transaction has been moved from the pending queue and the txpool is empty once again

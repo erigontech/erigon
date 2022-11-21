@@ -2,9 +2,11 @@ package models
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
 )
@@ -113,6 +115,10 @@ const (
 var (
 	// DevSignedPrivateKey is the signed private key for signing transactions
 	DevSignedPrivateKey, _ = crypto.HexToECDSA(hexPrivateKey)
+	// gspec is the geth dev genesis block
+	gspec = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(DevAddress))
+	// ContractBackend is a simulated backend created using a simulated blockchain
+	ContractBackend = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 )
 
 // Responses for the rpc calls
