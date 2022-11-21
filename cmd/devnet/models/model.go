@@ -54,7 +54,7 @@ const (
 	// ChainParam is the chain parameter
 	ChainParam = "dev"
 	// DevPeriodParam is the dev.period parameter
-	DevPeriodParam = "0"
+	DevPeriodParam = "30"
 	// ConsoleVerbosityParam is the verbosity parameter for the console logs
 	ConsoleVerbosityParam = "0"
 	// LogDirParam is the log directory parameter for logging to disk
@@ -103,6 +103,8 @@ const (
 	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
 	// ETHGetBlockByNumber represents the eth_getBlockByNumber method
 	ETHGetBlockByNumber RPCMethod = "eth_getBlockByNumber"
+	// ETHGetLogs represents the eth_getLogs method
+	ETHGetLogs RPCMethod = "eth_getLogs"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method

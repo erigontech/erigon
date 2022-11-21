@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"math/big"
 	"time"
 
@@ -113,4 +114,39 @@ func txHashInBlock(client *rpc.Client, hash common.Hash, blockNumber string) (ui
 	}
 
 	return uint64(0), false, nil
+}
+
+// EmitFallbackEvent emits an event from the contract using the fallback method
+func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) error {
+	fmt.Println("EMITTING EVENT FROM FALLBACK...")
+
+	// adding one to the nonce before initiating another transaction
+	opts.Nonce.Add(opts.Nonce, big.NewInt(1))
+
+	tx, err := subContract.Fallback(opts, []byte{})
+	if err != nil {
+		return fmt.Errorf("failed to emit event from fallback: %v", err)
+	}
+
+	signedTx, err := types.SignTx(tx, *signer, models.DevSignedPrivateKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign fallback transaction: %v", err)
+	}
+
+	hash, err := requests.SendTransaction(models.ReqId, &signedTx)
+	if err != nil {
+		return fmt.Errorf("failed to send fallback transaction: %v", err)
+	}
+	fmt.Printf("Tx submitted, adding tx with hash %q to txpool\n", hash)
+
+	blockN, err := SearchBlockForTransactionHash(*hash)
+	if err != nil {
+		return fmt.Errorf("failed to find tx in block: %v", err)
+	}
+
+	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
+		return fmt.Errorf("failed to get logs: %v", err)
+	}
+
+	return nil
 }

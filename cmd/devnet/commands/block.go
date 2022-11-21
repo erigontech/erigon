@@ -57,9 +57,6 @@ func callContractTx() (*common.Hash, error) {
 		return nil, err
 	}
 
-	fmt.Printf("signedTx: %+v\n", *signedTx)
-
-	fmt.Println("Creating contract tx...")
 	// send the contract transaction to the node
 	hash, err := requests.SendTransaction(models.ReqId, signedTx)
 	if err != nil {
@@ -67,15 +64,18 @@ func callContractTx() (*common.Hash, error) {
 		return nil, err
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+	fmt.Println()
 
-	//devPeriod, err := strconv.Atoi(models.DevPeriodParam)
-	//if err != nil {
-	//	fmt.Printf("failed to send transaction: %v\n", err)
-	//	return nil, err
-	//}
-	//time.Sleep(time.Duration(devPeriod) * time.Second)
+	_, err = services.SearchBlockForTransactionHash(*hash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find tx in block: %v", err)
+	}
+	fmt.Println()
 
-	fmt.Println("printing: ", address, subscriptionContract, transactOpts)
+	if err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address); err != nil {
+		fmt.Printf("failed to emit events: %v\n", err)
+		return nil, err
+	}
 
 	return hash, nil
 }

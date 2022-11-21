@@ -37,23 +37,23 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
+	//// confirm that the txpool has this transaction in the pending queue
+	//fmt.Println("CONFIRMING TXPOOL HAS THE LATEST TRANSACTION...")
+	//checkTxPoolContent(1, 0)
+	//fmt.Println()
+	//
+	//// look for the transaction hash in the newly mined block
+	//fmt.Println("LOOKING FOR TRANSACTION IN THE LATEST BLOCK...")
+	//callSubscribeToNewHeads(*nonContractHash)
+	//fmt.Println()
+
 	// initiate a contract transaction
 	fmt.Println("INITIATING A CONTRACT TRANSACTION...")
-	contractHash, err := callContractTx()
+	_, err := callContractTx()
 	if err != nil {
 		fmt.Printf("callContractTx error: %v\n", err)
 		return
 	}
-	fmt.Println()
-
-	// confirm that the txpool has this transaction in the pending queue
-	fmt.Println("CONFIRMING TXPOOL HAS THE LATEST TRANSACTION...")
-	checkTxPoolContent(1, 0)
-	fmt.Println()
-
-	// look for the transaction hash in the newly mined block
-	fmt.Println("LOOKING FOR TRANSACTION IN THE LATEST BLOCK...")
-	callSubscribeToNewHeads(*contractHash)
 	fmt.Println()
 
 	// confirm that the transaction has been moved from the pending queue and the txpool is empty once again
