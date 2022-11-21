@@ -1385,9 +1385,8 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 	set := make([]string, 0, 1)
 	for i := 0; i < len(args); i++ {
 		// Make sure the next argument is a flag and skip if not set
-		flag, ok := args[i].(cli.StringFlag)
+		flag, ok := args[i].(cli.Flag)
 		if !ok {
-			fmt.Printf("flag: %+v\n", flag)
 			panic(fmt.Sprintf("invalid argument, not cli.Flag type: %T", args[i]))
 		}
 		// Check if next arg extends current and expand its name if so
@@ -1405,7 +1404,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 				i++
 				continue
 
-			case cli.StringFlag:
+			case cli.Flag:
 			default:
 				panic(fmt.Sprintf("invalid argument, not cli.Flag or string extension: %T", args[i+1]))
 			}

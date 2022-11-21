@@ -3,15 +3,16 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -144,7 +145,7 @@ func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bin
 		return fmt.Errorf("failed to find tx in block: %v", err)
 	}
 
-	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
+	if err = requests.GetLogs(reqId, blockN, blockN, address, true); err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 

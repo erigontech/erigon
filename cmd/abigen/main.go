@@ -151,12 +151,9 @@ func abigen(c *cli.Context) error {
 			err      error
 		)
 		input := c.String(abiFlag.Name)
-		fmt.Printf("input name========================= : %+v\n", input)
 		if input == "-" {
-			fmt.Println("was ---------")
 			abiBytes, err = io.ReadAll(os.Stdin)
 		} else {
-			fmt.Println("was not ---------")
 			abiBytes, err = os.ReadFile(input)
 		}
 		if err != nil {
