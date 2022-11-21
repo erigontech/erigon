@@ -93,7 +93,9 @@ type Header struct {
 	AuRaStep uint64
 	AuRaSeal []byte
 
-	BaseFee *big.Int `json:"baseFeePerGas"` // EIP-1559
+	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
+	ExcessDataGas   *big.Int     `json:"excessDataGas"`   // EIP-4844
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
@@ -146,6 +148,13 @@ func (h *Header) EncodingSize() int {
 	if h.BaseFee != nil {
 		encodingSize++
 		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
+		if h.WithdrawalsHash != nil {
+			encodingSize += 33
+			if h.ExcessDataGas != nil {
+				encodingSize++
+				encodingSize += rlp.BigIntLenExcludingHead(h.ExcessDataGas)
+			}
+		}
 	}
 
 	if h.Verkle {
@@ -274,9 +283,26 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	// Write the optional fields. If any one of them is nil then don't write any subsequent ones as
+	// this will confuse the decoder. TODO: should we error out if we have non-nil values following
+	// nil ones?
 	if h.BaseFee != nil {
 		if err := rlp.EncodeBigInt(h.BaseFee, w, b[:]); err != nil {
 			return err
+		}
+		if h.WithdrawalsHash != nil {
+			b[0] = 128 + 32
+			if _, err := w.Write(b[:1]); err != nil {
+				return err
+			}
+			if _, err := w.Write(h.WithdrawalsHash.Bytes()); err != nil {
+				return err
+			}
+			if h.ExcessDataGas != nil {
+				if err := rlp.EncodeBigInt(h.ExcessDataGas, w, b[:]); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -408,6 +434,36 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	}
 	h.BaseFee = new(big.Int).SetBytes(b)
 
+	// WithdrawalsHash
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.WithdrawalsHash = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no WithdrawalsHash): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read WithdrawalsHash: %w", err)
+	} else {
+		if len(b) != 32 {
+			return fmt.Errorf("wrong size for WithdrawalsHash: %d", len(b))
+		}
+		copy(h.WithdrawalsHash[:], b)
+	}
+
+	// ExcessDataGas
+	if b, err = s.Uint256Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.ExcessDataGas = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no ExcessDataGas): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read ExcessDataGas: %w", err)
+	}
+	h.ExcessDataGas = new(big.Int).SetBytes(b)
+
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read VerkleProof: %w", err)
@@ -427,14 +483,15 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty *hexutil.Big
-	Number     *hexutil.Big
-	GasLimit   hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Time       hexutil.Uint64
-	Extra      hexutil.Bytes
-	BaseFee    *hexutil.Big
-	Hash       common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+	Difficulty    *hexutil.Big
+	Number        *hexutil.Big
+	GasLimit      hexutil.Uint64
+	GasUsed       hexutil.Uint64
+	Time          hexutil.Uint64
+	Extra         hexutil.Bytes
+	BaseFee       *hexutil.Big
+	ExcessDataGas *hexutil.Big
+	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
@@ -472,6 +529,12 @@ func (h *Header) SanityCheck() error {
 			return fmt.Errorf("too large base fee: bitlen %d", bfLen)
 		}
 	}
+	if h.ExcessDataGas != nil {
+		if bfLen := h.ExcessDataGas.BitLen(); bfLen > 256 {
+			return fmt.Errorf("too large excess data gas: bitlen %d", bfLen)
+		}
+	}
+
 	return nil
 }
 
@@ -855,6 +918,14 @@ func CopyHeader(h *Header) *Header {
 		cpy.BaseFee = new(big.Int)
 		cpy.BaseFee.Set(h.BaseFee)
 	}
+	if h.WithdrawalsHash != nil {
+		cpy.WithdrawalsHash = new(common.Hash)
+		*cpy.WithdrawalsHash = *h.WithdrawalsHash
+	}
+	if h.ExcessDataGas != nil {
+		cpy.ExcessDataGas = new(big.Int)
+		cpy.ExcessDataGas.Set(h.ExcessDataGas)
+	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
@@ -1055,6 +1126,13 @@ func (b *Block) BaseFee() *big.Int {
 		return nil
 	}
 	return new(big.Int).Set(b.header.BaseFee)
+}
+func (b *Block) WithdrawalsHash() *common.Hash { return b.header.WithdrawalsHash }
+func (b *Block) ExcessDataGas() *big.Int {
+	if b.header.ExcessDataGas == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.ExcessDataGas)
 }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
