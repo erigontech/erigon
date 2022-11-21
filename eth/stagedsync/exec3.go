@@ -879,7 +879,7 @@ func reconstituteStep(step int, last bool,
 		}
 		if startBlockNum > 0 {
 			startBlockNum--
-			startTxNum, err = rawdb.TxNums.Max(tx, startBlockNum)
+			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
 			if err != nil {
 				return err
 			}
