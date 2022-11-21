@@ -56,15 +56,18 @@ type ReconState struct {
 	sizeEstimate uint64
 }
 
-func NewReconState(workCh chan *TxTask) *ReconState {
+func NewReconState() *ReconState {
 	rs := &ReconState{
 		ReconnWork: &ReconnWork{
-			workCh:   workCh,
 			triggers: map[uint64][]*TxTask{},
 		},
 		changes: map[string]*btree.BTreeG[reconPair]{},
 	}
 	return rs
+}
+
+func (rs *ReconState) SetWorkCh(workCh chan *TxTask) {
+	rs.workCh = workCh
 }
 
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {

@@ -1,8 +1,6 @@
 package state
 
 import (
-	//"fmt"
-
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
@@ -93,7 +91,7 @@ func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *ac
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	//fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
 	w.rs.Delete(kv.PlainStateD, addr, nil, w.txNum)
 	return nil
 }
@@ -120,6 +118,7 @@ func (w *StateReconWriterInc) WriteAccountStorage(address common.Address, incarn
 	}
 	if value.IsZero() {
 		w.rs.Delete(kv.PlainStateD, addr, k, w.txNum)
+		//fmt.Printf("delete storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
 	} else {
 		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
 		w.rs.Put(kv.PlainStateR, addr, k, value.Bytes(), w.txNum)

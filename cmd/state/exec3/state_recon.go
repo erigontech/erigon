@@ -227,8 +227,8 @@ type ReconWorker struct {
 	wg          *sync.WaitGroup
 	rs          *state2.ReconState
 	blockReader services.FullBlockReader
-	stateWriter *state2.StateReconWriter
-	stateReader *state2.HistoryReaderNoState
+	stateWriter *state2.StateReconWriterInc
+	stateReader *state2.HistoryReaderInc
 	getHeader   func(hash common.Hash, number uint64) *types.Header
 	ctx         context.Context
 	engine      consensus.Engine
@@ -244,7 +244,7 @@ type ReconWorker struct {
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 	a *state.Aggregator22, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
-	chainTx kv.Tx,
+	chainTx kv.Tx, step int,
 ) *ReconWorker {
 	ac := a.MakeContext()
 	rw := &ReconWorker{
@@ -253,8 +253,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 		rs:          rs,
 		blockReader: blockReader,
 		ctx:         context.Background(),
-		stateWriter: state2.NewStateReconWriter(ac, rs),
-		stateReader: state2.NewHistoryReaderNoState(ac, rs),
+		stateWriter: state2.NewStateReconWriterInc(ac, rs),
+		stateReader: state2.NewHistoryReaderInc(ac, rs, step),
 		chainConfig: chainConfig,
 		logger:      logger,
 		genesis:     genesis,
@@ -312,13 +312,13 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
-				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+			if _, _, err = rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+				err = fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 			}
 		}
 	} else if txTask.TxIndex == -1 {
@@ -362,7 +362,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			panic(err)
 		}
 	}
-	if dependency, ok := rw.stateReader.ReadError(); ok {
+	if dependency, ok := rw.stateReader.ReadError(); ok || err != nil {
 		//fmt.Printf("rollback %d\n", txNum)
 		rw.rs.RollbackTx(txTask, dependency)
 	} else {

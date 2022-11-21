@@ -705,9 +705,11 @@ func reconstituteStep(step int, last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	agg *libstate.Aggregator22, chainDb kv.RwDB, rs *state.ReconState, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
-	batchSize datasize.ByteSize, s *StageState, workCh chan *state.TxTask, blockNum uint64,
+	batchSize datasize.ByteSize, s *StageState, blockNum uint64,
 ) error {
 	log.Info("Step of incremental reconstitution", "step", step, "last", last)
+	workCh := make(chan *state.TxTask, workerCount*4)
+	rs.SetWorkCh(workCh)
 	doneCount := atomic2.NewUint64(0)
 	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, nil /* fromKey */, nil /* toKey */)
 
@@ -787,7 +789,7 @@ func reconstituteStep(step int, last bool,
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i], step)
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
@@ -866,10 +868,44 @@ func reconstituteStep(step int, last bool,
 		}
 	}()
 
-	var inputTxNum uint64
+	var startOk, endOk bool
+	startTxNum := uint64(step) * uint64(100_000_000)
+	endTxNum := uint64(step+1) * uint64(100_000_000)
+	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
+		if err != nil {
+			return err
+		}
+		if startBlockNum > 0 {
+			startBlockNum--
+			startTxNum, err = rawdb.TxNums.Max(tx, startBlockNum)
+			if err != nil {
+				return err
+			}
+		}
+		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !startOk {
+		return fmt.Errorf("step startTxNum not found in snapshot blocks: %d", startTxNum)
+	}
+	if !endOk {
+		return fmt.Errorf("step endTxNum not found in snapshot blocks: %d", endTxNum)
+	}
+	if last {
+		endBlockNum = blockNum
+	}
+
+	var inputTxNum uint64 = startTxNum
 	var b *types.Block
 	var txKey [8]byte
-	for bn = uint64(0); bn <= blockNum; bn++ {
+	for bn = startBlockNum; bn <= endBlockNum; bn++ {
 		t = time.Now()
 		rules := chainConfig.Rules(bn)
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
@@ -991,15 +1027,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
-	workCh := make(chan *state.TxTask, workerCount*4)
-	rs := state.NewReconState(workCh)
+	rs := state.NewReconState()
 	numSteps := agg.Steps()
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 	for step := 0; step < numSteps; step++ {
 		if err := reconstituteStep(step, step+1 == numSteps, workerCount, ctx, db,
 			txNum, dirs, agg, chainDb, rs, blockReader, chainConfig, logger, genesis,
-			engine, batchSize, s, workCh, blockNum,
+			engine, batchSize, s, blockNum,
 		); err != nil {
 			return err
 		}
