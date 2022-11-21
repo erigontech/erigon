@@ -11,12 +11,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
 	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
+	"github.com/ledgerwatch/erigon/common/math"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -87,6 +89,28 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	log.Info("Current finalized epoch.", "epoch", status.FinalizedEpoch)
 	log.Info("Current head root.", "root", hex.EncodeToString(status.HeadRoot[:]))
 	log.Info("Current head slot.", "slot", status.HeadSlot)
+	log.Info("Current checkpoint slot.", "slot", cpBlock.Block.Slot)
+
+	timeSlot := utils.GetCurrentSlot(cpState.GenesisTime, lcCfg.BeaconCfg.SecondsPerSlot)
+	log.Info("Current slot based on timestamp.", "slot", timeSlot)
+
+	// Confirm that current head slot is within a few blocks of the timestamp slot.
+	if math.AbsoluteDifference(status.HeadSlot, timeSlot) > 10 {
+		log.Error("Difference between time-based and status-based head slot is larger than 10")
+	}
+
+	numBlocks := status.HeadSlot - cpBlock.Block.Slot
+	log.Info("Fetching new blocks.", "blocks", numBlocks)
+
+	blocks, err := clcore.GetBlocksByRange(ctx, s, cpBlock.Block.Slot, numBlocks)
+	if err != nil {
+		log.Error("[Head sync] Failed, recent blocks not fetched", "reason", err)
+		return err
+	}
+
+	log.Info("Fetched new blocks.", "block count", len(blocks))
+	log.Info("Most recent block.", "slot", blocks[len(blocks)-1].Block.Slot)
+	log.Info("Most recent block.", "root", hex.EncodeToString(blocks[len(blocks)-1].Block.StateRoot[:]))
 	return nil
 }
 
