@@ -244,11 +244,13 @@ func Exec3(ctx context.Context,
 					if err := rs.ApplyState(tx, txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
+					rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+					outputTxNum.Inc()
+					outputBlockNum.Store(txTask.BlockNum)
+					rwsReceiveCond.Signal()
 					if err := rs.ApplyHistory(tx, txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
-					outputTxNum.Inc()
-					outputBlockNum.Store(txTask.BlockNum)
 				}
 			}
 		}
