@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	state2 "github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
@@ -229,7 +228,6 @@ type ReconWorker struct {
 	blockReader services.FullBlockReader
 	stateWriter *state2.StateReconWriter
 	stateReader *state2.HistoryReaderNoState
-	getHeader   func(hash common.Hash, number uint64) *types.Header
 	ctx         context.Context
 	engine      consensus.Engine
 	chainConfig *params.ChainConfig
@@ -273,13 +271,6 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 
 func (rw *ReconWorker) Run() {
 	defer rw.wg.Done()
-	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(txTask)
 	}
