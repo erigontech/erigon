@@ -99,3 +99,18 @@ func ReadLightClientFinalityUpdate(tx kv.Tx) (*cltypes.LightClientFinalityUpdate
 	}
 	return update, nil
 }
+
+func ReadLightClientOptimisticUpdate(tx kv.Tx) (*cltypes.LightClientOptimisticUpdate, error) {
+	encoded, err := tx.GetOne(kv.LightClient, kv.LightClientOptimisticUpdate)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) == 0 {
+		return nil, nil
+	}
+	update := &cltypes.LightClientOptimisticUpdate{}
+	if err = update.UnmarshalSSZ(encoded); err != nil {
+		return nil, err
+	}
+	return update, nil
+}

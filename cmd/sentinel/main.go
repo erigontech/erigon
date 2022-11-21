@@ -132,31 +132,56 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		copy(roots[2][:], rawRoot3)
 
 		var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
+
+		// Getting fork digest into bytes array.
+		forkDigest := "4a26c58b"
+		fdSlice, err := hex.DecodeString(forkDigest)
+		check(err)
+		var fdArr [4]byte
+		copy(fdArr[:], fdSlice)
+
+		// Getting CP block root into bytes array.
+		cpRootRaw := "60ee0f7170ed4984e4a7e735dff36bce28d2fb03a3f698287b73415d70fe7355"
+		cpRootSlice, err := hex.DecodeString(cpRootRaw)
+		check(err)
+		var cpRootArr [32]byte
+		copy(cpRootArr[:], cpRootSlice)
+
+		// Getting head block root into bytes array.
+		headRootRaw := "b52fc95e02471414451e6cf465709f53f65145fc5efbb18817252c33e301fa3a"
+		headRootSlice, err := hex.DecodeString(headRootRaw)
+		check(err)
+		var headRootArr [32]byte
+		copy(headRootArr[:], headRootSlice)
+
+		// USING: https://beaconcha.in/slot/5101760 as the checkpoint & current block.
+		statusReq := &cltypes.Status{
+			ForkDigest:     fdArr,
+			FinalizedRoot:  cpRootArr,
+			FinalizedEpoch: 160285,
+			HeadRoot:       headRootArr,
+			HeadSlot:       5129184,
+		}
+
+		blocksByRangeReq := &cltypes.BeaconBlocksByRangeRequest{
+			StartSlot: 5142800,
+			Count:     2,
+			Step:      1, // deprecated, must be set to 1.
+		}
+		req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
+		if err != nil {
+			log.Error("could not construct request", "err", err)
+		}
+		sendRequest(ctx, s, req)
 	*/
-
-	// Getting fork digest into bytes array.
-	forkDigest := "4a26c58b"
-	fdSlice, err := hex.DecodeString(forkDigest)
+	roots := make([][32]byte, 1)
+	rawRoot1, err := hex.DecodeString("cc85056af7f6e3e4835436cb12a09a9d56e0aac15d08436af82dbe0cd7ae60e0")
 	check(err)
-	var fdArr [4]byte
-	copy(fdArr[:], fdSlice)
 
-	// Getting CP block root into bytes array.
-	cpRootRaw := "3657dbacf691e5c3787bf6b824bdd83bec8c3446797635370bdd0ed4b7c5b760"
-	cpRootSlice, err := hex.DecodeString(cpRootRaw)
-	check(err)
-	var cpRootArr [32]byte
-	copy(cpRootArr[:], cpRootSlice)
+	copy(roots[0][:], rawRoot1)
 
-	// USING: https://beaconcha.in/slot/5101760 as the checkpoint & current block.
-	statusReq := &cltypes.Status{
-		ForkDigest:     fdArr,
-		FinalizedRoot:  cpRootArr,
-		FinalizedEpoch: 159430,
-		HeadRoot:       cpRootArr,
-		HeadSlot:       5101760,
-	}
-	req, err := constructRequest(handlers.StatusProtocolV1, statusReq)
+	var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
+	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
 	if err != nil {
 		log.Error("could not construct request", "err", err)
 		return err
@@ -196,8 +221,10 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 		case <-ctx.Done():
 		case <-newReqTicker.C:
 			go func() {
+				log.Info("Sending request", "data", req)
 				message, err := s.SendRequest(ctx, req)
 				if err != nil {
+					log.Error("Error returned", "err", err)
 					return
 				}
 				if message.Error {

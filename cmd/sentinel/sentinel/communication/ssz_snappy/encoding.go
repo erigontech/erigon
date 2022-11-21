@@ -23,108 +23,7 @@ import (
 	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
-	"github.com/libp2p/go-libp2p-core/network"
 )
-
-type StreamCodec struct {
-	s  network.Stream
-	sr *snappy.Reader
-}
-
-func NewStreamCodec(
-	s network.Stream,
-) communication.StreamCodec {
-	return &StreamCodec{
-		s:  s,
-		sr: snappy.NewReader(s),
-	}
-}
-
-func (d *StreamCodec) Close() error {
-	if err := d.s.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *StreamCodec) CloseWriter() error {
-	if err := d.s.CloseWrite(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *StreamCodec) CloseReader() error {
-	if err := d.s.CloseRead(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// write packet to stream. will add correct header + compression
-// will error if packet does not implement ssz.Marshaler interface
-func (d *StreamCodec) WritePacket(pkt communication.Packet, prefix ...byte) (err error) {
-	val, ok := pkt.(ssz.Marshaler)
-	if !ok {
-		return nil
-	}
-	if len(prefix) > 0 {
-		return EncodeAndWrite(d.s, val, prefix[0])
-	}
-	return EncodeAndWrite(d.s, val)
-}
-
-// write raw bytes to stream
-func (d *StreamCodec) Write(payload []byte) (n int, err error) {
-	return d.s.Write(payload)
-}
-
-// read raw bytes to stream
-func (d *StreamCodec) Read(b []byte) (n int, err error) {
-	return d.s.Read(b)
-}
-
-// read raw bytes to stream
-func (d *StreamCodec) ReadByte() (b byte, err error) {
-	o := [1]byte{}
-	_, err = io.ReadFull(d.s, o[:])
-	if err != nil {
-		return
-	}
-	return o[0], nil
-}
-
-// decode into packet p, then return the packet context
-func (d *StreamCodec) Decode(p communication.Packet) (ctx *communication.StreamContext, err error) {
-	ctx, err = d.readPacket(p)
-	return
-}
-
-func (d *StreamCodec) readPacket(p communication.Packet) (ctx *communication.StreamContext, err error) {
-	c := &communication.StreamContext{
-		Packet:   p,
-		Stream:   d.s,
-		Codec:    d,
-		Protocol: d.s.Protocol(),
-	}
-	if val, ok := p.(ssz.Unmarshaler); ok {
-		ln, _, err := readUvarint(d.s)
-		if err != nil {
-			return c, err
-		}
-		c.Raw = make([]byte, ln)
-		_, err = io.ReadFull(d.sr, c.Raw)
-		if err != nil {
-			return c, fmt.Errorf("readPacket: %w", err)
-		}
-		err = val.UnmarshalSSZ(c.Raw)
-		if err != nil {
-			return c, fmt.Errorf("readPacket: %w", err)
-		}
-	}
-	return c, nil
-}
 
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
@@ -225,7 +124,7 @@ func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSS
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
 			if err != nil {
-				return fmt.Errorf("Read error: %w", err)
+				return fmt.Errorf("read error: %w", err)
 			}
 			bytesRead += n
 		}
