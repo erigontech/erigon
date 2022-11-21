@@ -116,7 +116,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	ac := agg.MakeContext()
 	workCh := make(chan *state.TxTask)
 	rs := state.NewReconState()
-	rs.SetWorkCh(workCh)
+	rs.Reset(workCh)
 	if err = replayTxNum(ctx, allSnapshots, blockReader, txNum, txNums, rs, ac); err != nil {
 		return err
 	}

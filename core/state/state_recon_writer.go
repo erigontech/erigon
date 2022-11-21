@@ -45,6 +45,7 @@ type ReconnWork struct {
 	workCh        chan *TxTask
 	queue         TxTaskQueue
 	rollbackCount uint64
+	maxTxNum      uint64
 }
 
 // ReconState is the accumulator of changes to the state
@@ -66,8 +67,11 @@ func NewReconState() *ReconState {
 	return rs
 }
 
-func (rs *ReconState) SetWorkCh(workCh chan *TxTask) {
+func (rs *ReconState) Reset(workCh chan *TxTask) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 	rs.workCh = workCh
+	rs.doneBitmap.Clear()
 }
 
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
@@ -179,6 +183,9 @@ func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 		delete(rs.triggers, txNum)
 	}
 	rs.doneBitmap.Add(txNum)
+	if txNum > rs.maxTxNum {
+		rs.maxTxNum = txNum
+	}
 }
 
 func (rs *ReconnWork) RollbackTx(txTask *TxTask, dependency uint64) {
@@ -206,6 +213,12 @@ func (rs *ReconnWork) DoneCount() uint64 {
 	c := rs.doneBitmap.GetCardinality()
 	rs.lock.RUnlock()
 	return c
+}
+
+func (rs *ReconnWork) MaxTxNum() uint64 {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.maxTxNum
 }
 
 func (rs *ReconnWork) RollbackCount() uint64 {

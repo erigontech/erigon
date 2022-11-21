@@ -705,11 +705,10 @@ func reconstituteStep(step int, last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	agg *libstate.Aggregator22, chainDb kv.RwDB, rs *state.ReconState, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
-	batchSize datasize.ByteSize, s *StageState, blockNum uint64,
+	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
-	log.Info("Step of incremental reconstitution", "step", step, "last", last)
 	workCh := make(chan *state.TxTask, workerCount*4)
-	rs.SetWorkCh(workCh)
+	rs.Reset(workCh)
 	doneCount := atomic2.NewUint64(0)
 	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, nil /* fromKey */, nil /* toKey */)
 
@@ -793,81 +792,6 @@ func reconstituteStep(step int, last bool,
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
-	count := uint64(0)
-	rollbackCount := uint64(0)
-	total := bitmap.GetCardinality()
-	for i := 0; i < workerCount; i++ {
-		go reconWorkers[i].Run()
-	}
-	commitThreshold := batchSize.Bytes()
-	prevCount := uint64(0)
-	prevRollbackCount := uint64(0)
-	prevTime := time.Now()
-	reconDone := make(chan struct{})
-	var bn uint64
-	go func() {
-		for {
-			select {
-			case <-reconDone:
-				return
-			case <-logEvery.C:
-				var m runtime.MemStats
-				common.ReadMemStats(&m)
-				sizeEstimate := rs.SizeEstimate()
-				count = rs.DoneCount()
-				rollbackCount = rs.RollbackCount()
-				currentTime := time.Now()
-				interval := currentTime.Sub(prevTime)
-				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
-				progress := 100.0 * float64(count) / float64(total)
-				var repeatRatio float64
-				if count > prevCount {
-					repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
-				}
-				prevTime = currentTime
-				prevCount = count
-				prevRollbackCount = rollbackCount
-				syncMetrics[stages.Execution].Set(bn)
-				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", progress),
-					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
-					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
-					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-				if sizeEstimate >= commitThreshold {
-					t := time.Now()
-					if err = func() error {
-						lock.Lock()
-						defer lock.Unlock()
-						for i := 0; i < workerCount; i++ {
-							roTxs[i].Rollback()
-						}
-						if err := db.Update(ctx, func(tx kv.RwTx) error {
-							if err = rs.Flush(tx); err != nil {
-								return err
-							}
-							//if err = agg.Flush(tx); err != nil {
-							//	return err
-							//}
-							return nil
-						}); err != nil {
-							return err
-						}
-						for i := 0; i < workerCount; i++ {
-							if roTxs[i], err = db.BeginRo(ctx); err != nil {
-								return err
-							}
-							reconWorkers[i].SetTx(roTxs[i])
-						}
-						return nil
-					}(); err != nil {
-						panic(err)
-					}
-					log.Info(fmt.Sprintf("[%s] State reconstitution, commit", s.LogPrefix()), "took", time.Since(t))
-				}
-			}
-		}
-	}()
-
 	var startOk, endOk bool
 	startTxNum := uint64(step) * uint64(100_000_000)
 	endTxNum := uint64(step+1) * uint64(100_000_000)
@@ -901,6 +825,79 @@ func reconstituteStep(step int, last bool,
 	if last {
 		endBlockNum = blockNum
 	}
+	var maxTxNum uint64 = startTxNum
+	rollbackCount := uint64(0)
+	for i := 0; i < workerCount; i++ {
+		go reconWorkers[i].Run()
+	}
+	commitThreshold := batchSize.Bytes()
+	prevCount := uint64(0)
+	prevRollbackCount := uint64(0)
+	prevTime := time.Now()
+	reconDone := make(chan struct{})
+	var bn uint64
+	go func() {
+		for {
+			select {
+			case <-reconDone:
+				return
+			case <-logEvery.C:
+				var m runtime.MemStats
+				common.ReadMemStats(&m)
+				sizeEstimate := rs.SizeEstimate()
+				maxTxNum = rs.MaxTxNum()
+				count := rs.DoneCount()
+				rollbackCount = rs.RollbackCount()
+				currentTime := time.Now()
+				interval := currentTime.Sub(prevTime)
+				speedTx := float64(count-prevCount) / (float64(interval) / float64(time.Second))
+				progress := 100.0 * float64(maxTxNum) / float64(total)
+				stepProgress := 100.0 * float64(maxTxNum-startTxNum) / float64(endTxNum-startTxNum)
+				var repeatRatio float64
+				if count > prevCount {
+					repeatRatio = 100.0 * float64(rollbackCount-prevRollbackCount) / float64(count-prevCount)
+				}
+				prevTime = currentTime
+				prevCount = count
+				prevRollbackCount = rollbackCount
+				syncMetrics[stages.Execution].Set(bn)
+				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
+					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
+					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
+					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				if sizeEstimate >= commitThreshold {
+					t := time.Now()
+					if err = func() error {
+						lock.Lock()
+						defer lock.Unlock()
+						for i := 0; i < workerCount; i++ {
+							roTxs[i].Rollback()
+						}
+						if err := db.Update(ctx, func(tx kv.RwTx) error {
+							if err = rs.Flush(tx); err != nil {
+								return err
+							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						for i := 0; i < workerCount; i++ {
+							if roTxs[i], err = db.BeginRo(ctx); err != nil {
+								return err
+							}
+							reconWorkers[i].SetTx(roTxs[i])
+						}
+						return nil
+					}(); err != nil {
+						panic(err)
+					}
+					log.Info(fmt.Sprintf("[%s] State reconstitution, commit", s.LogPrefix()), "took", time.Since(t))
+				}
+			}
+		}
+	}()
 
 	var inputTxNum uint64 = startTxNum
 	var b *types.Block
@@ -1032,9 +1029,10 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 	for step := 0; step < numSteps; step++ {
+		log.Info("Step of incremental reconstitution", "step", step+1, "out of", numSteps, "workers", workerCount)
 		if err := reconstituteStep(step, step+1 == numSteps, workerCount, ctx, db,
 			txNum, dirs, agg, chainDb, rs, blockReader, chainConfig, logger, genesis,
-			engine, batchSize, s, blockNum,
+			engine, batchSize, s, blockNum, txNum,
 		); err != nil {
 			return err
 		}
