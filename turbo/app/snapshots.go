@@ -163,11 +163,13 @@ func doLocalityIndex(cliCtx *cli.Context) error {
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
+	log.Info("opened db")
 	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory)
 
+	log.Info("opened snapshots")
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
 	if err != nil {
 		return err
@@ -177,6 +179,7 @@ func doLocalityIndex(cliCtx *cli.Context) error {
 		return err
 	}
 
+	log.Info("building index")
 	err = agg.BuildLocalityIndex(ctx)
 	if err != nil {
 		return err
