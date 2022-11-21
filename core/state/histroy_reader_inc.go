@@ -12,7 +12,7 @@ import (
 )
 
 type HistoryReaderInc struct {
-	ac         *libstate.Aggregator22Context
+	as         *libstate.AggregatorSteps
 	tx         kv.Tx
 	txNum      uint64
 	trace      bool
@@ -23,8 +23,8 @@ type HistoryReaderInc struct {
 	step       int
 }
 
-func NewHistoryReaderInc(ac *libstate.Aggregator22Context, rs *ReconState, step int) *HistoryReaderInc {
-	return &HistoryReaderInc{ac: ac, rs: rs, step: step}
+func NewHistoryReaderInc(as *libstate.AggregatorSteps, rs *ReconState, step int) *HistoryReaderInc {
+	return &HistoryReaderInc{as: as, rs: rs, step: step}
 }
 
 func (hr *HistoryReaderInc) SetTxNum(txNum uint64) {
@@ -52,7 +52,7 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.ac.ReadAccountDataNoStateInc(addr, hr.txNum, hr.step); err != nil {
+		if enc, noState, err = hr.as.ReadAccountDataNoState(addr, hr.txNum, hr.step); err != nil {
 			return nil, err
 		}
 	}
@@ -130,7 +130,7 @@ func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnati
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.ac.ReadAccountStorageNoStateInc(addr, k, hr.txNum, hr.step); err != nil {
+		if enc, noState, err = hr.as.ReadAccountStorageNoState(addr, k, hr.txNum, hr.step); err != nil {
 			return nil, err
 		}
 	}
@@ -190,7 +190,7 @@ func (hr *HistoryReaderInc) ReadAccountCode(address common.Address, incarnation 
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.ac.ReadAccountCodeNoStateInc(addr, hr.txNum, hr.step); err != nil {
+		if enc, noState, err = hr.as.ReadAccountCodeNoState(addr, hr.txNum, hr.step); err != nil {
 			return nil, err
 		}
 	}
@@ -242,7 +242,7 @@ func (hr *HistoryReaderInc) ReadAccountCodeSize(address common.Address, incarnat
 	var size int
 	noState := false
 	if stateTxNum >= hr.txNum {
-		if size, noState, err = hr.ac.ReadAccountCodeSizeNoStateInc(addr, hr.txNum, hr.step); err != nil {
+		if size, noState, err = hr.as.ReadAccountCodeSizeNoState(addr, hr.txNum, hr.step); err != nil {
 			return 0, err
 		}
 	}

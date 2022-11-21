@@ -843,7 +843,7 @@ func reconstituteStep(step int, last bool,
 		go reconWorkers[i].Run()
 	}
 	commitThreshold := batchSize.Bytes()
-	prevCount := uint64(0)
+	prevCount := rs.DoneCount()
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})

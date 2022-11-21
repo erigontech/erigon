@@ -29,6 +29,7 @@ import (
 type FillWorker struct {
 	txNum          uint64
 	doneCount      *atomic.Uint64
+	as             *state.AggregatorSteps
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
@@ -42,6 +43,7 @@ func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
+		as:        a.MakeSteps(),
 		fromKey:   fromKey,
 		toKey:     toKey,
 		total:     atomic.NewUint64(0),
@@ -166,7 +168,7 @@ func (fw *FillWorker) ResetProgress() {
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateAccountsReconTxsInc(step, fw.txNum)
+	it := fw.as.IterateAccountsTxs(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -182,7 +184,7 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector, step int)
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateStorageReconTxsInc(step, fw.txNum)
+	it := fw.as.IterateStorageTxs(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -198,7 +200,7 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector, step int) 
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector, step int) {
 	defer fw.doneCount.Inc()
-	it := fw.ac.IterateCodeReconTxsInc(step, fw.txNum)
+	it := fw.as.IterateCodeTxs(step, fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -247,6 +249,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 	chainTx kv.Tx, step int,
 ) *ReconWorker {
 	ac := a.MakeContext()
+	as := a.MakeSteps()
 	rw := &ReconWorker{
 		lock:        lock,
 		wg:          wg,
@@ -254,7 +257,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 		blockReader: blockReader,
 		ctx:         context.Background(),
 		stateWriter: state2.NewStateReconWriterInc(ac, rs),
-		stateReader: state2.NewHistoryReaderInc(ac, rs, step),
+		stateReader: state2.NewHistoryReaderInc(as, rs, step),
 		chainConfig: chainConfig,
 		logger:      logger,
 		genesis:     genesis,

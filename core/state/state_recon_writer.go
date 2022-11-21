@@ -71,7 +71,13 @@ func (rs *ReconState) Reset(workCh chan *TxTask) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	rs.workCh = workCh
-	rs.doneBitmap.Clear()
+	rs.triggers = map[uint64][]*TxTask{}
+	rs.rollbackCount = 0
+	rs.queue = rs.queue[:cap(rs.queue)]
+	for i := 0; i < len(rs.queue); i++ {
+		rs.queue[i] = nil
+	}
+	rs.queue = rs.queue[:0]
 }
 
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
