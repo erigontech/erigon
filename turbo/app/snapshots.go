@@ -155,6 +155,9 @@ func preloadFileAsync(name string) {
 }
 
 func doLocalityIndex(cliCtx *cli.Context) error {
+	log.Info("starting")
+	defer log.Info("finished")
+
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
