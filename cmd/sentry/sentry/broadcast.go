@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
@@ -129,7 +130,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 	initialTxs := txs
 	for len(txs) > 0 {
 
-		pendingLen := maxTxPacketSize / common.HashLength
+		pendingLen := maxTxPacketSize / length.Hash
 		pending := make([]common.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {
@@ -188,7 +189,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 	defer cs.lock.RUnlock()
 	for len(txs) > 0 {
 
-		pendingLen := maxTxPacketSize / common.HashLength
+		pendingLen := maxTxPacketSize / length.Hash
 		pending := make([]common.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {
@@ -244,7 +245,7 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 	defer cs.lock.RUnlock()
 	for len(txs) > 0 {
 
-		pendingLen := maxTxPacketSize / common.HashLength
+		pendingLen := maxTxPacketSize / length.Hash
 		pending := make([]common.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {

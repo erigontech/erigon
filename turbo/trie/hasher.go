@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"hash"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -89,7 +90,7 @@ func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
 		copy(storeTo, hn.hash)
-		return common.HashLength, nil
+		return length.Hash, nil
 	}
 	if len(n.reference()) > 0 {
 		copy(storeTo, n.reference())
@@ -120,7 +121,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		n.ref.len = byte(refLen)
 	}
 
-	if h.callback != nil && len(n.reference()) == common.HashLength {
+	if h.callback != nil && len(n.reference()) == length.Hash {
 		var hash common.Hash
 		copy(hash[:], storeTo)
 		h.callback(hash, n)
@@ -349,9 +350,9 @@ func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (i
 		return 0, err
 	}
 
-	if hashLen == common.HashLength {
-		buffer[pos] = byte(0x80 + common.HashLength)
-		return common.HashLength + 1, nil
+	if hashLen == length.Hash {
+		buffer[pos] = byte(0x80 + length.Hash)
+		return length.Hash + 1, nil
 	}
 
 	// Shift one byte backwards, because it is not treated as a byte array but embedded RLP

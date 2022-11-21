@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	atomic2 "go.uber.org/atomic"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -40,6 +41,7 @@ type TxTask struct {
 	TxIndex            int // -1 for block initialisation
 	Final              bool
 	Tx                 types.Transaction
+	GetHashFn          func(n uint64) common.Hash
 	TxAsMessage        types.Message
 	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*KvList
@@ -91,7 +93,7 @@ type State22 struct {
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
-	txsDone      uint64
+	txsDone      *atomic2.Uint64
 	finished     bool
 }
 
@@ -108,6 +110,7 @@ func NewState22() *State22 {
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[statePair]{},
+		txsDone:      atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -130,8 +133,9 @@ const btreeOverhead = 16
 
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
-	defer rs.lock.RUnlock()
-	return rs.get(table, key)
+	v := rs.get(table, key)
+	rs.lock.RUnlock()
+	return v
 }
 
 func (rs *State22) get(table string, key []byte) []byte {
@@ -158,12 +162,12 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 				if err = c.Delete(item.key); err != nil {
 					return false
 				}
-				//fmt.Printf("Flush [%x]=>\n", ks)
+				//fmt.Printf("Flush [%x]=>\n", item.key)
 			} else {
 				if err = c.Put(item.key, item.val); err != nil {
 					return false
 				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", ks, val)
+				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 			}
 			return true
 		})
@@ -219,7 +223,7 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txDoneIncrement()
+	rs.txsDone.Add(1)
 	return count
 }
 
@@ -227,12 +231,6 @@ func (rs *State22) queuePush(t *TxTask) {
 	rs.queueLock.Lock()
 	heap.Push(&rs.queue, t)
 	rs.queueLock.Unlock()
-}
-
-func (rs *State22) txDoneIncrement() {
-	rs.lock.Lock()
-	rs.txsDone++
-	rs.lock.Unlock()
 }
 
 func (rs *State22) AddWork(txTask *TxTask) {
@@ -263,44 +261,9 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
-	emptyRemoval := txTask.Rules.IsSpuriousDragon
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-
-	agg.SetTxNum(txTask.TxNum)
-	for addr := range txTask.BalanceIncreaseSet {
-		addrBytes := addr.Bytes()
-		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addrBytes)
-		if enc0 == nil {
-			var err error
-			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
-			if err != nil {
-				return err
-			}
-		}
-		var a accounts.Account
-		if err := a.DecodeForStorage(enc0); err != nil {
-			return err
-		}
-		if len(enc0) > 0 {
-			// Need to convert before balance increase
-			enc0 = accounts.Serialise2(&a)
-		}
-		a.Balance.Add(&a.Balance, &increase)
-		var enc1 []byte
-		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
-			enc1 = []byte{}
-		} else {
-			enc1 = make([]byte, a.EncodingLengthForStorage())
-			a.EncodeForStorage(enc1)
-		}
-		rs.put(kv.PlainState, addrBytes, enc1)
-		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
-			return err
-		}
-	}
+func (rs *State22) appplyState1(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
 
 	if len(txTask.AccountDels) > 0 {
 		cursor, err := roTx.Cursor(kv.PlainState)
@@ -376,18 +339,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		}
 	}
 
-	for addrS, enc0 := range txTask.AccountPrevs {
-		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
-			return err
-		}
-	}
-	for compositeS, val := range txTask.StoragePrevs {
-		composite := []byte(compositeS)
-		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
-			return err
-		}
-	}
-
 	k := make([]byte, 20+8)
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
@@ -417,6 +368,80 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 			return err
 		}
 	}
+	return nil
+}
+
+func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	emptyRemoval := txTask.Rules.IsSpuriousDragon
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	for addr := range txTask.BalanceIncreaseSet {
+		addrBytes := addr.Bytes()
+		increase := txTask.BalanceIncreaseSet[addr]
+		enc0 := rs.get(kv.PlainState, addrBytes)
+		if enc0 == nil {
+			var err error
+			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
+			if err != nil {
+				return err
+			}
+		}
+		var a accounts.Account
+		if err := a.DecodeForStorage(enc0); err != nil {
+			return err
+		}
+		if len(enc0) > 0 {
+			// Need to convert before balance increase
+			enc0 = accounts.Serialise2(&a)
+		}
+		a.Balance.Add(&a.Balance, &increase)
+		var enc1 []byte
+		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
+			enc1 = []byte{}
+		} else {
+			enc1 = make([]byte, a.EncodingLengthForStorage())
+			a.EncodeForStorage(enc1)
+		}
+		rs.put(kv.PlainState, addrBytes, enc1)
+		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
+			return err
+		}
+	}
+
+	if txTask.WriteLists != nil {
+		for table, list := range txTask.WriteLists {
+			for i, key := range list.Keys {
+				rs.put(table, key, list.Vals[i])
+			}
+		}
+	}
+	return nil
+}
+
+func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	agg.SetTxNum(txTask.TxNum)
+	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
+		return err
+	}
+	if err := rs.appplyState(roTx, txTask, agg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (rs *State22) ApplyHistory(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+	for addrS, enc0 := range txTask.AccountPrevs {
+		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
+			return err
+		}
+	}
+	for compositeS, val := range txTask.StoragePrevs {
+		composite := []byte(compositeS)
+		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
+			return err
+		}
+	}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
 			if err := agg.AddTraceFrom(addr[:]); err != nil {
@@ -438,13 +463,6 @@ func (rs *State22) Apply(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22)
 		for _, topic := range log.Topics {
 			if err := agg.AddLogTopic(topic[:]); err != nil {
 				return fmt.Errorf("adding event log for topic %x: %w", topic, err)
-			}
-		}
-	}
-	if txTask.WriteLists != nil {
-		for table, list := range txTask.WriteLists {
-			for i, key := range list.Keys {
-				rs.put(table, key, list.Vals[i])
 			}
 		}
 	}
@@ -546,12 +564,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *State22) DoneCount() uint64 {
-	rs.lock.RLock()
-	r := rs.txsDone
-	rs.lock.RUnlock()
-	return r
-}
+func (rs *State22) DoneCount() uint64 { return rs.txsDone.Load() }
 
 func (rs *State22) SizeEstimate() uint64 {
 	rs.lock.RLock()

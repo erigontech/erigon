@@ -27,6 +27,10 @@ func TestDefaultBSCGenesisBlock(t *testing.T) {
 		require.Equal(t, block.Hash().Bytes(), expect.Bytes(), network)
 	}
 	for _, network := range networkname.All {
+		if network == networkname.ChiadoChainName {
+			continue
+		}
+
 		check(network)
 	}
 }

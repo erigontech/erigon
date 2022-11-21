@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
@@ -201,7 +202,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	tr := New(common.Hash{})
 	valueShort := []byte("VAL")
 	for _, key := range keys {
-		tr.Update([]byte(key)[common.HashLength:], valueShort)
+		tr.Update([]byte(key)[length.Hash:], valueShort)
 	}
 	trieHash := tr.Hash()
 
@@ -231,7 +232,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	cutoff := 2 * common.HashLength
+	cutoff := 2 * length.Hash
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueShort)}, groups, hasTree, hasHash, false); err != nil {
@@ -303,7 +304,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	cutoff := 2 * (common.HashLength + common.IncarnationLength)
+	cutoff := 2 * (length.Hash + common.IncarnationLength)
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {

@@ -886,22 +886,22 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	log.Info("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
 		case <-stop:
-			log.Debug("Discarding sealing operation for block", "number", number)
+			log.Info("Discarding sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
 			if wiggle > 0 {
-				log.Trace(
+				log.Info(
 					"Sealing out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
 					"in-turn-signer", snap.ValidatorSet.GetProposer().Address.Hex(),
 				)
 			}
-			log.Trace(
+			log.Info(
 				"Sealing successful",
 				"number", number,
 				"delay", delay,

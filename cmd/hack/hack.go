@@ -20,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -207,9 +208,9 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits = 8 * common.HashLength
+	var incarnationBytes [length.Incarnation]byte
+	startkey := make([]byte, length.Hash+length.Incarnation+length.Hash)
+	var fixedbits = 8 * length.Hash
 	copy(startkey, addrHash[:])
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.HashedStorage)
@@ -219,7 +220,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 		defer c.Close()
 		return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			fmt.Printf("Incarnation(z): %d\n", 0)
-			copy(incarnationBytes[:], k[common.HashLength:])
+			copy(incarnationBytes[:], k[length.Hash:])
 			found = true
 			return false, nil
 		})
@@ -1098,6 +1099,8 @@ func chainConfig(name string) error {
 		chainConfig = params.BorMainnetChainConfig
 	case "gnosis":
 		chainConfig = params.GnosisChainConfig
+	case "chiado":
+		chainConfig = params.ChiadoChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}

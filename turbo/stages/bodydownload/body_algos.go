@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -159,7 +160,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 					if block == nil {
 						var doubleHash DoubleHash
 						copy(doubleHash[:], header.UncleHash.Bytes())
-						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+						copy(doubleHash[length.Hash:], header.TxHash.Bytes())
 						bd.requestedMap[doubleHash] = blockNum
 					} else {
 						err = bd.addBodyToBucket(tx, blockNum, block.RawBody())
@@ -309,7 +310,7 @@ Loop:
 			txHash := types.DeriveSha(RawTransactions(txs[i]))
 			var doubleHash DoubleHash
 			copy(doubleHash[:], uncleHash.Bytes())
-			copy(doubleHash[common.HashLength:], txHash.Bytes())
+			copy(doubleHash[length.Hash:], txHash.Bytes())
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
