@@ -145,7 +145,7 @@ func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bin
 		return fmt.Errorf("failed to find tx in block: %v", err)
 	}
 
-	if err = requests.GetLogs(reqId, blockN, blockN, address, true); err != nil {
+	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 
