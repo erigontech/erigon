@@ -23,7 +23,7 @@ CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb
+BUILD_TAGS = nosqlite,noboltdb,disable_libutp
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false

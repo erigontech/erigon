@@ -6,6 +6,7 @@ import (
 	"path"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -103,7 +103,7 @@ func ReplayTx(genesis *core.Genesis) error {
 		txNum = txnum
 	}
 	fmt.Printf("txNum = %d\n", txNum)
-	dirs := datadir2.New(datadirCli)
+	dirs := datadir.New(datadirCli)
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, nil)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
