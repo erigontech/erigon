@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	chainConfig = params.AllEthashProtocolChanges
+	chainConfig = params.AllProtocolChanges
 	address     = common.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 )
 
