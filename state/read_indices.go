@@ -24,8 +24,9 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 type ReadIndices struct {
@@ -112,13 +113,14 @@ func (ri *ReadIndices) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (RC
 			c.Close()
 		}
 	}()
-	if c.accounts, err = ri.accounts.collate(txFrom, txTo, roTx, logEvery); err != nil {
+	ctx := context.TODO()
+	if c.accounts, err = ri.accounts.collate(ctx, txFrom, txTo, roTx, logEvery); err != nil {
 		return RCollation{}, err
 	}
-	if c.storage, err = ri.storage.collate(txFrom, txTo, roTx, logEvery); err != nil {
+	if c.storage, err = ri.storage.collate(ctx, txFrom, txTo, roTx, logEvery); err != nil {
 		return RCollation{}, err
 	}
-	if c.code, err = ri.code.collate(txFrom, txTo, roTx, logEvery); err != nil {
+	if c.code, err = ri.code.collate(ctx, txFrom, txTo, roTx, logEvery); err != nil {
 		return RCollation{}, err
 	}
 	closeColl = false

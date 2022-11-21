@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
-func TestEmptyState(t *testing.T) {
+func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -48,10 +48,10 @@ func TestEmptyState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	firstRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
 	require.NoError(t, err)
 
-	t.Logf("root hash %x\n", rootHash)
+	t.Logf("root hash %x\n", firstRootHash)
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
@@ -64,15 +64,15 @@ func TestEmptyState(t *testing.T) {
 	plainKeys, hashedKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050505").
 		Build()
-	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
-		t.Fatal(err)
-	}
-	_, branchNodeUpdates, err = hph.ReviewKeys(plainKeys, hashedKeys)
-	if err != nil {
-		t.Fatal(err)
-	}
+	err = ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	secondRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	require.NotEqualValues(t, firstRootHash, secondRootHash)
+
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
-	fmt.Printf("2. Generated updates\n")
+	fmt.Printf("2. Generated single update\n")
 	renderUpdates(branchNodeUpdates)
 
 	// More updates
@@ -81,18 +81,19 @@ func TestEmptyState(t *testing.T) {
 	plainKeys, hashedKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").
 		Build()
-	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
-		t.Fatal(err)
-	}
-	_, branchNodeUpdates, err = hph.ReviewKeys(plainKeys, hashedKeys)
+	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
+	thirdRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	require.NotEqualValues(t, secondRootHash, thirdRootHash)
+
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
-	fmt.Printf("3. Generated updates\n")
+	fmt.Printf("3. Generated single update\n")
 	renderUpdates(branchNodeUpdates)
 }
 
-func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
+func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -135,7 +136,7 @@ func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	require.EqualValues(t, hashBeforeEmptyUpdate, hashAfterEmptyUpdate)
 }
 
-func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
+func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 

@@ -35,6 +35,10 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -43,9 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/semaphore"
 )
 
 type InvertedIndex struct {
@@ -749,7 +750,7 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 	return ii1
 }
 
-func (ii *InvertedIndex) collate(txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (map[string]*roaring64.Bitmap, error) {
+func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (map[string]*roaring64.Bitmap, error) {
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return nil, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
@@ -776,6 +777,10 @@ func (ii *InvertedIndex) collate(txFrom, txTo uint64, roTx kv.Tx, logEvery *time
 		case <-logEvery.C:
 			log.Info("[snapshots] collate history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 			bitmap.RunOptimize()
+		case <-ctx.Done():
+			err := ctx.Err()
+			log.Warn("index collate cancelled", "err", err)
+			return nil, err
 		default:
 		}
 	}
@@ -954,7 +959,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 		if err = idxC.DeleteExact(v, k); err != nil {
 			return err
 		}
-		// This DeleteCurrent needs to the the last in the loop iteration, because it invalidates k and v
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = keysCursor.DeleteCurrent(); err != nil {
 			return err
 		}
@@ -1009,4 +1014,21 @@ func (ii *InvertedIndex) EnableMadvNormalReadAhead() *InvertedIndex {
 		return true
 	})
 	return ii
+}
+
+func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
+	if ii.files == nil {
+		return 0, 0, 0
+	}
+	ii.files.Ascend(func(item *filesItem) bool {
+		if item.index == nil {
+			return false
+		}
+		filesSize += uint64(item.decompressor.Size())
+		idxSize += uint64(item.index.Size())
+		filesCount += 2
+
+		return true
+	})
+	return filesCount, filesSize, idxSize
 }

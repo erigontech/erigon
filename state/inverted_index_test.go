@@ -27,12 +27,13 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
@@ -90,7 +91,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(0, 7, roTx, logEvery)
+	bs, err := ii.collate(ctx, 0, 7, roTx, logEvery)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(bs))
 	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
@@ -166,7 +167,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(0, 16, roTx, logEvery)
+	bs, err := ii.collate(ctx, 0, 16, roTx, logEvery)
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs)
@@ -299,7 +300,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
 			defer roTx.Rollback()
-			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
 			require.NoError(t, err)
 			roTx.Rollback()
 			sf, err := ii.buildFiles(ctx, step, bs)
@@ -346,7 +347,7 @@ func TestInvIndexRanges(t *testing.T) {
 		func() {
 			roTx, err := db.BeginRo(ctx)
 			require.NoError(t, err)
-			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
 			roTx.Rollback()
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs)

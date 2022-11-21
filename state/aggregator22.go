@@ -27,14 +27,15 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
+	"golang.org/x/sync/semaphore"
+
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
-	"golang.org/x/sync/semaphore"
 )
 
 type Aggregator22 struct {
@@ -325,7 +326,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	//	defer wg.Done()
 	//	var err error
 	if err = db.View(ctx, func(tx kv.Tx) error {
-		ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, tx, logEvery)
+		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
 		errCh <- err
@@ -339,7 +340,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	//	defer wg.Done()
 	//	var err error
 	if err = db.View(ctx, func(tx kv.Tx) error {
-		ac.logTopics, err = a.logTopics.collate(txFrom, txTo, tx, logEvery)
+		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
 		errCh <- err
@@ -353,7 +354,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	//	defer wg.Done()
 	//	var err error
 	if err = db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesFrom, err = a.tracesFrom.collate(txFrom, txTo, tx, logEvery)
+		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
 		errCh <- err
@@ -367,7 +368,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	//	defer wg.Done()
 	//	var err error
 	if err = db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesTo, err = a.tracesTo.collate(txFrom, txTo, tx, logEvery)
+		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
 		errCh <- err

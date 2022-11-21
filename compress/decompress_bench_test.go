@@ -75,25 +75,35 @@ func BenchmarkDecompressMatchPrefix(b *testing.B) {
 func BenchmarkDecompressTorrent(t *testing.B) {
 	t.Skip()
 
-	// fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
-	fpath := "./v1-006000-006500-transactions.seg"
+	//fpath := "/Volumes/wotah/mainnet/snapshots/v1-013500-014000-bodies.seg"
+	fpath := "/Volumes/wotah/mainnet/snapshots/v1-013500-014000-transactions.seg"
+	//fpath := "./v1-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
-	condensePatternTableBitThreshold = 6
+	condensePatternTableBitThreshold = 5
 	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 
-	d, err := NewDecompressor(fpath)
-	require.NoError(t, err)
-	defer d.Close()
-
-	getter := d.MakeGetter()
-
-	for i := 0; i < t.N && getter.HasNext(); i++ {
-		_, sz := getter.Next(nil)
-		if sz == 0 {
-			t.Fatal("sz == 0")
+	t.Run("init", func(t *testing.B) {
+		for i := 0; i < t.N; i++ {
+			d, err := NewDecompressor(fpath)
+			require.NoError(t, err)
+			d.Close()
 		}
-	}
+	})
+	t.Run("run", func(t *testing.B) {
+		d, err := NewDecompressor(fpath)
+		require.NoError(t, err)
+		defer d.Close()
+
+		getter := d.MakeGetter()
+
+		for i := 0; i < t.N && getter.HasNext(); i++ {
+			_, sz := getter.Next(nil)
+			if sz == 0 {
+				t.Fatal("sz == 0")
+			}
+		}
+	})
 }
