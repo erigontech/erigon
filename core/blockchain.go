@@ -507,13 +507,14 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	return ret, err
 }
 
+// SysCreate is a special (system) contract creation methods for genesis constructors.
 func SysCreate(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
 	msg := types.NewMessage(
-		state.SystemAddress,
+		contract,
 		nil, // to
 		0, u256.Num0,
 		math.MaxUint64, u256.Num0,
@@ -523,12 +524,12 @@ func SysCreate(contract common.Address, data []byte, chainConfig params.ChainCon
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	author := &state.SystemAddress
+	author := &contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author)
 	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
 
-	ret, _, err := evm.CreateWithAddress(
+	ret, _, err := evm.SysCreate(
 		vm.AccountRef(msg.From()),
 		msg.Data(),
 		msg.Gas(),

@@ -378,19 +378,17 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 
-		/*
-			hasConstructorAllocation := false
-			for _, account := range g.Alloc {
-				if len(account.Constructor) > 0 {
-					hasConstructorAllocation = true
-					break
-				}
+		hasConstructorAllocation := false
+		for _, account := range g.Alloc {
+			if len(account.Constructor) > 0 {
+				hasConstructorAllocation = true
+				break
 			}
-			// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
-			if hasConstructorAllocation && g.Config.Aura != nil {
-				statedb.CreateAccount(common.Address{}, false)
-			}
-		*/
+		}
+		// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
+		if hasConstructorAllocation && g.Config.Aura != nil {
+			statedb.CreateAccount(common.Address{}, false)
+		}
 
 		keys := sortedAllocKeys(g.Alloc)
 		for _, key := range keys {

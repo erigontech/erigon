@@ -35,11 +35,6 @@ func TestDefaultGenesisBlockHashes(t *testing.T) {
 		require.Equal(t, block.Hash().Bytes(), expect.Bytes(), network)
 	}
 	for _, network := range networkname.All {
-		// TODO(yperbasis): re-enable
-		if network == networkname.ChiadoChainName {
-			continue
-		}
-
 		check(network)
 	}
 }
@@ -87,15 +82,12 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 
 	block, _, err = DefaultChiadoGenesisBlock().ToBlock()
 	require.NoError(err)
-	// TODO(yperbasis): re-enable
-	/*
-		if block.Root() != params.ChiadoGenesisStateRoot {
-			t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
-		}
-		if block.Hash() != params.ChiadoGenesisHash {
-			t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
-		}
-	*/
+	if block.Root() != params.ChiadoGenesisStateRoot {
+		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
+	}
+	if block.Hash() != params.ChiadoGenesisHash {
+		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
+	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
