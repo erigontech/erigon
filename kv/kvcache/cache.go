@@ -115,7 +115,7 @@ type Coherent struct {
 	miss                 *metrics.Counter
 	cfg                  CoherentConfig
 	latestStateVersionID uint64
-	lock                 sync.RWMutex
+	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
 }
 
@@ -614,14 +614,14 @@ func DebugStats(cache Cache) []Stat {
 	if !ok {
 		return res
 	}
-	casted.lock.RLock()
-	defer casted.lock.RUnlock()
+	casted.lock.Lock()
 	for root, r := range casted.roots {
 		res = append(res, Stat{
 			BlockNum: root,
 			Lenght:   r.cache.Len(),
 		})
 	}
+	casted.lock.Unlock()
 	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
 	return res
 }
@@ -640,8 +640,8 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 		return 0, nil
 	}
 	checked := 0
-	casted.lock.RLock()
-	defer casted.lock.RUnlock()
+	casted.lock.Lock()
+	defer casted.lock.Unlock()
 	//log.Info("AssertCheckValues start", "db_id", tx.ViewID(), "mem_id", casted.id.Load(), "len", casted.cache.Len())
 	root, ok := casted.roots[castedView.stateVersionID]
 	if !ok {
@@ -684,8 +684,8 @@ func (c *Coherent) evictRoots() {
 	}
 }
 func (c *Coherent) Len() int {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	if c.latestStateView == nil {
 		return 0
 	}
@@ -714,7 +714,7 @@ func Less(a, b *Element) bool { return bytes.Compare(a.K, b.K) < 0 }
 
 type ThreadSafeEvictionList struct {
 	l    *List
-	lock sync.RWMutex
+	lock sync.Mutex
 }
 
 func (l *ThreadSafeEvictionList) Init() {
@@ -748,16 +748,16 @@ func (l *ThreadSafeEvictionList) Oldest() *Element {
 }
 
 func (l *ThreadSafeEvictionList) Len() int {
-	l.lock.RLock()
+	l.lock.Lock()
 	length := l.l.Len()
-	l.lock.RUnlock()
+	l.lock.Unlock()
 	return length
 }
 
 func (l *ThreadSafeEvictionList) Size() int {
-	l.lock.RLock()
+	l.lock.Lock()
 	size := l.l.Size()
-	l.lock.RUnlock()
+	l.lock.Unlock()
 	return size
 }
 
