@@ -8,8 +8,8 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -72,8 +72,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
 			AssertSubset(k, hasTree, hasState)
 			AssertSubset(k, hasHash, hasState)
-			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/common.HashLength))
+			if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(v[6:])/length.Hash))
 			}
 			found := false
 			var parentK []byte
@@ -186,8 +186,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
 			AssertSubset(k, hasTree, hasState)
 			AssertSubset(k, hasHash, hasState)
-			if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
+			if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+				panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/length.Hash))
 			}
 
 			found := false

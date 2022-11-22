@@ -1,5 +1,9 @@
 package metrics
 
+import (
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
+)
+
 func init() {
-	Enabled = true
+	metrics.Enabled = true
 }

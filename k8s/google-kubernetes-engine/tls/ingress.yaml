@@ -1,0 +1,21 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mainnet
+spec:
+  rules:
+    - host: ""
+      http:
+        paths:
+          - backend:
+              service:
+                name: http
+                port:
+                  number: 8545
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - ""
+      secretName: ""

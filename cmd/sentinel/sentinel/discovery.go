@@ -84,6 +84,11 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
+		// Skip Peer if IP was private.
+		if node.IP().IsPrivate() {
+			continue
+		}
+
 		go func(peerInfo *peer.AddrInfo) {
 			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
 				log.Debug("Could not connect with peer", "err", err)

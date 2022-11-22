@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -240,7 +240,7 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
-	cfg.agg.SetWorkers(estimate.CompressSnapshot.Workers() / 2)
+	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
 	if initialCycle && s.BlockNumber == 0 {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
@@ -250,7 +250,6 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 		if found && reconstituteToBlock > s.BlockNumber+1 {
 			reconWorkers := cfg.syncCfg.ReconWorkerCount
-			log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "from", s.BlockNumber, "to", reconstituteToBlock)
 			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
@@ -351,7 +350,10 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
-		return ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle)
+		if err = ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	quit := ctx.Done()

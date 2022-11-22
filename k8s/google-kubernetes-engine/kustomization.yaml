@@ -1,0 +1,12 @@
+---
+patchesJson6902:
+  - path: statefulset-erigon-patch.yaml
+    target:
+      group: apps
+      kind: StatefulSet
+      name: erigon
+      version: v1
+resources:
+  - ../base
+  - ../base/services
+  - podmonitoring.yaml

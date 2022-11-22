@@ -22,9 +22,9 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	node2 "github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured
