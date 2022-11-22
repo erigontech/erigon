@@ -845,9 +845,8 @@ func reconstituteStep(last bool,
 	}
 	if last {
 		endBlockNum = blockNum
-	} else {
-		endBlockNum++
 	}
+	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
 	var maxTxNum uint64 = startTxNum
 	rollbackCount := uint64(0)
 	prevCount := rs.DoneCount()
