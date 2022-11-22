@@ -120,7 +120,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	var mode libstate.CommitmentMode
 	switch commitmentsMode {
 	case "update":
-		mode = libstate.CommitmentModeUpdates
+		mode = libstate.CommitmentModeUpdate
 	default:
 		mode = libstate.CommitmentModeDirect
 	}
