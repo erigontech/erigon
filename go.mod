@@ -31,7 +31,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
-	github.com/ethereum/go-ethereum v1.10.25
 	github.com/ferranbt/fastssz v0.1.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20220902153445-097bd83b7732
@@ -155,7 +154,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
-	github.com/protolambda/go-kzg v0.0.0-20221108193918-c6d0faa55038 // indirect
+	github.com/protolambda/go-kzg v0.0.0-20221122014024-bb3fa3695412
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/supranational/blst v0.3.10 // indirect
@@ -261,5 +260,3 @@ require (
 )
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-
-replace github.com/ethereum/go-ethereum v1.10.25 => github.com/mdehoog/go-ethereum v1.10.19-0.20221117142754-381b51eccf71
