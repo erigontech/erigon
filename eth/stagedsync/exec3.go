@@ -205,6 +205,7 @@ func Exec3(ctx context.Context,
 			}
 			defer tx.Rollback()
 
+			notifyReceived := func() { rwsReceiveCond.Signal() }
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
 				case <-ctx.Done():
@@ -215,8 +216,8 @@ func Exec3(ctx context.Context,
 						defer rwsLock.Unlock()
 						resultsSize.Add(txTask.ResultsSize)
 						heap.Push(&rws, txTask)
-						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
-						rwsReceiveCond.Signal()
+						processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived)
+						syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					}()
 				}
 			}
@@ -240,11 +241,16 @@ func Exec3(ctx context.Context,
 						return
 					}
 					execWorkers[0].RunTxTask(txTask)
-					if err := rs.Apply(tx, txTask, agg); err != nil {
+					if err := rs.ApplyState(tx, txTask, agg); err != nil {
 						panic(fmt.Errorf("State22.Apply: %w", err))
 					}
+					rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 					outputTxNum.Inc()
 					outputBlockNum.Store(txTask.BlockNum)
+					rwsReceiveCond.Signal()
+					if err := rs.ApplyHistory(tx, txTask, agg); err != nil {
+						panic(fmt.Errorf("State22.Apply: %w", err))
+					}
 				}
 			}
 		}
@@ -325,7 +331,8 @@ func Exec3(ctx context.Context,
 									drained = true
 								}
 							}
-							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize)
+							processResultQueue(&rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {})
+							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 							if rws.Len() == 0 {
 								break
 							}
@@ -469,6 +476,16 @@ loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, blockNum)
+
+		f := core.GetHashFn(header, getHeaderFunc)
+		getHashFnMute := &sync.Mutex{}
+		getHashFn := func(n uint64) common2.Hash {
+			getHashFnMute.Lock()
+			defer getHashFnMute.Unlock()
+			return f(n)
+		}
+
 		if parallel {
 			func() {
 				rwsLock.RLock()
@@ -485,15 +502,6 @@ loop:
 			}()
 		}
 
-		f := core.GetHashFn(header, getHeaderFunc)
-		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
-			getHashFnMute.Lock()
-			defer getHashFnMute.Unlock()
-			return f(n)
-		}
-
-		signer := *types.MakeSigner(chainConfig, blockNum)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -684,18 +692,21 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 }
 
 func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64) {
+	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask := heap.Pop(rws).(*state.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.Apply(applyTx, txTask, agg); err != nil {
+			if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 				panic(fmt.Errorf("State22.Apply: %w", err))
 			}
 			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 			outputTxNum.Inc()
 			outputBlockNum.Store(txTask.BlockNum)
-			syncMetrics[stages.Execution].Set(txTask.BlockNum)
+			onSuccess()
+			if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+				panic(fmt.Errorf("State22.Apply: %w", err))
+			}
 			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		} else {
 			rs.AddWork(txTask)
@@ -1028,6 +1039,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var inputTxNum uint64
 	var b *types.Block
 	var txKey [8]byte
+	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+		if err = chainDb.View(ctx, func(tx kv.Tx) error {
+			h, err = blockReader.Header(ctx, tx, hash, number)
+			if err != nil {
+				return err
+			}
+			return nil
+
+		}); err != nil {
+			panic(err)
+		}
+		return h
+	}
 	for bn = uint64(0); bn <= blockNum; bn++ {
 		t = time.Now()
 		rules := chainConfig.Rules(bn)
@@ -1039,6 +1063,14 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, bn)
+
+		f := core.GetHashFn(header, getHeaderFunc)
+		getHashFnMute := &sync.Mutex{}
+		getHashFn := func(n uint64) common2.Hash {
+			getHashFnMute.Lock()
+			defer getHashFnMute.Unlock()
+			return f(n)
+		}
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
@@ -1055,6 +1087,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					BlockHash:    b.Hash(),
 					SkipAnalysis: skipAnalysis,
 					Final:        txIndex == len(txs),
+					GetHashFn:    getHashFn,
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
