@@ -10,12 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
-	state2 "github.com/ledgerwatch/erigon/core/state"
+	state "github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -29,8 +29,8 @@ import (
 type FillWorker struct {
 	txNum          uint64
 	doneCount      *atomic.Uint64
-	as             *state.AggregatorSteps
-	ac             *state.Aggregator22Context
+	as             *libstate.AggregatorStep
+	ac             *libstate.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
@@ -38,12 +38,12 @@ type FillWorker struct {
 	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *libstate.Aggregator22, as *libstate.AggregatorStep, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
-		as:        a.MakeSteps(),
+		as:        as,
 		fromKey:   fromKey,
 		toKey:     toKey,
 		total:     atomic.NewUint64(0),
@@ -98,7 +98,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
 			}
 			if a.Incarnation > 0 {
-				a.Incarnation = state2.FirstContractIncarnation
+				a.Incarnation = state.FirstContractIncarnation
 			}
 			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
@@ -121,7 +121,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey[:20], key[:20])
-			binary.BigEndian.PutUint64(compositeKey[20:], state2.FirstContractIncarnation)
+			binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 			copy(compositeKey[20+8:], key[20:])
 
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
@@ -144,7 +144,7 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey, key)
-			binary.BigEndian.PutUint64(compositeKey[length.Addr:], state2.FirstContractIncarnation)
+			binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 			codeHash, err := common.HashData(val)
 			if err != nil {
@@ -166,9 +166,9 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector, step int) {
+func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	defer fw.doneCount.Inc()
-	it := fw.as.IterateAccountsTxs(step, fw.txNum)
+	it := fw.as.IterateAccountsTxs(fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -182,9 +182,9 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector, step int)
 	}
 }
 
-func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector, step int) {
+func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 	defer fw.doneCount.Inc()
-	it := fw.as.IterateStorageTxs(step, fw.txNum)
+	it := fw.as.IterateStorageTxs(fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -198,9 +198,9 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector, step int) 
 	}
 }
 
-func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector, step int) {
+func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 	defer fw.doneCount.Inc()
-	it := fw.as.IterateCodeTxs(step, fw.txNum)
+	it := fw.as.IterateCodeTxs(fw.txNum)
 	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
@@ -227,10 +227,10 @@ func bytesToUint64(buf []byte) (x uint64) {
 type ReconWorker struct {
 	lock        sync.Locker
 	wg          *sync.WaitGroup
-	rs          *state2.ReconState
+	rs          *state.ReconState
 	blockReader services.FullBlockReader
-	stateWriter *state2.StateReconWriterInc
-	stateReader *state2.HistoryReaderInc
+	stateWriter *state.StateReconWriterInc
+	stateReader *state.HistoryReaderInc
 	getHeader   func(hash common.Hash, number uint64) *types.Header
 	ctx         context.Context
 	engine      consensus.Engine
@@ -243,21 +243,20 @@ type ReconWorker struct {
 	posa        consensus.PoSA
 }
 
-func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
-	a *state.Aggregator22, blockReader services.FullBlockReader,
+func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
+	a *libstate.Aggregator22, as *libstate.AggregatorStep, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
-	chainTx kv.Tx, step int,
+	chainTx kv.Tx,
 ) *ReconWorker {
 	ac := a.MakeContext()
-	as := a.MakeSteps()
 	rw := &ReconWorker{
 		lock:        lock,
 		wg:          wg,
 		rs:          rs,
 		blockReader: blockReader,
 		ctx:         context.Background(),
-		stateWriter: state2.NewStateReconWriterInc(ac, rs),
-		stateReader: state2.NewHistoryReaderInc(as, rs, step),
+		stateWriter: state.NewStateReconWriterInc(ac, rs),
+		stateReader: state.NewHistoryReaderInc(as, rs),
 		chainConfig: chainConfig,
 		logger:      logger,
 		genesis:     genesis,
@@ -288,16 +287,16 @@ func (rw *ReconWorker) Run() {
 	}
 }
 
-var noop = state2.NewNoopWriter()
+var noop = state.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
+func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rules := txTask.Rules
-	ibs := state2.New(rw.stateReader)
+	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {

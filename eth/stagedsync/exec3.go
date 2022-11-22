@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"encoding/binary"
@@ -715,23 +716,23 @@ func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs 
 	}
 }
 
-func reconstituteStep(step int, last bool,
+func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
-	agg *libstate.Aggregator22, chainDb kv.RwDB, rs *state.ReconState, blockReader services.FullBlockReader,
+	agg *libstate.Aggregator22, as *libstate.AggregatorStep, chainDb kv.RwDB, rs *state.ReconState, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
 	workCh := make(chan *state.TxTask, workerCount*4)
 	rs.Reset(workCh)
 	doneCount := atomic2.NewUint64(0)
-	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, nil /* fromKey */, nil /* toKey */)
+	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, as, nil /* fromKey */, nil /* toKey */)
 
 	t := time.Now()
 	doneCount.Store(0)
 	fillWorker.ResetProgress()
 	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	accountCollectorX.LogLvl(log.LvlDebug)
-	fillWorker.BitmapAccounts(accountCollectorX, step)
+	fillWorker.BitmapAccounts(accountCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
@@ -746,7 +747,7 @@ func reconstituteStep(step int, last bool,
 	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	storageCollectorX.LogLvl(log.LvlDebug)
 	fillWorker.ResetProgress()
-	fillWorker.BitmapStorage(storageCollectorX, step)
+	fillWorker.BitmapStorage(storageCollectorX)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -762,7 +763,7 @@ func reconstituteStep(step int, last bool,
 	fillWorker.ResetProgress()
 	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollectorX.LogLvl(log.LvlDebug)
-	fillWorker.BitmapCode(codeCollectorX, step)
+	fillWorker.BitmapCode(codeCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
@@ -802,13 +803,12 @@ func reconstituteStep(step int, last bool,
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, blockReader, chainConfig, logger, genesis, engine, chainTxs[i], step)
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, as, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
 	var startOk, endOk bool
-	startTxNum := uint64(step) * uint64(100_000_000)
-	endTxNum := uint64(step+1) * uint64(100_000_000)
+	startTxNum, endTxNum := as.TxNumRange()
 	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
@@ -841,11 +841,11 @@ func reconstituteStep(step int, last bool,
 	}
 	var maxTxNum uint64 = startTxNum
 	rollbackCount := uint64(0)
+	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
 		go reconWorkers[i].Run()
 	}
 	commitThreshold := batchSize.Bytes()
-	prevCount := rs.DoneCount()
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})
@@ -1064,10 +1064,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	numSteps := agg.Steps()
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
+	aggSteps := agg.MakeSteps()
 	for step := 0; step < numSteps; step++ {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", numSteps, "workers", workerCount)
-		if err := reconstituteStep(step, step+1 == numSteps, workerCount, ctx, db,
-			txNum, dirs, agg, chainDb, rs, blockReader, chainConfig, logger, genesis,
+		if err := reconstituteStep(step+1 == numSteps, workerCount, ctx, db,
+			txNum, dirs, agg, aggSteps[step], chainDb, rs, blockReader, chainConfig, logger, genesis,
 			engine, batchSize, s, blockNum, txNum,
 		); err != nil {
 			return err
@@ -1234,21 +1235,29 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	db.Close()
 	// Load all collections into the main collector
+	var lastTxKey [8]byte
+	binary.BigEndian.PutUint64(lastTxKey[:], txNum)
 	for i := 0; i < workerCount; i++ {
 		if err = plainStateCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return plainStateCollector.Collect(k, v)
+			transposedKey = append(transposedKey[:0], k...)
+			transposedKey = append(transposedKey, lastTxKey[:]...)
+			return plainStateCollector.Collect(transposedKey, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollectors[i].Close()
 		if err = codeCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return codeCollector.Collect(k, v)
+			transposedKey = append(transposedKey[:0], k...)
+			transposedKey = append(transposedKey, lastTxKey[:]...)
+			return codeCollector.Collect(transposedKey, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollectors[i].Close()
 		if err = plainContractCollectors[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return plainContractCollector.Collect(k, v)
+			transposedKey = append(transposedKey[:0], k...)
+			transposedKey = append(transposedKey, lastTxKey[:]...)
+			return plainContractCollector.Collect(transposedKey, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
@@ -1264,22 +1273,38 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		if err = tx.ClearBucket(kv.PlainContractCode); err != nil {
 			return err
 		}
+		var lastKey []byte
 		if err = plainStateCollector.Load(tx, kv.PlainState, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			//TODO leave the latest for each key or nothing if val is empty
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+				if len(v) > 0 {
+					return next(k, k[:len(k)-8], v)
+				}
+			}
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollector.Close()
 		if err = codeCollector.Load(tx, kv.Code, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			//TODO leave the latest for each key or nothing if val is empty
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+				if len(v) > 0 {
+					return next(k, k[:len(k)-8], v)
+				}
+			}
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollector.Close()
 		if err = plainContractCollector.Load(tx, kv.PlainContractCode, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			//TODO leave the latest for each key or nothing if val is empty
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+				if len(v) > 0 {
+					return next(k, k[:len(k)-8], v)
+				}
+			}
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
