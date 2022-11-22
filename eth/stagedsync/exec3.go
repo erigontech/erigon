@@ -731,7 +731,7 @@ func reconstituteStep(last bool,
 	doneCount.Store(0)
 	fillWorker.ResetProgress()
 	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	accountCollectorX.LogLvl(log.LvlDebug)
+	accountCollectorX.LogLvl(log.LvlInfo)
 	fillWorker.BitmapAccounts(accountCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -745,7 +745,7 @@ func reconstituteStep(last bool,
 	t = time.Now()
 	doneCount.Store(0)
 	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	storageCollectorX.LogLvl(log.LvlDebug)
+	storageCollectorX.LogLvl(log.LvlInfo)
 	fillWorker.ResetProgress()
 	fillWorker.BitmapStorage(storageCollectorX)
 
@@ -762,7 +762,7 @@ func reconstituteStep(last bool,
 	doneCount.Store(0)
 	fillWorker.ResetProgress()
 	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	codeCollectorX.LogLvl(log.LvlDebug)
+	codeCollectorX.LogLvl(log.LvlInfo)
 	fillWorker.BitmapCode(codeCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -1024,7 +1024,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
 	}
-	fmt.Printf("Max blockNum = %d\n", blockNum)
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
@@ -1041,7 +1040,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 
-	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
+	log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "fromBlock", s.BlockNumber, "toBlock", blockNum, "toTxNum", txNum)
 
 	reconDbPath := filepath.Join(dirs.DataDir, "recondb")
 	dir.Recreate(reconDbPath)
@@ -1050,8 +1049,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		Flags(func(u uint) uint {
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
-		WriteMergeThreshold(8192).
-		PageSize(uint64(16 * datasize.KB)).
+		WriteMergeThreshold(2 * 8192).
+		PageSize(uint64(4 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {
