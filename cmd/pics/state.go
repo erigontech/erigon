@@ -272,7 +272,7 @@ func initialState1() error {
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = common.Address{1}
 		gspec    = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.AllProtocolChanges,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -281,7 +281,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
+		signer = types.MakeSigner(params.AllProtocolChanges, 1)
 	)
 	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()

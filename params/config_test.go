@@ -29,8 +29,8 @@ func TestCheckCompatible(t *testing.T) {
 		wantErr     *ConfigCompatError
 	}
 	tests := []test{
-		{stored: AllEthashProtocolChanges, new: AllEthashProtocolChanges, head: 0, wantErr: nil},
-		{stored: AllEthashProtocolChanges, new: AllEthashProtocolChanges, head: 100, wantErr: nil},
+		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 0, wantErr: nil},
+		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 100, wantErr: nil},
 		{
 			stored:  &ChainConfig{TangerineWhistleBlock: big.NewInt(10)},
 			new:     &ChainConfig{TangerineWhistleBlock: big.NewInt(20)},
@@ -38,7 +38,7 @@ func TestCheckCompatible(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			stored: AllEthashProtocolChanges,
+			stored: AllProtocolChanges,
 			new:    &ChainConfig{HomesteadBlock: nil},
 			head:   3,
 			wantErr: &ConfigCompatError{
@@ -49,7 +49,7 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored: AllEthashProtocolChanges,
+			stored: AllProtocolChanges,
 			new:    &ChainConfig{HomesteadBlock: big.NewInt(1)},
 			head:   3,
 			wantErr: &ConfigCompatError{
