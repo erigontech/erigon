@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -131,7 +130,7 @@ func aggregateResultsFromStateTests(
 			var root common.Hash
 			var calcRootErr error
 
-			statedb, err := test.Run(&params.Rules{}, tx, st, cfg)
+			statedb, err := test.Run(tx, st, cfg)
 			// print state root for evmlab tracing
 			root, calcRootErr = trie.CalcRoot("", tx)
 			if err == nil && calcRootErr != nil {
