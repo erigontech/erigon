@@ -389,6 +389,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
+	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	if rules.IsNano {
 		for _, blackListAddr := range types.NanoBlackList {
@@ -402,7 +403,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +421,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check whether the init code size has been exceeded.
-	if vmConfig.HasEip3860(rules) && contractCreation && len(st.data) > params.MaxInitCodeSize {
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
