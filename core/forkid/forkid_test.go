@@ -150,7 +150,16 @@ func TestCreation(t *testing.T) {
 			params.GnosisChainConfig,
 			params.GnosisGenesisHash,
 			[]testcase{
-				{24000000, ID{Hash: checksumToBytes(0x018479D3), Next: 0}},
+				{0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},
+				{21735000, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},
+			},
+		},
+		// Chiado test cases
+		{
+			params.ChiadoChainConfig,
+			params.ChiadoGenesisHash,
+			[]testcase{
+				{0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 0}},
 			},
 		},
 	}
