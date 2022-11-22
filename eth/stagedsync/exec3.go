@@ -737,7 +737,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	if !ok {
 		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
 	}
-	fmt.Printf("Max blockNum = %d\n", blockNum)
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
 	}
@@ -753,8 +752,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}); err != nil {
 		return err
 	}
+	log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "fromBlock", s.BlockNumber, "toBlock", blockNum, "toTxNum", txNum)
 
-	fmt.Printf("Corresponding block num = %d, txNum = %d\n", blockNum, txNum)
 	var wg sync.WaitGroup
 	workCh := make(chan *state.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
@@ -812,8 +811,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		Flags(func(u uint) uint {
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
-		WriteMergeThreshold(8192).
-		PageSize(uint64(16 * datasize.KB)).
+		WriteMergeThreshold(2 * 8192).
+		PageSize(uint64(4 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {
@@ -824,7 +823,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	accountCollectorX := etl.NewCollector("account scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accountCollectorX.Close()
-	accountCollectorX.LogLvl(log.LvlDebug)
+	accountCollectorX.LogLvl(log.LvlInfo)
 	for i := 0; i < workerCount; i++ {
 		if err = accountCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return accountCollectorX.Collect(k, v)
@@ -870,7 +869,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	storageCollectorX := etl.NewCollector("storage scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollectorX.Close()
-	storageCollectorX.LogLvl(log.LvlDebug)
+	storageCollectorX.LogLvl(log.LvlInfo)
 	for i := 0; i < workerCount; i++ {
 		if err = storageCollectorsX[i].Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return storageCollectorX.Collect(k, v)
@@ -912,7 +911,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollectorX.Close()
-	codeCollectorX.LogLvl(log.LvlDebug)
+	codeCollectorX.LogLvl(log.LvlInfo)
 	var bitmap roaring64.Bitmap
 	for i := 0; i < workerCount; i++ {
 		bitmap.Or(fillWorkers[i].Bitmap())
