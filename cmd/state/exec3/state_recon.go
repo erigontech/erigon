@@ -26,10 +26,29 @@ import (
 	"go.uber.org/atomic"
 )
 
+type ScanWorker struct {
+	txNum          uint64
+	as             *libstate.AggregatorStep
+	fromKey, toKey []byte
+	currentKey     []byte
+	bitmap         roaring64.Bitmap
+
+	total, progress *atomic.Uint64
+}
+
+func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {
+	sw := &ScanWorker{
+		txNum:    txNum,
+		as:       as,
+		total:    atomic.NewUint64(0),
+		progress: atomic.NewUint64(0),
+	}
+	return sw
+}
+
 type FillWorker struct {
 	txNum          uint64
 	doneCount      *atomic.Uint64
-	as             *libstate.AggregatorStep
 	ac             *libstate.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
@@ -38,12 +57,11 @@ type FillWorker struct {
 	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *libstate.Aggregator22, as *libstate.AggregatorStep, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *libstate.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
-		as:        as,
 		fromKey:   fromKey,
 		toKey:     toKey,
 		total:     atomic.NewUint64(0),
@@ -52,10 +70,19 @@ func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *libstate.Aggregato
 	return fw
 }
 
+func (sw *ScanWorker) Total() uint64 {
+	return sw.total.Load()
+}
+
+func (sw *ScanWorker) Bitmap() *roaring64.Bitmap { return &sw.bitmap }
+
+func (sw *ScanWorker) Progress() uint64 {
+	return sw.progress.Load()
+}
+
 func (fw *FillWorker) Total() uint64 {
 	return fw.total.Load()
 }
-func (fw *FillWorker) Bitmap() *roaring64.Bitmap { return &fw.bitmap }
 
 func (fw *FillWorker) Progress() uint64 {
 	return fw.progress.Load()
@@ -161,15 +188,19 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	}
 }
 
+func (sw *ScanWorker) ResetProgress() {
+	sw.total.Store(0)
+	sw.progress.Store(0)
+}
+
 func (fw *FillWorker) ResetProgress() {
 	fw.total.Store(0)
 	fw.progress.Store(0)
 }
 
-func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.as.IterateAccountsTxs(fw.txNum)
-	fw.total.Store(it.Total())
+func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
+	it := sw.as.IterateAccountsTxs(sw.txNum)
+	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -177,15 +208,14 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.progress.Store(progress)
+		sw.bitmap.Add(txNum)
 	}
 }
 
-func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.as.IterateStorageTxs(fw.txNum)
-	fw.total.Store(it.Total())
+func (sw *ScanWorker) BitmapStorage(storageCollectorX *etl.Collector) {
+	it := sw.as.IterateStorageTxs(sw.txNum)
+	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -193,15 +223,14 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.progress.Store(progress)
+		sw.bitmap.Add(txNum)
 	}
 }
 
-func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.as.IterateCodeTxs(fw.txNum)
-	fw.total.Store(it.Total())
+func (sw *ScanWorker) BitmapCode(codeCollectorX *etl.Collector) {
+	it := sw.as.IterateCodeTxs(sw.txNum)
+	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -209,8 +238,8 @@ func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.progress.Store(progress)
+		sw.bitmap.Add(txNum)
 	}
 }
 

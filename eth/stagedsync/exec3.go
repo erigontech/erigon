@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -725,14 +726,14 @@ func reconstituteStep(last bool,
 	workCh := make(chan *state.TxTask, workerCount*4)
 	rs.Reset(workCh)
 	doneCount := atomic2.NewUint64(0)
-	fillWorker := exec3.NewFillWorker(txNum, doneCount, agg, as, nil /* fromKey */, nil /* toKey */)
+	scanWorker := exec3.NewScanWorker(txNum, as)
 
 	t := time.Now()
 	doneCount.Store(0)
-	fillWorker.ResetProgress()
+	scanWorker.ResetProgress()
 	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	accountCollectorX.LogLvl(log.LvlInfo)
-	fillWorker.BitmapAccounts(accountCollectorX)
+	scanWorker.BitmapAccounts(accountCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
@@ -746,8 +747,8 @@ func reconstituteStep(last bool,
 	doneCount.Store(0)
 	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	storageCollectorX.LogLvl(log.LvlInfo)
-	fillWorker.ResetProgress()
-	fillWorker.BitmapStorage(storageCollectorX)
+	scanWorker.ResetProgress()
+	scanWorker.BitmapStorage(storageCollectorX)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -760,10 +761,10 @@ func reconstituteStep(last bool,
 
 	t = time.Now()
 	doneCount.Store(0)
-	fillWorker.ResetProgress()
+	scanWorker.ResetProgress()
 	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollectorX.LogLvl(log.LvlInfo)
-	fillWorker.BitmapCode(codeCollectorX)
+	scanWorker.BitmapCode(codeCollectorX)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
 	}); err != nil {
@@ -772,7 +773,7 @@ func reconstituteStep(last bool,
 	codeCollectorX.Close()
 	codeCollectorX = nil
 	log.Info("Scan code history", "took", time.Since(t))
-	bitmap := fillWorker.Bitmap()
+	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
 	logEvery := time.NewTicker(logInterval)
@@ -803,7 +804,13 @@ func reconstituteStep(last bool,
 		}
 	}
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, as, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
+		var localAs *libstate.AggregatorStep
+		if i == 0 {
+			localAs = as
+		} else {
+			localAs = as.Clone()
+		}
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 	}
 	wg.Add(workerCount)
@@ -838,6 +845,8 @@ func reconstituteStep(last bool,
 	}
 	if last {
 		endBlockNum = blockNum
+	} else {
+		endBlockNum++
 	}
 	var maxTxNum uint64 = startTxNum
 	rollbackCount := uint64(0)
@@ -1060,14 +1069,13 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer os.RemoveAll(reconDbPath)
 
 	rs := state.NewReconState()
-	numSteps := agg.Steps()
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 	aggSteps := agg.MakeSteps()
-	for step := 0; step < numSteps; step++ {
-		log.Info("Step of incremental reconstitution", "step", step+1, "out of", numSteps, "workers", workerCount)
-		if err := reconstituteStep(step+1 == numSteps, workerCount, ctx, db,
-			txNum, dirs, agg, aggSteps[step], chainDb, rs, blockReader, chainConfig, logger, genesis,
+	for step, as := range aggSteps {
+		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
+		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
+			txNum, dirs, agg, as, chainDb, rs, blockReader, chainConfig, logger, genesis,
 			engine, batchSize, s, blockNum, txNum,
 		); err != nil {
 			return err
@@ -1171,6 +1179,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	doneCount := atomic2.NewUint64(0)
 	fillWorkers := make([]*exec3.FillWorker, workerCount)
+	var fromKey, toKey []byte
+	bigCount := big.NewInt(int64(workerCount))
+	bigStep := big.NewInt(0x100000000)
+	bigStep.Div(bigStep, bigCount)
+	bigCurrent := big.NewInt(0)
+	for i := 0; i < workerCount; i++ {
+		fromKey = toKey
+		if i == workerCount-1 {
+			toKey = nil
+		} else {
+			bigCurrent.Add(bigCurrent, bigStep)
+			toKey = make([]byte, 4)
+			bigCurrent.FillBytes(toKey)
+		}
+		//fmt.Printf("%d) Fill worker [%x] - [%x]\n", i, fromKey, toKey)
+		fillWorkers[i] = exec3.NewFillWorker(txNum, doneCount, agg, fromKey, toKey)
+	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	for i := 0; i < workerCount; i++ {
