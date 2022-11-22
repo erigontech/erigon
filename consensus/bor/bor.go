@@ -817,7 +817,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 	// bc.SetStateSync(stateSyncData)
 
 	// return the final block for sealing
-	return block, nil, types.Receipts{}, nil
+	return block, txs, receipts, nil
 }
 
 func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
