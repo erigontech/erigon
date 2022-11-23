@@ -361,7 +361,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, 0, err
 	}
 	// Check whether the init code size has been exceeded.
-	if evm.chainRules.IsShanghai && len(codeAndHash.code) > params.MaxInitCodeSize {
+	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Create a new account on the state

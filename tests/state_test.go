@@ -42,6 +42,9 @@ func TestState(t *testing.T) {
 
 	st := new(testMatcher)
 
+	// EOF is not implemented yet
+	st.skipLoad(`^stEIP3540/`)
+
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
@@ -53,17 +56,12 @@ func TestState(t *testing.T) {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					config, ok := Forks[subtest.Fork]
-					if !ok {
-						return UnsupportedForkError{subtest.Fork}
-					}
-					rules := config.Rules(1)
 					tx, err := db.BeginRw(context.Background())
 					if err != nil {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, err = test.Run(rules, tx, subtest, vmconfig)
+					_, err = test.Run(tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
