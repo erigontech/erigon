@@ -42,7 +42,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Timestamp:   expectedLogs[i].Timestamp,
 		})
 	}
-	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, uint64((len(expectedLogs))))
+	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
+		LogCount: uint64((len(expectedLogs))),
+	})
 	if err != nil {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
@@ -50,7 +52,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	assert.EqualValues(expectedErigonLogs, actual)
 }
 
-func TestErigonGetRelevantLogs(t *testing.T) {
+func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
@@ -88,7 +90,9 @@ func TestErigonGetRelevantLogs(t *testing.T) {
 			expectedLogs[i].Topics[0],
 		})
 	}
-	actual, err := api.GetRelevantLogs(context.Background(), filters.FilterCriteria{Topics: containsTopics}, blockCount)
+	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{Topics: containsTopics}, filters.LogFilterOptions{
+		BlockCount: blockCount,
+	})
 	if err != nil {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}

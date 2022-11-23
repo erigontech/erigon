@@ -33,6 +33,12 @@ import (
 // Same as ethereum.FilterQuery but with UnmarshalJSON() method.
 type FilterCriteria ethereum.FilterQuery
 
+type LogFilterOptions struct {
+	LogCount          uint64 `json:"logCount,omitempty"`
+	BlockCount        uint64 `json:"blockCount,omitempty"`
+	IgnoreTopicsOrder bool   `json:"ignoreTopicsOrder,omitempty"`
+}
+
 /*
 // filter is a helper struct that holds meta information over the filter type
 // and associated subscription in the event system.
