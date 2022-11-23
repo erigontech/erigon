@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 )
@@ -10,6 +11,7 @@ func checkTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
 	pendingSize, queuedSize, err := requests.TxpoolContent(models.ReqId)
 	if err != nil {
 		fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
+		return
 	}
 
 	if pendingSize != expectedPendingSize {
