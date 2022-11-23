@@ -21,7 +21,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/consensys/gnark-crypto v0.4.1-0.20210426202927-39ac3d4b3f1f
-	github.com/crate-crypto/go-ipa v0.0.0-20220916134416-c5abbdbdf644
+	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
@@ -30,7 +30,7 @@ require (
 	github.com/emirpasic/gods v1.18.1
 	github.com/ferranbt/fastssz v0.1.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/gballet/go-verkle v0.0.0-20220829125900-a702d458d33c
+	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.4.2
