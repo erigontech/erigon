@@ -300,7 +300,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := make([]*types.Log, 0)
+			var filtered types.Logs
 			if logOptions.IgnoreTopicsOrder {
 				filtered = logs.CointainTopics(addrMap, topicsMap)
 			} else {
