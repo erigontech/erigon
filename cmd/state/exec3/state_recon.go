@@ -1,6 +1,7 @@
 package exec3
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -32,16 +33,12 @@ type ScanWorker struct {
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
-
-	total, progress *atomic.Uint64
 }
 
 func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {
 	sw := &ScanWorker{
-		txNum:    txNum,
-		as:       as,
-		total:    atomic.NewUint64(0),
-		progress: atomic.NewUint64(0),
+		txNum: txNum,
+		as:    as,
 	}
 	return sw
 }
@@ -70,15 +67,7 @@ func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *libstate.Aggregato
 	return fw
 }
 
-func (sw *ScanWorker) Total() uint64 {
-	return sw.total.Load()
-}
-
 func (sw *ScanWorker) Bitmap() *roaring64.Bitmap { return &sw.bitmap }
-
-func (sw *ScanWorker) Progress() uint64 {
-	return sw.progress.Load()
-}
 
 func (fw *FillWorker) Total() uint64 {
 	return fw.total.Load()
@@ -188,58 +177,70 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	}
 }
 
-func (sw *ScanWorker) ResetProgress() {
-	sw.total.Store(0)
-	sw.progress.Store(0)
-}
-
 func (fw *FillWorker) ResetProgress() {
 	fw.total.Store(0)
 	fw.progress.Store(0)
 }
 
+var addr1 common.Address = common.HexToAddress("0x981816992ca910b8d00d88db0217b07c199e995a")
+
 func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	it := sw.as.IterateAccountsTxs(sw.txNum)
-	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
+		key, txNum, del := it.Next()
+		if bytes.Equal(key, addr1[:]) {
+			fmt.Printf("BitmapAccounts %x %d %t\n", key, txNum, del)
 		}
-		sw.progress.Store(progress)
-		sw.bitmap.Add(txNum)
+		if del {
+			if err := accountCollectorX.Collect(key, nil); err != nil {
+				panic(err)
+			}
+		} else {
+			binary.BigEndian.PutUint64(txKey[:], txNum)
+			if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
+				panic(err)
+			}
+			sw.bitmap.Add(txNum)
+		}
 	}
 }
 
 func (sw *ScanWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 	it := sw.as.IterateStorageTxs(sw.txNum)
-	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
+		key, txNum, del := it.Next()
+		if del {
+			if err := storageCollectorX.Collect(key, nil); err != nil {
+				panic(err)
+			}
+		} else {
+			binary.BigEndian.PutUint64(txKey[:], txNum)
+			if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
+				panic(err)
+			}
+			sw.bitmap.Add(txNum)
 		}
-		sw.progress.Store(progress)
-		sw.bitmap.Add(txNum)
 	}
 }
 
 func (sw *ScanWorker) BitmapCode(codeCollectorX *etl.Collector) {
 	it := sw.as.IterateCodeTxs(sw.txNum)
-	sw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
+		key, txNum, del := it.Next()
+		if del {
+			if err := codeCollectorX.Collect(key, nil); err != nil {
+				panic(err)
+			}
+		} else {
+			binary.BigEndian.PutUint64(txKey[:], txNum)
+			if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
+				panic(err)
+			}
+			sw.bitmap.Add(txNum)
 		}
-		sw.progress.Store(progress)
-		sw.bitmap.Add(txNum)
 	}
 }
 
@@ -321,6 +322,11 @@ var noop = state.NewNoopWriter()
 func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	if txTask.BlockNum == 5335164 {
+		rw.stateReader.SetTrace(true)
+	} else {
+		rw.stateReader.SetTrace(false)
+	}
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)

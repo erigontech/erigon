@@ -725,12 +725,9 @@ func reconstituteStep(last bool,
 ) error {
 	workCh := make(chan *state.TxTask, workerCount*4)
 	rs.Reset(workCh)
-	doneCount := atomic2.NewUint64(0)
 	scanWorker := exec3.NewScanWorker(txNum, as)
 
 	t := time.Now()
-	doneCount.Store(0)
-	scanWorker.ResetProgress()
 	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	accountCollectorX.LogLvl(log.LvlInfo)
 	scanWorker.BitmapAccounts(accountCollectorX)
@@ -744,10 +741,8 @@ func reconstituteStep(last bool,
 	log.Info("Scan accounts history", "took", time.Since(t))
 
 	t = time.Now()
-	doneCount.Store(0)
 	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	storageCollectorX.LogLvl(log.LvlInfo)
-	scanWorker.ResetProgress()
 	scanWorker.BitmapStorage(storageCollectorX)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -760,8 +755,6 @@ func reconstituteStep(last bool,
 	log.Info("Scan storage history", "took", time.Since(t))
 
 	t = time.Now()
-	doneCount.Store(0)
-	scanWorker.ResetProgress()
 	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollectorX.LogLvl(log.LvlInfo)
 	scanWorker.BitmapCode(codeCollectorX)
@@ -959,6 +952,9 @@ func reconstituteStep(last bool,
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
+				if bn == 5335164 {
+					fmt.Printf("create task blockNum=%d, txIndex=%d, txNum=%d\n", bn, txIndex, inputTxNum)
+				}
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,

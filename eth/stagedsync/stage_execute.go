@@ -272,13 +272,15 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewState22()
-	if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
-		cfg.blockReader, log.New(), cfg.agg, cfg.engine,
-		to,
-		cfg.chainConfig, cfg.genesis); err != nil {
-		return err
-	}
+	/*
+		rs := state.NewState22()
+		if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
+			cfg.blockReader, log.New(), cfg.agg, cfg.engine,
+			to,
+			cfg.chainConfig, cfg.genesis); err != nil {
+			return err
+		}
+	*/
 
 	return nil
 }

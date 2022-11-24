@@ -48,11 +48,17 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 	if txKey != nil {
 		stateTxNum = binary.BigEndian.Uint64(txKey)
 	}
+	if hr.trace {
+		fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, stateTxNum=%d\n", address, hr.txNum, stateTxNum)
+	}
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
 		if enc, noState, err = hr.as.ReadAccountDataNoState(addr, hr.txNum); err != nil {
 			return nil, err
+		}
+		if hr.trace {
+			fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
 		}
 	}
 	if !noState {
@@ -65,6 +71,9 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 			return nil, &RequiredStateError{StateTxNum: stateTxNum}
 		}
 		enc = hr.rs.Get(kv.PlainStateR, addr, nil, stateTxNum)
+		if hr.trace {
+			fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, enc=%x\n", address, hr.txNum, enc)
+		}
 		if enc == nil {
 			if hr.tx == nil {
 				return nil, fmt.Errorf("hr.tx is nil")
