@@ -17,8 +17,8 @@
 package downloadercfg
 
 import (
-	"fmt"
-	"net"
+	"io/ioutil"
+	"runtime"
 	"strings"
 
 	lg "github.com/anacrolix/log"
@@ -78,17 +78,7 @@ func New(snapDir string, version string, verbosity lg.Level, downloadRate, uploa
 
 	torrentConfig.ListenPort = port
 	// check if ipv6 is enabled
-	torrentConfig.DisableIPv6 = true
-	l, err := net.Listen("tcp6", fmt.Sprintf(":%d", port))
-	if err != nil {
-		isDisabled := strings.Contains(err.Error(), "cannot assign requested address") || strings.Contains(err.Error(), "address family not supported by protocol")
-		if !isDisabled {
-			log.Warn("can't enable ipv6", "err", err)
-		}
-	} else {
-		l.Close()
-		torrentConfig.DisableIPv6 = false
-	}
+	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
@@ -106,4 +96,19 @@ func New(snapDir string, version string, verbosity lg.Level, downloadRate, uploa
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
 	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
+}
+
+func getIpv6Enabled() bool {
+	if runtime.GOOS == "linux" {
+		file, err := ioutil.ReadFile("/sys/module/ipv6/parameters/disable")
+		if err != nil {
+			log.Warn("could not read /sys/module/ipv6/parameters/disable for ipv6 detection")
+			return false
+		}
+		fileContent := strings.TrimSpace(string(file))
+		return fileContent != "0"
+	}
+
+	// TODO hotfix: for platforms other than linux disable ipv6
+	return false
 }
