@@ -103,6 +103,17 @@ type Header struct {
 	VerkleKeyVals []verkle.KeyValuePair
 }
 
+// ParentExcessDataGas is a helper that returns the excess data gas value of the parent block.  It
+// returns nil if the parent header could not be fetched, or if the parent block's excess data gas
+// is nil.
+func (h *Header) ParentExcessDataGas(getHeader func(hash common.Hash, number uint64) *Header) *big.Int {
+	p := getHeader(h.ParentHash, h.Number.Uint64())
+	if p != nil {
+		return p.ExcessDataGas
+	}
+	return nil
+}
+
 func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */

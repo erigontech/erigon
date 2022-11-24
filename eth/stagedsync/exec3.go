@@ -400,7 +400,7 @@ func Exec3(ctx context.Context,
 	}
 	defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 
-	var b *types.Block
+	var b, parentBlock *types.Block
 	var blockNum uint64
 loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
@@ -408,6 +408,16 @@ loop:
 
 		inputBlockNum.Store(blockNum)
 		rules := chainConfig.Rules(blockNum)
+		if b == nil {
+			if blockNum >= 0 {
+				parentBlock, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum-1)
+				if err != nil {
+					return err
+				}
+			}
+		} else {
+			parentBlock = b
+		}
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
@@ -440,17 +450,18 @@ loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
-				BlockNum:     blockNum,
-				Header:       header,
-				Coinbase:     b.Coinbase(),
-				Uncles:       b.Uncles(),
-				Rules:        rules,
-				Txs:          txs,
-				TxNum:        inputTxNum,
-				TxIndex:      txIndex,
-				BlockHash:    b.Hash(),
-				SkipAnalysis: skipAnalysis,
-				Final:        txIndex == len(txs),
+				BlockNum:      blockNum,
+				Header:        header,
+				ExcessDataGas: parentBlock.ExcessDataGas(),
+				Coinbase:      b.Coinbase(),
+				Uncles:        b.Uncles(),
+				Rules:         rules,
+				Txs:           txs,
+				TxNum:         inputTxNum,
+				TxIndex:       txIndex,
+				BlockHash:     b.Hash(),
+				SkipAnalysis:  skipAnalysis,
+				Final:         txIndex == len(txs),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -930,11 +941,12 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	var inputTxNum uint64
-	var b *types.Block
+	var b, parentBlock *types.Block
 	var txKey [8]byte
 	for bn = uint64(0); bn <= blockNum; bn++ {
 		t = time.Now()
 		rules := chainConfig.Rules(bn)
+		parentBlock = b
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
 			return err
@@ -959,6 +971,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 					BlockHash:    b.Hash(),
 					SkipAnalysis: skipAnalysis,
 					Final:        txIndex == len(txs),
+				}
+				if parentBlock != nil {
+					txTask.ExcessDataGas = parentBlock.ExcessDataGas()
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
