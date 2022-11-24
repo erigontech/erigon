@@ -544,7 +544,8 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 	return nil
 }
 
-func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
@@ -599,6 +600,10 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	rlp.Encode(hasher, enc)
 	hasher.Sum(hash[:0])
 	return hash
+}
+
+func (ethash *Ethash) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
 }
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists

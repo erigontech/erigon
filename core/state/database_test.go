@@ -1343,7 +1343,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
 			},

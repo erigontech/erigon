@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -65,7 +65,6 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
-				log.Warn("no pending block found returning latest executed block")
 				blockNumber = plainStateBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
@@ -102,33 +101,37 @@ func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts
 	return reader.ReadAccountData(address)
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, txnIndex uint64, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
 	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err
 	}
-	var stateReader state.StateReader
+	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, historyV3, agg)
+}
+
+func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber uint64, latest bool, txnIndex uint64, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-		stateReader = state.NewCachedReader2(cacheView, tx)
-	} else {
-		if historyV3 {
-			aggCtx := agg.MakeContext()
-			aggCtx.SetTx(tx)
-			r := state.NewHistoryReader22(aggCtx)
-			r.SetTx(tx)
-			minTxNum, err := rawdb.TxNums.Min(tx, blockNumber+1)
-			if err != nil {
-				return nil, err
-			}
-			r.SetTxNum(minTxNum)
-			stateReader = r
-		} else {
-			stateReader = state.NewPlainState(tx, blockNumber+1)
-		}
+		return state.NewCachedReader2(cacheView, tx), nil
 	}
-	return stateReader, nil
+	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, agg, historyV3)
+}
+
+func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state2.Aggregator22, historyV3 bool) (state.StateReader, error) {
+	if !historyV3 {
+		return state.NewPlainState(tx, blockNumber), nil
+	}
+	aggCtx := agg.MakeContext()
+	aggCtx.SetTx(tx)
+	r := state.NewHistoryReader22(aggCtx)
+	r.SetTx(tx)
+	minTxNum, err := rawdb.TxNums.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	r.SetTxNum(minTxNum + txnIndex)
+	return r, nil
 }

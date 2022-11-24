@@ -9,12 +9,15 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -24,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -32,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
@@ -155,7 +156,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 
-	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+8096 && highestSeenHeader < finishProgressBefore+8096
+	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+32_000 && highestSeenHeader < finishProgressBefore+32_000
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
@@ -167,7 +168,11 @@ func StageLoopStep(
 	}
 
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
-		notifications.Accumulator.Reset(tx.ViewID())
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			log.Error("problem reading plain state version", "err", err)
+		}
+		notifications.Accumulator.Reset(stateVersion)
 	}
 
 	err = sync.Run(db, tx, initialCycle, false /* quiet */)
@@ -196,6 +201,7 @@ func StageLoopStep(
 	var headTd *big.Int
 	var head uint64
 	var headHash common.Hash
+	var plainStateVersion uint64
 	if head, err = stages.GetStageProgress(rotx, stages.Headers); err != nil {
 		return headBlockHash, err
 	}
@@ -206,6 +212,14 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
+
+	// update the accumulator with a new plain state version so the cache can be notified that
+	// state has moved on
+	if plainStateVersion, err = rawdb.GetStateVersion(rotx); err != nil {
+		return headBlockHash, err
+	}
+	notifications.Accumulator.SetStateID(plainStateVersion)
+
 	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
 		log.Info("Commit cycle", "in", commitTime)
 	}
@@ -230,6 +244,7 @@ func StageLoopStep(
 		}
 		updateHead(ctx, head, headHash, headTd256)
 	}
+
 	if notifications != nil {
 		if notifications.Accumulator != nil {
 			header := rawdb.ReadCurrentHeader(rotx)
@@ -444,7 +459,7 @@ func NewStagedSync(ctx context.Context,
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
-				cfg.Sync.ExecWorkerCount,
+				cfg.Sync,
 				agg,
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
@@ -503,7 +518,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				blockReader,
 				controlServer.Hd,
 				cfg.Genesis,
-				cfg.Sync.ExecWorkerCount,
+				cfg.Sync,
 				agg,
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),

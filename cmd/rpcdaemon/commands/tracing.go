@@ -8,10 +8,11 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -22,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -75,15 +75,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-
-	_, blockCtx, _, ibs, reader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, block.Hash(), 0)
+	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, 0, api._agg, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -92,23 +84,36 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
-	for idx, tx := range block.Transactions() {
+	for idx, txn := range block.Transactions() {
 		select {
 		default:
 		case <-ctx.Done():
 			stream.WriteNil()
 			return ctx.Err()
 		}
-		ibs.Prepare(tx.Hash(), block.Hash(), idx)
-		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
+		ibs.Prepare(txn.Hash(), block.Hash(), idx)
+		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		txCtx := vm.TxContext{
-			TxHash:   tx.Hash(),
+			TxHash:   txn.Hash(),
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),
 		}
 
-		transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
-		_ = ibs.FinalizeTx(rules, reader)
+		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+
+		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
+		if err != nil {
+			stream.SetBuffer([]byte{})
+			stream.WriteMore()
+			stream.WriteObjectStart()
+			err = rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			if err != nil {
+				return err
+			}
+		}
+
+		_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		if idx != len(block.Transactions())-1 {
 			stream.WriteMore()
 		}
@@ -146,7 +151,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
-	blockHash := block.Hash()
 	var txnIndex uint64
 	var txn types.Transaction
 	for i, transaction := range block.Transactions() {
@@ -177,10 +181,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
-	}
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txnIndex)
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, txnIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -203,20 +204,15 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
-	var stateReader state.StateReader
-	if latest {
-		cacheView, err := api.stateCache.View(ctx, dbtx)
-		if err != nil {
-			return err
-		}
-		stateReader = state.NewCachedReader2(cacheView, dbtx)
-	} else {
-		stateReader = state.NewPlainState(dbtx, blockNumber+1)
+
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg)
+	if err != nil {
+		return err
 	}
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {
@@ -316,7 +312,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
 	if err != nil {
 		stream.WriteNil()
 		return err

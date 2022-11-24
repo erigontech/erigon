@@ -23,7 +23,7 @@ CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1"
 
-BUILD_TAGS = nosqlite,noboltdb
+BUILD_TAGS = nosqlite,noboltdb,disable_libutp
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
@@ -102,6 +102,7 @@ erigon: go-version erigon.cmd
 
 COMMANDS += devnet
 COMMANDS += downloader
+COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -114,7 +115,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
-COMMANDS += sentinel_node
+COMMANDS += sentinel
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

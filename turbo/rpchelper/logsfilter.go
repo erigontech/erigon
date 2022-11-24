@@ -53,15 +53,30 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSu
 }
 
 func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
-	if filter, ok := a.logsFilters[filterId]; ok {
-		a.subtractLogFilters(filter)
-		close(filter.sender)
-		delete(a.logsFilters, filterId)
-		return true
+	a.logsFilterLock.RLock()
+	filter, ok := a.logsFilters[filterId]
+	a.logsFilterLock.RUnlock()
+	if !ok {
+		return false
 	}
-	return false
+
+	for {
+		select {
+		case <-filter.sender:
+		default:
+			a.logsFilterLock.Lock()
+			defer a.logsFilterLock.Unlock()
+			// Need to re-check the channel because it might have been closed and removed from the map
+			// which we were not holding the lock
+			if filter, ok = a.logsFilters[filterId]; !ok {
+				return false
+			}
+			a.subtractLogFilters(filter)
+			close(filter.sender)
+			delete(a.logsFilters, filterId)
+			return true
+		}
+	}
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
@@ -112,8 +127,8 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 }
 
 func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
 	for _, filter := range a.logsFilters {
 		if filter.allAddrs == 0 {
 			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(eventLog.Address)]

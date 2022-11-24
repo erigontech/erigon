@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -164,8 +165,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -182,7 +183,7 @@ func (t *StateTest) Run(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, v
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -269,23 +270,23 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 			return nil, common.Hash{}, fmt.Errorf("interate over plain state: %w", err)
 		}
 		var newK []byte
-		if len(k) == common.AddressLength {
-			newK = make([]byte, common.HashLength)
+		if len(k) == length.Addr {
+			newK = make([]byte, length.Hash)
 		} else {
-			newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+			newK = make([]byte, length.Hash*2+length.Incarnation)
 		}
 		h.Sha.Reset()
 		//nolint:errcheck
-		h.Sha.Write(k[:common.AddressLength])
+		h.Sha.Write(k[:length.Addr])
 		//nolint:errcheck
-		h.Sha.Read(newK[:common.HashLength])
-		if len(k) > common.AddressLength {
-			copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+		h.Sha.Read(newK[:length.Hash])
+		if len(k) > length.Addr {
+			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
 			h.Sha.Reset()
 			//nolint:errcheck
-			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
-			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+			h.Sha.Read(newK[length.Hash+length.Incarnation:])
 			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
@@ -460,7 +461,8 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		uint256.NewInt(tipCap.Uint64()),
 		data,
 		accessList,
-		false)
+		false, /* checkNonce */
+		false /* isFree */)
 
 	return msg, nil
 }

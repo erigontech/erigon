@@ -20,10 +20,12 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -39,14 +41,14 @@ type LightClient struct {
 	verbose           bool
 	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
-	sentinel          lightrpc.SentinelClient
+	db                kv.RwDB
+	sentinel          consensusrpc.SentinelClient
 	execution         remote.ETHBACKENDServer
 	store             *LightClientStore
-	lastValidated     *cltypes.LightClientUpdate
 }
 
-func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient,
+func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+	execution remote.ETHBACKENDServer, sentinel consensusrpc.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
 	return &LightClient{
@@ -59,6 +61,7 @@ func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, 
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
+		db:                db,
 	}, err
 }
 
@@ -67,6 +70,12 @@ func (l *LightClient) Start() {
 		log.Error("No trusted setup")
 		return
 	}
+	tx, err := l.db.BeginRw(l.ctx)
+	if err != nil {
+		log.Error("Could not open MDBX transaction", "err", err)
+		return
+	}
+	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
 	go l.chainTip.StartLoop()
 	for {
@@ -114,27 +123,66 @@ func (l *LightClient) Start() {
 				updates = append(updates, newUpdate)
 			}
 		}
+
 		// Push updates
 		for _, update := range updates {
 			err := l.processLightClientUpdate(update)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
+				updates = []*cltypes.LightClientUpdate{}
+				break
 			}
 		}
 		// log new validated segment
 		if len(updates) > 0 {
-			l.lastValidated = updates[len(updates)-1]
+			lastValidated := updates[len(updates)-1]
+			// Save to Database
+			if lastValidated.HasNextSyncCommittee() {
+				if err := cldb.WriteLightClientUpdate(tx, lastValidated); err != nil {
+					log.Warn("Could not write lightclient update to db", "err", err)
+				}
+			}
+			if lastValidated.IsFinalityUpdate() {
+				if err := cldb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lastValidated.AttestedHeader,
+					FinalizedHeader: lastValidated.FinalizedHeader,
+					FinalityBranch:  lastValidated.FinalityBranch,
+					SyncAggregate:   lastValidated.SyncAggregate,
+					SignatureSlot:   lastValidated.SignatureSlot,
+				}); err != nil {
+					log.Warn("Could not write finality lightclient update to db", "err", err)
+				}
+			}
+			if err := cldb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
+				AttestedHeader: lastValidated.AttestedHeader,
+				SyncAggregate:  lastValidated.SyncAggregate,
+				SignatureSlot:  lastValidated.SignatureSlot,
+			}); err != nil {
+				log.Warn("Could not write optimistic lightclient update to db", "err", err)
+			}
+
+			if err := tx.Commit(); err != nil {
+				log.Error("[LightClient] could not commit to database", "err", err)
+				return
+			}
+			tx, err = l.db.BeginRw(l.ctx)
+			if err != nil {
+				log.Error("[LightClient] could not begin database transaction", "err", err)
+				return
+			}
+			defer tx.Rollback()
+
 			if l.verbose {
 				log.Info("[LightClient] Validated Chain Segments",
 					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", l.lastValidated.AttestedHeader.Slot)
+					"to", lastValidated.AttestedHeader.Slot)
 			}
 			prev, curr := l.chainTip.GetLastBlocks()
 			if prev == nil {
 				continue
 			}
 			// Skip if we went out of sync and weird network stuff happen
-			if prev.Slot != l.lastValidated.AttestedHeader.Slot {
+			if prev.Slot != lastValidated.AttestedHeader.Slot {
 				continue
 			}
 			// Validate update against block N-1
@@ -143,7 +191,7 @@ func (l *LightClient) Start() {
 				log.Warn("[LightClient] Could not retrive body root of block N-1", "err", err)
 				continue
 			}
-			if !bytes.Equal(prevRoot[:], l.lastValidated.AttestedHeader.BodyRoot[:]) {
+			if !bytes.Equal(prevRoot[:], lastValidated.AttestedHeader.BodyRoot[:]) {
 				log.Warn("[LightClient] Could validate block N-1")
 				continue
 			}
@@ -169,7 +217,7 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &lightrpc.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(l.ctx, &consensusrpc.EmptyRequest{})
 			if err != nil {
 				log.Warn("could not read peers", "err", err)
 				continue

@@ -817,14 +817,15 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 	// bc.SetStateSync(stateSyncData)
 
 	// return the final block for sealing
-	return block, nil, types.Receipts{}, nil
+	return block, txs, receipts, nil
 }
 
 func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
-func (c *Bor) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (c *Bor) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -885,22 +886,22 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	log.Info("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
 		case <-stop:
-			log.Debug("Discarding sealing operation for block", "number", number)
+			log.Info("Discarding sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
 			if wiggle > 0 {
-				log.Trace(
+				log.Info(
 					"Sealing out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
 					"in-turn-signer", snap.ValidatorSet.GetProposer().Address.Hex(),
 				)
 			}
-			log.Trace(
+			log.Info(
 				"Sealing successful",
 				"number", number,
 				"delay", delay,
@@ -938,6 +939,10 @@ func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *
 // SealHash returns the hash of a block prior to it being sealed.
 func (c *Bor) SealHash(header *types.Header) common.Hash {
 	return SealHash(header, c.config)
+}
+
+func (c *Bor) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
 }
 
 // APIs implements consensus.Engine, returning the user facing RPC API to allow

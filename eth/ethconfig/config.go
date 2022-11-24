@@ -27,21 +27,22 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 // AggregationStep number of transactions in smallest static file
 const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 16 // 100M / 32
+//const HistoryV3AggregationStep = 3_125_000 / 32 // 100M / 32
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
@@ -68,7 +69,8 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
-		ExecWorkerCount:            1,
+		ExecWorkerCount:            2,
+		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -234,7 +236,12 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// ConsenSUS layer
-	CL bool
+	CL                          bool
+	LightClientDiscoveryAddr    string
+	LightClientDiscoveryPort    uint64
+	LightClientDiscoveryTCPPort uint64
+	SentinelAddr                string
+	SentinelPort                uint64
 
 	// FORK_NEXT_VALUE (see EIP-3675) block override
 	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
@@ -245,8 +252,9 @@ type Config struct {
 type Sync struct {
 	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle    time.Duration
-	ExecWorkerCount int
+	LoopThrottle     time.Duration
+	ExecWorkerCount  int
+	ReconWorkerCount int
 
 	BlockDownloaderWindow      int
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
@@ -260,6 +268,8 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.RopstenChainName:    {},
 	networkname.MumbaiChainName:     {},
 	networkname.BorMainnetChainName: {},
+	networkname.GnosisChainName:     {},
+	networkname.ChiadoChainName:     {},
 }
 
 func UseSnapshotsByChainName(chain string) bool {

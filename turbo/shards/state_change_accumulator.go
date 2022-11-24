@@ -6,12 +6,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	"github.com/ledgerwatch/erigon/common"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
-	viewID             uint64 // mdbx's txID
+	plainStateID       uint64
 	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
@@ -26,20 +27,24 @@ type StateChangeConsumer interface {
 	SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch)
 }
 
-func (a *Accumulator) Reset(viewID uint64) {
+func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
-	a.viewID = viewID
+	a.plainStateID = plainStateID
 }
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, blockGasLimit uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit}
+	sc := &remote.StateChangeBatch{StateVersionID: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+}
+
+func (a *Accumulator) SetStateID(stateID uint64) {
+	a.plainStateID = stateID
 }
 
 // StartChange begins accumulation of changes for a new block

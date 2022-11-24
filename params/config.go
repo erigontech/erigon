@@ -74,6 +74,7 @@ var (
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 )
 
 var (
@@ -84,6 +85,7 @@ var (
 	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
 	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
 	GnosisGenesisStateRoot  = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
+	ChiadoGenesisStateRoot  = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
 )
 
 var (
@@ -112,27 +114,28 @@ var (
 
 	FermionChainConfig = readChainSpec("chainspecs/fermion.json")
 
-	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
-	// and accepted by the Ethereum core developers into the Ethash consensus.
-	AllEthashProtocolChanges = &ChainConfig{
-		ChainID:               big.NewInt(1337),
-		Consensus:             EtHashConsensus,
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
-		TangerineWhistleBlock: big.NewInt(0),
-		TangerineWhistleHash:  common.Hash{},
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
-		Ethash:                new(EthashConfig),
-		Clique:                nil,
+	// AllProtocolChanges contains every protocol change (EIPs) introduced
+	// and accepted by the Ethereum core developers into the main net protocol.
+	AllProtocolChanges = &ChainConfig{
+		ChainID:                       big.NewInt(1337),
+		Consensus:                     EtHashConsensus,
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		TangerineWhistleHash:          common.Hash{},
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiBlock:                 big.NewInt(0),
+		Ethash:                        new(EthashConfig),
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -141,8 +144,6 @@ var (
 		ChainID:               big.NewInt(1337),
 		Consensus:             CliqueConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -153,8 +154,6 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
-		ArrowGlacierBlock:     nil,
-		Ethash:                nil,
 		Clique:                &CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
@@ -166,14 +165,14 @@ var (
 
 	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
 
+	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
-		ChainID:               big.NewInt(1),
+		ChainID:               big.NewInt(1337),
 		Consensus:             EtHashConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -183,18 +182,13 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
 		Ethash:                new(EthashConfig),
-		Clique:                nil,
 	}
 
 	TestChainAuraConfig = &ChainConfig{
 		ChainID:               big.NewInt(1),
 		Consensus:             AuRaConsensus,
 		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		DAOForkSupport:        false,
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -204,8 +198,6 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           nil,
-		ArrowGlacierBlock:     nil,
 		Aura:                  &AuRaConfig{},
 	}
 
@@ -895,6 +887,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return BorDevnetChainConfig
 	case networkname.GnosisChainName:
 		return GnosisChainConfig
+	case networkname.ChiadoChainName:
+		return ChiadoChainConfig
 	default:
 		return nil
 	}
@@ -930,6 +924,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &BorDevnetGenesisHash
 	case networkname.GnosisChainName:
 		return &GnosisGenesisHash
+	case networkname.ChiadoChainName:
+		return &ChiadoGenesisHash
 	default:
 		return nil
 	}
@@ -963,6 +959,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return BorMainnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
+	case genesisHash == ChiadoGenesisHash:
+		return ChiadoChainConfig
 	default:
 		return nil
 	}

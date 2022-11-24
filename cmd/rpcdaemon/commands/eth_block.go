@@ -74,7 +74,6 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
-
 	var stateReader state.StateReader
 	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
@@ -83,7 +82,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, stateBlockNumber)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber, 0, api._agg, api.historyV3(tx))
+		if err != nil {
+			return nil, err
+		}
 	}
 	st := state.New(stateReader)
 
@@ -221,7 +223,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
-
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(b.Header(), chainConfig.Bor)
+	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -281,6 +285,10 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
+
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(block.Header(), chainConfig.Bor)
+	}
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields

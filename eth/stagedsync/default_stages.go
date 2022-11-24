@@ -208,7 +208,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 				return UnwindTxLookup(u, s, tx, txLookup, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneTxLookup(p, tx, txLookup, ctx)
+				return PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
 		{

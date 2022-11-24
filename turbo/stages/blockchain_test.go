@@ -27,9 +27,10 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -486,12 +487,15 @@ func TestChainTxReorgs(t *testing.T) {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, txn := range txs {
-		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
-			t.Errorf("add %d: expected tx to be found", i)
-		}
+		_, found, err := br.TxnLookup(m.Ctx, tx, txn.Hash())
+		require.NoError(t, err)
+		require.True(t, found)
+
 		if m.HistoryV3 {
 			// m.HistoryV3 doesn't store
 		} else {
@@ -760,10 +764,10 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			return nil
 		})
 		require.NoError(err)
-		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
 		if m.HistoryV3 {
 			// receipts are not stored in erigon3
 		} else {
+			require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
 			require.Greater(found, uint64(0))
 		}
 	} else {
@@ -788,6 +792,8 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+
 	if pm.TxIndex.Enabled() {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
 		require.NoError(err)
@@ -800,12 +806,10 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
-			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			foundBlockNum, found, err := br.TxnLookup(context.Background(), tx, txn.Hash())
 			require.NoError(err)
-			if found == nil {
-				require.NotNil(found)
-			}
-			require.Equal(uint64(1), *found)
+			require.True(found)
+			require.Equal(uint64(1), foundBlockNum)
 		}
 	}
 	/*
@@ -966,7 +970,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1913,7 +1917,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01

@@ -25,7 +25,7 @@ import (
 )
 
 func TestDifficulty(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	dt := new(testMatcher)
 

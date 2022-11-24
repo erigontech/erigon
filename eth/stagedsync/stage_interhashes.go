@@ -201,7 +201,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
-		compositeKey := make([]byte, common.HashLength+common.HashLength)
+		compositeKey := make([]byte, length.Hash+length.Hash)
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
 		for it.HasNext() {
@@ -215,7 +215,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 				return err
 			}
 			copy(compositeKey, addrHash[:])
-			copy(compositeKey[common.HashLength:], secKey[:])
+			copy(compositeKey[length.Hash:], secKey[:])
 			if len(v) != 0 {
 				v = nonEmptyMarker
 			}
@@ -349,16 +349,20 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		for it.HasNext() {
 			k, v = it.Next(k[:0], v[:0])
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-			value, err := p.tx.GetOne(kv.PlainState, k[:20])
+			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
 			}
 			incarnation := uint64(1)
-			if len(value) != 0 {
-				oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+			if len(enc) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(enc)
 				incarnation = oldInc
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			value, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
 			newK, err := transformPlainStateKey(plainKey)
 			if err != nil {
 				return err
@@ -532,7 +536,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 					return nil
 				}
 			}
-			compositeKey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+			compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
 			copy(compositeKey, k[:32])
 			binary.BigEndian.PutUint64(compositeKey[32:], incarnation)
 			copy(compositeKey[40:], k[32:])

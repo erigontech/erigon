@@ -448,8 +448,6 @@ func (t *TransactionsFixedOrder) Pop() {
 }
 
 // Message is a fully derived transaction and implements core.Message
-//
-// NOTE: In a future PR this will be removed.
 type Message struct {
 	to         *common.Address
 	from       common.Address
@@ -462,9 +460,10 @@ type Message struct {
 	data       []byte
 	accessList AccessList
 	checkNonce bool
+	isFree     bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -474,6 +473,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
+		isFree:     isFree,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -500,4 +500,8 @@ func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
+}
+func (m Message) IsFree() bool { return m.isFree }
+func (m *Message) SetIsFree(isFree bool) {
+	m.isFree = isFree
 }

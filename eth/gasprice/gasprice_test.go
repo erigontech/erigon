@@ -24,6 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -144,7 +146,8 @@ func TestSuggestPrice(t *testing.T) {
 		Default:    big.NewInt(params.GWei),
 	}
 	backend := newTestBackend(t)
-	oracle := gasprice.NewOracle(backend, config)
+	cache := commands.NewGasPriceCache()
+	oracle := gasprice.NewOracle(backend, config, cache)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
