@@ -39,6 +39,12 @@ type LogFilterOptions struct {
 	IgnoreTopicsOrder bool   `json:"ignoreTopicsOrder,omitempty"`
 }
 
+func DefaultLogFilterOptions() LogFilterOptions {
+	return LogFilterOptions{
+		BlockCount: 1,
+	}
+}
+
 /*
 // filter is a helper struct that holds meta information over the filter type
 // and associated subscription in the event system.
