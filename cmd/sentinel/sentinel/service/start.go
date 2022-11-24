@@ -42,15 +42,15 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		// now lets separately connect to the gossip topics. this joins the room
 		subscriber, err := sent.SubscribeGossip(v)
 		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		err = subscriber.Listen()
 		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	log.Info("Sentinel started", "enr", sent.String())
+	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 
 	server := NewSentinelServer(ctx, sent)
 	if creds == nil {
