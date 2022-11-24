@@ -45,7 +45,7 @@ func (s *SentinelServer) SubscribeGossip(_ *consensusrpc.EmptyRequest, stream co
 				Data: packet.data,
 				Type: packet.t,
 			}); err != nil {
-				log.Warn("Could not relay gossip packet", "reason", err)
+				log.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
 	}
@@ -79,10 +79,10 @@ func (s *SentinelServer) ListenToGossip() {
 }
 
 func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) error {
-	log.Trace("[Gossip] Received Packet", "topic", pkt.Topic)
+	log.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
 	err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
 	if err != nil {
-		log.Warn("[Gossip] Error Forwarding Packet", "err", err)
+		log.Warn("[Sentinel Gossip] Error Forwarding Packet", "err", err)
 	}
 	// Compute data
 	u := pkt.Packet.(ssz.Marshaler)

@@ -53,7 +53,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
 			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
-				log.Debug("Could not connect with peer", "err", err)
+				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
@@ -69,7 +69,7 @@ func (s *Sentinel) listenForPeers() {
 			break
 		}
 		if s.HasTooManyPeers() {
-			log.Trace("Not looking for peers, at peer limit")
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -80,7 +80,7 @@ func (s *Sentinel) listenForPeers() {
 		node := iterator.Node()
 		peerInfo, _, err := convertToAddrInfo(node)
 		if err != nil {
-			log.Error("Could not convert to peer info", "err", err)
+			log.Error("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
 
@@ -91,7 +91,7 @@ func (s *Sentinel) listenForPeers() {
 
 		go func(peerInfo *peer.AddrInfo) {
 			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
-				log.Debug("Could not connect with peer", "err", err)
+				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
@@ -101,7 +101,7 @@ func (s *Sentinel) connectToBootnodes() error {
 	for i := range s.discoverConfig.Bootnodes {
 		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
-				log.Error("Could not retrieve tcp port")
+				log.Error("[Sentinel] Could not retrieve tcp port")
 			}
 			continue
 		}
