@@ -4,10 +4,6 @@ on:
   schedule:
     - cron: "0 01 * * *" # run at 1 am UTC every day
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: true
   
 jobs:
   hive:
