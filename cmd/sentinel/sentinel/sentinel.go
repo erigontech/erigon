@@ -218,7 +218,7 @@ func (s *Sentinel) Start(
 // potentially we can put the req/resp handler here as well?
 ) error {
 	if s.started {
-		log.Warn("Sentinel already running")
+		log.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()
