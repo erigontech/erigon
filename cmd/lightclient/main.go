@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
@@ -82,7 +82,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	finalizedRoot, err := clcore.RetrieveTrustedRoot(tx, ctx, lcCfg.CheckpointUri)
+	finalizedRoot, err := core.RetrieveTrustedRoot(tx, ctx, lcCfg.CheckpointUri)
 	if err != nil {
 		return err
 	}
