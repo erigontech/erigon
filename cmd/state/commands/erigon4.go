@@ -41,30 +41,30 @@ import (
 )
 
 func init() {
-	withBlock(erigon23Cmd)
-	withDataDir(erigon23Cmd)
-	withChain(erigon23Cmd)
+	withBlock(erigon4Cmd)
+	withDataDir(erigon4Cmd)
+	withChain(erigon4Cmd)
 
-	erigon23Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
-	erigon23Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
-	erigon23Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
-	rootCmd.AddCommand(erigon23Cmd)
+	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	rootCmd.AddCommand(erigon4Cmd)
 }
 
 var (
 	commitmentsMode string // flag --commitments.mode [direct|update]
 )
 
-var erigon23Cmd = &cobra.Command{
-	Use:   "erigon23",
-	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
+var erigon4Cmd = &cobra.Command{
+	Use:   "erigon4",
+	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.GetLoggerCmd("erigon23", cmd)
-		return Erigon23(genesis, chainConfig, logger)
+		logger := logging.GetLoggerCmd("erigon4", cmd)
+		return Erigon4(genesis, chainConfig, logger)
 	},
 }
 
-func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
+func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -99,7 +99,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	defer db.Close()
 
 	dirs := datadir.New(datadirCli)
-	aggPath := filepath.Join(datadirCli, "erigon23")
+	aggPath := filepath.Join(datadirCli, "erigon4")
 
 	var rwTx kv.RwTx
 	defer func() {
