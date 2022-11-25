@@ -100,7 +100,7 @@ func BodiesForward(
 		// Do not print logs for short periods
 		log.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(3 * time.Second)
 	defer logEvery.Stop()
 
 	// Property of blockchain: same block in different forks will have different hashes.
