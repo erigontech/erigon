@@ -290,6 +290,8 @@ func (c *Bor) Type() params.ConsensusType {
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
+// This is thread-safe (only access the header and config (which is never updated),
+// as well as signatures, which are lru.ARCCache, which is thread-safe)
 func (c *Bor) Author(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures, c.config)
 }

@@ -103,6 +103,7 @@ func (ethash *Ethash) Type() params.ConsensusType {
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
+// This is thread-safe (only access the header.Coinbase)
 func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }

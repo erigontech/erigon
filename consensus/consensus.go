@@ -80,27 +80,12 @@ type Engine interface {
 }
 
 // EngineReader are read-only methods of the consensus engine
+// All of these methods should have thread-safe implementations
 type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
 	Author(header *types.Header) (common.Address, error)
-
-	// VerifyHeader checks whether a header conforms to the consensus rules of a
-	// given engine. Verifying the seal may be done optionally here, or explicitly
-	// via the VerifySeal method.
-	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) error
-
-	// VerifyUncles verifies that the given block's uncles conform to the consensus
-	// rules of a given engine.
-	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
-
-	// SealHash returns the hash of a block prior to it being sealed.
-	SealHash(header *types.Header) common.Hash
-
-	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
 
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
@@ -110,6 +95,15 @@ type EngineReader interface {
 
 // EngineReader are write methods of the consensus engine
 type EngineWriter interface {
+	// VerifyHeader checks whether a header conforms to the consensus rules of a
+	// given engine. Verifying the seal may be done optionally here, or explicitly
+	// via the VerifySeal method.
+	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) error
+
+	// VerifyUncles verifies that the given block's uncles conform to the consensus
+	// rules of a given engine.
+	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
+
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
@@ -144,6 +138,13 @@ type EngineWriter interface {
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
 	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
+
+	// SealHash returns the hash of a block prior to it being sealed.
+	SealHash(header *types.Header) common.Hash
+
+	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
+	// that a new block should have.
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 

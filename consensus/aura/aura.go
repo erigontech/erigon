@@ -338,6 +338,7 @@ type AuRa struct {
 	EpochManager      *EpochManager // Mutex<EpochManager>,
 
 	certifier *common.Address // certifies service transactions
+	certifierLock sync.RWMutex
 }
 
 type GasLimitOverride struct {
@@ -484,6 +485,7 @@ func (c *AuRa) Type() params.ConsensusType {
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
+// This is thread-safe (only access the Coinbase of the header)
 func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 	/*
 				 let message = keccak(empty_step_rlp(self.step, &self.parent_hash));
@@ -775,9 +777,11 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 		state.SetCode(address, rewrittenCode)
 	}
 
+	c.certifierLock.Lock()
 	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
 	}
+	c.certifierLock.Unlock()
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
@@ -1216,7 +1220,10 @@ func (c *AuRa) SealHash(header *types.Header) common.Hash {
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
+// This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
 func (c *AuRa) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	c.certifierLock.RLock()
+	defer c.certifierLock.RUnlock()
 	if c.certifier == nil {
 		return false
 	}
