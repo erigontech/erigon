@@ -34,6 +34,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if len(txHashes) == 0 {
 		return nil, nil
@@ -116,7 +117,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	blockCtx, txCtx := transactions.GetEvmContext(engine, firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
 	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)

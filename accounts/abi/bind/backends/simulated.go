@@ -120,7 +120,7 @@ func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Comp
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
 	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
 }
-func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
+func (b *SimulatedBackend) HistoryV3() bool          { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
 
 // Close terminates the underlying blockchain's update loop.
