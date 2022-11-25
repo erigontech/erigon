@@ -72,6 +72,7 @@ func (f *ForwardBeaconDownloader) SetHighestProcessSlot(highestSlotProcessed uin
 	f.lastDownloadedSlot = highestSlotProcessed
 }
 
+// addSegment process new block segment.
 func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBellatrix) {
 	// Skip if it is not downloading or limit was reached
 	if !f.isDownloading || len(f.segments) >= f.limitSegmentsLength {
@@ -87,26 +88,29 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBel
 	f.segments = append(f.segments, block)
 }
 
-func (f *ForwardBeaconDownloader) RequestMore() {
-	go func() {
-		count := uint64(192)
-		responses, err := rpc.SendBeaconBlocksByRangeReq(
-			f.ctx,
-			f.lastDownloadedSlot+1,
-			count,
-			f.sentinel,
-		)
-		if err != nil {
-			return
-		}
-		for _, response := range responses {
-			if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
-				f.addSegment(segment)
+func (f *ForwardBeaconDownloader) RequestMore(count int) {
+	for i := 0; i < count; i++ {
+		go func() {
+			count := uint64(10)
+			responses, err := rpc.SendBeaconBlocksByRangeReq(
+				f.ctx,
+				f.lastDownloadedSlot+1,
+				count,
+				f.sentinel,
+			)
+			if err != nil {
+				return
 			}
-		}
-	}()
+			for _, response := range responses {
+				if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
+					f.addSegment(segment)
+				}
+			}
+		}()
+	}
 }
 
+// ProcessBlocks processes blocks we accumulated.
 func (f *ForwardBeaconDownloader) ProcessBlocks() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -120,4 +124,11 @@ func (f *ForwardBeaconDownloader) ProcessBlocks() error {
 	// clear segments
 	f.segments = f.segments[:0]
 	return nil
+}
+
+// GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
+func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.highestSlotProcessed
 }
