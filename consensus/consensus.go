@@ -75,6 +75,12 @@ type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
+	EngineReader
+	EngineWriter
+}
+
+// EngineReader are read-only methods of the consensus engine
+type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
@@ -89,6 +95,21 @@ type Engine interface {
 	// rules of a given engine.
 	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
 
+	// SealHash returns the hash of a block prior to it being sealed.
+	SealHash(header *types.Header) common.Hash
+
+	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
+	// that a new block should have.
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
+
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
+
+	Type() params.ConsensusType
+}
+
+// EngineReader are write methods of the consensus engine
+type EngineWriter interface {
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
@@ -124,22 +145,11 @@ type Engine interface {
 	// than one result may also be returned depending on the consensus algorithm.
 	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
 
-	// SealHash returns the hash of a block prior to it being sealed.
-	SealHash(header *types.Header) common.Hash
-
-	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
-
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
-
-	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
-	Type() params.ConsensusType
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
 }
