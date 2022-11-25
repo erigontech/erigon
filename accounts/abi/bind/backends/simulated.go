@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -120,6 +121,7 @@ func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots 
 	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
 }
 func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
