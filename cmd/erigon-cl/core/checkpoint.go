@@ -1,4 +1,4 @@
-package clcore
+package core
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -48,7 +48,7 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState,
 func RetrieveTrustedRoot(tx kv.Tx, ctx context.Context, uri string) ([32]byte, error) {
 	var update *cltypes.LightClientFinalityUpdate
 	var err error
-	if update, err = cldb.ReadLightClientFinalityUpdate(tx); err != nil {
+	if update, err = rawdb.ReadLightClientFinalityUpdate(tx); err != nil {
 		return [32]byte{}, err
 	}
 	if update != nil {

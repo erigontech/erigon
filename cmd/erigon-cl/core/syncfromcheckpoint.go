@@ -1,4 +1,4 @@
-package clcore
+package core
 
 import (
 	"context"
