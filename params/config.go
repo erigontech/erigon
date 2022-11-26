@@ -235,6 +235,7 @@ type ChainConfig struct {
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
 	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Shanghai switch block (nil = no fork, 0 = already activated)
+	ShardingBlock *big.Int `json:"shanghaiBlock,omitempty"` // Proto-danksharding switch block (nil = no fork, 0 = already activated)
 	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch block (nil = no fork, 0 = already activated)
 
 	// Parlia fork blocks
@@ -584,6 +585,11 @@ func (c *ChainConfig) IsShanghai(num uint64) bool {
 	return isForked(c.ShanghaiBlock, num)
 }
 
+// IsSharding returns whether num is either equal to the fork block that activates proto-danksharding (EIP-4844)
+func (c *ChainConfig) IsSharding(num uint64) bool {
+	return isForked(c.ShardingBlock, num)
+}
+
 // IsCancun returns whether num is either equal to the Cancun fork block or greater.
 func (c *ChainConfig) IsCancun(num uint64) bool {
 	return isForked(c.CancunBlock, num)
@@ -818,6 +824,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
+	IsSharding                                              bool
 	IsNano, IsMoran                                         bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsStarknet, IsAura                            bool
@@ -841,6 +848,7 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
 		IsShanghai:            c.IsShanghai(num),
+		IsSharding:            c.IsSharding(num),
 		IsCancun:              c.IsCancun(num),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),

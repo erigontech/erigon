@@ -60,6 +60,7 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
+	DataHashes() []common.Hash
 	GetGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time

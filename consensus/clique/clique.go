@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -369,6 +370,13 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
+	if config.IsSharding(header.Number.Uint64()) {
+		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
+			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
+		} else {
+			header.SetExcessDataGas(new(big.Int))
+		}
+	}
 	return txs, r, nil
 }
 
@@ -378,11 +386,13 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *ty
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	header.UncleHash = types.CalcUncleHash(nil)
-
+	// Finalize block
+	outTxs, outR, err := c.Finalize(chainConfig, header, state, txs, uncles, receipts, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), txs, receipts, nil
+	return types.NewBlock(header, outTxs, nil, outR), outTxs, outR, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
