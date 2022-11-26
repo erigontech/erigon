@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -138,12 +138,12 @@ func (l *LightClient) Start() {
 			lastValidated := updates[len(updates)-1]
 			// Save to Database
 			if lastValidated.HasNextSyncCommittee() {
-				if err := cldb.WriteLightClientUpdate(tx, lastValidated); err != nil {
+				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
 					log.Warn("Could not write lightclient update to db", "err", err)
 				}
 			}
 			if lastValidated.IsFinalityUpdate() {
-				if err := cldb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
+				if err := rawdb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
 					AttestedHeader:  lastValidated.AttestedHeader,
 					FinalizedHeader: lastValidated.FinalizedHeader,
 					FinalityBranch:  lastValidated.FinalityBranch,
@@ -153,7 +153,7 @@ func (l *LightClient) Start() {
 					log.Warn("Could not write finality lightclient update to db", "err", err)
 				}
 			}
-			if err := cldb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
+			if err := rawdb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
 				AttestedHeader: lastValidated.AttestedHeader,
 				SyncAggregate:  lastValidated.SyncAggregate,
 				SignatureSlot:  lastValidated.SignatureSlot,

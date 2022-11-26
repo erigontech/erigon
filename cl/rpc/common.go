@@ -168,7 +168,7 @@ func sendBlocksRequest(ctx context.Context, opts blocksRequestOpts) ([]cltypes.O
 		return nil, err
 	}
 	if message.Error {
-		log.Warn("received error", "err", string(message.Data))
+		log.Trace("received error", "err", string(message.Data))
 		return nil, nil
 	}
 	if err := ssz_snappy.DecodeListSSZBeaconBlock(message.Data, uint64(opts.count), responsePacket); err != nil {
