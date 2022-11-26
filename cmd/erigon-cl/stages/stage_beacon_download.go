@@ -2,9 +2,6 @@ package stages
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -62,10 +59,7 @@ func SpawnStageBeaconForward(cfg StageBeaconForwardCfg /*s *stagedsync.StageStat
 			if block.Block.Slot != newHighestSlotProcessed+1 || block.Block.Slot > targetSlot {
 				continue
 			}
-			file, _ := os.Create(fmt.Sprintf("ssz_dump_%d", block.Block.Slot))
-			dat, _ := block.MarshalSSZ()
-			file.Write([]byte(hex.EncodeToString(dat)))
-			file.Close()
+
 			newHighestSlotProcessed++
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
 				return
