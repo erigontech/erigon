@@ -203,18 +203,16 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 	wg := sync.WaitGroup{}
 	log.Info("from", "from", from)
 	for i := from; i < 256; i++ {
-		for j := 0; j < 256; j++ {
-			prefix := []byte{byte(i), byte(j)}
-			wg.Add(1)
-			go func(perfix []byte) {
-				defer wg.Done()
-				if err := db.View(context.Background(), func(tx kv.Tx) error {
-					return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
-				}); err != nil {
-					log.Error(err.Error())
-				}
-			}(prefix)
-		}
+		prefix := []byte{byte(i)}
+		wg.Add(1)
+		go func(perfix []byte) {
+			defer wg.Done()
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
+			}); err != nil {
+				log.Error(err.Error())
+			}
+		}(prefix)
 	}
 	wg.Wait()
 
