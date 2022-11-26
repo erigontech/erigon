@@ -209,6 +209,7 @@ func warmup(ctx context.Context, chaindata string, bucket string, from uint64) e
 			}
 		}(i)
 	}
+	wg.Wait()
 
 	return nil
 }
