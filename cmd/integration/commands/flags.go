@@ -17,6 +17,7 @@ var (
 	batchSizeStr                   string
 	reset                          bool
 	bucket                         string
+	from                           uint64
 	datadirCli, toChaindata        string
 	migration                      string
 	integrityFast, integritySlow   bool
@@ -89,6 +90,10 @@ func withReset(cmd *cobra.Command) {
 
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withFrom(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&from, "from", 0, "")
 }
 
 func withDataDir2(cmd *cobra.Command) {

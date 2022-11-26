@@ -58,10 +58,10 @@ var cmdCompareBucket = &cobra.Command{
 
 var warmupCmd = &cobra.Command{
 	Use:   "warmup",
-	Short: "compare bucket to the same bucket in '--chaindata.reference'",
+	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		err := warmup(ctx, datadirCli, bucket)
+		err := warmup(ctx, datadirCli, bucket, from)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -132,6 +132,7 @@ func init() {
 
 	withDataDir(warmupCmd)
 	withBucket(warmupCmd)
+	withFrom(warmupCmd)
 
 	rootCmd.AddCommand(warmupCmd)
 
@@ -191,14 +192,15 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 	return nil
 }
-func warmup(ctx context.Context, chaindata string, bucket string) error {
+
+func warmup(ctx context.Context, chaindata string, bucket string, from uint64) error {
 	db := mdbx2.MustOpen(chaindata)
 	defer db.Close()
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 256; i++ {
+	for i := from; i < 256; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func(i uint64) {
 			defer wg.Done()
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
 				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error { return nil })
