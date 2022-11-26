@@ -206,7 +206,7 @@ func warmup(ctx context.Context, chaindata string, bucket string, from uint64) e
 			prefix := []byte{byte(i)}
 			log.Info("prefix", "prefix", fmt.Sprintf("%x", prefix))
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
+				return tx.ForPrefix(kv.PlainState, prefix, func(k, v []byte) error { return nil })
 			}); err != nil {
 				log.Error(err.Error())
 			}
