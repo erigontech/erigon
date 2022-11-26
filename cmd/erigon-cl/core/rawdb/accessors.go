@@ -162,7 +162,7 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 	value = append(value, block.StateRoot[:]...)                // Encode State Root
 	// Body level encoding
 	value = append(value, blockBody.RandaoReveal[:]...) // Encode Randao Reveal
-	value = append(value, blockBody.Graffiti[:]...)     // Encode Graffiti
+	value = append(value, blockBody.Graffiti...)        // Encode Graffiti
 	var err error
 	// Encode eth1Data
 	if value, err = EncodeSSZ(value, blockBody.Eth1Data); err != nil {
@@ -215,8 +215,9 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 	if err := WriteExecutionPayload(tx, payload); err != nil {
 		return err
 	}
+	value = utils.CompressSnappy(value)
 	// Finally write the beacon block
-	return tx.Put(kv.BeaconBlocks, key, utils.CompressSnappy(value))
+	return tx.Put(kv.BeaconBlocks, key, value)
 }
 
 func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatrix, error) {
@@ -247,7 +248,7 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatr
 	// Body level encoding
 	copy(beaconBody.RandaoReveal[:], beaconBlockBytes[pos:])
 	beaconBody.Graffiti = make([]byte, 32)
-	copy(beaconBody.Graffiti[:], beaconBlockBytes[pos+96:])
+	copy(beaconBody.Graffiti, beaconBlockBytes[pos+96:])
 	pos += 128
 	// Eth1Data
 	beaconBody.Eth1Data = &cltypes.Eth1Data{}
