@@ -198,12 +198,15 @@ func warmup(ctx context.Context, chaindata string, bucket string, from uint64) e
 	defer db.Close()
 
 	wg := sync.WaitGroup{}
+	log.Info("from", "from", from)
 	for i := from; i < 256; i++ {
 		wg.Add(1)
 		go func(i uint64) {
 			defer wg.Done()
+			prefix := []byte{byte(i)}
+			log.Info("prefix", "prefix", fmt.Sprintf("%x", prefix))
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error { return nil })
+				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
 			}); err != nil {
 				log.Error(err.Error())
 			}
