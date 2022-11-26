@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -47,6 +48,20 @@ var cmdCompareBucket = &cobra.Command{
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
+}
+
+var warmupCmd = &cobra.Command{
+	Use:   "warmup",
+	Short: "compare bucket to the same bucket in '--chaindata.reference'",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := common2.RootContext()
+		err := warmup(ctx, datadirCli, bucket)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -115,6 +130,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareStates)
 
+	withDataDir(warmupCmd)
+	withBucket(warmupCmd)
+
+	rootCmd.AddCommand(warmupCmd)
+
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
@@ -167,6 +187,25 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 		})
 	}); err != nil {
 		return err
+	}
+
+	return nil
+}
+func warmup(ctx context.Context, chaindata string, bucket string) error {
+	db := mdbx2.MustOpen(chaindata)
+	defer db.Close()
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 256; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error { return nil })
+			}); err != nil {
+				log.Error(err.Error())
+			}
+		}(i)
 	}
 
 	return nil
