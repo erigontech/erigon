@@ -10,10 +10,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
-type StageBeaconForwardCfg struct {
+type StageBeaconsBlockCfg struct {
 	db         kv.RwDB
 	downloader *network.ForwardBeaconDownloader
 	genesisCfg *clparams.GenesisConfig
@@ -21,9 +22,9 @@ type StageBeaconForwardCfg struct {
 	state      *cltypes.BeaconState
 }
 
-func StageBeaconForward(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconState) StageBeaconForwardCfg {
-	return StageBeaconForwardCfg{
+func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
+	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconState) StageBeaconsBlockCfg {
+	return StageBeaconsBlockCfg{
 		db:         db,
 		downloader: downloader,
 		genesisCfg: genesisCfg,
@@ -32,8 +33,8 @@ func StageBeaconForward(db kv.RwDB, downloader *network.ForwardBeaconDownloader,
 	}
 }
 
-// SpawnStageBeaconForward spawn the beacon forward stage
-func SpawnStageBeaconForward(cfg StageBeaconForwardCfg /*s *stagedsync.StageState,*/, tx kv.RwTx, ctx context.Context) error {
+// SpawnStageBeaconsForward spawn the beacon forward stage
+func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg /*s *stagedsync.StageState,*/, tx kv.RwTx, ctx context.Context) error {
 	useExternalTx := tx != nil
 	var err error
 	if !useExternalTx {
@@ -91,6 +92,9 @@ func SpawnStageBeaconForward(cfg StageBeaconForwardCfg /*s *stagedsync.StageStat
 		}
 	}
 	log.Info("Processed and collected blocks", "count", targetSlot-progress)
+	if err := stages.SaveStageProgress(tx, stages.BeaconBlocks, cfg.downloader.GetHighestProcessedSlot()); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

@@ -64,7 +64,10 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	downloader := network.NewForwardBeaconDownloader(ctx, s)
 
-	return stages.SpawnStageBeaconForward(stages.StageBeaconForward(db, downloader, genesisCfg, beaconConfig, cpState), nil, ctx)
+	if err := stages.SpawnStageBeaconsBlocks(stages.StageBeaconsBlock(db, downloader, genesisCfg, beaconConfig, cpState), nil, ctx); err != nil {
+		return err
+	}
+	return stages.SpawnStageBeaconState(stages.StageBeaconState(db, genesisCfg, beaconConfig, cpState), nil, ctx)
 }
 
 func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {

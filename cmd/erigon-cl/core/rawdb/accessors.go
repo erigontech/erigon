@@ -150,13 +150,9 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 		blockBody = block.Body
 		payload   = blockBody.ExecutionPayload
 	)
-	// get the body root, equivalent of block hash on EL.
-	blockRoot, err := block.HashTreeRoot()
-	if err != nil {
-		return err
-	}
+
 	// database key is is [slot + body root]
-	key := append(EncodeNumber(block.Slot), blockRoot[:]...)
+	key := EncodeNumber(block.Slot)
 	// 34068 is the biggest it can ever be.
 	value := make([]byte, 0, 33553)                    // Pre-allocate some data for faster appending
 	value = append(value, signedBlock.Signature[:]...) // First 96 bytes is the signature
@@ -167,6 +163,7 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 	// Body level encoding
 	value = append(value, blockBody.RandaoReveal[:]...) // Encode Randao Reveal
 	value = append(value, blockBody.Graffiti[:]...)     // Encode Graffiti
+	var err error
 	// Encode eth1Data
 	if value, err = EncodeSSZ(value, blockBody.Eth1Data); err != nil {
 		return err
@@ -219,12 +216,16 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 		return err
 	}
 	// Finally write the beacon block
-	return tx.Put(kv.BeaconBlocks, key, value)
+	return tx.Put(kv.BeaconBlocks, key, utils.CompressSnappy(value))
 }
 
-func ReadBeaconBlock(tx kv.RwTx, slot uint64, blockRoot common.Hash) (*cltypes.SignedBeaconBlockBellatrix, error) {
-	key := append(EncodeNumber(slot), blockRoot[:]...)
-	beaconBlockBytes, err := tx.GetOne(kv.BeaconBlocks, key)
+func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatrix, error) {
+	key := EncodeNumber(slot)
+	beaconBlockBytesCompressed, err := tx.GetOne(kv.BeaconBlocks, key)
+	if err != nil {
+		return nil, err
+	}
+	beaconBlockBytes, err := utils.DecompressSnappy(beaconBlockBytesCompressed)
 	if err != nil {
 		return nil, err
 	}
@@ -412,5 +413,6 @@ func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error 
 	_, _, err := rawdb2.WriteRawBodyIfNotExists(tx, hash, header.Number.Uint64(), &types.RawBody{
 		Transactions: payload.Transactions,
 	})
+
 	return err
 }
