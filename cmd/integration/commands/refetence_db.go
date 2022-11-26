@@ -202,7 +202,7 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 
 	wg := sync.WaitGroup{}
 	log.Info("from", "from", from)
-	for i := from; i < 256; i++ {
+	for i := from; i < from+10; i++ {
 		for j := 0; j < 256; j++ {
 			prefix := []byte{byte(i), byte(j)}
 			wg.Add(1)
