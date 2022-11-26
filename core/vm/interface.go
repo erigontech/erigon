@@ -50,6 +50,8 @@ type IntraBlockState interface {
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
+	GetTransientState(address common.Address, slot *common.Hash, outValue *uint256.Int)
+	SetTransientState(common.Address, *common.Hash, uint256.Int)
 
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool

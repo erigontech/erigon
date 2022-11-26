@@ -200,6 +200,12 @@ const (
 	LOG4
 )
 
+// 0xb0 range.
+const (
+	TSTORE OpCode = 0xb3
+	TLOAD  OpCode = 0xb4
+)
+
 // unofficial opcodes used for parsing.
 const (
 	PUSH OpCode = 0xb0 + iota
@@ -374,6 +380,10 @@ var opCodeToString = map[OpCode]string{
 	LOG3:   "LOG3",
 	LOG4:   "LOG4",
 
+	// 0xb0 range.
+	TLOAD:  "TLOAD",
+	TSTORE: "TSTORE",
+
 	// 0xf0 range.
 	CREATE:       "CREATE",
 	CALL:         "CALL",
@@ -531,6 +541,8 @@ var stringToOp = map[string]OpCode{
 	"SWAP14":         SWAP14,
 	"SWAP15":         SWAP15,
 	"SWAP16":         SWAP16,
+	"TLOAD":          TLOAD,
+	"TSTORE":         TSTORE,
 	"LOG0":           LOG0,
 	"LOG1":           LOG1,
 	"LOG2":           LOG2,

@@ -82,13 +82,14 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal        *journal
-	validRevisions []revision
-	nextRevisionID int
-	tracer         StateTracer
-	trace          bool
-	accessList     *accessList
-	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	journal          *journal
+	validRevisions   []revision
+	nextRevisionID   int
+	tracer           StateTracer
+	trace            bool
+	accessList       *accessList
+	transientStorage transientStorage
+	balanceInc       map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
 // Create a new state from a given trie
@@ -101,6 +102,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		logs:              map[common.Hash][]*types.Log{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
+		transientStorage:  newTransientStorage(),
 		balanceInc:        map[common.Address]*BalanceIncrease{},
 	}
 }
@@ -136,6 +138,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logSize = 0
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
+	sdb.transientStorage = newTransientStorage()
 	sdb.balanceInc = make(map[common.Address]*BalanceIncrease)
 }
 
@@ -505,6 +508,30 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
+func (sdb *IntraBlockState) SetTransientState(addr common.Address, key *common.Hash, value uint256.Int) {
+	var prev uint256.Int
+	sdb.GetTransientState(addr, key, &prev)
+	if prev == value {
+		return
+	}
+
+	sdb.journal.append(transientStorageChange{
+		account:  &addr,
+		key:      *key,
+		prevalue: value,
+	})
+
+	sdb.setTransientState(addr, key, value)
+}
+
+func (sdb *IntraBlockState) setTransientState(addr common.Address, key *common.Hash, value uint256.Int) {
+	sdb.transientStorage.Set(addr, key, value)
+}
+
+func (sdb *IntraBlockState) GetTransientState(addr common.Address, key *common.Hash, value *uint256.Int) {
+	sdb.transientStorage.Get(addr, key, value)
+}
+
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
@@ -813,6 +840,7 @@ func (sdb *IntraBlockState) Prepare(thash, bhash common.Hash, ti int) {
 	sdb.bhash = bhash
 	sdb.txIndex = ti
 	sdb.accessList = newAccessList()
+	sdb.transientStorage = newTransientStorage()
 }
 
 // no not lock

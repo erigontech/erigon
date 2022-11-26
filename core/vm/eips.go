@@ -167,6 +167,46 @@ func enable3198(jt *JumpTable) {
 	}
 }
 
+// enable1153 applies EIP-1153 "Transient Storage"
+// - Adds TLOAD that reads from transient storage
+// - Adds TSTORE that writes to transient storage
+func enable1153(jt *JumpTable) {
+	jt[TLOAD] = &operation{
+		execute:     opTload,
+		constantGas: params.WarmStorageReadCostEIP2929,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+	}
+
+	jt[TSTORE] = &operation{
+		execute:     opTstore,
+		constantGas: params.WarmStorageReadCostEIP2929,
+		minStack:    minStack(2, 0),
+		maxStack:    maxStack(2, 0),
+	}
+}
+
+// opTload implements TLOAD opcode
+func opTload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	loc := scope.Stack.Peek()
+	interpreter.hasherBuf = loc.Bytes32()
+	interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+	return nil, nil
+}
+
+// opTstore implements TSTORE opcode
+func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	loc := scope.Stack.Pop()
+	val := scope.Stack.Pop()
+	interpreter.hasherBuf = loc.Bytes32()
+	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), &interpreter.hasherBuf, val)
+
+	return nil, nil
+}
+
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	baseFee := interpreter.evm.Context().BaseFee

@@ -108,6 +108,16 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			args: make([]int64, 2),
 		},
 		{
+			name: "SetTransientState",
+			fn: func(a testAction, s *IntraBlockState) {
+				var key common.Hash
+				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
+				val := uint256.NewInt(uint64(a.args[1]))
+				s.SetTransientState(addr, &key, *val)
+			},
+			args: make([]int64, 2),
+		},
+		{
 			name: "SetCode",
 			fn: func(a testAction, s *IntraBlockState) {
 				code := make([]byte, 16)
