@@ -61,7 +61,7 @@ func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInte
 		}
 		var encodedNode []byte
 
-		rootHash := node.ComputeCommitment().Bytes()
+		rootHash := node.Commitment().Bytes()
 		encodedNode, err = node.Serialize()
 		if err != nil {
 			return
@@ -199,7 +199,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 			return next(k, nil, nil)
 		}
 		if err := root.InsertOrdered(common.CopyBytes(k), common.CopyBytes(v), func(node verkle.VerkleNode) {
-			rootHash := node.ComputeCommitment().Bytes()
+			rootHash := node.Commitment().Bytes()
 			encodedNode, err := node.Serialize()
 			if err != nil {
 				panic(err)
@@ -226,7 +226,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 	}
 
 	log.Info("Started Verkle Tree Flushing")
-	return root.ComputeCommitment().Bytes(), verkleCollector.Load(v.db, kv.VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
+	return root.Commitment().Bytes(), verkleCollector.Load(v.db, kv.VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
 		}})
@@ -271,7 +271,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
 		return common.Hash{}, err
 	}
-	commitment := rootNode.ComputeCommitment().Bytes()
+	commitment := rootNode.Commitment().Bytes()
 	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
 }
 
