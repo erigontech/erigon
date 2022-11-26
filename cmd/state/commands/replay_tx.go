@@ -147,24 +147,25 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 	stateWriter.SetTxNum(txNum)
 	noop := state.NewNoopWriter()
 	rules := chainConfig.Rules(bn)
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, nil, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
+	}
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for {
 		stateReader.ResetError()
 		ibs := state.New(stateReader)
 		gp := new(core.GasPool).AddGas(txn.GetGas())
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, gas=%d, input=[%x]\n", txNum, blockNum, txIndex, txn.GetGas(), txn.GetData())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(chainConfig, bn)}
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
-			h, err := blockReader.Header(ctx, nil, hash, number)
-			if err != nil {
-				panic(err)
-			}
-			return h
-		}
 		getHashFn := core.GetHashFn(header, getHeader)
 		logger := log.New()
 		engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 		txnHash := txn.Hash()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		blockContext := core.NewEVMBlockContext(header, excessDataGas, getHashFn, engine, nil /* author */)
 		ibs.Prepare(txnHash, blockHash, txIndex)
 		msg, err := txn.AsMessage(*types.MakeSigner(chainConfig, bn), header.BaseFee, rules)
 		if err != nil {

@@ -17,6 +17,8 @@
 package core
 
 import (
+	"math/big"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -30,7 +32,7 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, excessDataGas *big.Int, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
@@ -41,7 +43,7 @@ func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *G
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */)
+			return SysCallContract(contract, data, *config, ibs, header, excessDataGas, engine, true /* constCall */)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -95,7 +97,7 @@ func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *G
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
+func ApplyTransaction(config *params.ChainConfig, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, excessDataGas *big.Int, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
@@ -107,9 +109,9 @@ func ApplyTransaction(config *params.ChainConfig, blockHashFunc func(n uint64) c
 	if tx.IsStarkNet() {
 		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 	} else {
-		blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
+		blockContext := NewEVMBlockContext(header, excessDataGas, blockHashFunc, engine, author)
 		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
 	}
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, excessDataGas, tx, usedGas, vmenv, cfg)
 }

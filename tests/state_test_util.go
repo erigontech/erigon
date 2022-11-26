@@ -231,7 +231,7 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
+	context := core.NewEVMBlockContext(header, nil, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)

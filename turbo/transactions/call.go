@@ -3,6 +3,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -107,7 +108,15 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
+	var excessDataGas *big.Int
+	parentHeader, err := headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+	if err != nil {
+		// TODO(eip-4844): Do we need to propagate this error?
+		log.Error("Can't get parent block's header:", err)
+	} else if parentHeader != nil {
+		excessDataGas = parentHeader.ExcessDataGas
+	}
+	return core.NewEVMBlockContext(header, excessDataGas, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
 		vm.TxContext{
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),

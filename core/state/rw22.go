@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"sync"
 
 	"github.com/google/btree"
@@ -31,6 +32,7 @@ type TxTask struct {
 	BlockNum           uint64
 	Rules              *params.Rules
 	Header             *types.Header
+	ExcessDataGas      *big.Int
 	Txs                types.Transactions
 	Uncles             []*types.Header
 	Coinbase           common.Address
