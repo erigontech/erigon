@@ -11,6 +11,7 @@ import (
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -193,8 +194,10 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	return nil
 }
 
-func warmup(ctx context.Context, chaindata string, bucket string, from uint64) error {
-	db := mdbx2.MustOpen(chaindata)
+func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) error {
+	dirs := datadir.New(datadirCli)
+
+	db := mdbx2.MustOpen(dirs.Chaindata)
 	defer db.Close()
 
 	wg := sync.WaitGroup{}
@@ -204,13 +207,8 @@ func warmup(ctx context.Context, chaindata string, bucket string, from uint64) e
 		go func(i uint64) {
 			defer wg.Done()
 			prefix := []byte{byte(i)}
-			log.Info("prefix", "prefix", fmt.Sprintf("%x", prefix))
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForPrefix(kv.PlainState, prefix, func(k, v []byte) error {
-					log.Info("aaa", "aaa", fmt.Sprintf("%x", k))
-
-					return nil
-				})
+				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
 			}); err != nil {
 				log.Error(err.Error())
 			}
