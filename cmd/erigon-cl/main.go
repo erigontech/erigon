@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -38,8 +39,13 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
 
+	db, err := mdbx.NewTemporaryMdbx()
+	if err != nil {
+		log.Error("Error opening database", "err", err)
+	}
+	defer db.Close()
 	// Fetch the checkpoint state.
-	cpState, err := getCheckpointState(ctx)
+	cpState, err := getCheckpointState(ctx, db)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
 		return err
@@ -58,7 +64,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	downloader := network.NewForwardBeaconDownloader(ctx, s)
 
-	return stages.SpawnStageBeaconForward(stages.StageBeaconForward(downloader, genesisCfg, beaconConfig, cpState), nil, ctx)
+	return stages.SpawnStageBeaconForward(stages.StageBeaconForward(db, downloader, genesisCfg, beaconConfig, cpState), nil, ctx)
 }
 
 func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {
@@ -79,18 +85,11 @@ func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensu
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context) (*cltypes.BeaconState, error) {
-	db, err := mdbx.NewTemporaryMdbx()
+func getCheckpointState(ctx context.Context, db kv.RwDB) (*cltypes.BeaconState, error) {
 
-	// Checkpoint sync.
-	if err != nil {
-		log.Error("Error opening database", "err", err)
-	}
-	defer db.Close()
 	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
 
 	state, err := core.RetrieveBeaconState(ctx, uri)
-
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return nil, err
@@ -111,5 +110,5 @@ func getCheckpointState(ctx context.Context) (*cltypes.BeaconState, error) {
 		return nil, err
 	}
 	log.Info("Checkpoint sync successful: hurray!")
-	return state, nil
+	return state, tx.Commit()
 }
