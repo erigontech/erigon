@@ -209,24 +209,25 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 
 	wg := sync.WaitGroup{}
 	log.Info("from", "from", from)
-	prefix := []byte{byte(from)}
-	wg.Add(1)
-	go func(perfix []byte) {
-		defer wg.Done()
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			return tx.ForEach(bucket, prefix, func(k, v []byte) error {
-				log.Info("progress", "k", fmt.Sprintf("%x", k))
-				//select {
-				//case <-logEvery.C:
-				//	log.Info("progress", "k", fmt.Sprintf("%x", k))
-				//default:
-				//}
-				return nil
-			})
-		}); err != nil {
-			log.Error(err.Error())
-		}
-	}(prefix)
+	for i := from; i < 256; i++ {
+		prefix := []byte{byte(i)}
+		wg.Add(1)
+		go func(perfix []byte) {
+			defer wg.Done()
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
+					select {
+					case <-logEvery.C:
+						log.Info("progress", "k", fmt.Sprintf("%x", k))
+					default:
+					}
+					return nil
+				})
+			}); err != nil {
+				log.Error(err.Error())
+			}
+		}(prefix)
+	}
 	wg.Wait()
 
 	return nil
