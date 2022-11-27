@@ -196,6 +196,7 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 
 func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) error {
 	dirs := datadir.New(datadirCli)
+	fmt.Printf("path: %s\n", dirs.Chaindata)
 
 	db, err := mdbx2.Open(dirs.Chaindata, log.New(""), true)
 	if err != nil {
