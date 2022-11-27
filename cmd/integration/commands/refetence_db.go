@@ -200,6 +200,9 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 	db := mdbx2.MustOpen(dirs.Chaindata)
 	defer db.Close()
 
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
 	wg := sync.WaitGroup{}
 	log.Info("from", "from", from)
 	for i := from; i < 256; i++ {
@@ -208,7 +211,14 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 		go func(perfix []byte) {
 			defer wg.Done()
 			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error { return nil })
+				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error {
+					select {
+					case <-logEvery.C:
+						log.Info("progress", "k", fmt.Sprintf("%x", k))
+					default:
+					}
+					return nil
+				})
 			}); err != nil {
 				log.Error(err.Error())
 			}
