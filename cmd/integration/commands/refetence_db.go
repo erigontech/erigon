@@ -204,7 +204,7 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 	}
 	defer db.Close()
 
-	logEvery := time.NewTicker(10 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 
 	wg := sync.WaitGroup{}
