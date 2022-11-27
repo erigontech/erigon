@@ -111,12 +111,6 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
-		{
-			Name:   "locality_index",
-			Action: doLocalityIndex,
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
-		},
 	},
 }
 
@@ -152,39 +146,6 @@ func preloadFileAsync(name string) {
 		ff, _ := os.Open(name)
 		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
 	}()
-}
-
-func doLocalityIndex(cliCtx *cli.Context) error {
-	log.Info("starting")
-	defer log.Info("finished")
-
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-
-	log.Info("opened db")
-	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
-	defer chainDB.Close()
-
-	dir.MustExist(dirs.SnapHistory)
-
-	log.Info("opened snapshots")
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
-	if err != nil {
-		return err
-	}
-	err = agg.ReopenFiles()
-	if err != nil {
-		return err
-	}
-
-	log.Info("building index")
-	err = agg.BuildLocalityIndex(ctx)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
