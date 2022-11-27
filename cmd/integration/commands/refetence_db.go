@@ -197,7 +197,10 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) error {
 	dirs := datadir.New(datadirCli)
 
-	db := mdbx2.MustOpen(dirs.Chaindata)
+	db, err := mdbx2.Open(dirs.Chaindata, log.New(""), true)
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	logEvery := time.NewTicker(10 * time.Second)
@@ -205,24 +208,26 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 
 	wg := sync.WaitGroup{}
 	log.Info("from", "from", from)
-	for i := from; i < 256; i++ {
-		prefix := []byte{byte(i)}
-		wg.Add(1)
-		go func(perfix []byte) {
-			defer wg.Done()
-			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, prefix, func(k, v []byte) error {
-					select {
-					case <-logEvery.C:
-						log.Info("progress", "k", fmt.Sprintf("%x", k))
-					default:
-					}
-					return nil
-				})
-			}); err != nil {
-				log.Error(err.Error())
-			}
-		}(prefix)
+	for i := from; i < from+10; i++ {
+		for j := 0; j < 256; j++ {
+			prefix := []byte{byte(i), byte(j)}
+			wg.Add(1)
+			go func(perfix []byte) {
+				defer wg.Done()
+				if err := db.View(context.Background(), func(tx kv.Tx) error {
+					return tx.ForPrefix(bucket, prefix, func(k, v []byte) error {
+						select {
+						case <-logEvery.C:
+							log.Info("progress", "k", fmt.Sprintf("%x", k))
+						default:
+						}
+						return nil
+					})
+				}); err != nil {
+					log.Error(err.Error())
+				}
+			}(prefix)
+		}
 	}
 	wg.Wait()
 
