@@ -217,11 +217,12 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 				defer wg.Done()
 				if err := db.View(context.Background(), func(tx kv.Tx) error {
 					return tx.ForPrefix(bucket, prefix, func(k, v []byte) error {
-						select {
-						case <-logEvery.C:
-							log.Info("progress", "k", fmt.Sprintf("%x", k))
-						default:
-						}
+						log.Info("progress", "k", fmt.Sprintf("%x", k))
+						//select {
+						//case <-logEvery.C:
+						//	log.Info("progress", "k", fmt.Sprintf("%x", k))
+						//default:
+						//}
 						return nil
 					})
 				}); err != nil {
