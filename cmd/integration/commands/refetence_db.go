@@ -226,6 +226,7 @@ func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) 
 			}); err != nil {
 				log.Error(err.Error())
 			}
+			log.Info("end", "prefix", fmt.Sprintf("%x", prefix))
 		}(prefix)
 	}
 	wg.Wait()
