@@ -89,6 +89,11 @@ func (ct CommonTx) IsStarkNet() bool {
 	return false
 }
 
+func (ct *CommonTx) DataHashes() []common.Hash {
+	// Only blob txs have data hashes
+	return []common.Hash{}
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx

@@ -681,3 +681,7 @@ func (stx *SignedBlobTx) ByteLength() uint64 {
 func (stx *SignedBlobTx) FixedLength() uint64 {
 	return 0
 }
+
+func (stx *SignedBlobTx) DataHashes() []common.Hash {
+	return []common.Hash(stx.Message.BlobVersionedHashes)
+}
