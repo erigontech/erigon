@@ -60,7 +60,7 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
-	DataHashes() []common.Hash
+	GetDataHashes() []common.Hash
 	GetGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
@@ -452,18 +452,20 @@ func (t *TransactionsFixedOrder) Pop() {
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to         *common.Address
-	from       common.Address
-	nonce      uint64
-	amount     uint256.Int
-	gasLimit   uint64
-	gasPrice   uint256.Int
-	feeCap     uint256.Int
-	tip        uint256.Int
-	data       []byte
-	accessList AccessList
-	checkNonce bool
-	isFree     bool
+	to               *common.Address
+	from             common.Address
+	nonce            uint64
+	amount           uint256.Int
+	gasLimit         uint64
+	gasPrice         uint256.Int
+	feeCap           uint256.Int
+	tip              uint256.Int
+	maxFeePerDataGas uint256.Int
+	data             []byte
+	accessList       AccessList
+	checkNonce       bool
+	isFree           bool
+	dataHashes       []common.Hash
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
@@ -497,6 +499,9 @@ func (m Message) FeeCap() *uint256.Int   { return &m.feeCap }
 func (m Message) Tip() *uint256.Int      { return &m.tip }
 func (m Message) Value() *uint256.Int    { return &m.amount }
 func (m Message) Gas() uint64            { return m.gasLimit }
+func (m Message) MaxFeePerDataGas() *uint256.Int {
+	return &m.maxFeePerDataGas
+}
 func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
@@ -508,6 +513,7 @@ func (m Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
+func (m Message) DataHashes() []common.Hash { return m.dataHashes }
 
 type TxWrapData interface {
 	copy() TxWrapData

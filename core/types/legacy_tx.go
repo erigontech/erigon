@@ -89,7 +89,7 @@ func (ct CommonTx) IsStarkNet() bool {
 	return false
 }
 
-func (ct *CommonTx) DataHashes() []common.Hash {
+func (ct *CommonTx) GetDataHashes() []common.Hash {
 	// Only blob txs have data hashes
 	return []common.Hash{}
 }

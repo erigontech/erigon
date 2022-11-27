@@ -83,12 +83,14 @@ type Message interface {
 	FeeCap() *uint256.Int
 	Tip() *uint256.Int
 	Gas() uint64
+	MaxFeePerDataGas() *uint256.Int
 	Value() *uint256.Int
 
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types.AccessList
+	DataHashes() []common.Hash
 
 	IsFree() bool
 }
