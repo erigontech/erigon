@@ -24,9 +24,9 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap/buffer"
 
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -54,20 +54,20 @@ func check(err error) {
 	}
 }
 
-func constructBodyFreeRequest(t string) *consensusrpc.RequestData {
-	return &consensusrpc.RequestData{
+func constructBodyFreeRequest(t string) *sentinelrpc.RequestData {
+	return &sentinelrpc.RequestData{
 		Topic: t,
 	}
 }
 
-func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*consensusrpc.RequestData, error) {
+func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*sentinelrpc.RequestData, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
 		return nil, fmt.Errorf("unable to encode request body: %v", err)
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	return &consensusrpc.RequestData{
+	return &sentinelrpc.RequestData{
 		Data:  data,
 		Topic: t,
 	}, nil
@@ -190,8 +190,8 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	return nil
 }
 
-func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
-	subscription, err := s.SubscribeGossip(ctx, &consensusrpc.EmptyRequest{})
+func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
+	subscription, err := s.SubscribeGossip(ctx, &sentinelrpc.EmptyRequest{})
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return
@@ -201,7 +201,7 @@ func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
 		if err != nil {
 			return
 		}
-		if data.Type != consensusrpc.GossipType_AggregateAndProofGossipType {
+		if data.Type != sentinelrpc.GossipType_AggregateAndProofGossipType {
 			continue
 		}
 		block := &cltypes.SignedAggregateAndProof{}
@@ -214,7 +214,7 @@ func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
 }
 
 // Debug function to recieve test packets on the req/resp domain.
-func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consensusrpc.RequestData) {
+func sendRequest(ctx context.Context, s sentinelrpc.SentinelClient, req *sentinelrpc.RequestData) {
 	newReqTicker := time.NewTicker(1000 * time.Millisecond)
 	for {
 		select {

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
@@ -70,7 +70,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	return stages.SpawnStageBeaconState(stages.StageBeaconState(db, genesisCfg, beaconConfig, cpState), nil, ctx)
 }
 
-func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg) (consensusrpc.SentinelClient, error) {
+func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg) (sentinelrpc.SentinelClient, error) {
 	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        cfg.Addr,
 		Port:          int(cfg.Port),
