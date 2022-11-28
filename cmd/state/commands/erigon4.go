@@ -15,11 +15,15 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -34,35 +38,33 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 func init() {
-	withBlock(erigon23Cmd)
-	withDataDir(erigon23Cmd)
-	withChain(erigon23Cmd)
+	withBlock(erigon4Cmd)
+	withDataDir(erigon4Cmd)
+	withChain(erigon4Cmd)
 
-	erigon23Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
-	erigon23Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
-	erigon23Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
-	rootCmd.AddCommand(erigon23Cmd)
+	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	rootCmd.AddCommand(erigon4Cmd)
 }
 
 var (
 	commitmentsMode string // flag --commitments.mode [direct|update]
 )
 
-var erigon23Cmd = &cobra.Command{
-	Use:   "erigon23",
-	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and histoty (ugrade 3)",
+var erigon4Cmd = &cobra.Command{
+	Use:   "erigon4",
+	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.GetLoggerCmd("erigon23", cmd)
-		return Erigon23(genesis, chainConfig, logger)
+		logger := logging.GetLoggerCmd("erigon4", cmd)
+		return Erigon4(genesis, chainConfig, logger)
 	},
 }
 
-func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
+func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -84,13 +86,11 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadirCli, "db23")
+	stateDbPath := path.Join(datadirCli, "db4")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-	} else if err = os.RemoveAll(stateDbPath); err != nil {
-		return err
 	}
 	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).WriteMap().Open()
 	if err2 != nil {
@@ -99,7 +99,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 	defer db.Close()
 
 	dirs := datadir.New(datadirCli)
-	aggPath := filepath.Join(datadirCli, "erigon23")
+	aggPath := filepath.Join(datadirCli, "erigon4")
 
 	var rwTx kv.RwTx
 	defer func() {
@@ -235,6 +235,7 @@ func Erigon23(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		}
 		agg.SetTx(rwTx)
 		readWrapper.roTx = rwTx
+		readWrapper.ac = agg.MakeContext()
 		return nil
 	}
 
@@ -443,18 +444,20 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
-	if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
-		rootHash, err := ww.w.ComputeCommitment(true, trace)
-		if err != nil {
-			return 0, nil, err
+	if txNum >= startTxNum {
+		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+			rootHash, err := ww.w.ComputeCommitment(true, trace)
+			if err != nil {
+				return 0, nil, err
+			}
+			if !bytes.Equal(rootHash, header.Root[:]) {
+				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
+			}
 		}
-		if !bytes.Equal(rootHash, header.Root[:]) {
-			return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
-		}
-	}
 
-	if err := ww.w.FinishTx(); err != nil {
-		return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+		if err := ww.w.FinishTx(); err != nil {
+			return 0, nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", txNum, block.NumberU64(), err)
+		}
 	}
 
 	return txNum, receipts, nil

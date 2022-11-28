@@ -15,7 +15,7 @@ package handlers
 
 import (
 	"github.com/ledgerwatch/erigon/cl/fork"
-	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core/cl-db"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -43,7 +43,7 @@ func (c *ConsensusHandlers) lightClientFinalityUpdateHandler(stream network.Stre
 		return
 	}
 	defer tx.Rollback()
-	update, err := cldb.ReadLightClientFinalityUpdate(tx)
+	update, err := rawdb.ReadLightClientFinalityUpdate(tx)
 	if err != nil {
 		stream.Close()
 		return
@@ -73,7 +73,7 @@ func (c *ConsensusHandlers) lightClientOptimisticUpdateHandler(stream network.St
 		return
 	}
 	defer tx.Rollback()
-	update, err := cldb.ReadLightClientOptimisticUpdate(tx)
+	update, err := rawdb.ReadLightClientOptimisticUpdate(tx)
 	if err != nil {
 		stream.Close()
 		return

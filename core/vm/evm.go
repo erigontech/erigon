@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -161,6 +162,9 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
 	evm.txContext = txCtx
 	evm.intraBlockState = ibs
+
+	// ensure the evm is reset to be used again
+	atomic.StoreInt32(&evm.abort, 0)
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
@@ -361,7 +365,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, 0, err
 	}
 	// Check whether the init code size has been exceeded.
-	if evm.chainRules.IsShanghai && len(codeAndHash.code) > params.MaxInitCodeSize {
+	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Create a new account on the state
