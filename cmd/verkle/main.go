@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -279,6 +280,60 @@ func dump(cfg optionsCfg) error {
 	return nil
 }
 
+func dump_acc_preimages(cfg optionsCfg) error {
+	db, err := mdbx.Open(cfg.stateDb, log.Root(), false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	logInterval := time.NewTicker(30 * time.Second)
+	file, err := os.Create("dump_accounts")
+	if err != nil {
+		return err
+	}
+
+	stateCursor, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Current Block Number", "num", num)
+	for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) != 20 {
+			continue
+		}
+		// Address
+		if _, err := file.Write(k); err != nil {
+			return err
+		}
+		addressHash := utils.Keccak256(k)
+
+		if _, err := file.Write(addressHash[:]); err != nil {
+			return err
+		}
+
+		select {
+		case <-logInterval.C:
+			log.Info("Dumping preimages to plain text", "key", common.Bytes2Hex(k))
+		default:
+		}
+	}
+	file.Close()
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
 	mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
@@ -319,6 +374,10 @@ func main() {
 	case "dump":
 		log.Info("Dumping in dump.txt")
 		if err := dump(opt); err != nil {
+			log.Error("Error", "err", err.Error())
+		}
+	case "acc_preimages":
+		if err := dump_acc_preimages(opt); err != nil {
 			log.Error("Error", "err", err.Error())
 		}
 	default:

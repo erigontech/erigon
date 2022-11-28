@@ -89,19 +89,19 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NoDiscovery:   lcCfg.NoDiscovery,
 	}, nil, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
 	if err != nil {
-		log.Error("Could not start sentinel", "err", err)
+		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err
 	}
-	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+	log.Info("[Sentinel] Sentinel started", "addr", lcCfg.ServerAddr)
 
 	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
 	if err != nil {
-		log.Error("Could not compute fork digeest", "err", err)
+		log.Error("[Sentinel] Could not compute fork digeest", "err", err)
 		return err
 	}
-	log.Info("Fork digest", "data", digest)
+	log.Info("[Sentinel] Fork digest", "data", digest)
 
-	log.Info("Sending test request")
+	log.Info("[Sentinel] Sending test request")
 	/*
 		sendRequest(ctx, s, constructBodyFreeRequest(handlers.LightClientFinalityUpdateV1))
 		sendRequest(ctx, s, constructBodyFreeRequest(handlers.MetadataProtocolV1))
@@ -170,7 +170,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		}
 		req, err := constructRequest(handlers.BeaconBlocksByRangeProtocolV2, blocksByRangeReq)
 		if err != nil {
-			log.Error("could not construct request", "err", err)
+			log.Error("[Sentinel] could not construct request", "err", err)
 		}
 		sendRequest(ctx, s, req)
 	*/
@@ -183,7 +183,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
 	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
 	if err != nil {
-		log.Error("could not construct request", "err", err)
+		log.Error("[Sentinel] could not construct request", "err", err)
 		return err
 	}
 	sendRequest(ctx, s, req)
@@ -193,7 +193,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
 	subscription, err := s.SubscribeGossip(ctx, &consensusrpc.EmptyRequest{})
 	if err != nil {
-		log.Error("Could not start sentinel", "err", err)
+		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return
 	}
 	for {
@@ -206,10 +206,10 @@ func debugGossip(ctx context.Context, s consensusrpc.SentinelClient) {
 		}
 		block := &cltypes.SignedAggregateAndProof{}
 		if err := block.UnmarshalSSZ(data.Data); err != nil {
-			log.Error("Error", "err", err)
+			log.Error("[Sentinel] Error", "err", err)
 			continue
 		}
-		log.Info("Received", "msg", block)
+		log.Info("[Sentinel] Received", "msg", block)
 	}
 }
 
@@ -221,18 +221,18 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 		case <-ctx.Done():
 		case <-newReqTicker.C:
 			go func() {
-				log.Info("Sending request", "data", req)
+				log.Info("[Sentinel] Sending request", "data", req)
 				message, err := s.SendRequest(ctx, req)
 				if err != nil {
-					log.Error("Error returned", "err", err)
+					log.Error("[Sentinel] Error returned", "err", err)
 					return
 				}
 				if message.Error {
-					log.Error("received error", "err", string(message.Data))
+					log.Error("[Sentinel] received error", "err", string(message.Data))
 					return
 				}
 
-				log.Info("Non-error response received", "data", message.Data)
+				log.Info("[Sentinel] Non-error response received", "data", message.Data)
 				f, err := os.Create("out")
 				if err != nil {
 					panic(fmt.Sprintf("unable to open file: %v\n", err))
@@ -241,7 +241,7 @@ func sendRequest(ctx context.Context, s consensusrpc.SentinelClient, req *consen
 				if err != nil {
 					panic(fmt.Sprintf("unable to write to file: %v\n", err))
 				}
-				log.Info("Hex representation", "data", hex.EncodeToString(message.Data))
+				log.Info("[Sentinel] Hex representation", "data", hex.EncodeToString(message.Data))
 				f.Close()
 			}()
 		}
