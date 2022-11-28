@@ -234,7 +234,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("dbg1\n")
 	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
