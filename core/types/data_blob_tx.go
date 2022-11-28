@@ -448,11 +448,6 @@ func (stx *SignedBlobTx) GetTip() *uint256.Int {
 	return &tip
 }
 
-func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
-	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
-	return &fee
-}
-
 func (stx *SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return stx.GetTip()
@@ -478,6 +473,15 @@ func (stx *SignedBlobTx) Cost() *uint256.Int {
 	value := uint256.Int(stx.Message.Value)
 	total.Add(total, &value)
 	return total
+}
+
+func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
+	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
+	return &fee
+}
+
+func (stx *SignedBlobTx) GetDataHashes() []common.Hash {
+	return []common.Hash(stx.Message.BlobVersionedHashes)
 }
 
 // TODO
@@ -548,15 +552,16 @@ func (tx *SignedBlobTx) GetAccessList() AccessList {
 
 func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
-		nonce:      stx.GetNonce(),
-		gasLimit:   stx.GetGas(),
-		tip:        *stx.GetTip(),
-		feeCap:     *stx.GetFeeCap(),
-		to:         stx.GetTo(),
-		amount:     stx.GetAmount(),
-		data:       stx.Message.Data,
-		accessList: stx.GetAccessList(),
-		checkNonce: true,
+		nonce:            stx.GetNonce(),
+		gasLimit:         stx.GetGas(),
+		tip:              *stx.GetTip(),
+		feeCap:           *stx.GetFeeCap(),
+		to:               stx.GetTo(),
+		amount:           stx.GetAmount(),
+		data:             stx.Message.Data,
+		accessList:       stx.GetAccessList(),
+		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
+		checkNonce:       true,
 	}
 
 	if baseFee != nil {
@@ -680,8 +685,4 @@ func (stx *SignedBlobTx) ByteLength() uint64 {
 
 func (stx *SignedBlobTx) FixedLength() uint64 {
 	return 0
-}
-
-func (stx *SignedBlobTx) DataHashes() []common.Hash {
-	return []common.Hash(stx.Message.BlobVersionedHashes)
 }
