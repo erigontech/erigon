@@ -337,11 +337,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
-	isBor := mock.ChainConfig.Bor != nil
-	var sprint uint64
-	if isBor {
-		sprint = mock.ChainConfig.Bor.Sprint
-	}
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
@@ -390,7 +385,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, isBor, sprint),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
