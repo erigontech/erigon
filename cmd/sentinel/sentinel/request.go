@@ -58,7 +58,7 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 			log.Warn("[Sentinel Req] sentinel has been shut down")
 			return nil, false, nil
 		case <-reqRetryTimer.C:
-			log.Debug("[Sentinel Req] timeout", "topic", topic, "peer", peerId)
+			log.Trace("[Sentinel Req] timeout", "topic", topic, "peer", peerId)
 			if err.Error() == "protocol not supported" {
 				s.peers.DisconnectPeer(peerId)
 			}
@@ -69,7 +69,7 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 	}
 
 	defer stream.Close()
-	log.Debug("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
+	log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
 
 	respRetryTimer := time.NewTimer(clparams.RespTimeout)
 	defer respRetryTimer.Stop()
@@ -81,7 +81,7 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 			log.Warn("[Sentinel Resp] sentinel has been shutdown")
 			return nil, false, nil
 		case <-respRetryTimer.C:
-			log.Debug("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)
+			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)
 			return nil, false, err
 		case <-retryTicker.C:
 			resp, foundErrRequest, err = verifyResponse(stream, peerId)
