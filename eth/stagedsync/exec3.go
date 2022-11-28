@@ -645,7 +645,7 @@ loop:
 		default:
 		}
 
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
+		if err := agg.BuildFilesInBackground(ctx, chainDb); err != nil {
 			return err
 		}
 	}
