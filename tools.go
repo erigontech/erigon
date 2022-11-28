@@ -19,6 +19,7 @@ package tools
 import (
 	_ "github.com/ledgerwatch/interfaces"
 	_ "github.com/ledgerwatch/interfaces/downloader"
+	_ "github.com/ledgerwatch/interfaces/p2psentinel"
 	_ "github.com/ledgerwatch/interfaces/p2psentry"
 	_ "github.com/ledgerwatch/interfaces/remote"
 	_ "github.com/ledgerwatch/interfaces/txpool"
