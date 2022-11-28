@@ -13,14 +13,17 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader"
+	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -48,8 +51,7 @@ var (
 )
 
 func init() {
-	flags := append(debug.Flags, utils.MetricFlags...)
-	utils.CobraFlags(rootCmd, flags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging2.Flags)
 
 	withDataDir(rootCmd)
 
@@ -104,6 +106,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		_ = logging2.GetLoggerCmd("downloader", cmd)
 		if err := Downloader(cmd.Context()); err != nil {
 			log.Error("Downloader", "err", err)
 			return nil
@@ -114,7 +117,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context) error {
 	dirs := datadir.New(datadirCli)
-	torrentLogLevel, dbg, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -133,10 +136,12 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := downloadercfg.New(dirs.Snap, torrentLogLevel, dbg, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
+	cfg, err := downloadercfg2.New(dirs.Snap, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
+	downloadernat.DoNat(natif, cfg)
 
 	d, err := downloader.New(cfg)
 	if err != nil {

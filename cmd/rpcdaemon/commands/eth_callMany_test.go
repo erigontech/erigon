@@ -15,10 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 // block 1 contains 3 Transactions
@@ -38,7 +38,7 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},

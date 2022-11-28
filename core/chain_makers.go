@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -199,7 +200,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
-		parent.Seal(),
+		parent.Header().AuRaStep,
 	)
 }
 
@@ -298,7 +299,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
-	types.SetHeaderSealFlag(config.IsHeaderWithSeal())
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
@@ -360,23 +360,23 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					return nil, nil, fmt.Errorf("interate over plain state: %w", err)
 				}
 				var newK []byte
-				if len(k) == common.AddressLength {
-					newK = make([]byte, common.HashLength)
+				if len(k) == length.Addr {
+					newK = make([]byte, length.Hash)
 				} else {
-					newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+					newK = make([]byte, length.Hash*2+length.Incarnation)
 				}
 				h.Sha.Reset()
 				//nolint:errcheck
-				h.Sha.Write(k[:common.AddressLength])
+				h.Sha.Write(k[:length.Addr])
 				//nolint:errcheck
-				h.Sha.Read(newK[:common.HashLength])
-				if len(k) > common.AddressLength {
-					copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+				h.Sha.Read(newK[:length.Hash])
+				if len(k) > length.Addr {
+					copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
 					h.Sha.Reset()
 					//nolint:errcheck
-					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+					h.Sha.Write(k[length.Addr+length.Incarnation:])
 					//nolint:errcheck
-					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+					h.Sha.Read(newK[length.Hash+length.Incarnation:])
 					if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
 					}
@@ -449,7 +449,6 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, time
 	parentGasLimit := parent.GasLimit
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if chainConfig.IsLondon(header.Number.Uint64()) {
-		header.Eip1559 = true
 		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
 		if !chainConfig.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
@@ -480,10 +479,9 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
-		parent.Seal(),
+		parent.Header().AuRaStep,
 	)
-	header.Seal = engine.GenerateSeal(chain, header, parent.Header(), nil)
-	header.WithSeal = chain.Config().IsHeaderWithSeal()
+	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }

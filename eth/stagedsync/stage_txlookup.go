@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -61,7 +61,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return err
 	}
 	if toBlock > 0 {
-		endBlock = libcommon.Min(endBlock, toBlock)
+		endBlock = cmp.Min(endBlock, toBlock)
 	}
 
 	startBlock := s.BlockNumber
@@ -182,7 +182,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
 	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		smallestInDB := cfg.snapshots.BlocksAvailable()
-		blockFrom, blockTo = libcommon.Max(blockFrom, smallestInDB), libcommon.Max(blockTo, smallestInDB)
+		blockFrom, blockTo = cmp.Max(blockFrom, smallestInDB), cmp.Max(blockTo, smallestInDB)
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
@@ -204,7 +204,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
-func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -216,18 +216,26 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	blockFrom, blockTo := s.PruneProgress, uint64(0)
 
+	var pruneBor bool
+
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+		pruneBor = true
 	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
 	}
+
+	if !initialCycle { // limit time for pruning
+		blockTo = cmp.Min(blockTo, blockFrom+100)
+	}
+
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
-		if cfg.isBor {
+		if cfg.isBor && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}

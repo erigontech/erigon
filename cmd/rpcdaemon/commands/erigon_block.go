@@ -16,8 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
@@ -164,7 +164,16 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 		return nil, nil
 	}
 
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx)
+	additionalFields := make(map[string]interface{})
+	td, err := rawdb.ReadTd(db, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
+
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -199,7 +208,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
 
-	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
 	if err != nil {
 		return nil, err
 	}

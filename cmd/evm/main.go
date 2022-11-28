@@ -23,16 +23,16 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/urfave/cli"
+	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
 var (
-	app = flags.NewApp(params.GitCommit, "", "the evm command line interface")
+	app = cli2.NewApp(params.GitCommit, "", "the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",
@@ -137,55 +137,55 @@ var stateTransitionCommand = cli.Command{
 	Usage:   "executes a full state transition",
 	Action:  t8ntool.Main,
 	Flags: []cli.Flag{
-		t8ntool.TraceFlag,
-		t8ntool.TraceDisableMemoryFlag,
-		t8ntool.TraceDisableStackFlag,
-		t8ntool.TraceDisableReturnDataFlag,
-		t8ntool.OutputBasedir,
-		t8ntool.OutputAllocFlag,
-		t8ntool.OutputResultFlag,
-		t8ntool.OutputBodyFlag,
-		t8ntool.InputAllocFlag,
-		t8ntool.InputEnvFlag,
-		t8ntool.InputTxsFlag,
-		t8ntool.ForknameFlag,
-		t8ntool.ChainIDFlag,
-		t8ntool.VerbosityFlag,
+		&t8ntool.TraceFlag,
+		&t8ntool.TraceDisableMemoryFlag,
+		&t8ntool.TraceDisableStackFlag,
+		&t8ntool.TraceDisableReturnDataFlag,
+		&t8ntool.OutputBasedir,
+		&t8ntool.OutputAllocFlag,
+		&t8ntool.OutputResultFlag,
+		&t8ntool.OutputBodyFlag,
+		&t8ntool.InputAllocFlag,
+		&t8ntool.InputEnvFlag,
+		&t8ntool.InputTxsFlag,
+		&t8ntool.ForknameFlag,
+		&t8ntool.ChainIDFlag,
+		&t8ntool.VerbosityFlag,
 	},
 }
 
 func init() {
 	app.Flags = []cli.Flag{
-		BenchFlag,
-		CreateFlag,
-		DebugFlag,
-		VerbosityFlag,
-		CodeFlag,
-		CodeFileFlag,
-		GasFlag,
-		PriceFlag,
-		ValueFlag,
-		DumpFlag,
-		InputFlag,
-		InputFileFlag,
-		MemProfileFlag,
-		CPUProfileFlag,
-		StatDumpFlag,
-		GenesisFlag,
-		MachineFlag,
-		SenderFlag,
-		ReceiverFlag,
-		DisableMemoryFlag,
-		DisableStackFlag,
-		DisableStorageFlag,
-		DisableReturnDataFlag,
+		&BenchFlag,
+		&CreateFlag,
+		&DebugFlag,
+		&VerbosityFlag,
+		&CodeFlag,
+		&CodeFileFlag,
+		&GasFlag,
+		&PriceFlag,
+		&ValueFlag,
+		&DumpFlag,
+		&InputFlag,
+		&InputFileFlag,
+		&MemProfileFlag,
+		&CPUProfileFlag,
+		&StatDumpFlag,
+		&GenesisFlag,
+		&MachineFlag,
+		&SenderFlag,
+		&ReceiverFlag,
+		&DisableMemoryFlag,
+		&DisableStackFlag,
+		&DisableStorageFlag,
+		&DisableReturnDataFlag,
 	}
-	app.Commands = []cli.Command{
-		compileCommand,
-		disasmCommand,
-		runCommand,
-		stateTestCommand,
-		stateTransitionCommand,
+	app.Commands = []*cli.Command{
+		&compileCommand,
+		&disasmCommand,
+		&runCommand,
+		&stateTestCommand,
+		&stateTransitionCommand,
 	}
 }
 

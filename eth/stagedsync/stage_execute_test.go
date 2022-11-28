@@ -136,14 +136,16 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			txTask := &state.TxTask{
 				BlockNum:   n,
 				Rules:      params.TestRules,
-				Block:      nil,
 				TxNum:      n,
 				TxIndex:    0,
 				Final:      true,
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			if err := rs.Apply(tx, txTask, agg); err != nil {
+			if err := rs.ApplyState(tx, txTask, agg); err != nil {
+				panic(err)
+			}
+			if err := rs.ApplyHistory(tx, txTask, agg); err != nil {
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
@@ -151,7 +153,7 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 				if err != nil {
 					panic(err)
 				}
-				if err := agg.Flush(); err != nil {
+				if err := agg.Flush(tx); err != nil {
 					panic(err)
 				}
 			}

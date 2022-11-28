@@ -14,7 +14,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -283,18 +282,15 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	var baseFee *big.Int
-	eip1559 := false
 
 	if req.BaseFeePerGas != nil {
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
-		eip1559 = true
 	}
 	header := types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
 		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
 		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		Eip1559:     eip1559,
 		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      big.NewInt(int64(req.BlockNumber)),
@@ -528,13 +524,6 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, err
 	}
 
-	blockRlp, err := rlp.EncodeToBytes(block)
-	if err != nil {
-		return nil, err
-	}
-	log.Info("PoS block built successfully", "hash", block.Header().Hash(),
-		"transactions count", len(encodedTransactions), "number", block.NumberU64(), "rlp", common.Bytes2Hex(blockRlp))
-
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
@@ -650,12 +639,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 }
 
 func (s *EthBackendServer) evictOldBuilders() {
-	// sort payload IDs in ascending order
-	ids := make([]uint64, 0, len(s.builders))
-	for id := range s.builders {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
+	ids := common.SortedKeys(s.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(s.builders)-MaxBuilders; i++ {

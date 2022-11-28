@@ -5,11 +5,12 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +27,7 @@ var (
 	trustedPeers []string // trusted peers
 	discoveryDNS []string
 	nodiscover   bool // disable sentry's discovery mechanism
-	protocol     int
+	protocol     uint
 	netRestrict  string // CIDR to restrict peering to
 	maxPeers     int
 	maxPendPeers int
@@ -34,7 +35,7 @@ var (
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging2.Flags)
 
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
 	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
@@ -44,7 +45,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&trustedPeers, utils.TrustedPeersFlag.Name, []string{}, utils.TrustedPeersFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
-	rootCmd.Flags().IntVar(&protocol, utils.P2pProtocolVersionFlag.Name, utils.P2pProtocolVersionFlag.Value, utils.P2pProtocolVersionFlag.Usage)
+	rootCmd.Flags().UintVar(&protocol, utils.P2pProtocolVersionFlag.Name, utils.P2pProtocolVersionFlag.Value.Value()[0], utils.P2pProtocolVersionFlag.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, utils.NetrestrictFlag.Name, utils.NetrestrictFlag.Value, utils.NetrestrictFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
@@ -80,13 +81,14 @@ var rootCmd = &cobra.Command{
 			staticPeers,
 			trustedPeers,
 			uint(port),
-			uint(protocol),
+			protocol,
 		)
 		if err != nil {
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(protocol), healthCheck)
+		_ = logging2.GetLoggerCmd("sentry", cmd)
+		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, protocol, healthCheck)
 	},
 }
 

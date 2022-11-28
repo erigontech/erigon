@@ -77,7 +77,7 @@ func TestWaitDeployed(t *testing.T) {
 			// Create the transaction.
 			// Create the transaction.
 			var tx types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
-			signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+			signer := types.MakeSigner(params.TestChainConfig, 1)
 			tx, _ = types.SignTx(tx, *signer, testKey)
 
 			// Wait for it to get mined in the background.
@@ -87,16 +87,17 @@ func TestWaitDeployed(t *testing.T) {
 				mined   = make(chan struct{})
 				ctx     = context.Background()
 			)
-			go func() {
-				address, err = bind.WaitDeployed(ctx, backend, tx)
-				close(mined)
-			}()
 
 			// Send and mine the transaction.
 			if err = backend.SendTransaction(ctx, tx); err != nil {
 				t.Fatalf("test %q: failed to set tx: %v", name, err)
 			}
 			backend.Commit()
+
+			go func() {
+				address, err = bind.WaitDeployed(ctx, backend, tx)
+				close(mined)
+			}()
 
 			select {
 			case <-mined:
@@ -126,7 +127,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+	signer := types.MakeSigner(params.TestChainConfig, 1)
 	var tx types.Transaction = types.NewTransaction(0, common.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -144,6 +145,10 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	tx = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, testKey)
 
+	if err := backend.SendTransaction(ctx, tx); err != nil {
+		t.Errorf("error when sending tx: %v", err)
+	}
+
 	done := make(chan bool)
 	go func() {
 		defer close(done)
@@ -154,9 +159,6 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		done <- true
 	}()
 
-	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %v", err)
-	}
 	cancel()
 	<-done
 }

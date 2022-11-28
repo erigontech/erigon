@@ -199,8 +199,6 @@ func TestEmptyBlock(t *testing.T) {
 	if ethconfig.EnableHistoryV3InTest {
 		t.Skip("")
 	}
-	types.SetHeaderSealFlag(true)
-	defer types.SetHeaderSealFlag(false)
 
 	require := require.New(t)
 	genesis := core.DefaultGnosisGenesisBlock()
@@ -225,7 +223,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.NumberU64(),
 		genesisBlock.Hash(),
 		genesisBlock.UncleHash(),
-		genesisBlock.Seal(),
+		genesisBlock.Header().AuRaStep,
 	)
 
 	block := types.NewBlockWithHeader(header)

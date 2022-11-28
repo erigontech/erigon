@@ -69,8 +69,9 @@ type EngineAPI interface {
 // EngineImpl is implementation of the EngineAPI interface
 type EngineImpl struct {
 	*BaseAPI
-	db  kv.RoDB
-	api rpchelper.ApiBackend
+	db         kv.RoDB
+	api        rpchelper.ApiBackend
+	internalCL bool
 }
 
 func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} {
@@ -88,6 +89,10 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 }
 
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
 	log.Debug("Received ForkchoiceUpdated", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
 		"build", payloadAttributes != nil)
 
@@ -143,6 +148,10 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
 	log.Debug("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
 	var baseFee *uint256.Int
@@ -201,6 +210,11 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	log.Info("Received GetPayload", "payloadId", decodedPayloadId)
 
@@ -242,6 +256,11 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 // Can also be used to ping the execution layer (heartbeats).
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig TransitionConfiguration) (TransitionConfiguration, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return TransitionConfiguration{}, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+
 	tx, err := e.db.BeginRo(ctx)
 
 	if err != nil {
@@ -274,10 +293,11 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 }
 
 // NewEngineAPI returns EngineImpl instance
-func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.ApiBackend) *EngineImpl {
+func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.ApiBackend, internalCL bool) *EngineImpl {
 	return &EngineImpl{
-		BaseAPI: base,
-		db:      db,
-		api:     api,
+		BaseAPI:    base,
+		db:         db,
+		api:        api,
+		internalCL: internalCL,
 	}
 }

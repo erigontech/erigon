@@ -13,6 +13,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
     + [Getting Started](#getting-started)
+    + [Logging](#logging)
     + [Testnets](#testnets)
     + [Mining](#mining)
     + [Windows](#windows)
@@ -49,10 +50,10 @@ System Requirements
 ===================
 
 * For an Archive node of Ethereum Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
-  200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Ethereum Mainnet Full node (
+  200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
   see `--prune*` flags): 400Gb (April 2022).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022)..
+* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
 * BSC Archive: 7TB. BSC Full: 1TB.
 
@@ -61,7 +62,11 @@ System Requirements
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
-RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
+RAM: >=16GB, 64-bit architecture.
+
+[Golang version >= 1.18](https://golang.org/doc/install).
+
+GCC 10+.
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -99,7 +104,35 @@ Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
 
-Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile)
+Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Logging
+
+_Flags:_ 
+
+  - `verbosity`
+  - `log.console.verbosity` (overriding alias for `verbosity`)
+  - `log.json`
+  - `log.console.json` (alias for `log.json`)
+  - `log.dir.path`
+  - `log.dir.verbosity`
+  - `log.dir.json`
+
+
+In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an int value specifying the highest output log level:
+
+```
+  LvlCrit = 0
+  LvlError = 1
+  LvlWarn = 2
+  LvlInfo = 3
+  LvlDebug = 4
+  LvlTrace = 5
+```
+
+To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. 'debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
+
+Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk output `--log.dir.json`.
 
 ### Modularity
 
@@ -108,6 +141,10 @@ Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history downloa
 Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
+
+### Embedded Consensus Layer
+
+By default the Engine API is disabled in favour of Erigon native Embedded Consensus Layer, if you want to either stake or sync an external Consensus Layer, run Erigon with flag `--externalcl`.
 
 ### Optional stages
 
@@ -484,13 +521,14 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 | Port  | Protocol  |        Purpose         | Expose  |
 |:-----:|:---------:|:----------------------:|:-------:|
-| 30303 | TCP & UDP |  eth/66 or 67 peering  | Public  |
+| 30303 | TCP & UDP |     eth/66 peering     | Public  |
+| 30304 | TCP & UDP |     eth/67 peering     | Public  |
 | 9090  |    TCP    |    gRPC Connections    | Private |
 | 42069 | TCP & UDP | Snap sync (Bittorrent) | Public  |
 | 6060  |    TCP    |    Metrics or Pprof    | Private |
 | 8551  |    TCP    | Engine API (JWT auth)  | Private |
 
-Typically, 30303 is exposed to the internet to allow incoming peering connections. 9090 is exposed only
+Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
@@ -515,6 +553,15 @@ Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will 
 Port
 9091 is for internal gRCP connections (e.g erigon -> sentry).
 
+#### `sentinel` ports
+
+| Port  | Protocol  |     Purpose      | Expose  |
+|:-----:|:---------:|:----------------:|:-------:|
+| 4000  |    UDP    |     Peering      | Public  |
+| 4001  |    TCP    |     Peering      | Public  |
+| 7777  |    TCP    | gRPC Connections | Private |
+
+
 #### Other ports
 
 | Port | Protocol | Purpose | Expose  |
@@ -526,6 +573,28 @@ Optional flags can be enabled that enable pprof or metrics (or both) - however, 
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
+Hetzner may want strict firewall rules, like: 
+```
+0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks       RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)    RFC 6598, Section 7
+127.0.0.0/8           Loopback                   RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                 RFC 3927
+172.16.0.0/12         Private-Use Networks       RFC 1918
+192.0.0.0/24          IETF Protocol Assignments  RFC 5736
+192.0.2.0/24          TEST-NET-1                 RFC 5737
+192.88.99.0/24        6to4 Relay Anycast         RFC 3068
+192.168.0.0/16        Private-Use Networks       RFC 1918
+198.18.0.0/15         Network Interconnect
+                      Device Benchmark Testing   RFC 2544
+198.51.100.0/24       TEST-NET-2                 RFC 5737
+203.0.113.0/24        TEST-NET-3                 RFC 5737
+224.0.0.0/4           Multicast                  RFC 3171
+240.0.0.0/4           Reserved for Future Use    RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
+                                                 RFC 922, Section 7
+```
 
 ### How to get diagnostic for bug report?
 

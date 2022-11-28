@@ -599,8 +599,10 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.dbWrapper.db = env.IntraBlockState()
 	// Compute intrinsic gas
 	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
-	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
-	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+	isEIP2028 := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
+	vmConfig := env.Config()
+	isEIP3860 := vmConfig.HasEip3860(env.ChainRules())
+	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isEIP2028, isEIP3860)
 	if err != nil {
 		return
 	}

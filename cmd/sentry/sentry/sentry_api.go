@@ -62,6 +62,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
 					Data: bytes,
 				},
+				MaxPeers: 1,
 			}
 
 			sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
@@ -112,6 +113,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 					Data: bytes,
 				},
+				MaxPeers: 5,
 			}
 			sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 			if err1 != nil {

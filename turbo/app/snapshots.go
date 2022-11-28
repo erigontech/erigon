@@ -15,91 +15,101 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 const ASSERT = false
 
+func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
+	for _, list := range lists {
+		res = append(res, list...)
+	}
+	return res
+}
+
 var snapshotCommand = cli.Command{
 	Name:        "snapshots",
 	Description: `Managing snapshots (historical data partitions)`,
-	Subcommands: []cli.Command{
+	Subcommands: []*cli.Command{
 		{
 			Name:   "create",
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotToFlag,
-				SnapshotSegmentSizeFlag,
-			}, debug.Flags...),
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotToFlag,
+				&SnapshotSegmentSizeFlag,
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotRebuildFlag,
-			}, debug.Flags...),
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotRebuildFlag,
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "retire",
 			Action: doRetireCommand,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotToFlag,
-				SnapshotEveryFlag,
-			}, debug.Flags...),
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&SnapshotFromFlag,
+				&SnapshotToFlag,
+				&SnapshotEveryFlag,
+			}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "compress",
 			Action: doCompress,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 	},
 }
@@ -123,7 +133,7 @@ var (
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
 		Usage: "Amount of blocks in each segment",
-		Value: snap.Erigon2SegmentSize,
+		Value: snaptype.Erigon2SegmentSize,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -140,10 +150,10 @@ func preloadFileAsync(name string) {
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 
 	compress.SetDecompressionTableCondensity(9)
 
@@ -179,10 +189,10 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 func doRam(cliCtx *cli.Context) error {
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	runtime.ReadMemStats(&m)
@@ -214,7 +224,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
-	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, estimate.IndexSnapshot.Workers()); err != nil {
+	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, sem); err != nil {
 		log.Error("Error", "err", err)
 	}
 	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
@@ -225,8 +236,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
-	err = agg.BuildMissedIndices()
+	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
 	}
@@ -237,10 +247,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 
 	preloadFileAsync(f)
 
@@ -286,10 +296,10 @@ func doCompress(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 	args := cliCtx.Args()
-	if len(args) != 1 {
+	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
 	}
-	f := args[0]
+	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo)
 	if err != nil {
@@ -378,10 +388,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Work on history snapshots")
-	if err = agg.BuildMissedIndices(); err != nil {
+	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
-	if err = agg.Merge(); err != nil {
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
 
@@ -434,7 +445,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, workers int) error {
+func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethconfig.Snapshot, dirs datadir.Dirs, from uint64, sem *semaphore.Weighted) error {
 	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -444,7 +455,7 @@ func rebuildIndices(logPrefix string, ctx context.Context, db kv.RoDB, cfg ethco
 	}
 	allSnapshots.LogStat()
 
-	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, workers); err != nil {
+	if err := snapshotsync.BuildMissedIndices(logPrefix, ctx, dirs, *chainID, sem); err != nil {
 		return err
 	}
 	return nil

@@ -41,7 +41,7 @@ func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
 	if newMemSize > 0x1FFFFFFFE0 {
 		return 0, ErrGasUintOverflow
 	}
-	newMemSizeWords := toWordSize(newMemSize)
+	newMemSizeWords := ToWordSize(newMemSize)
 	newMemSize = newMemSizeWords * 32
 
 	if newMemSize > uint64(mem.Len()) {
@@ -78,7 +78,7 @@ func memoryCopierGas(stackpos int) gasFunc {
 			return 0, ErrGasUintOverflow
 		}
 
-		if words, overflow = math.SafeMul(toWordSize(words), params.CopyGas); overflow {
+		if words, overflow = math.SafeMul(ToWordSize(words), params.CopyGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
 
@@ -252,7 +252,7 @@ func makeGasLog(n uint64) gasFunc {
 	}
 }
 
-func gasSha3(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasKeccak256(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -261,7 +261,7 @@ func gasSha3(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if wordGas, overflow = math.SafeMul(toWordSize(wordGas), params.Sha3WordGas); overflow {
+	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
@@ -287,18 +287,33 @@ var (
 )
 
 func gasCreate2(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return gasCreateImplementation(stack, mem, memorySize, params.Keccak256WordGas)
+}
+
+func gasCreateEip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return gasCreateImplementation(stack, mem, memorySize, params.InitCodeWordGas)
+}
+
+func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return gasCreateImplementation(stack, mem, memorySize, params.Keccak256WordGas+params.InitCodeWordGas)
+}
+
+func gasCreateImplementation(stack *stack.Stack, mem *Memory, memorySize uint64, wordCost uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
 	}
-	wordGas, overflow := stack.Back(2).Uint64WithOverflow()
+	len, overflow := stack.Back(2).Uint64WithOverflow()
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if wordGas, overflow = math.SafeMul(toWordSize(wordGas), params.Sha3WordGas); overflow {
+	numWords := ToWordSize(len)
+	wordGas, overflow := math.SafeMul(numWords, wordCost)
+	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
 		return 0, ErrGasUintOverflow
 	}
 	return gas, nil

@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -28,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -51,11 +52,12 @@ const (
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
 type PeerInfo struct {
-	peer      *p2p.Peer
-	lock      sync.RWMutex
-	deadlines []time.Time // Request deadlines
-	height    uint64
-	rw        p2p.MsgReadWriter
+	peer          *p2p.Peer
+	lock          sync.RWMutex
+	deadlines     []time.Time // Request deadlines
+	latestDealine time.Time
+	height        uint64
+	rw            p2p.MsgReadWriter
 
 	removed    chan struct{} // close this channel on remove
 	ctx        context.Context
@@ -65,6 +67,46 @@ type PeerInfo struct {
 	// if this queue is full (means peer is slow) - old messages will be dropped
 	// channel closed on peer remove
 	tasks chan func()
+}
+
+type PeerRef struct {
+	pi     *PeerInfo
+	height uint64
+}
+
+// PeersByMinBlock is the priority queue of peers. Used to select certain number of peers considered to be "best available"
+type PeersByMinBlock []PeerRef
+
+// Len (part of heap.Interface) returns the current size of the best peers queue
+func (bp PeersByMinBlock) Len() int {
+	return len(bp)
+}
+
+// Less (part of heap.Interface) compares two peers
+func (bp PeersByMinBlock) Less(i, j int) bool {
+	return bp[i].height < bp[j].height
+}
+
+// Swap (part of heap.Interface) moves two peers in the queue into each other's places.
+func (bp PeersByMinBlock) Swap(i, j int) {
+	bp[i], bp[j] = bp[j], bp[i]
+}
+
+// Push (part of heap.Interface) places a new peer onto the end of queue.
+func (bp *PeersByMinBlock) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	p := x.(PeerRef)
+	*bp = append(*bp, p)
+}
+
+// Pop (part of heap.Interface) removes the first peer from the queue
+func (bp *PeersByMinBlock) Pop() interface{} {
+	old := *bp
+	n := len(old)
+	x := old[n-1]
+	*bp = old[0 : n-1]
+	return x
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
@@ -105,6 +147,7 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	pi.deadlines = append(pi.deadlines, deadline)
+	pi.latestDealine = deadline
 }
 
 func (pi *PeerInfo) Height() uint64 {
@@ -140,6 +183,12 @@ func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 	return len(pi.deadlines)
 }
 
+func (pi *PeerInfo) LatestDeadline() time.Time {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.latestDealine
+}
+
 func (pi *PeerInfo) Remove() {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
@@ -165,7 +214,7 @@ func (pi *PeerInfo) Async(f func()) {
 			pi.tasks = nil
 		}
 	case pi.tasks <- f:
-		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
+		if len(pi.tasks) == cap(pi.tasks) { // if channel full - discard old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
 				select {
 				case <-pi.tasks:
@@ -455,7 +504,7 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
+			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -683,45 +732,41 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
-	var maxPermits int
+func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
+	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
+	byMinBlock := make(PeersByMinBlock, 0, peerCount)
+	var pokePeer *PeerInfo // Peer with the earliest dealine, to be "poked" by the request
+	var pokeDeadline time.Time
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if peerInfo.Height() >= minBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				permits := maxPermitsPerPeer - deadlines
-				if permits > maxPermits {
-					maxPermits = permits
-					foundPeerInfo = peerInfo
+		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+		height := peerInfo.Height()
+		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+		if deadlines < maxPermitsPerPeer {
+			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
+			if byMinBlock.Len() > peerCount {
+				// Remove the worst peer
+				peerRef := heap.Pop(&byMinBlock).(PeerRef)
+				latestDeadline := peerRef.pi.LatestDeadline()
+				if pokePeer == nil || latestDeadline.Before(pokeDeadline) {
+					pokeDeadline = latestDeadline
+					pokePeer = peerInfo
 				}
 			}
 		}
 		return true
 	})
-	return foundPeerInfo, maxPermits > 0
-}
-
-func (ss *GrpcServer) findBestPeerWithPermit() (*PeerInfo, bool) {
-	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerInfo *PeerInfo
-	var maxBlock uint64
-	now := time.Now()
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if maxBlock == 0 || peerInfo.Height() > maxBlock {
-			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
-			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer {
-				maxBlock = peerInfo.Height()
-				foundPeerInfo = peerInfo
-			}
-		}
-		return true
-	})
-	return foundPeerInfo, foundPeerInfo != nil
+	var foundPeers []*PeerInfo
+	if peerCount == 1 || pokePeer == nil {
+		foundPeers = make([]*PeerInfo, len(byMinBlock))
+	} else {
+		foundPeers = make([]*PeerInfo, len(byMinBlock)+1)
+		foundPeers[len(foundPeers)-1] = pokePeer
+	}
+	for i, peerRef := range byMinBlock {
+		foundPeers[i] = peerRef.pi
+	}
+	return foundPeers
 }
 
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
@@ -732,17 +777,11 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
-	peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
-	if found {
-		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
-	} else {
-		// If peer with specified minBlock is not found, send to best peer with permits
-		peerInfo, found = ss.findBestPeerWithPermit()
-		if found {
-			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
-		}
+	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
+	reply.Peers = make([]*proto_types.H512, len(peerInfos))
+	for i, peerInfo := range peerInfos {
+		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
+		reply.Peers[i] = gointerfaces.ConvertHashToH512(peerInfo.ID())
 	}
 	return reply, nil
 }
@@ -785,25 +824,27 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
-	amount := uint64(0)
+	peerInfos := make([]*PeerInfo, 0, 32) // 32 gives capacity for 1024 peers, well beyond default
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		amount++
+		peerInfos = append(peerInfos, peerInfo)
 		return true
 	})
-	if req.MaxPeers < amount {
-		amount = req.MaxPeers
+	rand.Shuffle(len(peerInfos), func(i int, j int) {
+		peerInfos[i], peerInfos[j] = peerInfos[j], peerInfos[i]
+	})
+	peersToSendCount := len(peerInfos)
+	if peersToSendCount > 0 {
+		peerCountConstrained := math.Min(float64(len(peerInfos)), float64(req.MaxPeers))
+		// Ensure we have at least 1 peer during our sqrt operation
+		peersToSendCount = int(math.Max(math.Sqrt(peerCountConstrained), 1.0))
 	}
 
-	// Send the block to a subset of our peers
-	sendToAmount := int(math.Sqrt(float64(amount)))
-	i := 0
 	var lastErr error
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+	// Send the block to a subset of our peers at random
+	for _, peerInfo := range peerInfos[:peersToSendCount] {
 		ss.writePeer("sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
-		i++
-		return i < sendToAmount
-	})
+	}
 	return reply, lastErr
 }
 

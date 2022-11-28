@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/log/v3"
 )
 

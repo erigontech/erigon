@@ -193,10 +193,7 @@ func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *typ
 	return ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, seal)
 }
 
-// verifyHeader checks whether a header conforms to the consensus rules of the
-// stock Ethereum ethash engine.
-// See YP section 4.3.4. "Block Header Validity"
-func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
+func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
@@ -210,12 +207,6 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	if header.Time <= parent.Time {
 		return errOlderBlockTime
-	}
-	// Verify the block's difficulty based on its timestamp and parent's difficulty
-	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.Seal)
-
-	if expected.Cmp(header.Difficulty) != 0 {
-		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
 	}
 	// Verify that the gas limit is <= 2^63-1
 	if header.GasLimit > params.MaxGasLimit {
@@ -249,12 +240,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(big.NewInt(1)) != 0 {
 		return consensus.ErrInvalidNumber
 	}
-	// Verify the engine specific seal securing the block
-	if seal {
-		if err := ethash.VerifySeal(nil, header); err != nil {
-			return err
-		}
-	}
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyDAOHeaderExtraData(chain.Config(), header); err != nil {
 		return err
@@ -265,14 +251,35 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	return nil
 }
 
-func (ethash *Ethash) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
+// verifyHeader checks whether a header conforms to the consensus rules of the
+// stock Ethereum ethash engine.
+// See YP section 4.3.4. "Block Header Validity"
+func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
+	if err := VerifyHeaderBasics(chain, header, parent, uncle); err != nil {
+		return err
+	}
+	// Verify the block's difficulty based on its timestamp and parent's difficulty
+	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	if expected.Cmp(header.Difficulty) != 0 {
+		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
+	}
+	// Verify the engine specific seal securing the block
+	if seal {
+		if err := ethash.VerifySeal(nil, header); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (ethash *Ethash) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ []rlp.RawValue) *big.Int {
+func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ uint64) *big.Int {
 	return CalcDifficulty(chain.Config(), time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 }
 
@@ -533,11 +540,12 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.Seal)
+	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
 	return nil
 }
 
-func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
@@ -586,12 +594,16 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 		header.Time,
 		header.Extra,
 	}
-	if header.Eip1559 {
+	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
 	rlp.Encode(hasher, enc)
 	hasher.Sum(hash[:0])
 	return hash
+}
+
+func (ethash *Ethash) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return false
 }
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists

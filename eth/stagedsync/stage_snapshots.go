@@ -5,12 +5,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -20,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 type SnapshotsCfg struct {
@@ -138,7 +141,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, estimate.IndexSnapshot.Workers()); err != nil {
+				sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, sem); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
@@ -153,7 +157,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
-		if err := cfg.agg.BuildMissedIndices(); err != nil {
+		sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
+		if err := cfg.agg.BuildMissedIndices(ctx, sem); err != nil {
 			return err
 		}
 		if cfg.dbEventNotifier != nil {
@@ -309,18 +314,28 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 		}
 		return nil
 	}
-
+	// Original intent of snInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
+	// Then, we would insist to only download such files, and no others (whitelist)
+	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
+	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
+	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
 	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
 	if err != nil {
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
 	var missingSnapshots []snapshotsync.Range
+	var existingFiles []snaptype.FileInfo
 	if !dbEmpty {
-		_, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
+		existingFiles, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
 		if err != nil {
 			return err
 		}
+	}
+	existingFilesMap := map[string]struct{}{}
+	for _, existingFile := range existingFiles {
+		_, fname := filepath.Split(existingFile.Path)
+		existingFilesMap[fname] = struct{}{}
 	}
 	if len(missingSnapshots) > 0 {
 		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
@@ -332,7 +347,9 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
+			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
+		}
 	}
 	if cfg.historyV3 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
@@ -499,9 +516,8 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 	}
 	ok, err := blockRetire.BackgroundResult.GetAndReset()
 	if err != nil {
-		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
-	}
-	if ok {
+		log.Warn(fmt.Sprintf("[%s]", s.LogPrefix()), "err", err)
+	} else if ok {
 		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files(), agg.Files()); err != nil {
 			return err
 		}

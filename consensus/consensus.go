@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -95,7 +94,8 @@ type Engine interface {
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header,
+		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
@@ -129,9 +129,12 @@ type Engine interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []rlp.RawValue
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
+
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

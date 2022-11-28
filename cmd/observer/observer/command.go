@@ -6,10 +6,12 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 type CommandFlags struct {
@@ -51,7 +53,7 @@ func NewCommand() *Command {
 	}
 
 	// debug flags
-	utils.CobraFlags(&command, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(&command, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	instance := Command{
 		command: command,
@@ -219,7 +221,7 @@ func (command *Command) withErigonLogPath() {
 func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags) error) error {
 	command.command.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// apply debug flags
-		return utils.SetupCobra(cmd)
+		return debug.SetupCobra(cmd)
 	}
 	command.command.PersistentPostRun = func(cmd *cobra.Command, args []string) {
 		debug.Exit()

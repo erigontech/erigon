@@ -9,16 +9,13 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned per call
@@ -73,19 +70,15 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if block == nil {
 		return StorageRangeResult{}, nil
 	}
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
 
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
+	if api.historyV3(tx) {
+		panic("not implemented!")
+	}
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
+	return StorageRangeAt(stateReader.(*state.PlainState), contractAddress, keyStart, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -240,10 +233,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if block == nil {
 		return nil, nil
 	}
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
-	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}

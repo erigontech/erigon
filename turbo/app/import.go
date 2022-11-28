@@ -12,6 +12,9 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -20,9 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	turboNode "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 const (
@@ -35,8 +35,8 @@ var importCommand = cli.Command{
 	Usage:     "Import a blockchain file",
 	ArgsUsage: "<filename> (<filename 2> ... <filename N>) ",
 	Flags: []cli.Flag{
-		utils.DataDirFlag,
-		utils.ChainFlag,
+		&utils.DataDirFlag,
+		&utils.ChainFlag,
 	},
 	Category: "BLOCKCHAIN COMMANDS",
 	Description: `
@@ -48,7 +48,7 @@ processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
 func importChain(ctx *cli.Context) error {
-	if len(ctx.Args()) < 1 {
+	if ctx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
 

@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -143,13 +142,13 @@ func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
+func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
 	}
 	if !reached {
-		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
+		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
 	return SerenityDifficulty
 }
@@ -202,12 +201,16 @@ func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, r
 	return nil
 }
 
-func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
+func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
-func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-	s.eth1Engine.Initialize(config, chain, e, header, txs, uncles, syscall)
+func (s *Serenity) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+	return s.eth1Engine.IsServiceTransaction(sender, syscall)
+}
+
+func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, e, header, state, txs, uncles, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {

@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
 var bindTests = []struct {
@@ -1793,7 +1793,7 @@ var bindTests = []struct {
 func TestGolangBindings(t *testing.T) {
 	// Skip the test if no Go command can be found
 	gocmd := runtime.GOROOT() + "/bin/go"
-	if !common.FileExist(gocmd) {
+	if !dir.FileExist(gocmd) {
 		t.Skip("go sdk not found for testing")
 	}
 	// Create a temporary workspace for the test suite

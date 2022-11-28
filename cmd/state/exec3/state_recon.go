@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,50 +23,50 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
+	"go.uber.org/atomic"
 )
 
 type FillWorker struct {
 	txNum          uint64
-	doneCount      *atomic2.Uint64
+	doneCount      *atomic.Uint64
 	ac             *state.Aggregator22Context
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
-	total          uint64
-	progress       uint64
+
+	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic2.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
 	fw := &FillWorker{
 		txNum:     txNum,
 		doneCount: doneCount,
 		ac:        a.MakeContext(),
 		fromKey:   fromKey,
 		toKey:     toKey,
+		total:     atomic.NewUint64(0),
+		progress:  atomic.NewUint64(0),
 	}
 	return fw
 }
 
 func (fw *FillWorker) Total() uint64 {
-	return atomic.LoadUint64(&fw.total)
+	return fw.total.Load()
 }
 func (fw *FillWorker) Bitmap() *roaring64.Bitmap { return &fw.bitmap }
 
 func (fw *FillWorker) Progress() uint64 {
-	return atomic.LoadUint64(&fw.progress)
+	return fw.progress.Load()
 }
 
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	value := make([]byte, 1024)
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			var a accounts.Account
@@ -110,15 +109,13 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey[:20], key[:20])
@@ -134,16 +131,14 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 }
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
 
 	for it.HasNext() {
 		key, val, progress := it.Next()
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.currentKey = key
 		if len(val) > 0 {
 			copy(compositeKey, key)
@@ -165,16 +160,14 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 }
 
 func (fw *FillWorker) ResetProgress() {
-	fw.total = 0
-	fw.progress = 0
+	fw.total.Store(0)
+	fw.progress.Store(0)
 }
 
 func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -182,17 +175,15 @@ func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
 
 func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -200,17 +191,15 @@ func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
 		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
 
 func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
-	defer func() {
-		fw.doneCount.Add(1)
-	}()
+	defer fw.doneCount.Inc()
 	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	atomic.StoreUint64(&fw.total, it.Total())
+	fw.total.Store(it.Total())
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, progress := it.Next()
@@ -218,7 +207,7 @@ func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
 		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
 			panic(err)
 		}
-		atomic.StoreUint64(&fw.progress, progress)
+		fw.progress.Store(progress)
 		fw.bitmap.Add(txNum)
 	}
 }
@@ -296,13 +285,14 @@ func (rw *ReconWorker) Run() {
 	}
 }
 
+var noop = state2.NewNoopWriter()
+
 func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
-	noop := state2.NewNoopWriter()
 	rules := txTask.Rules
 	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -325,42 +315,48 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Block.Header(), ibs, txTask.Block.Transactions(), txTask.Block.Uncles(), nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Block.Number(), ibs)
+			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Block.Header(), rw.engine)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Block.Header(), txTask.Block.Transactions(), txTask.Block.Uncles(), syscall)
+
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else {
 		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Block.Header()); err != nil {
+			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
 				panic(err)
 			} else if isSystemTx {
 				return
 			}
 		}
-		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: core.SkipAnalysis(rw.chainConfig, txTask.BlockNum)}
-		getHashFn := core.GetHashFn(txTask.Block.Header(), rw.getHeader)
-		blockContext := core.NewEVMBlockContext(txTask.Block.Header(), getHashFn, rw.engine, nil /* author */)
-		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
+		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
+		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
-		txContext := core.NewEVMTxContext(msg)
-		vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+
+		var vmenv vm.VMInterface
+		if txTask.Tx.IsStarkNet() {
+			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		} else {
+			blockContext := core.NewEVMBlockContext(txTask.Header, getHashFn, rw.engine, nil /* author */)
+			txContext := core.NewEVMTxContext(msg)
+			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txHash, err))
+			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			panic(err)

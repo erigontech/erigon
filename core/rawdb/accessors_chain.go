@@ -31,6 +31,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -547,7 +548,7 @@ func NonCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uin
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
-	blockKey := make([]byte, dbutils.NumberLength+common.HashLength)
+	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)
 	for i := from; i < to+1; i++ {
 		binary.BigEndian.PutUint64(encNum, i)
@@ -635,9 +636,9 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	if err != nil {
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
-	senders := make([]common.Address, len(data)/common.AddressLength)
+	senders := make([]common.Address, len(data)/length.Addr)
 	for i := 0; i < len(senders); i++ {
-		copy(senders[i][:], data[i*common.AddressLength:])
+		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil
 }
@@ -696,9 +697,9 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 }
 
 func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []common.Address) error {
-	data := make([]byte, common.AddressLength*len(senders))
+	data := make([]byte, length.Addr*len(senders))
 	for i, sender := range senders {
-		copy(data[i*common.AddressLength:], sender[:])
+		copy(data[i*length.Addr:], sender[:])
 	}
 	if err := db.Put(kv.Senders, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block senders: %w", err)
@@ -947,7 +948,13 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 			return fmt.Errorf("receipt unmarshal failed:  %w", err)
 		}
 
-		receipts[binary.BigEndian.Uint32(k[8:])].Logs = logs
+		txIndex := int(binary.BigEndian.Uint32(k[8:]))
+
+		// only return logs from real txs (not from block's stateSyncReceipt)
+		if txIndex < len(receipts) {
+			receipts[txIndex].Logs = logs
+		}
+
 		return nil
 	}); err != nil {
 		log.Error("logs fetching failed", "err", err)
@@ -1268,20 +1275,6 @@ func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	return k, nil
 }
 
-// FirstKey - candidate on move to kv.Tx interface
-func FirstKey(tx kv.Tx, table string) ([]byte, error) {
-	c, err := tx.Cursor(table)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	k, _, err := c.First()
-	if err != nil {
-		return nil, err
-	}
-	return k, nil
-}
-
 // SecondKey - useful if table always has zero-key (for example genesis block)
 func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
@@ -1534,7 +1527,7 @@ func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	})
 }
 func ReadEpoch(tx kv.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
-	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(kv.Epoch, k)
@@ -1567,7 +1560,7 @@ func FindEpochBeforeOrEqualNumber(tx kv.Tx, n uint64) (blockNum uint64, blockHas
 }
 
 func WriteEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
-	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.Put(kv.Epoch, k, transitionProof)
@@ -1858,7 +1851,7 @@ func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {
 		encoded []byte
 		err     error
 	)
-	root = node.ComputeCommitment().Bytes()
+	root = node.Commitment().Bytes()
 	encoded, err = node.Serialize()
 	if err != nil {
 		return err
@@ -1871,6 +1864,9 @@ func ReadVerkleNode(tx kv.RwTx, root common.Hash) (verkle.VerkleNode, error) {
 	encoded, err := tx.GetOne(kv.VerkleTrie, root[:])
 	if err != nil {
 		return nil, err
+	}
+	if len(encoded) == 0 {
+		return verkle.New(), nil
 	}
 	return verkle.ParseNode(encoded, 0, root[:])
 }

@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	BlockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
@@ -80,7 +80,7 @@ func ExecuteBlockEphemerallyForBSC(
 	chainReader consensus.ChainHeaderReader,
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -158,7 +158,7 @@ func ExecuteBlockEphemerallyForBSC(
 		// otherwise it causes block verification error.
 		header.GasUsed = *usedGas
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *chainConfig, ibs, header, engine)
+			return SysCallContract(contract, data, *chainConfig, ibs, header, engine, false /* constCall */)
 		}
 		outTxs, outReceipts, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, epochReader, chainReader, syscall)
 		if err != nil {
@@ -230,7 +230,7 @@ func ExecuteBlockEphemerally(
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -341,7 +341,7 @@ func ExecuteBlockEphemerallyBor(
 	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
-	defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -464,7 +464,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, constCall bool) (result []byte, err error) {
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -476,8 +476,9 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
+		true, // isFree
 	)
-	vmConfig := vm.Config{NoReceipts: true}
+	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
 	var txContext vm.TxContext
@@ -506,11 +507,36 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	return ret, err
 }
 
-// from the null sender, with 50M gas.
-func SysCallContractTx(contract common.Address, data []byte) (tx types.Transaction, err error) {
-	//nonce := ibs.GetNonce(SystemAddress)
-	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(state.SystemAddress)
+// SysCreate is a special (system) contract creation methods for genesis constructors.
+func SysCreate(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+
+	msg := types.NewMessage(
+		contract,
+		nil, // to
+		0, u256.Num0,
+		math.MaxUint64, u256.Num0,
+		nil, nil,
+		data, nil, false,
+		true, // isFree
+	)
+	vmConfig := vm.Config{NoReceipts: true}
+	// Create a new context to be used in the EVM environment
+	author := &contract
+	txContext := NewEVMTxContext(msg)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author)
+	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
+
+	ret, _, err := evm.SysCreate(
+		vm.AccountRef(msg.From()),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		contract,
+	)
+	return ret, err
 }
 
 func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
@@ -547,7 +573,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 	receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine)
+		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */)
 	}
 	if isMining {
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
@@ -569,8 +595,8 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
-	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	engine.Initialize(cc, chain, epochReader, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */)
 	})
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64()), noop)
