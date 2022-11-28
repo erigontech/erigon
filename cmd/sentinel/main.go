@@ -38,7 +38,7 @@ import (
 )
 
 func main() {
-	app := sentinelapp.MakeApp(runSentinelNode, flags.LightClientDefaultFlags)
+	app := sentinelapp.MakeApp(runSentinelNode, flags.CLDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -74,27 +74,27 @@ func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*consensusrpc.Reques
 }
 
 func runSentinelNode(cliCtx *cli.Context) error {
-	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
+	cfg, _ := lcCli.SetupConsensusClientCfg(cliCtx)
 	ctx := context.Background()
 
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
-	log.Info("[Sentinel] running sentinel with configuration", "cfg", lcCfg)
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
+	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
 	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        lcCfg.Addr,
-		Port:          int(lcCfg.Port),
-		TCPPort:       lcCfg.ServerTcpPort,
-		GenesisConfig: lcCfg.GenesisCfg,
-		NetworkConfig: lcCfg.NetworkCfg,
-		BeaconConfig:  lcCfg.BeaconCfg,
-		NoDiscovery:   lcCfg.NoDiscovery,
-	}, nil, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
+		IpAddr:        cfg.Addr,
+		Port:          int(cfg.Port),
+		TCPPort:       cfg.ServerTcpPort,
+		GenesisConfig: cfg.GenesisCfg,
+		NetworkConfig: cfg.NetworkCfg,
+		BeaconConfig:  cfg.BeaconCfg,
+		NoDiscovery:   cfg.NoDiscovery,
+	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil)
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err
 	}
-	log.Info("[Sentinel] Sentinel started", "addr", lcCfg.ServerAddr)
+	log.Info("[Sentinel] Sentinel started", "addr", cfg.ServerAddr)
 
-	digest, err := fork.ComputeForkDigest(lcCfg.BeaconCfg, lcCfg.GenesisCfg)
+	digest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
 	if err != nil {
 		log.Error("[Sentinel] Could not compute fork digeest", "err", err)
 		return err
