@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -161,6 +162,9 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
 	evm.txContext = txCtx
 	evm.intraBlockState = ibs
+
+	// ensure the evm is reset to be used again
+	atomic.StoreInt32(&evm.abort, 0)
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
