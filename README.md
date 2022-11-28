@@ -6,8 +6,6 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 
 ![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
 
-![Hive](https://gist.githubusercontent.com/revitteth/dc492845ba6eb694e6c7279224634b20/raw/badge.svg)
-
 <!--ts-->
 
 - [System Requirements](#system-requirements)
