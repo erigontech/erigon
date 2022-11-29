@@ -356,7 +356,7 @@ func dump_storage_preimages(cfg optionsCfg) error {
 		return err
 	}
 	collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize))
-
+	defer collector.Close()
 	stateCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
