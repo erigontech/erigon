@@ -235,8 +235,14 @@ func (rs *State22) queuePush(t *TxTask) {
 
 func (rs *State22) AddWork(txTask *TxTask) {
 	txTask.BalanceIncreaseSet = nil
-	txTask.ReadLists = nil
-	txTask.WriteLists = nil
+	if txTask.ReadLists != nil {
+		returnReadList(txTask.ReadLists)
+		txTask.ReadLists = nil
+	}
+	if txTask.WriteLists != nil {
+		returnWriteList(txTask.WriteLists)
+		txTask.WriteLists = nil
+	}
 	txTask.ResultsSize = 0
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
@@ -427,6 +433,11 @@ func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregat
 	if err := rs.appplyState(roTx, txTask, agg); err != nil {
 		return err
 	}
+
+	returnReadList(txTask.ReadLists)
+	returnWriteList(txTask.WriteLists)
+
+	txTask.ReadLists, txTask.WriteLists = nil, nil
 	return nil
 }
 
@@ -638,13 +649,8 @@ type StateWriter22 struct {
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
 	return &StateWriter22{
-		rs: rs,
-		writeLists: map[string]*KvList{
-			kv.PlainState:        {},
-			kv.Code:              {},
-			kv.PlainContractCode: {},
-			kv.IncarnationMap:    {},
-		},
+		rs:           rs,
+		writeLists:   newWriteList(),
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
@@ -657,12 +663,7 @@ func (w *StateWriter22) SetTxNum(txNum uint64) {
 }
 
 func (w *StateWriter22) ResetWriteSet() {
-	w.writeLists = map[string]*KvList{
-		kv.PlainState:        {},
-		kv.Code:              {},
-		kv.PlainContractCode: {},
-		kv.IncarnationMap:    {},
-	}
+	w.writeLists = newWriteList()
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
@@ -745,13 +746,8 @@ type StateReader22 struct {
 
 func NewStateReader22(rs *State22) *StateReader22 {
 	return &StateReader22{
-		rs: rs,
-		readLists: map[string]*KvList{
-			kv.PlainState:     {},
-			kv.Code:           {},
-			CodeSizeTable:     {},
-			kv.IncarnationMap: {},
-		},
+		rs:        rs,
+		readLists: newReadList(),
 	}
 }
 
@@ -764,12 +760,7 @@ func (r *StateReader22) SetTx(tx kv.Tx) {
 }
 
 func (r *StateReader22) ResetReadSet() {
-	r.readLists = map[string]*KvList{
-		kv.PlainState:     {},
-		kv.Code:           {},
-		CodeSizeTable:     {},
-		kv.IncarnationMap: {},
-	}
+	r.readLists = newReadList()
 }
 
 func (r *StateReader22) ReadSet() map[string]*KvList {
@@ -893,3 +884,43 @@ func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, 
 	}
 	return binary.BigEndian.Uint64(enc), nil
 }
+
+var writeListPool = sync.Pool{
+	New: func() any {
+		return map[string]*KvList{
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.PlainContractCode: {},
+			kv.IncarnationMap:    {},
+		}
+	},
+}
+
+func newWriteList() map[string]*KvList {
+	w := writeListPool.Get().(map[string]*KvList)
+	for _, tbl := range w {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
+	return w
+}
+func returnWriteList(w map[string]*KvList) { writeListPool.Put(w) }
+
+var readListPool = sync.Pool{
+	New: func() any {
+		return map[string]*KvList{
+			kv.PlainState:     {},
+			kv.Code:           {},
+			CodeSizeTable:     {},
+			kv.IncarnationMap: {},
+		}
+	},
+}
+
+func newReadList() map[string]*KvList {
+	w := readListPool.Get().(map[string]*KvList)
+	for _, tbl := range w {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
+	return w
+}
+func returnReadList(w map[string]*KvList) { readListPool.Put(w) }
