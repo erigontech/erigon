@@ -20,10 +20,10 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
@@ -42,13 +42,13 @@ type LightClient struct {
 	highestSeen       uint64 // Highest ETH1 block seen
 	recentHashesCache *lru.Cache
 	db                kv.RwDB
-	sentinel          consensusrpc.SentinelClient
+	sentinel          sentinel.SentinelClient
 	execution         remote.ETHBACKENDServer
 	store             *LightClientStore
 }
 
 func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel consensusrpc.SentinelClient,
+	execution remote.ETHBACKENDServer, sentinel sentinel.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
 	return &LightClient{
@@ -217,7 +217,7 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &consensusrpc.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyRequest{})
 			if err != nil {
 				log.Warn("could not read peers", "err", err)
 				continue

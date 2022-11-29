@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 )
 
 const (
@@ -12,8 +12,8 @@ const (
 )
 
 type gossipObject struct {
-	data []byte                  // gossip data
-	t    consensusrpc.GossipType // determine which gossip message we are notifying of
+	data []byte              // gossip data
+	t    sentinel.GossipType // determine which gossip message we are notifying of
 }
 
 type gossipNotifier struct {
@@ -28,7 +28,7 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t consensusrpc.GossipType, data []byte) {
+func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
