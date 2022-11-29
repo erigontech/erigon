@@ -106,7 +106,6 @@ func Exec3(ctx context.Context,
 	genesis *core.Genesis,
 ) (err error) {
 	useExternalTx := applyTx != nil
-	fmt.Printf("exec: parallell!! %t, %t\n", useExternalTx, parallel)
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
