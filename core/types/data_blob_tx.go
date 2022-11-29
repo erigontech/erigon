@@ -351,7 +351,8 @@ type BlobTxMessage struct {
 }
 
 func (tx *BlobTxMessage) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
+	err := dr.Container(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
+	return err
 }
 
 func (tx *BlobTxMessage) Serialize(w *codec.EncodingWriter) error {
@@ -584,7 +585,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 func (stx *SignedBlobTx) Hash() common.Hash {
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.GetChainID(),
-		stx.GetNonce,
+		stx.GetNonce(),
 		stx.GetTip(),
 		stx.GetFeeCap(),
 		stx.GetGas(),
@@ -602,14 +603,13 @@ func (stx *SignedBlobTx) Hash() common.Hash {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx SignedBlobTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
 	// encode TxType
-	b[0] = DynamicFeeTxType
+	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w); err != nil {
 		return err
 	}
 	return nil
@@ -626,7 +626,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 
 // TODO: Review encoding order
 // by trangtran
-func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (stx SignedBlobTx) encodePayload(w io.Writer) error {
 	wcodec := codec.NewEncodingWriter(w)
 	return wcodec.Container(&stx.Message, &stx.Signature)
 }
@@ -672,7 +672,8 @@ func (tx SignedBlobTx) EncodingSize() int {
 }
 
 func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container(&stx.Message, &stx.Signature)
+	err := dr.Container(&stx.Message, &stx.Signature)
+	return err
 }
 
 func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {

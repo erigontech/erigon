@@ -293,6 +293,12 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
+	case *SignedBlobTx:
+		chainID := uint256.Int(t.Message.ChainID)
+		if !chainID.IsZero() && !chainID.Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, V = decodeSignature(sig)
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
