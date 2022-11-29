@@ -38,3 +38,6 @@ type ChainSideEvent struct {
 }
 
 type ChainHeadEvent struct{ Block *types.Block }
+
+// NewVoteEvent is posted when a batch of votes enters the vote pool.
+type NewVoteEvent struct{ Vote *types.VoteEnvelope }

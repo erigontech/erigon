@@ -250,6 +250,8 @@ type ChainConfig struct {
 	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
+	BonehBlock      *big.Int `json:"bonehBlock,omitempty" toml:",omitempty"`      // bonehBlock switch block (nil = no fork, 0 = already activated)
+	LynnBlock       *big.Int `json:"lynnBlock,omitempty" toml:",omitempty"`       // lynnBlock switch block (nil = no fork, 0 = already activated)
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
 	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
 	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
@@ -555,6 +557,26 @@ func (c *ChainConfig) IsEuler(num *big.Int) bool {
 
 func (c *ChainConfig) IsOnEuler(num *big.Int) bool {
 	return configNumEqual(c.EulerBlock, num)
+}
+
+// IsBoneh returns whether num is either equal to the first fast finality fork block or greater.
+func (c *ChainConfig) IsBoneh(num *big.Int) bool {
+	return isForked(c.BonehBlock, num.Uint64())
+}
+
+// IsOnBoneh returns whether num is equal to the first fast finality fork block.
+func (c *ChainConfig) IsOnBoneh(num *big.Int) bool {
+	return configNumEqual(c.BonehBlock, num)
+}
+
+// IsLynn returns whether num is either equal to the second fast finality fork block or greater.
+func (c *ChainConfig) IsLynn(num *big.Int) bool {
+	return isForked(c.LynnBlock, num.Uint64())
+}
+
+// IsOnLynn returns whether num is equal to the second fast finality fork block.
+func (c *ChainConfig) IsOnLynn(num *big.Int) bool {
+	return configNumEqual(c.LynnBlock, num)
 }
 
 // IsGibbs returns whether num is either equal to the euler fork block or greater.
