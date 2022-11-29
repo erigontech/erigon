@@ -20,7 +20,8 @@ import "math/big"
 
 // GasLimitBoundDivisor it can be changed by BSC
 var (
-	GasLimitBoundDivisor uint64 = 1024 // The bound divisor of the gas limit, used in update calculations.
+	GasLimitBoundDivisor       uint64 = 1024 // The bound divisor of the gas limit, used in update calculations.
+	ParliaGasLimitBoundDivisor uint64 = 256  // The bound divisor of the gas limit, used in update calculations.
 )
 
 const (
