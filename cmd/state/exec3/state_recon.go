@@ -355,7 +355,9 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
 			if _, _, err = rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
-				err = fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
+				if _, readError := rw.stateReader.ReadError(); !readError {
+					panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+				}
 			}
 		}
 	} else if txTask.TxIndex == -1 {
@@ -371,7 +373,9 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
-				panic(err)
+				if _, readError := rw.stateReader.ReadError(); !readError {
+					panic(err)
+				}
 			} else if isSystemTx {
 				return
 			}
@@ -393,10 +397,14 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
+			if _, readError := rw.stateReader.ReadError(); !readError {
+				panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
+			}
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
-			panic(err)
+			if _, readError := rw.stateReader.ReadError(); !readError {
+				panic(err)
+			}
 		}
 	}
 	if dependency, ok := rw.stateReader.ReadError(); ok || err != nil {

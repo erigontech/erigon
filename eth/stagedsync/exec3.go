@@ -1293,42 +1293,71 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		var lastKey []byte
+		var lastVal []byte
 		if err = plainStateCollector.Load(tx, kv.PlainState, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if !bytes.Equal(k[:len(k)-8], lastKey) {
-				lastKey = append(lastKey[:0], k[:len(k)-8]...)
-				if len(v) > 0 {
-					return next(k, k[:len(k)-8], v)
+				if lastKey != nil && len(lastVal) > 0 {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
 				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
 			}
+			lastVal = append(lastVal[:0], v...)
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollector.Close()
+		if lastKey != nil && len(lastVal) > 0 {
+			if e := tx.Put(kv.PlainState, lastKey, lastVal); e != nil {
+				return e
+			}
+		}
+		lastKey = nil
+		lastVal = nil
 		if err = codeCollector.Load(tx, kv.Code, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if !bytes.Equal(k[:len(k)-8], lastKey) {
-				lastKey = append(lastKey[:0], k[:len(k)-8]...)
-				if len(v) > 0 {
-					return next(k, k[:len(k)-8], v)
+				if lastKey != nil && len(lastVal) > 0 {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
 				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
 			}
+			lastVal = append(lastVal[:0], v...)
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollector.Close()
+		if lastKey != nil && len(lastVal) > 0 {
+			if e := tx.Put(kv.Code, lastKey, lastVal); e != nil {
+				return e
+			}
+		}
+		lastKey = nil
+		lastVal = nil
 		if err = plainContractCollector.Load(tx, kv.PlainContractCode, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if !bytes.Equal(k[:len(k)-8], lastKey) {
-				lastKey = append(lastKey[:0], k[:len(k)-8]...)
-				if len(v) > 0 {
-					return next(k, k[:len(k)-8], v)
+				if lastKey != nil && len(lastVal) > 0 {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
 				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
 			}
+			lastVal = append(lastVal[:0], v...)
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainContractCollector.Close()
+		if lastKey != nil && len(lastVal) > 0 {
+			if e := tx.Put(kv.PlainContractCode, lastKey, lastVal); e != nil {
+				return e
+			}
+		}
 		if err := s.Update(tx, blockNum); err != nil {
 			return err
 		}

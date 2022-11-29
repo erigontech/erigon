@@ -1285,6 +1285,7 @@ func iterate(filename string, prefix string) error {
 			ef, _ := eliasfano32.ReadEliasFano(val)
 			efIt := ef.Iterator()
 			fmt.Printf("[%x] =>", key)
+			cnt := 0
 			for efIt.HasNext() {
 				txNum := efIt.Next()
 				var txKey [8]byte
@@ -1295,6 +1296,11 @@ func iterate(filename string, prefix string) error {
 				fmt.Printf(" %d", txNum)
 				if len(v) == 0 {
 					fmt.Printf("*")
+				}
+				cnt++
+				if cnt == 16 {
+					fmt.Printf("\n")
+					cnt = 0
 				}
 			}
 			fmt.Printf("\n")
@@ -1319,6 +1325,22 @@ func readSeg(chaindata string) error {
 		count++
 	}
 	fmt.Printf("count=%d\n", count)
+	return nil
+}
+
+func dumpState(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			fmt.Printf("%x %x\n", k, v)
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1451,6 +1473,8 @@ func main() {
 		err = rmSnKey(*chaindata)
 	case "readSeg":
 		err = readSeg(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 	}
 
 	if err != nil {
