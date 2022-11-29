@@ -270,9 +270,6 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		ot.precompile = true
 		return
 	}
-	if value == nil {
-		value = uint256.NewInt(0)
-	}
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
