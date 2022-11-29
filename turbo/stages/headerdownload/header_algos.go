@@ -298,9 +298,9 @@ func (hd *HeaderDownload) logAnchorState() {
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
-	log.Info("[Downloader] Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
+	log.Debug("[Downloader] Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	for _, s := range ss {
-		log.Info(s)
+		log.Debug(s)
 	}
 }
 
@@ -1297,7 +1297,7 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				_, sentToPeer := headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
+					hd.UpdateRetryTime(req, currentTime, 30*time.Second /* timeout */)
 					log.Debug("[Downloader] Sent request", "height", req.Number)
 				}
 			}

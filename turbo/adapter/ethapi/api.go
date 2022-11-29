@@ -398,7 +398,10 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		chainId = types.DeriveChainId(&t.V)
-		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
+		if !chainId.IsZero() {
+			result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		}
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
@@ -410,9 +413,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
-		if len(t.AccessList) > 0 {
-			result.Accesses = &t.AccessList
-		}
+		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
 		chainId.Set(t.ChainID)
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
@@ -421,9 +422,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
-		if len(t.AccessList) > 0 {
-			result.Accesses = &t.AccessList
-		}
+		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
 		if baseFee != nil && blockHash != (common.Hash{}) {
 			// price = min(tip, gasFeeCap - baseFee) + baseFee

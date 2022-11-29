@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -62,7 +63,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	// generate some random topics
 	topics := make([][]common.Hash, 0)
 	for i := 0; i < 10; i++ {
-		bytes := make([]byte, common.HashLength)
+		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
 		topics = append(topics, toAdd)

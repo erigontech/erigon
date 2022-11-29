@@ -22,13 +22,13 @@ import (
 	_ "net/http/pprof" //nolint:gosec
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -71,8 +71,8 @@ var (
 
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
-	pprofFlag, pprofAddrFlag, pprofPortFlag,
-	cpuprofileFlag, traceFlag,
+	&pprofFlag, &pprofAddrFlag, &pprofPortFlag,
+	&cpuprofileFlag, &traceFlag,
 }
 
 func SetupCobra(cmd *cobra.Command) error {

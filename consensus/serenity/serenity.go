@@ -209,8 +209,8 @@ func (s *Serenity) IsServiceTransaction(sender common.Address, syscall consensus
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-	s.eth1Engine.Initialize(config, chain, e, header, txs, uncles, syscall)
+func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, e, header, state, txs, uncles, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {

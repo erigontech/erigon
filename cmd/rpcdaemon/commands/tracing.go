@@ -8,6 +8,8 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -21,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -83,22 +84,35 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
-	for idx, tx := range block.Transactions() {
+	for idx, txn := range block.Transactions() {
 		select {
 		default:
 		case <-ctx.Done():
 			stream.WriteNil()
 			return ctx.Err()
 		}
-		ibs.Prepare(tx.Hash(), block.Hash(), idx)
-		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
+		ibs.Prepare(txn.Hash(), block.Hash(), idx)
+		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		txCtx := vm.TxContext{
-			TxHash:   tx.Hash(),
+			TxHash:   txn.Hash(),
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),
 		}
 
-		transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+
+		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
+		if err != nil {
+			stream.SetBuffer([]byte{})
+			stream.WriteMore()
+			stream.WriteObjectStart()
+			err = rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			if err != nil {
+				return err
+			}
+		}
+
 		_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		if idx != len(block.Transactions())-1 {
 			stream.WriteMore()

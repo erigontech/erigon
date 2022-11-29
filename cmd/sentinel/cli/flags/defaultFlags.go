@@ -1,15 +1,15 @@
 package flags
 
-import "github.com/urfave/cli"
+import "github.com/urfave/cli/v2"
 
-var LightClientDefaultFlags = []cli.Flag{
-	LightClientPort,
-	LightClientAddr,
-	LightClientTcpPort,
-	LightClientVerbosity,
-	LightClientChain,
-	LightClientServerAddr,
-	LightClientServerPort,
-	LightClientServerProtocol,
-	LightClientDiscovery,
+var CLDefaultFlags = []cli.Flag{
+	&SentinelDiscoveryPort,
+	&SentinelDiscoveryAddr,
+	&SentinelServerPort,
+	&SentinelServerAddr,
+	&Chain,
+	&Verbosity,
+	&SentinelTcpPort,
+	&NoDiscovery,
+	&ChaindataFlag,
 }

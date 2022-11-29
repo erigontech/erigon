@@ -48,9 +48,6 @@ func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	if s.ID == stages.Execution && newBlockNum == 0 {
-		panic(newBlockNum)
-	}
 	if m, ok := syncMetrics[s.ID]; ok {
 		m.Set(newBlockNum)
 	}

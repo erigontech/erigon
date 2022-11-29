@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -53,7 +54,7 @@ const (
 	extraSeal        = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 	nextForkHashSize = 4  // Fixed number of extra-data suffix bytes reserved for nextForkHash.
 
-	validatorBytesLength = common.AddressLength
+	validatorBytesLength = length.Addr
 	wiggleTime           = uint64(1) // second, Random delay (per signer) to allow concurrent signers
 	initialBackOffTime   = uint64(1) // second
 	processBackOffTime   = uint64(1) // second
@@ -656,7 +657,8 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 }
 
 // Initialize runs any pre-transaction state modifications (e.g. epoch start)
-func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs types.Transactions, systemTxs types.Transactions, err error) {

@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -46,6 +47,7 @@ type Sentinel struct {
 	cfg        *SentinelConfig
 	peers      *peers.Peers
 	MetadataV2 *cltypes.MetadataV2
+	db         kv.RoDB
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -129,7 +131,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.host, s.peers, s.MetadataV2).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.MetadataV2).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -160,10 +162,12 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
+	db kv.RoDB,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
+		db:  db,
 	}
 
 	// Setup discovery
@@ -214,7 +218,7 @@ func (s *Sentinel) Start(
 // potentially we can put the req/resp handler here as well?
 ) error {
 	if s.started {
-		log.Warn("Sentinel already running")
+		log.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()

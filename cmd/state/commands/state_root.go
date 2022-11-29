@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
