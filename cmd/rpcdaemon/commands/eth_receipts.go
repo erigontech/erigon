@@ -405,9 +405,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
 		ibs := state.New(stateReader)
 		ibs.Prepare(txHash, blockHash, txIndex)
+
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
 		evm.ResetBetweenBlocks(blockCtx, txCtx, ibs, vmConfig, rules)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
