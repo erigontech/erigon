@@ -377,8 +377,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Try to read code header if it claims to be EOF-formatted.
 	var header EOF1Header
 	if evm.chainRules.IsShanghai && hasEOFMagic(codeAndHash.code) {
+		evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+		if !ok {
+			return nil, common.Address{}, gas, ErrInvalidInterpreter
+		}
 		var err error
-		header, err = validateEOF(codeAndHash.code, evm.interpreter.cfg.JumpTable)
+		header, err = validateEOF(codeAndHash.code, evmInterpreter.jt)
 		if err != nil {
 			return nil, common.Address{}, gas, ErrInvalidEOFCode
 		}
@@ -409,7 +413,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		if evm.chainRules.IsShanghai {
 			// Allow only valid EOF1 if EIP-3540 and EIP-3670 are enabled.
 			if hasEOFMagic(ret) {
-				_, err = validateEOF(ret, evm.interpreter.cfg.JumpTable)
+				evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
+				if !ok {
+					return nil, common.Address{}, gas, ErrInvalidInterpreter
+				}
+				_, err = validateEOF(ret, evmInterpreter.jt)
 				if err != nil {
 					err = ErrInvalidEOFCode
 				}

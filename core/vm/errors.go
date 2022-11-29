@@ -43,6 +43,7 @@ var (
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
 	ErrInvalidEOFCode           = errors.New("invalid code: EOF validation failed")
+	ErrInvalidInterpreter       = errors.New("invalid interpreter")
 
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
