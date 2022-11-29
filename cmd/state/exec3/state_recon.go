@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -278,7 +279,7 @@ func (rw *ReconWorker) Run() {
 
 var noop = state2.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
+func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -339,9 +340,7 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		if txTask.Tx.IsStarkNet() {
 			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			blockContext := core.NewEVMBlockContext(txTask.Header, txTask.GetHashFn, rw.engine, nil /* author */)
-			txContext := core.NewEVMTxContext(msg)
-			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+			vmenv = vm.NewEVM(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.chainConfig, vmConfig)
 		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)

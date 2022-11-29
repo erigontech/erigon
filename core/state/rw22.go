@@ -15,81 +15,23 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	atomic2 "go.uber.org/atomic"
 )
-
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
-type TxTask struct {
-	TxNum              uint64
-	BlockNum           uint64
-	Rules              *params.Rules
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Coinbase           common.Address
-	BlockHash          common.Hash
-	Sender             *common.Address
-	SkipAnalysis       bool
-	TxIndex            int // -1 for block initialisation
-	Final              bool
-	Tx                 types.Transaction
-	GetHashFn          func(n uint64) common.Hash
-	TxAsMessage        types.Message
-	BalanceIncreaseSet map[common.Address]uint256.Int
-	ReadLists          map[string]*KvList
-	WriteLists         map[string]*KvList
-	AccountPrevs       map[string][]byte
-	AccountDels        map[string]*accounts.Account
-	StoragePrevs       map[string][]byte
-	CodePrevs          map[string]uint64
-	ResultsSize        int64
-	Error              error
-	Logs               []*types.Log
-	TraceFroms         map[common.Address]struct{}
-	TraceTos           map[common.Address]struct{}
-}
-
-type TxTaskQueue []*TxTask
-
-func (h TxTaskQueue) Len() int {
-	return len(h)
-}
-
-func (h TxTaskQueue) Less(i, j int) bool {
-	return h[i].TxNum < h[j].TxNum
-}
-
-func (h TxTaskQueue) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *TxTaskQueue) Push(a interface{}) {
-	*h = append(*h, a.(*TxTask))
-}
-
-func (h *TxTaskQueue) Pop() interface{} {
-	c := *h
-	*h = c[:len(c)-1]
-	return c[len(c)-1]
-}
 
 const CodeSizeTable = "CodeSize"
 
 type State22 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
-	triggers     map[uint64]*TxTask
+	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.RWMutex
-	queue        TxTaskQueue
+	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
 	changes      map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
@@ -107,7 +49,7 @@ func stateItemLess(i, j statePair) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]*TxTask{},
+		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree.BTreeG[statePair]{},
 		txsDone:      atomic2.NewUint64(0),
@@ -180,19 +122,19 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *State22) Schedule() (*TxTask, bool) {
+func (rs *State22) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*TxTask), true
+		return heap.Pop(&rs.queue).(*exec22.TxTask), true
 	}
 	return nil, false
 }
 
-func (rs *State22) RegisterSender(txTask *TxTask) bool {
+func (rs *State22) RegisterSender(txTask *exec22.TxTask) bool {
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
@@ -227,13 +169,13 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *State22) queuePush(t *TxTask) {
+func (rs *State22) queuePush(t *exec22.TxTask) {
 	rs.queueLock.Lock()
 	heap.Push(&rs.queue, t)
 	rs.queueLock.Unlock()
 }
 
-func (rs *State22) AddWork(txTask *TxTask) {
+func (rs *State22) AddWork(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	if txTask.ReadLists != nil {
 		returnReadList(txTask.ReadLists)
@@ -267,7 +209,7 @@ func (rs *State22) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) appplyState1(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -377,7 +319,7 @@ func (rs *State22) appplyState1(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggreg
 	return nil
 }
 
-func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -425,7 +367,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggrega
 	return nil
 }
 
-func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
 	agg.SetTxNum(txTask.TxNum)
 	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
 		return err
@@ -441,7 +383,7 @@ func (rs *State22) ApplyState(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregat
 	return nil
 }
 
-func (rs *State22) ApplyHistory(roTx kv.Tx, txTask *TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) ApplyHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
@@ -584,7 +526,7 @@ func (rs *State22) SizeEstimate() uint64 {
 	return r
 }
 
-func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
+func (rs *State22) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	search := statePair{}
 	var t *btree.BTreeG[statePair]
 
@@ -619,28 +561,10 @@ func (rs *State22) ReadsValid(readLists map[string]*KvList) bool {
 	return true
 }
 
-// KvList sort.Interface to sort write list by keys
-type KvList struct {
-	Keys, Vals [][]byte
-}
-
-func (l KvList) Len() int {
-	return len(l.Keys)
-}
-
-func (l KvList) Less(i, j int) bool {
-	return bytes.Compare(l.Keys[i], l.Keys[j]) < 0
-}
-
-func (l *KvList) Swap(i, j int) {
-	l.Keys[i], l.Keys[j] = l.Keys[j], l.Keys[i]
-	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
-}
-
 type StateWriter22 struct {
 	rs           *State22
 	txNum        uint64
-	writeLists   map[string]*KvList
+	writeLists   map[string]*exec22.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -670,7 +594,7 @@ func (w *StateWriter22) ResetWriteSet() {
 	w.codePrevs = map[string]uint64{}
 }
 
-func (w *StateWriter22) WriteSet() map[string]*KvList {
+func (w *StateWriter22) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
@@ -741,7 +665,7 @@ type StateReader22 struct {
 	trace     bool
 	rs        *State22
 	composite []byte
-	readLists map[string]*KvList
+	readLists map[string]*exec22.KvList
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
@@ -763,7 +687,7 @@ func (r *StateReader22) ResetReadSet() {
 	r.readLists = newReadList()
 }
 
-func (r *StateReader22) ReadSet() map[string]*KvList {
+func (r *StateReader22) ReadSet() map[string]*exec22.KvList {
 	return r.readLists
 }
 
@@ -887,7 +811,7 @@ func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, 
 
 var writeListPool = sync.Pool{
 	New: func() any {
-		return map[string]*KvList{
+		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
 			kv.Code:              {},
 			kv.PlainContractCode: {},
@@ -896,18 +820,18 @@ var writeListPool = sync.Pool{
 	},
 }
 
-func newWriteList() map[string]*KvList {
-	w := writeListPool.Get().(map[string]*KvList)
+func newWriteList() map[string]*exec22.KvList {
+	w := writeListPool.Get().(map[string]*exec22.KvList)
 	for _, tbl := range w {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return w
 }
-func returnWriteList(w map[string]*KvList) { writeListPool.Put(w) }
+func returnWriteList(w map[string]*exec22.KvList) { writeListPool.Put(w) }
 
 var readListPool = sync.Pool{
 	New: func() any {
-		return map[string]*KvList{
+		return map[string]*exec22.KvList{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
@@ -916,11 +840,11 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() map[string]*KvList {
-	w := readListPool.Get().(map[string]*KvList)
+func newReadList() map[string]*exec22.KvList {
+	w := readListPool.Get().(map[string]*exec22.KvList)
 	for _, tbl := range w {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return w
 }
-func returnReadList(w map[string]*KvList) { readListPool.Put(w) }
+func returnReadList(w map[string]*exec22.KvList) { readListPool.Put(w) }

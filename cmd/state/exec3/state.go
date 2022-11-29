@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -36,7 +38,7 @@ type Worker struct {
 	engine   consensus.Engine
 	logger   log.Logger
 	genesis  *core.Genesis
-	resultCh chan *state.TxTask
+	resultCh chan *exec22.TxTask
 	epoch    EpochReader
 	chain    ChainReader
 	isPoSA   bool
@@ -46,7 +48,7 @@ type Worker struct {
 	evm         *vm.EVM
 }
 
-func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *state.TxTask, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	ctx := context.Background()
 	w := &Worker{
 		lock:        lock,
@@ -66,7 +68,7 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 		engine:   engine,
 
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
-		evm:         vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
@@ -96,7 +98,7 @@ func (rw *Worker) Run() {
 	}
 }
 
-func (rw *Worker) RunTxTask(txTask *state.TxTask) {
+func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	if rw.background && rw.chainTx == nil {
@@ -178,12 +180,10 @@ func (rw *Worker) RunTxTask(txTask *state.TxTask) {
 
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
-			rw.starkNetEvm.Reset(vm.TxContext{}, ibs)
+			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
 			vmenv = rw.starkNetEvm
 		} else {
-			blockContext := core.NewEVMBlockContext(header, txTask.GetHashFn, rw.engine, nil /* author */)
-			txContext := core.NewEVMTxContext(msg)
-			rw.evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, txTask.Rules)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
@@ -299,10 +299,10 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *state.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
 	queueSize := workerCount * 4
 	reconWorkers = make([]*Worker, workerCount)
-	resultCh = make(chan *state.TxTask, queueSize)
+	resultCh = make(chan *exec22.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewWorker(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}

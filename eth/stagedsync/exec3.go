@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -57,7 +58,7 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *state.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	common.ReadMemStats(&m)
@@ -168,7 +169,7 @@ func Exec3(ctx context.Context,
 	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var resultsSize = atomic2.NewInt64(0)
 	var lock sync.RWMutex
-	var rws state.TxTaskQueue
+	var rws exec22.TxTaskQueue
 	var rwsLock sync.RWMutex
 
 	// erigon3 execution doesn't support power-off shutdown yet. it need to do quite a lot of work on exit
@@ -316,7 +317,7 @@ func Exec3(ctx context.Context,
 
 						// Drain results queue as well
 						for rws.Len() > 0 {
-							txTask := heap.Pop(&rws).(*state.TxTask)
+							txTask := heap.Pop(&rws).(*exec22.TxTask)
 							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
@@ -451,6 +452,7 @@ loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 
 		if parallel {
 			func() {
@@ -470,19 +472,20 @@ loop:
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &state.TxTask{
-				BlockNum:     blockNum,
-				Header:       header,
-				Coinbase:     b.Coinbase(),
-				Uncles:       b.Uncles(),
-				Rules:        rules,
-				Txs:          txs,
-				TxNum:        inputTxNum,
-				TxIndex:      txIndex,
-				BlockHash:    b.Hash(),
-				SkipAnalysis: skipAnalysis,
-				Final:        txIndex == len(txs),
-				GetHashFn:    getHashFn,
+			txTask := &exec22.TxTask{
+				BlockNum:        blockNum,
+				Header:          header,
+				Coinbase:        b.Coinbase(),
+				Uncles:          b.Uncles(),
+				Rules:           rules,
+				Txs:             txs,
+				TxNum:           inputTxNum,
+				TxIndex:         txIndex,
+				BlockHash:       b.Hash(),
+				SkipAnalysis:    skipAnalysis,
+				Final:           txIndex == len(txs),
+				GetHashFn:       getHashFn,
+				EvmBlockContext: blockContext,
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -615,10 +618,10 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *state.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
 	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
-		txTask := heap.Pop(rws).(*state.TxTask)
+		txTask := heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
 			if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
@@ -679,7 +682,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	log.Info(fmt.Sprintf("[%s] Blocks execution, reconstitution", s.LogPrefix()), "fromBlock", s.BlockNumber, "toBlock", blockNum, "toTxNum", txNum)
 
 	var wg sync.WaitGroup
-	workCh := make(chan *state.TxTask, workerCount*4)
+	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
 	var fromKey, toKey []byte
 	bigCount := big.NewInt(int64(workerCount))
@@ -994,23 +997,25 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
-				txTask := &state.TxTask{
-					BlockNum:     bn,
-					Header:       header,
-					Coinbase:     b.Coinbase(),
-					Uncles:       b.Uncles(),
-					Rules:        rules,
-					TxNum:        inputTxNum,
-					Txs:          txs,
-					TxIndex:      txIndex,
-					BlockHash:    b.Hash(),
-					SkipAnalysis: skipAnalysis,
-					Final:        txIndex == len(txs),
-					GetHashFn:    getHashFn,
+				txTask := &exec22.TxTask{
+					BlockNum:        bn,
+					Header:          header,
+					Coinbase:        b.Coinbase(),
+					Uncles:          b.Uncles(),
+					Rules:           rules,
+					TxNum:           inputTxNum,
+					Txs:             txs,
+					TxIndex:         txIndex,
+					BlockHash:       b.Hash(),
+					SkipAnalysis:    skipAnalysis,
+					Final:           txIndex == len(txs),
+					GetHashFn:       getHashFn,
+					EvmBlockContext: blockContext,
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]

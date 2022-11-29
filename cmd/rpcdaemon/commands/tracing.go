@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -93,7 +94,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		ibs.Prepare(txn.Hash(), block.Hash(), idx)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-		txCtx := vm.TxContext{
+		txCtx := evmtypes.TxContext{
 			TxHash:   txn.Hash(),
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),
@@ -250,8 +251,8 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		hash               common.Hash
 		replayTransactions types.Transactions
 		evm                *vm.EVM
-		blockCtx           vm.BlockContext
-		txCtx              vm.TxContext
+		blockCtx           evmtypes.BlockContext
+		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
@@ -346,7 +347,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		baseFee.SetFromBig(parent.BaseFee)
 	}
 
-	blockCtx = vm.BlockContext{
+	blockCtx = evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     getHash,

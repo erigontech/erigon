@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -52,14 +53,14 @@ func (*dummyStatedb) GetRefund() uint64                           { return 1337 
 func (*dummyStatedb) GetBalance(addr common.Address) *uint256.Int { return uint256.NewInt(0) }
 
 type vmContext struct {
-	blockCtx vm.BlockContext
-	txCtx    vm.TxContext
+	blockCtx evmtypes.BlockContext
+	txCtx    evmtypes.TxContext
 }
 
 func testCtx() *vmContext {
-	return &vmContext{blockCtx: vm.BlockContext{
+	return &vmContext{blockCtx: evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+	}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
 }
 
 func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
@@ -83,9 +84,9 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 func TestTracer(t *testing.T) {
 	execTracer := func(code string) ([]byte, string) {
 		t.Helper()
-		ctx := &vmContext{blockCtx: vm.BlockContext{
+		ctx := &vmContext{blockCtx: evmtypes.BlockContext{
 			BlockNumber: 1,
-		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
@@ -155,9 +156,9 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(vm.BlockContext{
+	env := vm.NewEVM(evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false)
 
 	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
@@ -183,7 +184,7 @@ func TestNoStepExec(t *testing.T) {
 	}
 	execTracer := func(code string) []byte {
 		t.Helper()
-		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		ctx := &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)

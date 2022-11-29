@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -101,7 +102,7 @@ func DoCall(
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (evmtypes.BlockContext, evmtypes.TxContext) {
 	var baseFee uint256.Int
 	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -110,7 +111,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 	}
 	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
-		vm.TxContext{
+		evmtypes.TxContext{
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice().ToBig(),
 		}
