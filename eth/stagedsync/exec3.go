@@ -100,13 +100,13 @@ func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlo
 
 func Exec3(ctx context.Context,
 	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
-	rs *state.State22, blockReader services.FullBlockReader,
+	parallel bool, rs *state.State22, blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
 ) (err error) {
 	useExternalTx := applyTx != nil
-	parallel := workerCount > 1
+	fmt.Printf("exec: parallell!! %t, %t\n", useExternalTx, parallel)
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
