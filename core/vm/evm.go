@@ -206,11 +206,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		bigValue := big.NewInt(-1)
-		if value != nil {
-			bigValue = value.ToBig()
-		}
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, bigValue, code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
