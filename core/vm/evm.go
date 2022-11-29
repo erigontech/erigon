@@ -167,6 +167,19 @@ func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
 	atomic.StoreInt32(&evm.abort, 0)
 }
 
+func (evm *EVM) ResetBetweenBlocks(blockCtx BlockContext, txCtx TxContext, ibs IntraBlockState, vmConfig Config, chainRules *params.Rules) {
+	evm.context = blockCtx
+	evm.txContext = txCtx
+	evm.intraBlockState = ibs
+	evm.config = vmConfig
+	evm.chainRules = chainRules
+
+	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+
+	// ensure the evm is reset to be used again
+	atomic.StoreInt32(&evm.abort, 0)
+}
+
 // Cancel cancels any running EVM operation. This may be called concurrently and
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() {

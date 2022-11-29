@@ -107,7 +107,6 @@ func Exec3(ctx context.Context,
 ) (err error) {
 	useExternalTx := applyTx != nil
 	parallel := workerCount > 1
-	fmt.Printf("exec3: %t, %t, %+v\n", useExternalTx, parallel, applyTx)
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
