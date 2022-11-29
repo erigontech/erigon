@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"fmt"
+	"hash"
 	"io"
 	"sync"
 
@@ -166,6 +167,13 @@ var hasherPool = sync.Pool{
 		return sha3.NewLegacyKeccak256()
 	},
 }
+
+func NewLegacyKeccak256() hash.Hash {
+	h := hasherPool.Get().(hash.Hash)
+	h.Reset()
+	return h
+}
+func ReturnToPoolLegacyKeccak256(h hash.Hash) { hasherPool.Put(h) }
 
 func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	sha := hasherPool.Get().(crypto.KeccakState)
