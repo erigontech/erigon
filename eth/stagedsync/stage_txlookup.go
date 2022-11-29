@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -23,8 +24,7 @@ type TxLookupCfg struct {
 	prune     prune.Mode
 	tmpdir    string
 	snapshots *snapshotsync.RoSnapshots
-	isBor     bool
-	borSprint uint64
+	borConfig *params.BorConfig
 }
 
 func StageTxLookupCfg(
@@ -32,16 +32,14 @@ func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
-	isBor bool,
-	borSprint uint64,
+	borConfig *params.BorConfig,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
 		prune:     prune,
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
-		isBor:     isBor,
-		borSprint: borSprint,
+		borConfig: borConfig,
 	}
 }
 
@@ -92,7 +90,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
-	if cfg.isBor {
+	if cfg.borConfig != nil {
 		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
 			return fmt.Errorf("borTxnLookupTransform: %w", err)
 		}
@@ -146,7 +144,7 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 
 		// we add state sync transactions every bor Sprint amount of blocks
-		if blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
+		if blocknum%cfg.borConfig.CalculateSprint(blocknum) == 0 && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
@@ -188,7 +186,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
-	if cfg.isBor {
+	if cfg.borConfig != nil {
 		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 			return fmt.Errorf("unwind BorTxLookUp: %w", err)
 		}
@@ -235,7 +233,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
-		if cfg.isBor && pruneBor {
+		if cfg.borConfig != nil && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}

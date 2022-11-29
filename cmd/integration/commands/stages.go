@@ -1079,13 +1079,8 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	isBor := chainConfig.Bor != nil
-	var sprint uint64
-	if isBor {
-		sprint = chainConfig.Bor.Sprint
-	}
 
-	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, sn, isBor, sprint)
+	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, sn, chainConfig.Bor)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)

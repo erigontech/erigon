@@ -311,8 +311,9 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		number := header.Number.Uint64()
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		if number >= s.config.Sprint {
-			delete(snap.Recents, number-s.config.Sprint)
+		currentSprint := s.config.CalculateSprint(number)
+		if number >= currentSprint {
+			delete(snap.Recents, number-currentSprint)
 		}
 
 		// Resolve the authorization key and check against signers
@@ -334,7 +335,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		snap.Recents[number] = signer
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%s.config.Sprint == 0 {
+		if number > 0 && (number+1)%currentSprint == 0 {
 			if err := validateHeaderExtraField(header.Extra); err != nil {
 				return nil, err
 			}
