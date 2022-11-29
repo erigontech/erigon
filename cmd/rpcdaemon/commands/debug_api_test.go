@@ -99,15 +99,15 @@ func TestTraceBlockByHash(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByHash(context.Background(), *tx.BlockHash, &tracers.TraceConfig{}, stream)
+		err = api.TraceBlockByHash(m.Ctx, *tx.BlockHash, &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
