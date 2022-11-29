@@ -553,8 +553,6 @@ loop:
 					}
 
 					applyTx.CollectMetrics()
-					//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
-					tt = time.Now()
 
 					return nil
 				}(); err != nil {
