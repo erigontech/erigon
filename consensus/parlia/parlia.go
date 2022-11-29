@@ -173,8 +173,8 @@ func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header, chainId *big.Int) (hash common.Hash) {
-	hasher := types.NewLegacyKeccak256()
-	defer types.ReturnToPoolLegacyKeccak256(hasher)
+	hasher := crypto.NewLegacyKeccak256()
+	defer crypto.ReturnToPoolKeccak256(hasher)
 
 	encodeSigHeader(hasher, header, chainId)
 	hasher.Sum(hash[:0])

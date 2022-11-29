@@ -524,8 +524,8 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header) (hash common.Hash) {
-	hasher := types.NewLegacyKeccak256()
-	defer types.ReturnToPoolLegacyKeccak256(hasher)
+	hasher := crypto.NewLegacyKeccak256()
+	defer crypto.ReturnToPoolKeccak256(hasher)
 
 	encodeSigHeader(hasher, header)
 	hasher.Sum(hash[:0])

@@ -404,17 +404,24 @@ func Exec3(ctx context.Context,
 	}
 
 	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
-		if err = chainDb.View(ctx, func(tx kv.Tx) error {
-			h, err = blockReader.Header(ctx, tx, hash, number)
-			if err != nil {
-				return err
+		if parallel {
+			if err = chainDb.View(ctx, func(tx kv.Tx) error {
+				h, err = blockReader.Header(ctx, tx, hash, number)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				panic(err)
 			}
-			return nil
-
-		}); err != nil {
-			panic(err)
+			return h
+		} else {
+			h, err = blockReader.Header(ctx, applyTx, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
 		}
-		return h
 	}
 	var b *types.Block
 	var blockNum uint64
