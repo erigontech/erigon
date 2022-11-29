@@ -3,9 +3,9 @@ package network
 import (
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"golang.org/x/net/context"
 )
 
@@ -19,7 +19,7 @@ type ForwardBeaconDownloader struct {
 	ctx                  context.Context
 	highestSlotProcessed uint64
 	lastDownloadedSlot   uint64
-	sentinel             consensusrpc.SentinelClient // Sentinel
+	sentinel             sentinel.SentinelClient // Sentinel
 	process              ProcessFn
 	isDownloading        bool // Should be set to true to set the blocks to download
 	limitSegmentsLength  int  // Limit how many blocks we store in the downloader without processing
@@ -28,7 +28,7 @@ type ForwardBeaconDownloader struct {
 	mu       sync.Mutex
 }
 
-func NewForwardBeaconDownloader(ctx context.Context, sentinel consensusrpc.SentinelClient) *ForwardBeaconDownloader {
+func NewForwardBeaconDownloader(ctx context.Context, sentinel sentinel.SentinelClient) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
 		ctx:           ctx,
 		segments:      []*cltypes.SignedBeaconBlockBellatrix{},

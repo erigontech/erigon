@@ -139,7 +139,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 		}
 
 		if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Debug("[Sentinel] couldn't connect to peer", "err", err)
+			log.Trace("[Sentinel] couldn't connect to peer", "err", err)
 			continue
 		}
 		connectedPeer = true
