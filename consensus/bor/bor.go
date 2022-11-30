@@ -21,6 +21,12 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -28,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -223,9 +228,10 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	GenesisContractsClient *GenesisContractsClient
+	GenesisContractsClient *contract.GenesisContractsClient
 	validatorSetABI        abi.ABI
 	stateReceiverABI       abi.ABI
+	spanner                Spanner
 	HeimdallClient         IHeimdallClient
 	WithoutHeimdall        bool
 
@@ -241,6 +247,7 @@ func New(
 	db kv.RwDB,
 	heimdallURL string,
 	withoutHeimdall bool,
+	spanner Spanner,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -253,10 +260,10 @@ func New(
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
-	vABI, _ := abi.JSON(strings.NewReader(validatorsetABI))
-	sABI, _ := abi.JSON(strings.NewReader(stateReceiverABI))
-	heimdallClient, _ := NewHeimdallClient(heimdallURL)
-	genesisContractsClient := NewGenesisContractsClient(chainConfig, borConfig.ValidatorContract, borConfig.StateReceiverContract)
+	vABI, _ := abi.JSON(strings.NewReader(contract.ValidatorsetABI))
+	sABI, _ := abi.JSON(strings.NewReader(contract.StateReceiverABI))
+	heimdallClient, _ := heimdall.NewHeimdallClient(heimdallURL)
+	genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, borConfig.ValidatorContract, borConfig.StateReceiverContract)
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
@@ -265,6 +272,7 @@ func New(
 		signatures:             signatures,
 		validatorSetABI:        vABI,
 		stateReceiverABI:       sABI,
+		spanner:                spanner,
 		GenesisContractsClient: genesisContractsClient,
 		HeimdallClient:         heimdallClient,
 		WithoutHeimdall:        withoutHeimdall,
@@ -427,7 +435,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 
 		currentValidators := snap.ValidatorSet.Copy().Validators
 		// sort validator by address
-		sort.Sort(ValidatorsByAddress(currentValidators))
+		sort.Sort(valset.ValidatorsByAddress(currentValidators))
 		for i, validator := range currentValidators {
 			copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
 		}
@@ -485,7 +493,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 					h := checkpoint.Hash()
 
 					// get validators and current span
-					validators, err := c.GetCurrentValidators(n + 1)
+					validators, err := c.spanner.GetCurrentValidators(n+1, c.signer, c.getSpanForBlock)
 					if err != nil {
 						return nil, err
 					}
@@ -670,13 +678,13 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	// get validator set if number
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.GetCurrentValidators(number + 1)
+		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.signer, c.getSpanForBlock)
 		if err != nil {
 			return errors.New("unknown validators")
 		}
 
 		// sort validator by address
-		sort.Sort(ValidatorsByAddress(newValidators))
+		sort.Sort(valset.ValidatorsByAddress(newValidators))
 		for _, validator := range newValidators {
 			header.Extra = append(header.Extra, validator.HeaderBytes()...)
 		}
@@ -716,7 +724,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	var err error
 	headerNumber := header.Number.Uint64()
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
-		cx := chainContext{Chain: chain, Bor: c}
+		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 			log.Error("Error while committing span", "err", err)
@@ -784,7 +792,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 
 	headerNumber := header.Number.Uint64()
 	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
-		cx := chainContext{Chain: chain, Bor: c}
+		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		// check and commit span
 		err := c.checkAndCommitSpan(state, header, cx, syscall)
@@ -965,73 +973,14 @@ func (c *Bor) Close() error {
 	return nil
 }
 
-// GetCurrentSpan get current span from contract
-func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain chainContext, syscall consensus.SystemCall) (*Span, error) {
-
-	// method
-	method := "getCurrentSpan"
-	data, err := c.validatorSetABI.Pack(method)
-	if err != nil {
-		log.Error("Unable to pack tx for getCurrentSpan", "err", err)
-		return nil, err
-	}
-
-	result, err := syscall(common.HexToAddress(c.config.ValidatorContract), data)
-	if err != nil {
-		return nil, err
-	}
-
-	// span result
-	ret := new(struct {
-		Number     *big.Int
-		StartBlock *big.Int
-		EndBlock   *big.Int
-	})
-	if err := c.validatorSetABI.UnpackIntoInterface(ret, method, result); err != nil {
-		return nil, err
-	}
-
-	// create new span
-	span := Span{
-		ID:         ret.Number.Uint64(),
-		StartBlock: ret.StartBlock.Uint64(),
-		EndBlock:   ret.EndBlock.Uint64(),
-	}
-
-	return &span, nil
-}
-
-// GetCurrentValidators get current validators
-func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
-	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
-		validators := []*Validator{
-			{
-				ID:               1,
-				Address:          c.signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
-
-		return validators, nil
-	}
-
-	span, err := c.getSpanForBlock(blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	return span.ValidatorSet.Validators, nil
-}
-
 func (c *Bor) checkAndCommitSpan(
 	state *state.IntraBlockState,
 	header *types.Header,
-	chain chainContext,
+	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain, syscall)
+	span, err := c.spanner.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return err
 	}
@@ -1042,40 +991,40 @@ func (c *Bor) checkAndCommitSpan(
 	return nil
 }
 
-func (c *Bor) needToCommitSpan(span *Span, headerNumber uint64) bool {
+func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool {
 	// if span is nil
-	if span == nil {
+	if currentSpan == nil {
 		return false
 	}
 
 	// check span is not set initially
-	if span.EndBlock == 0 {
+	if currentSpan.EndBlock == 0 {
 		return true
 	}
 
 	// if current block is first block of last sprint in current span
-	if span.EndBlock > c.config.CalculateSprint(headerNumber) && span.EndBlock-c.config.CalculateSprint(headerNumber)+1 == headerNumber {
+	if currentSpan.EndBlock > c.config.CalculateSprint(headerNumber) && currentSpan.EndBlock-c.config.CalculateSprint(headerNumber)+1 == headerNumber {
 		return true
 	}
 
 	return false
 }
 
-func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
+func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 	log.Info("Getting span", "for block", blockNum)
-	var span *HeimdallSpan
-	c.spanCache.AscendGreaterOrEqual(&HeimdallSpan{Span: Span{EndBlock: blockNum}}, func(item btree.Item) bool {
-		span = item.(*HeimdallSpan)
+	var borSpan *span.HeimdallSpan
+	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
+		borSpan = item.(*span.HeimdallSpan)
 		return false
 	})
-	if span == nil {
+	if borSpan == nil {
 		// Span with high enough block number is not loaded
 		var spanID uint64
 		if c.spanCache.Len() > 0 {
-			spanID = c.spanCache.Max().(*HeimdallSpan).ID + 1
+			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
 		}
-		for span == nil || span.EndBlock < blockNum {
-			var heimdallSpan HeimdallSpan
+		for borSpan == nil || borSpan.EndBlock < blockNum {
+			var heimdallSpan span.HeimdallSpan
 			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
@@ -1084,15 +1033,15 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
 				return nil, err
 			}
-			span = &heimdallSpan
-			c.spanCache.ReplaceOrInsert(span)
+			borSpan = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(borSpan)
 			spanID++
 		}
 	} else {
-		for span.StartBlock > blockNum {
+		for borSpan.StartBlock > blockNum {
 			// Span wit low enough block number is not loaded
-			var spanID = span.ID - 1
-			var heimdallSpan HeimdallSpan
+			var spanID = borSpan.ID - 1
+			var heimdallSpan span.HeimdallSpan
 			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(c.execCtx, fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
@@ -1101,24 +1050,24 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
 				return nil, err
 			}
-			span = &heimdallSpan
-			c.spanCache.ReplaceOrInsert(span)
+			borSpan = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(borSpan)
 		}
 	}
 	for c.spanCache.Len() > 128 {
 		c.spanCache.DeleteMin()
 	}
-	return span, nil
+	return borSpan, nil
 }
 
 func (c *Bor) fetchAndCommitSpan(
 	newSpanID uint64,
 	state *state.IntraBlockState,
 	header *types.Header,
-	chain chainContext,
+	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan HeimdallSpan
+	var heimdallSpan span.HeimdallSpan
 
 	if c.WithoutHeimdall {
 		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
@@ -1146,64 +1095,19 @@ func (c *Bor) fetchAndCommitSpan(
 		)
 	}
 
-	// get validators bytes
-	validators := make([]MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
-	for _, val := range heimdallSpan.ValidatorSet.Validators {
-		validators = append(validators, val.MinimalVal())
-	}
-	validatorBytes, err := rlp.EncodeToBytes(validators)
-	if err != nil {
-		return err
-	}
-
-	// get producers bytes
-	producers := make([]MinimalVal, 0, len(heimdallSpan.SelectedProducers))
-	for _, val := range heimdallSpan.SelectedProducers {
-		producers = append(producers, val.MinimalVal())
-	}
-	producerBytes, err := rlp.EncodeToBytes(producers)
-	if err != nil {
-		return err
-	}
-
-	// method
-	method := "commitSpan"
-	log.Debug("✅ Committing new span",
-		"id", heimdallSpan.ID,
-		"startBlock", heimdallSpan.StartBlock,
-		"endBlock", heimdallSpan.EndBlock,
-		"validatorBytes", hex.EncodeToString(validatorBytes),
-		"producerBytes", hex.EncodeToString(producerBytes),
-	)
-
-	// get packed data
-	data, err := c.validatorSetABI.Pack(method,
-		big.NewInt(0).SetUint64(heimdallSpan.ID),
-		big.NewInt(0).SetUint64(heimdallSpan.StartBlock),
-		big.NewInt(0).SetUint64(heimdallSpan.EndBlock),
-		validatorBytes,
-		producerBytes,
-	)
-	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "err", err)
-		return err
-	}
-
-	_, err = syscall(common.HexToAddress(c.config.ValidatorContract), data)
-	// apply message
-	return err
+	return c.spanner.CommitSpan(newSpanID, state, header, chain, heimdallSpan, syscall)
 }
 
 // CommitStates commit states
 func (c *Bor) CommitStates(
 	state *state.IntraBlockState,
 	header *types.Header,
-	chain chainContext,
+	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) ([]*types.StateSyncData, error) {
 	stateSyncs := make([]*types.StateSyncData, 0)
 	number := header.Number.Uint64()
-	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, c, syscall)
+	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, syscall)
 	if err != nil {
 		return nil, err
 	}
@@ -1243,7 +1147,7 @@ func (c *Bor) CommitStates(
 		}
 		stateSyncs = append(stateSyncs, &stateData)
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c, syscall); err != nil {
+		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, syscall); err != nil {
 			return nil, err
 		}
 		lastStateID++
@@ -1251,7 +1155,7 @@ func (c *Bor) CommitStates(
 	return stateSyncs, nil
 }
 
-func validateEventRecord(eventRecord *EventRecordWithTime, number uint64, to time.Time, lastStateID uint64, chainID string) error {
+func validateEventRecord(eventRecord *clerk.EventRecordWithTime, number uint64, to time.Time, lastStateID uint64, chainID string) error {
 	// event id should be sequential and event.Time should lie in the range [from, to)
 	if lastStateID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
 		return &InvalidStateReceivedError{number, lastStateID, &to, eventRecord}
@@ -1271,11 +1175,11 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	newSpanID uint64,
 	state *state.IntraBlockState,
 	header *types.Header,
-	chain chainContext,
+	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*HeimdallSpan, error) {
+) (*span.HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain, syscall)
+	spanBor, err := c.spanner.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return nil, err
 	}
@@ -1287,20 +1191,20 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	}
 
 	// new span
-	span.ID = newSpanID
-	if span.EndBlock == 0 {
-		span.StartBlock = 256
+	spanBor.ID = newSpanID
+	if spanBor.EndBlock == 0 {
+		spanBor.StartBlock = 256
 	} else {
-		span.StartBlock = span.EndBlock + 1
+		spanBor.StartBlock = spanBor.EndBlock + 1
 	}
-	span.EndBlock = span.StartBlock + (100 * c.config.CalculateSprint(headerNumber)) - 1
+	spanBor.EndBlock = spanBor.StartBlock + (100 * c.config.CalculateSprint(headerNumber)) - 1
 
-	selectedProducers := make([]Validator, len(snap.ValidatorSet.Validators))
+	selectedProducers := make([]valset.Validator, len(snap.ValidatorSet.Validators))
 	for i, v := range snap.ValidatorSet.Validators {
 		selectedProducers[i] = *v
 	}
-	heimdallSpan := &HeimdallSpan{
-		Span:              *span,
+	heimdallSpan := &span.HeimdallSpan{
+		Span:              *spanBor,
 		ValidatorSet:      *snap.ValidatorSet,
 		SelectedProducers: selectedProducers,
 		ChainID:           c.chainConfig.ChainID.String(),
@@ -1309,25 +1213,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	return heimdallSpan, nil
 }
 
-//
-// Chain context
-//
-
-// chain context
-type chainContext struct {
-	Chain consensus.ChainHeaderReader
-	Bor   consensus.Engine
-}
-
-func (c chainContext) Engine() consensus.Engine {
-	return c.Bor
-}
-
-func (c chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return c.Chain.GetHeader(hash, number)
-}
-
-func validatorContains(a []*Validator, x *Validator) (*Validator, bool) {
+func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
 	for _, n := range a {
 		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
 			return n, true
@@ -1336,11 +1222,11 @@ func validatorContains(a []*Validator, x *Validator) (*Validator, bool) {
 	return nil, false
 }
 
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator) *ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator) *valset.ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	changes := make([]*Validator, 0, len(oldVals))
+	changes := make([]*valset.Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

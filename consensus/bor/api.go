@@ -10,6 +10,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -115,10 +116,10 @@ func (api *API) GetCurrentProposer() (common.Address, error) {
 }
 
 // GetCurrentValidators gets the current validators
-func (api *API) GetCurrentValidators() ([]*Validator, error) {
+func (api *API) GetCurrentValidators() ([]*valset.Validator, error) {
 	snap, err := api.GetSnapshot(nil)
 	if err != nil {
-		return make([]*Validator, 0), err
+		return make([]*valset.Validator, 0), err
 	}
 	return snap.ValidatorSet.Validators, nil
 }
@@ -138,7 +139,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	}
 	currentHeaderNumber := api.chain.CurrentHeader().Number.Uint64()
 	if start > end || end > currentHeaderNumber {
-		return "", &InvalidStartEndBlockError{start, end, currentHeaderNumber}
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	blockHeaders := make([]*types.Header, end-start+1)
 	wg := new(sync.WaitGroup)

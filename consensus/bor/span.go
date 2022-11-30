@@ -1,29 +1,18 @@
 package bor
 
 import (
-	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// Span represents a current bor span
-type Span struct {
-	ID         uint64 `json:"span_id" yaml:"span_id"`
-	StartBlock uint64 `json:"start_block" yaml:"start_block"`
-	EndBlock   uint64 `json:"end_block" yaml:"end_block"`
-}
-
-// HeimdallSpan represents span from heimdall APIs
-type HeimdallSpan struct {
-	Span
-	ValidatorSet      ValidatorSet `json:"validator_set" yaml:"validator_set"`
-	SelectedProducers []Validator  `json:"selected_producers" yaml:"selected_producers"`
-	ChainID           string       `json:"bor_chain_id" yaml:"bor_chain_id"`
-}
-
-func (hs *HeimdallSpan) Less(other btree.Item) bool {
-	otherHs := other.(*HeimdallSpan)
-	if hs.EndBlock == 0 || otherHs.EndBlock == 0 {
-		// if endblock is not specified in one of the items, allow search by ID
-		return hs.ID < otherHs.ID
-	}
-	return hs.EndBlock < otherHs.EndBlock
+//go:generate mockgen -destination=./span_mock.go -package=bor . Spanner
+type Spanner interface {
+	GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain statefull.ChainContext, syscall consensus.SystemCall) (*span.Span, error)
+	GetCurrentValidators(blockNumber uint64, signer common.Address, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error)
+	CommitSpan(newSpanID uint64, state *state.IntraBlockState, header *types.Header, chain statefull.ChainContext, heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error
 }

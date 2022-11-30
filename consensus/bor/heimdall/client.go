@@ -1,4 +1,4 @@
-package bor
+package heimdall
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -22,12 +23,6 @@ var (
 type ResponseWithHeight struct {
 	Height string          `json:"height"`
 	Result json.RawMessage `json:"result"`
-}
-
-type IHeimdallClient interface {
-	Fetch(ctx context.Context, path string, query string) (*ResponseWithHeight, error)
-	FetchWithRetry(ctx context.Context, path string, query string) (*ResponseWithHeight, error)
-	FetchStateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error)
 }
 
 type HeimdallClient struct {
@@ -45,8 +40,8 @@ func NewHeimdallClient(urlString string) (*HeimdallClient, error) {
 	return h, nil
 }
 
-func (h *HeimdallClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
-	eventRecords := make([]*EventRecordWithTime, 0)
+func (h *HeimdallClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
+	eventRecords := make([]*clerk.EventRecordWithTime, 0)
 	for {
 		queryParams := fmt.Sprintf("from-id=%d&to-time=%d&limit=%d", fromID, to, stateFetchLimit)
 		log.Trace("Fetching state sync events", "queryParams", queryParams)
@@ -54,7 +49,7 @@ func (h *HeimdallClient) FetchStateSyncEvents(ctx context.Context, fromID uint64
 		if err != nil {
 			return nil, err
 		}
-		var _eventRecords []*EventRecordWithTime
+		var _eventRecords []*clerk.EventRecordWithTime
 		if response.Result == nil { // status 204
 			break
 		}

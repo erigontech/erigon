@@ -1,14 +1,17 @@
 package ethconsensusconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -61,9 +64,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *params.BorConfig:
+		spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
 		if chainConfig.Bor != nil {
 			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
-			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false, readonly), HeimdallURL, WithoutHeimdall)
+			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false, readonly), HeimdallURL, WithoutHeimdall, spanner)
 		}
 	}
 
