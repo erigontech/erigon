@@ -504,7 +504,9 @@ func (h *historyWAL) close() {
 	if h == nil { // allow dobule-close
 		return
 	}
-	h.historyVals.Close()
+	if h.historyVals != nil {
+		h.historyVals.Close()
+	}
 }
 
 func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
@@ -518,8 +520,8 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	}
 	if buffered {
 		w.historyVals = etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.historyVals.LogLvl(log.LvlTrace)
 	}
-	w.historyVals.LogLvl(log.LvlTrace)
 
 	val, err := h.tx.GetOne(h.settingsTable, historyValCountKey)
 	if err != nil {
@@ -535,6 +537,9 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 }
 
 func (h *historyWAL) flush(tx kv.RwTx) error {
+	if h.discard {
+		return nil
+	}
 	binary.BigEndian.PutUint64(h.autoIncrementBuf, h.autoIncrement)
 	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
 		return err

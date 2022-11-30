@@ -364,6 +364,9 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 }
 
 func (ii *invertedIndexWAL) Flush(tx kv.RwTx) error {
+	if ii.discard {
+		return nil
+	}
 	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -378,8 +381,12 @@ func (ii *invertedIndexWAL) close() {
 	if ii == nil {
 		return
 	}
-	ii.index.Close()
-	ii.indexKeys.Close()
+	if ii.index != nil {
+		ii.index.Close()
+	}
+	if ii.indexKeys != nil {
+		ii.indexKeys.Close()
+	}
 }
 
 var WALCollectorRam = etl.BufferOptimalSize / 16
@@ -406,9 +413,9 @@ func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *inver
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.index.LogLvl(log.LvlTrace)
+		w.indexKeys.LogLvl(log.LvlTrace)
 	}
-	w.index.LogLvl(log.LvlTrace)
-	w.indexKeys.LogLvl(log.LvlTrace)
 	return w
 }
 
