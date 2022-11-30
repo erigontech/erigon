@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -145,7 +144,9 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache, c *params.BorConfig
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header, c *params.BorConfig) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := crypto.NewLegacyKeccak256()
+	defer crypto.ReturnToPoolKeccak256(hasher)
+
 	encodeSigHeader(hasher, header, c)
 	hasher.Sum(hash[:0])
 	return hash

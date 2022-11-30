@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
@@ -346,6 +347,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		addrMap[v] = struct{}{}
 	}
 
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
+	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
+
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
@@ -374,7 +378,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			blockHash = header.Hash()
 			signer = types.MakeSigner(chainConfig, blockNum)
 			rules = chainConfig.Rules(blockNum)
-			skipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
+			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 
 			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
 			if err != nil {
@@ -401,13 +405,13 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
-		vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
 		ibs := state.New(stateReader)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		ibs.Prepare(txHash, blockHash, txIndex)
+
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
+		evm.ResetBetweenBlocks(blockCtx, txCtx, ibs, vmConfig, rules)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, blockHash, txIndex)
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d", err, blockNum, txNum)

@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -108,7 +109,7 @@ func ApplyTransaction(config *params.ChainConfig, blockHashFunc func(n uint64) c
 		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 	} else {
 		blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
-		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
+		vmenv = vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 	}
 
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
