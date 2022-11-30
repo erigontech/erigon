@@ -108,7 +108,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "execution: mainnet2-2:6061"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 7,
@@ -487,7 +512,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
-            "drawStyle": "points",
+            "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
@@ -495,7 +520,7 @@
               "tooltip": false,
               "viz": false
             },
-            "lineInterpolation": "stepBefore",
+            "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 2,
             "scaleDistribution": {
@@ -527,32 +552,7 @@
           },
           "unit": "s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "total: mainnet-sn3:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
@@ -743,6 +743,20 @@
           "legendFormat": "self_pnl_merge_time: {{instance}}",
           "range": true,
           "refId": "L"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "db_gc_work_xtime{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gc_work_xtime: {{instance}}",
+          "range": true,
+          "refId": "M"
         }
       ],
       "title": "Commit speed",
@@ -1028,7 +1042,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1038,32 +1053,7 @@
           },
           "unit": "decbytes"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "dirty: mainnet2:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -1162,7 +1152,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1172,7 +1163,32 @@
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "fsync: mainnet2-2:6061"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 7,
@@ -1205,7 +1221,7 @@
           "editorMode": "code",
           "exemplar": true,
           "expr": "rate(db_pgops_newly{instance=~\"$instance\"}[$rate_interval])",
-          "hide": true,
+          "hide": false,
           "interval": "",
           "legendFormat": "newly: {{instance}}",
           "range": true,
@@ -1218,7 +1234,7 @@
           },
           "exemplar": true,
           "expr": "rate(db_pgops_cow{instance=~\"$instance\"}[$rate_interval])",
-          "hide": true,
+          "hide": false,
           "interval": "",
           "legendFormat": "cow: {{instance}}",
           "refId": "B"
@@ -1338,6 +1354,34 @@
           "legendFormat": "gcxpages: {{instance}}",
           "range": true,
           "refId": "K"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "rate(db_pgops_msync{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "msync: {{instance}}",
+          "range": true,
+          "refId": "L"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "rate(db_pgops_fsnc{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "fsync: {{instance}}",
+          "range": true,
+          "refId": "M"
         }
       ],
       "title": "DB Pages Ops/sec",
@@ -1388,7 +1432,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1406,7 +1451,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "exec_steps_in_db: bsc-sn3:6061"
+                  "gc_overflow: mainnet2-2:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -1845,7 +1890,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "soft: goerli2:6061"
+                  "hard: mainnet2-2:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -2418,7 +2463,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "write: bsc-sn3:6061"
+                  "write: mainnet2-2:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -2653,33 +2698,7 @@
           },
           "unit": "decbytes"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "heap_alloc: mainnet-sn3-3:6061",
-                  "heap_alloc: mainnet-sn3-4:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -3118,33 +3137,7 @@
           },
           "unit": "short"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "memstats_mallocs_total: mainnet-sn3-3:6061",
-                  "memstats_mallocs_total: mainnet-sn3-4:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 5,
@@ -7102,14 +7095,12 @@
       },
       {
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
-            "mainnet-sn3-4:6061",
-            "mainnet-sn3-3:6061"
+            "mainnet2-2:6061"
           ],
           "value": [
-            "mainnet-sn3-4:6061",
-            "mainnet-sn3-3:6061"
+            "mainnet2-2:6061"
           ]
         },
         "datasource": {
@@ -7141,7 +7132,7 @@
         "auto_count": 30,
         "auto_min": "10s",
         "current": {
-          "selected": true,
+          "selected": false,
           "text": "1m",
           "value": "1m"
         },
@@ -7214,7 +7205,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -7244,6 +7235,6 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 77,
+  "version": 85,
   "weekStart": ""
 }
