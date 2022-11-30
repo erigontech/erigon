@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	btree2 "github.com/tidwall/btree"
 )
 
 type reconPair struct {
@@ -53,7 +54,7 @@ type ReconState struct {
 	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
 
 	lock         sync.RWMutex
-	changes      map[string]*btree.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
+	changes      map[string]*btree2.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
 	sizeEstimate uint64
 }
 
@@ -63,7 +64,7 @@ func NewReconState(workCh chan *exec22.TxTask) *ReconState {
 			workCh:   workCh,
 			triggers: map[uint64][]*exec22.TxTask{},
 		},
-		changes: map[string]*btree.BTreeG[reconPair]{},
+		changes: map[string]*btree2.BTreeG[reconPair]{},
 	}
 	return rs
 }
@@ -73,11 +74,11 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[reconPair](32, ReconnLess)
+		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 32, NoLocks: true})
 		rs.changes[table] = t
 	}
 	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
-	old, ok := t.ReplaceOrInsert(item)
+	old, ok := t.Set(item)
 	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 	if ok {
 		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
@@ -103,7 +104,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(func(item reconPair) bool {
+		t.Ascend(reconPair{}, func(item reconPair) bool {
 			if len(item.val) == 0 {
 				return true
 			}
@@ -125,7 +126,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
-		t.Clear(true)
+		t.Clear()
 	}
 	rs.sizeEstimate = 0
 	return nil
