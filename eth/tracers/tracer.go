@@ -580,7 +580,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if depth != 0 {
 		return
 	}
@@ -704,6 +704,9 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 
 		case *big.Int:
 			pushBigInt(val, jst.vm)
+
+		case *uint256.Int:
+			pushBigInt(val.ToBig(), jst.vm)
 
 		case int:
 			jst.vm.PushInt(val)
