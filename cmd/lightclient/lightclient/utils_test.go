@@ -12,22 +12,12 @@ func TestPowerOf2(t *testing.T) {
 		}
 	}()
 
-	testCases := []struct {
-		input       uint64
-		expected    uint64
-		shouldPanic bool
-	}{
-		{0, 1, false},
-		{1, 2, false},
-		{2, 4, false},
-		{16, 65536, false},
-		{64, 0, true},
+	// naively cover all test cases from 0 to 63
+	for i := 0; i < 64; i++ {
+		got := powerOf2(uint64(i))
+		require.EqualValues(t, got, 1<<i)
 	}
 
-	for _, testCase := range testCases {
-		got := powerOf2(testCase.input)
-		if !testCase.shouldPanic {
-			require.EqualValues(t, got, testCase.expected)
-		}
-	}
+	// check that 64 panics
+	powerOf2(64)
 }
