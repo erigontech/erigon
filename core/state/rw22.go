@@ -37,6 +37,8 @@ type State22 struct {
 	sizeEstimate uint64
 	txsDone      *atomic2.Uint64
 	finished     bool
+
+	applyStateHint *btree2.PathHint //only for apply func (it always work in 1-thread), only for kv.PlainState table
 }
 
 type statePair struct {
@@ -49,10 +51,11 @@ func stateItemLess(i, j statePair) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]*exec22.TxTask{},
-		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree2.BTreeG[statePair]{},
-		txsDone:      atomic2.NewUint64(0),
+		triggers:       map[uint64]*exec22.TxTask{},
+		senderTxNums:   map[common.Address]uint64{},
+		changes:        map[string]*btree2.BTreeG[statePair]{},
+		txsDone:        atomic2.NewUint64(0),
+		applyStateHint: &btree2.PathHint{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -353,11 +356,10 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	hint := &btree2.PathHint{}
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.getHint(kv.PlainState, addrBytes, hint)
+		enc0 := rs.getHint(kv.PlainState, addrBytes, rs.applyStateHint)
 		if enc0 == nil {
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
@@ -381,7 +383,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
 		}
-		rs.putHint(kv.PlainState, addrBytes, enc1, hint)
+		rs.putHint(kv.PlainState, addrBytes, enc1, rs.applyStateHint)
 		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
 			return err
 		}
@@ -389,8 +391,15 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
-			for i, key := range list.Keys {
-				rs.putHint(table, key, list.Vals[i], hint)
+			if table == kv.PlainState {
+				for i, key := range list.Keys {
+					rs.putHint(table, key, list.Vals[i], rs.applyStateHint)
+				}
+			} else {
+				for i, key := range list.Keys {
+					rs.put(table, key, list.Vals[i])
+				}
+
 			}
 		}
 	}
