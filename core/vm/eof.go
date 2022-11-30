@@ -190,7 +190,7 @@ func validateInstructions(code []byte, header *EOF1Header, jumpTable *JumpTable)
 			}
 			// Check if offset points to non-code segment.
 			// TODO(matt): include CALLF and RJUMPs in analysis.
-			if !analysis.codeSegment(uint64(pos)) {
+			if analysis[uint64(pos)/64]&(uint64(1)<<(uint64(pos)&63)) != 0 {
 				return ErrEOF1InvalidRelativeOffset
 			}
 			i += 2

@@ -252,7 +252,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		if evm.chainRules.IsShanghai && hasEOFMagic(code) {
 			evmInterpreter, ok := evm.interpreter.(*EVMInterpreter)
 			if !ok {
-				return nil, common.Address{}, gas, ErrInvalidInterpreter
+				return nil, gas, ErrInvalidInterpreter
 			}
 			c, _ := NewEOF1Container(code, evmInterpreter.jt, true)
 			container = &c

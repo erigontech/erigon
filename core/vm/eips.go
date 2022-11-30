@@ -251,7 +251,7 @@ func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 // opRjumpi implements the RJUMPI opcode
 func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	condition := scope.Stack.pop()
+	condition := scope.Stack.Pop()
 	if condition.BitLen() == 0 {
 		// Not branching, just skip over immediate argument.
 		*pc += 2
@@ -305,7 +305,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	}
 	caller := scope.RetStack[len(scope.RetStack)-1]
 	sig := scope.Contract.Container.types[int(section)]
-	if scope.Stack.len() < int(caller.StackHeight)+int(sig.input) {
+	if scope.Stack.Len() < int(caller.StackHeight)+int(sig.input) {
 		return nil, fmt.Errorf("too few stack items")
 	}
 	if len(scope.RetStack) >= 1024 {
@@ -313,7 +313,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	}
 	context := &SubroutineContext{
 		Section:     scope.ActiveSection,
-		StackHeight: caller.StackHeight + uint64(scope.Stack.len()),
+		StackHeight: caller.StackHeight + uint64(scope.Stack.Len()),
 		Pc:          *pc,
 	}
 	scope.RetStack = append(scope.RetStack, context)
@@ -321,7 +321,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	*pc = 0
 	*pc -= 1 // hacks xD
 	scope.ActiveSection = uint64(section)
-	scope.Stack.floor = int(context.StackHeight)
+	scope.Stack.Floor = int(context.StackHeight)
 
 	return nil, nil
 }
@@ -329,7 +329,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // opRetf implements the RETF opcode.
 func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	sig := scope.Contract.Container.types[scope.ActiveSection]
-	if scope.Stack.len() < int(sig.output) {
+	if scope.Stack.Len() < int(sig.output) {
 		return nil, fmt.Errorf("too few stack items")
 	}
 
@@ -339,7 +339,7 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 	*pc = context.Pc - 1
 	scope.ActiveSection = context.Section
-	scope.Stack.floor = int(context.StackHeight)
+	scope.Stack.Floor = int(context.StackHeight)
 
 	return nil, nil
 }

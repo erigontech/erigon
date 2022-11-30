@@ -34,7 +34,8 @@ var stackPool = sync.Pool{
 // expected to be changed and modified. stack does not take care of adding newly
 // initialised objects.
 type Stack struct {
-	Data []uint256.Int
+	Data  []uint256.Int
+	Floor int
 }
 
 func New() *Stack {
@@ -87,7 +88,7 @@ func (st *Stack) Reset() {
 }
 
 func (st *Stack) Len() int {
-	return len(st.Data)
+	return len(st.Data) - st.Floor
 }
 
 // Print dumps the content of the stack
