@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -481,11 +482,11 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
-	var txContext vm.TxContext
+	var txContext evmtypes.TxContext
 	var author *common.Address
 	if isBor {
 		author = &header.Coinbase
-		txContext = vm.TxContext{}
+		txContext = evmtypes.TxContext{}
 	} else {
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)

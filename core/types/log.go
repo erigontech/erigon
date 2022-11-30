@@ -121,6 +121,37 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 	}
 	return o
 }
+
+func (logs Logs) CointainTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}) Logs {
+	o := make(Logs, 0, len(logs))
+	for _, v := range logs {
+		found := false
+
+		// check address if addrMap is not empty
+		if len(addrMap) != 0 {
+			if _, ok := addrMap[v.Address]; !ok {
+				// not there? skip this log
+				continue
+			}
+		}
+		//topicsMap len zero match any topics
+		if len(topicsMap) == 0 {
+			o = append(o, v)
+		} else {
+			for i := range v.Topics {
+				//Contain any topics that matched
+				if _, ok := topicsMap[v.Topics[i]]; ok {
+					found = true
+				}
+			}
+			if found {
+				o = append(o, v)
+			}
+		}
+	}
+	return o
+}
+
 func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
 	result := make(Logs, 0, len(logs))
 	// populate a set of addresses

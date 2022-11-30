@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-func NewCVM(state IntraBlockState) *CVM {
+func NewCVM(state evmtypes.IntraBlockState) *CVM {
 	cvm := &CVM{
 		intraBlockState: state,
 	}
@@ -17,7 +18,7 @@ func NewCVM(state IntraBlockState) *CVM {
 
 type CVM struct {
 	config          Config
-	intraBlockState IntraBlockState
+	intraBlockState evmtypes.IntraBlockState
 }
 
 func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, common.Address, error) {
@@ -34,7 +35,7 @@ func (cvm *CVM) Config() Config {
 	return cvm.config
 }
 
-func (cvm *CVM) IntraBlockState() IntraBlockState {
+func (cvm *CVM) IntraBlockState() evmtypes.IntraBlockState {
 	return cvm.intraBlockState
 }
 
