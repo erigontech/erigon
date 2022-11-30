@@ -18,28 +18,28 @@ var _ KVClient = &KVClientMock{}
 
 // KVClientMock is a mock implementation of KVClient.
 //
-// 	func TestSomethingThatUsesKVClient(t *testing.T) {
+//	func TestSomethingThatUsesKVClient(t *testing.T) {
 //
-// 		// make and configure a mocked KVClient
-// 		mockedKVClient := &KVClientMock{
-// 			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
-// 				panic("mock out the Snapshots method")
-// 			},
-// 			StateChangesFunc: func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
-// 				panic("mock out the StateChanges method")
-// 			},
-// 			TxFunc: func(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
-// 				panic("mock out the Tx method")
-// 			},
-// 			VersionFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
-// 				panic("mock out the Version method")
-// 			},
-// 		}
+//		// make and configure a mocked KVClient
+//		mockedKVClient := &KVClientMock{
+//			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
+//				panic("mock out the Snapshots method")
+//			},
+//			StateChangesFunc: func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
+//				panic("mock out the StateChanges method")
+//			},
+//			TxFunc: func(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
+//				panic("mock out the Tx method")
+//			},
+//			VersionFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+//				panic("mock out the Version method")
+//			},
+//		}
 //
-// 		// use mockedKVClient in code that requires KVClient
-// 		// and then make assertions.
+//		// use mockedKVClient in code that requires KVClient
+//		// and then make assertions.
 //
-// 	}
+//	}
 type KVClientMock struct {
 	// SnapshotsFunc mocks the Snapshots method.
 	SnapshotsFunc func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
@@ -122,7 +122,8 @@ func (mock *KVClientMock) Snapshots(ctx context.Context, in *SnapshotsRequest, o
 
 // SnapshotsCalls gets all the calls that were made to Snapshots.
 // Check the length with:
-//     len(mockedKVClient.SnapshotsCalls())
+//
+//	len(mockedKVClient.SnapshotsCalls())
 func (mock *KVClientMock) SnapshotsCalls() []struct {
 	Ctx  context.Context
 	In   *SnapshotsRequest
@@ -165,7 +166,8 @@ func (mock *KVClientMock) StateChanges(ctx context.Context, in *StateChangeReque
 
 // StateChangesCalls gets all the calls that were made to StateChanges.
 // Check the length with:
-//     len(mockedKVClient.StateChangesCalls())
+//
+//	len(mockedKVClient.StateChangesCalls())
 func (mock *KVClientMock) StateChangesCalls() []struct {
 	Ctx  context.Context
 	In   *StateChangeRequest
@@ -206,7 +208,8 @@ func (mock *KVClientMock) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_T
 
 // TxCalls gets all the calls that were made to Tx.
 // Check the length with:
-//     len(mockedKVClient.TxCalls())
+//
+//	len(mockedKVClient.TxCalls())
 func (mock *KVClientMock) TxCalls() []struct {
 	Ctx  context.Context
 	Opts []grpc.CallOption
@@ -247,7 +250,8 @@ func (mock *KVClientMock) Version(ctx context.Context, in *emptypb.Empty, opts .
 
 // VersionCalls gets all the calls that were made to Version.
 // Check the length with:
-//     len(mockedKVClient.VersionCalls())
+//
+//	len(mockedKVClient.VersionCalls())
 func (mock *KVClientMock) VersionCalls() []struct {
 	Ctx  context.Context
 	In   *emptypb.Empty
@@ -270,37 +274,37 @@ var _ KV_StateChangesClient = &KV_StateChangesClientMock{}
 
 // KV_StateChangesClientMock is a mock implementation of KV_StateChangesClient.
 //
-// 	func TestSomethingThatUsesKV_StateChangesClient(t *testing.T) {
+//	func TestSomethingThatUsesKV_StateChangesClient(t *testing.T) {
 //
-// 		// make and configure a mocked KV_StateChangesClient
-// 		mockedKV_StateChangesClient := &KV_StateChangesClientMock{
-// 			CloseSendFunc: func() error {
-// 				panic("mock out the CloseSend method")
-// 			},
-// 			ContextFunc: func() context.Context {
-// 				panic("mock out the Context method")
-// 			},
-// 			HeaderFunc: func() (metadata.MD, error) {
-// 				panic("mock out the Header method")
-// 			},
-// 			RecvFunc: func() (*StateChangeBatch, error) {
-// 				panic("mock out the Recv method")
-// 			},
-// 			RecvMsgFunc: func(m interface{}) error {
-// 				panic("mock out the RecvMsg method")
-// 			},
-// 			SendMsgFunc: func(m interface{}) error {
-// 				panic("mock out the SendMsg method")
-// 			},
-// 			TrailerFunc: func() metadata.MD {
-// 				panic("mock out the Trailer method")
-// 			},
-// 		}
+//		// make and configure a mocked KV_StateChangesClient
+//		mockedKV_StateChangesClient := &KV_StateChangesClientMock{
+//			CloseSendFunc: func() error {
+//				panic("mock out the CloseSend method")
+//			},
+//			ContextFunc: func() context.Context {
+//				panic("mock out the Context method")
+//			},
+//			HeaderFunc: func() (metadata.MD, error) {
+//				panic("mock out the Header method")
+//			},
+//			RecvFunc: func() (*StateChangeBatch, error) {
+//				panic("mock out the Recv method")
+//			},
+//			RecvMsgFunc: func(m interface{}) error {
+//				panic("mock out the RecvMsg method")
+//			},
+//			SendMsgFunc: func(m interface{}) error {
+//				panic("mock out the SendMsg method")
+//			},
+//			TrailerFunc: func() metadata.MD {
+//				panic("mock out the Trailer method")
+//			},
+//		}
 //
-// 		// use mockedKV_StateChangesClient in code that requires KV_StateChangesClient
-// 		// and then make assertions.
+//		// use mockedKV_StateChangesClient in code that requires KV_StateChangesClient
+//		// and then make assertions.
 //
-// 	}
+//	}
 type KV_StateChangesClientMock struct {
 	// CloseSendFunc mocks the CloseSend method.
 	CloseSendFunc func() error
@@ -378,7 +382,8 @@ func (mock *KV_StateChangesClientMock) CloseSend() error {
 
 // CloseSendCalls gets all the calls that were made to CloseSend.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.CloseSendCalls())
+//
+//	len(mockedKV_StateChangesClient.CloseSendCalls())
 func (mock *KV_StateChangesClientMock) CloseSendCalls() []struct {
 } {
 	var calls []struct {
@@ -407,7 +412,8 @@ func (mock *KV_StateChangesClientMock) Context() context.Context {
 
 // ContextCalls gets all the calls that were made to Context.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.ContextCalls())
+//
+//	len(mockedKV_StateChangesClient.ContextCalls())
 func (mock *KV_StateChangesClientMock) ContextCalls() []struct {
 } {
 	var calls []struct {
@@ -437,7 +443,8 @@ func (mock *KV_StateChangesClientMock) Header() (metadata.MD, error) {
 
 // HeaderCalls gets all the calls that were made to Header.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.HeaderCalls())
+//
+//	len(mockedKV_StateChangesClient.HeaderCalls())
 func (mock *KV_StateChangesClientMock) HeaderCalls() []struct {
 } {
 	var calls []struct {
@@ -467,7 +474,8 @@ func (mock *KV_StateChangesClientMock) Recv() (*StateChangeBatch, error) {
 
 // RecvCalls gets all the calls that were made to Recv.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.RecvCalls())
+//
+//	len(mockedKV_StateChangesClient.RecvCalls())
 func (mock *KV_StateChangesClientMock) RecvCalls() []struct {
 } {
 	var calls []struct {
@@ -499,7 +507,8 @@ func (mock *KV_StateChangesClientMock) RecvMsg(m interface{}) error {
 
 // RecvMsgCalls gets all the calls that were made to RecvMsg.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.RecvMsgCalls())
+//
+//	len(mockedKV_StateChangesClient.RecvMsgCalls())
 func (mock *KV_StateChangesClientMock) RecvMsgCalls() []struct {
 	M interface{}
 } {
@@ -533,7 +542,8 @@ func (mock *KV_StateChangesClientMock) SendMsg(m interface{}) error {
 
 // SendMsgCalls gets all the calls that were made to SendMsg.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.SendMsgCalls())
+//
+//	len(mockedKV_StateChangesClient.SendMsgCalls())
 func (mock *KV_StateChangesClientMock) SendMsgCalls() []struct {
 	M interface{}
 } {
@@ -564,7 +574,8 @@ func (mock *KV_StateChangesClientMock) Trailer() metadata.MD {
 
 // TrailerCalls gets all the calls that were made to Trailer.
 // Check the length with:
-//     len(mockedKV_StateChangesClient.TrailerCalls())
+//
+//	len(mockedKV_StateChangesClient.TrailerCalls())
 func (mock *KV_StateChangesClientMock) TrailerCalls() []struct {
 } {
 	var calls []struct {
