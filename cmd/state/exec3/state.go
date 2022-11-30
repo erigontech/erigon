@@ -178,13 +178,21 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
+		//var vmenv vm.VMInterface
+		//if txTask.Tx.IsStarkNet() {
+		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+		//	vmenv = rw.starkNetEvm
+		//} else {
+		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		//	vmenv = rw.evm
+		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
-			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-			vmenv = rw.starkNetEvm
+			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-			vmenv = rw.evm
+			blockContext := core.NewEVMBlockContext(header, txTask.GetHashFn, rw.engine, nil /* author */)
+			txContext := core.NewEVMTxContext(msg)
+			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
 		if _, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */); err != nil {
 			txTask.Error = err
