@@ -15,6 +15,8 @@ package lightclient
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -46,6 +48,7 @@ type LightClient struct {
 	highestValidated     uint64      // Highest ETH2 slot validated.
 	highestProcessedRoot common.Hash // Highest processed ETH2 block root.
 	lastEth2ParentRoot   common.Hash // Last ETH2 Parent root.
+	lastProcessedBlock   uint64
 	recentHashesCache    *lru.Cache
 	db                   kv.RwDB
 	sentinel             sentinel.SentinelClient
@@ -238,6 +241,11 @@ func (l *LightClient) importBlockIfPossible() {
 	if l.verbose {
 		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
 	}
+	if l.lastProcessedBlock != 0 && l.lastProcessedBlock != eth1Number {
+		file, _ := os.Create(fmt.Sprintf("report_%d_%d", l.lastProcessedBlock, eth1Number))
+		file.Close()
+	}
+	l.lastProcessedBlock = eth1Number
 	// If all of the above is gud then do the push
 	if err := l.processBeaconBlock(curr); err != nil {
 		log.Warn("Could not send beacon block to ETH1", "err", err)
