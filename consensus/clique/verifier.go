@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -58,7 +59,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if !checkpoint && signersBytes != 0 {
 		return errExtraSigners
 	}
-	if checkpoint && signersBytes%common.AddressLength != 0 {
+	if checkpoint && signersBytes%length.Addr != 0 {
 		return errInvalidCheckpointSigners
 	}
 	// Ensure that the mix digest is zero as we don't have fork protection currently
@@ -142,9 +143,9 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Epoch == 0 {
-		signers := make([]byte, len(snap.Signers)*common.AddressLength)
+		signers := make([]byte, len(snap.Signers)*length.Addr)
 		for i, signer := range snap.GetSigners() {
-			copy(signers[i*common.AddressLength:], signer[:])
+			copy(signers[i*length.Addr:], signer[:])
 		}
 
 		extraSuffix := len(header.Extra) - ExtraSeal
@@ -186,9 +187,9 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
 
-				signers := make([]common.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/common.AddressLength)
+				signers := make([]common.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/length.Addr)
 				for i := 0; i < len(signers); i++ {
-					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*common.AddressLength:])
+					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*length.Addr:])
 				}
 				snap = newSnapshot(c.config, number, hash, signers)
 				if err := snap.store(c.db); err != nil {

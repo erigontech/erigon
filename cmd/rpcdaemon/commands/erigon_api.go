@@ -31,7 +31,7 @@ type ErigonAPI interface {
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
 	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.ErigonLogs, error)
-	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logCount uint64) (types.ErigonLogs, error)
+	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions ethFilters.LogFilterOptions) (types.ErigonLogs, error)
 
 	// WatchTheBurn / reward related (see ./erigon_issuance.go)
 	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)

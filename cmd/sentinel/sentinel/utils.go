@@ -93,7 +93,7 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 		}
 		multiAddr, err := convertToSingleMultiAddr(node)
 		if err != nil {
-			log.Debug("Could not convert to multiAddr", "err", err)
+			log.Debug("[Sentinel] Could not convert to multiAddr", "err", err)
 			continue
 		}
 		multiAddrs = append(multiAddrs, multiAddr)
@@ -139,7 +139,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 		}
 
 		if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Debug("couldn't connect to peer", "err", err)
+			log.Trace("[Sentinel] couldn't connect to peer", "err", err)
 			continue
 		}
 		connectedPeer = true

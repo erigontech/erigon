@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -481,11 +482,11 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
-	var txContext vm.TxContext
+	var txContext evmtypes.TxContext
 	var author *common.Address
 	if isBor {
 		author = &header.Coinbase
-		txContext = vm.TxContext{}
+		txContext = evmtypes.TxContext{}
 	} else {
 		author = &state.SystemAddress
 		txContext = NewEVMTxContext(msg)
@@ -507,11 +508,36 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	return ret, err
 }
 
-// from the null sender, with 50M gas.
-func SysCallContractTx(contract common.Address, data []byte) (tx types.Transaction, err error) {
-	//nonce := ibs.GetNonce(SystemAddress)
-	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(state.SystemAddress)
+// SysCreate is a special (system) contract creation methods for genesis constructors.
+func SysCreate(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+
+	msg := types.NewMessage(
+		contract,
+		nil, // to
+		0, u256.Num0,
+		math.MaxUint64, u256.Num0,
+		nil, nil,
+		data, nil, false,
+		true, // isFree
+	)
+	vmConfig := vm.Config{NoReceipts: true}
+	// Create a new context to be used in the EVM environment
+	author := &contract
+	txContext := NewEVMTxContext(msg)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author)
+	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
+
+	ret, _, err := evm.SysCreate(
+		vm.AccountRef(msg.From()),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		contract,
+	)
+	return ret, err
 }
 
 func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
