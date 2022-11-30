@@ -241,7 +241,7 @@ func (l *LightClient) importBlockIfPossible() {
 	if l.verbose {
 		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
 	}
-	if l.lastProcessedBlock != 0 && l.lastProcessedBlock != eth1Number {
+	if l.lastProcessedBlock != 0 && l.lastProcessedBlock != eth1Number-1 {
 		file, _ := os.Create(fmt.Sprintf("report_%d_%d", l.lastProcessedBlock, eth1Number))
 		file.Close()
 	}
