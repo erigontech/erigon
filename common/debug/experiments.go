@@ -45,18 +45,33 @@ func MergeTr() int {
 }
 
 var (
-	mdbxReaadahead     bool
-	mdbxReaadaheadOnce sync.Once
+	mdbxReadahead     bool
+	mdbxReadaheadOnce sync.Once
 )
 
 func MdbxReadAhead() bool {
-	mdbxReaadaheadOnce.Do(func() {
+	mdbxReadaheadOnce.Do(func() {
 		v, _ := os.LookupEnv("MDBX_READAHEAD")
 		if v == "true" {
-			mdbxReaadahead = true
+			mdbxReadahead = true
 		}
 	})
-	return mdbxReaadahead
+	return mdbxReadahead
+}
+
+var (
+	discardHistory     bool
+	discardHistoryOnce sync.Once
+)
+
+func DiscardHistory() bool {
+	discardHistoryOnce.Do(func() {
+		v, _ := os.LookupEnv("DISCARD_HISTORY")
+		if v == "true" {
+			discardHistory = true
+		}
+	})
+	return discardHistory
 }
 
 var (
