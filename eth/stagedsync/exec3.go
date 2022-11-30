@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -231,7 +232,11 @@ func Exec3(ctx context.Context,
 			defer rs.Finish()
 
 			agg.SetTx(tx)
-			defer agg.StartWrites().FinishWrites()
+			if debug.DiscardHistory() {
+				defer agg.DiscardHistory().FinishWrites()
+			} else {
+				defer agg.StartWrites().FinishWrites()
+			}
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
@@ -395,7 +400,11 @@ func Exec3(ctx context.Context,
 	}
 
 	if !parallel {
-		defer agg.StartWrites().FinishWrites()
+		if debug.DiscardHistory() {
+			defer agg.DiscardHistory().FinishWrites()
+		} else {
+			defer agg.StartWrites().FinishWrites()
+		}
 		execWorkers[0].ResetTx(applyTx)
 	}
 

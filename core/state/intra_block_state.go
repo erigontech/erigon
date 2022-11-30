@@ -786,7 +786,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter St
 }
 
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]uint256.Int {
-	s := map[common.Address]uint256.Int{}
+	s := make(map[common.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			s[addr] = bi.increase
