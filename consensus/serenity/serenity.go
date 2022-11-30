@@ -138,8 +138,11 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall, call)
 	}
-	s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
-	return types.NewBlock(header, txs, uncles, receipts, withdrawals), txs, receipts, nil
+	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
