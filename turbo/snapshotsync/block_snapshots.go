@@ -1838,6 +1838,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	p.Total.Store(uint64(d.Count()))
 
 	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPoolKeccak256(hasher)
 	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		p.Processed.Inc()

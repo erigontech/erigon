@@ -273,7 +273,8 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	rs := state.NewState22()
-	if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, rs,
+	parallel := initialCycle && tx == nil
+	if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, parallel, rs,
 		cfg.blockReader, log.New(), cfg.agg, cfg.engine,
 		to,
 		cfg.chainConfig, cfg.genesis); err != nil {
@@ -730,7 +731,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+		if err = cfg.agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {

@@ -121,7 +121,7 @@ const (
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int, code []byte)
+	CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
 	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error)
@@ -177,7 +177,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(evm *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (l *StructLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -398,7 +398,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureStart(env *EVM, _ int, from common.Address, to common.Address, preimage bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),

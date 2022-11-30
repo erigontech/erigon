@@ -17,13 +17,13 @@
 package vm
 
 import (
-	"math/big"
 	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -31,16 +31,6 @@ import (
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
 // deployed contract addresses (relevant after the account abstraction).
 var emptyCodeHash = crypto.Keccak256Hash(nil)
-
-type (
-	// CanTransferFunc is the signature of a transfer guard function
-	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
-	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
-	// GetHashFunc returns the nth block hash in the blockchain
-	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) common.Hash
-)
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
@@ -71,37 +61,6 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	return evm.interpreter.Run(contract, input, readOnly)
 }
 
-// BlockContext provides the EVM with auxiliary information. Once provided
-// it shouldn't be modified.
-type BlockContext struct {
-	// CanTransfer returns whether the account contains
-	// sufficient ether to transfer the value
-	CanTransfer CanTransferFunc
-	// Transfer transfers ether from one account to the other
-	Transfer TransferFunc
-	// GetHash returns the hash corresponding to n
-	GetHash GetHashFunc
-
-	// Block information
-	Coinbase    common.Address // Provides information for COINBASE
-	GasLimit    uint64         // Provides information for GASLIMIT
-	MaxGasLimit bool           // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64         // Provides information for NUMBER
-	Time        uint64         // Provides information for TIME
-	Difficulty  *big.Int       // Provides information for DIFFICULTY
-	BaseFee     *uint256.Int   // Provides information for BASEFEE
-	PrevRanDao  *common.Hash   // Provides information for PREVRANDAO
-}
-
-// TxContext provides the EVM with information about a transaction.
-// All fields can change between transactions.
-type TxContext struct {
-	// Message information
-	TxHash   common.Hash
-	Origin   common.Address // Provides information for ORIGIN
-	GasPrice *big.Int       // Provides information for GASPRICE
-}
-
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -113,10 +72,10 @@ type TxContext struct {
 // The EVM should never be reused and is not thread safe.
 type EVM struct {
 	// Context provides auxiliary blockchain related information
-	context   BlockContext
-	txContext TxContext
+	context   evmtypes.BlockContext
+	txContext evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
-	intraBlockState IntraBlockState
+	intraBlockState evmtypes.IntraBlockState
 	// Depth is the current call stack
 	depth int
 
@@ -141,7 +100,7 @@ type EVM struct {
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
 	evm := &EVM{
 		context:         blockCtx,
 		txContext:       txCtx,
@@ -158,9 +117,25 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
-func (evm *EVM) Reset(txCtx TxContext, ibs IntraBlockState) {
+func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.txContext = txCtx
 	evm.intraBlockState = ibs
+
+	// ensure the evm is reset to be used again
+	atomic.StoreInt32(&evm.abort, 0)
+}
+
+func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *params.Rules) {
+	evm.context = blockCtx
+	evm.txContext = txCtx
+	evm.intraBlockState = ibs
+	evm.config = vmConfig
+	evm.chainRules = chainRules
+
+	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+
+	// ensure the evm is reset to be used again
+	atomic.StoreInt32(&evm.abort, 0)
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
@@ -202,11 +177,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		bigValue := big.NewInt(-1)
-		if value != nil {
-			bigValue = value.ToBig()
-		}
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, bigValue, code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
@@ -337,7 +308,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), nil)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
@@ -463,14 +434,14 @@ func (evm *EVM) ChainRules() *params.Rules {
 	return evm.chainRules
 }
 
-func (evm *EVM) Context() BlockContext {
+func (evm *EVM) Context() evmtypes.BlockContext {
 	return evm.context
 }
 
-func (evm *EVM) TxContext() TxContext {
+func (evm *EVM) TxContext() evmtypes.TxContext {
 	return evm.txContext
 }
 
-func (evm *EVM) IntraBlockState() IntraBlockState {
+func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }
