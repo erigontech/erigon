@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -35,7 +34,6 @@ type State22 struct {
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
 	changes      map[string]*btree2.BTreeG[statePair]
-	changes2     map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
 	txsDone      *atomic2.Uint64
 	finished     bool
@@ -53,12 +51,24 @@ func NewState22() *State22 {
 	rs := &State22{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		//changes:      map[string]*btree.BTreeG[statePair]{},
-		changes: map[string]*btree2.BTreeG[statePair]{},
-		txsDone: atomic2.NewUint64(0),
+		changes:      map[string]*btree2.BTreeG[statePair]{},
+		txsDone:      atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
+}
+
+func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint) {
+	t, ok := rs.changes[table]
+	if !ok {
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 64, NoLocks: true})
+		rs.changes[table] = t
+	}
+	old, ok := t.SetHint(statePair{key: key, val: val}, hint)
+	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
+	if ok {
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
+	}
 }
 
 func (rs *State22) put(table string, key, val []byte) {
@@ -76,6 +86,12 @@ func (rs *State22) put(table string, key, val []byte) {
 
 const btreeOverhead = 16
 
+func (rs *State22) GetHint(table string, key []byte, hint *btree2.PathHint) []byte {
+	rs.lock.RLock()
+	v := rs.getHint(table, key, hint)
+	rs.lock.RUnlock()
+	return v
+}
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
 	v := rs.get(table, key)
@@ -83,6 +99,16 @@ func (rs *State22) Get(table string, key []byte) []byte {
 	return v
 }
 
+func (rs *State22) getHint(table string, key []byte, hint *btree2.PathHint) []byte {
+	t, ok := rs.changes[table]
+	if !ok {
+		return nil
+	}
+	if i, ok := t.GetHint(statePair{key: key}, hint); ok {
+		return i.val
+	}
+	return nil
+}
 func (rs *State22) get(table string, key []byte) []byte {
 	t, ok := rs.changes[table]
 	if !ok {
@@ -327,10 +353,11 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
+	hint := &btree2.PathHint{}
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addrBytes)
+		enc0 := rs.getHint(kv.PlainState, addrBytes, hint)
 		if enc0 == nil {
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
@@ -354,7 +381,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addrBytes, enc1)
+		rs.putHint(kv.PlainState, addrBytes, enc1, hint)
 		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
 			return err
 		}
@@ -363,7 +390,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
-				rs.put(table, key, list.Vals[i])
+				rs.putHint(table, key, list.Vals[i], hint)
 			}
 		}
 	}
@@ -669,12 +696,15 @@ type StateReader22 struct {
 	rs        *State22
 	composite []byte
 	readLists map[string]*exec22.KvList
+
+	stateHint *btree2.PathHint
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
 	return &StateReader22{
 		rs:        rs,
 		readLists: newReadList(),
+		stateHint: &btree2.PathHint{},
 	}
 }
 
@@ -700,7 +730,7 @@ func (r *StateReader22) SetTrace(trace bool) {
 
 func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc := r.rs.Get(kv.PlainState, addr)
+	enc := r.rs.GetHint(kv.PlainState, addr, r.stateHint)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, addr)
@@ -733,7 +763,7 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 	binary.BigEndian.PutUint64(r.composite[20:], incarnation)
 	copy(r.composite[20+8:], key.Bytes())
 
-	enc := r.rs.Get(kv.PlainState, r.composite)
+	enc := r.rs.GetHint(kv.PlainState, r.composite, r.stateHint)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, r.composite)
