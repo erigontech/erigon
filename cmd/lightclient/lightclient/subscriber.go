@@ -15,7 +15,6 @@ type ChainTipSubscriber struct {
 	ctx context.Context
 
 	currBlock *cltypes.BeaconBlockBellatrix // Most recent gossipped block
-	prevBlock *cltypes.BeaconBlockBellatrix // Second to most recent
 
 	lastUpdate *cltypes.LightClientUpdate
 	started    bool
@@ -69,12 +68,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		if err := block.UnmarshalSSZ(data.Data); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
-		// Duplicate? then skip
-		if c.currBlock != nil && block.Block.Slot == c.currBlock.Slot {
-			return nil
-		}
-		// Swap and replace
-		c.prevBlock = c.currBlock
+
 		c.currBlock = block.Block
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
@@ -122,12 +116,10 @@ func (c *ChainTipSubscriber) PopLastUpdate() *cltypes.LightClientUpdate {
 	return update
 }
 
-func (c *ChainTipSubscriber) GetLastBlocks() (*cltypes.BeaconBlockBellatrix, *cltypes.BeaconBlockBellatrix) {
+func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlockBellatrix {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// We need at least a pair, and blocks must be sequential
-	if c.prevBlock == nil || c.currBlock == nil || c.prevBlock.Slot != c.currBlock.Slot-1 {
-		return nil, nil
-	}
-	return c.prevBlock, c.currBlock
+	block := c.currBlock
+	c.currBlock = nil
+	return block
 }

@@ -14,7 +14,6 @@
 package lightclient
 
 import (
-	"bytes"
 	"context"
 	"time"
 
@@ -26,11 +25,15 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-const maxRecentHashes = 5 // 0.16 KB
-const safetyRange = 8     // 8 block of safety
+const (
+	maxRecentHashes   = 5  // 0.16 KB
+	safetyRange       = 16 // 16 block of safety
+	maxChainExtension = 8  // 8 blocks of chain extension
+)
 
 type LightClient struct {
 	ctx           context.Context
@@ -38,13 +41,16 @@ type LightClient struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	chainTip      *ChainTipSubscriber
 
-	verbose           bool
-	highestSeen       uint64 // Highest ETH1 block seen
-	recentHashesCache *lru.Cache
-	db                kv.RwDB
-	sentinel          sentinel.SentinelClient
-	execution         remote.ETHBACKENDServer
-	store             *LightClientStore
+	verbose              bool
+	highestSeen          uint64      // Highest ETH1 block seen.
+	highestValidated     uint64      // Highest ETH2 slot validated.
+	highestProcessedRoot common.Hash // Highest processed ETH2 block root.
+	lastEth2ParentRoot   common.Hash // Last ETH2 Parent root.
+	recentHashesCache    *lru.Cache
+	db                   kv.RwDB
+	sentinel             sentinel.SentinelClient
+	execution            remote.ETHBACKENDServer
+	store                *LightClientStore
 }
 
 func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
@@ -136,6 +142,12 @@ func (l *LightClient) Start() {
 		// log new validated segment
 		if len(updates) > 0 {
 			lastValidated := updates[len(updates)-1]
+			l.highestValidated = lastValidated.AttestedHeader.Slot
+			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HashTreeRoot()
+			if err != nil {
+				log.Warn("could not compute root", "err", err)
+				continue
+			}
 			// Save to Database
 			if lastValidated.HasNextSyncCommittee() {
 				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
@@ -177,41 +189,8 @@ func (l *LightClient) Start() {
 					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
 					"to", lastValidated.AttestedHeader.Slot)
 			}
-			prev, curr := l.chainTip.GetLastBlocks()
-			if prev == nil {
-				continue
-			}
-			// Skip if we went out of sync and weird network stuff happen
-			if prev.Slot != lastValidated.AttestedHeader.Slot {
-				continue
-			}
-			// Validate update against block N-1
-			prevRoot, err := prev.Body.HashTreeRoot()
-			if err != nil {
-				log.Warn("[LightClient] Could not retrive body root of block N-1", "err", err)
-				continue
-			}
-			if !bytes.Equal(prevRoot[:], lastValidated.AttestedHeader.BodyRoot[:]) {
-				log.Warn("[LightClient] Could validate block N-1")
-				continue
-			}
-			// Check if N.hash == (N-1).hash for ETH1, we really dont care about ETH2 validity at this point
-			if !bytes.Equal(prev.Body.ExecutionPayload.BlockHash[:],
-				curr.Body.ExecutionPayload.ParentHash[:]) {
-				log.Warn("[LightClient] Wrong ETH1 hashes")
-				continue
-			}
-			eth1Number := curr.Body.ExecutionPayload.BlockNumber
-			if l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange {
-				continue
-			}
-			// If all of the above is gud then do the push
-			if err := l.processBeaconBlock(curr); err != nil {
-				log.Warn("Could not send beacon block to ETH1", "err", err)
-			} else {
-				l.highestSeen = eth1Number
-			}
 		}
+		l.importBlockIfPossible()
 		// do not have high CPU load
 		timer := time.NewTimer(200 * time.Millisecond)
 		select {
@@ -227,5 +206,42 @@ func (l *LightClient) Start() {
 			return
 		}
 	}
+}
 
+func (l *LightClient) importBlockIfPossible() {
+	var err error
+	curr := l.chainTip.GetLastBlock()
+	if curr == nil {
+		return
+	}
+	// Skip if we are too far ahead without validating
+	if curr.Slot > l.highestValidated+maxChainExtension {
+		return
+	}
+	currentRoot, err := curr.HashTreeRoot()
+	if err != nil {
+		log.Warn("Could not send beacon block to ETH1", "err", err)
+		return
+	}
+
+	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
+		l.lastEth2ParentRoot = curr.ParentRoot
+		return
+	}
+	l.lastEth2ParentRoot = curr.ParentRoot
+	l.highestProcessedRoot = currentRoot
+
+	eth1Number := curr.Body.ExecutionPayload.BlockNumber
+	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
+		return
+	}
+	if l.verbose {
+		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
+	}
+	// If all of the above is gud then do the push
+	if err := l.processBeaconBlock(curr); err != nil {
+		log.Warn("Could not send beacon block to ETH1", "err", err)
+	} else {
+		l.highestSeen = eth1Number
+	}
 }
