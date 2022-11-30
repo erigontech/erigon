@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/holiman/uint256"
 
@@ -191,7 +192,7 @@ func (sw *stackWrapper) pushObject(vm *JSVM) {
 
 // dbWrapper provides a JavaScript wrapper around vm.Database.
 type dbWrapper struct {
-	db vm.IntraBlockState
+	db evmtypes.IntraBlockState
 }
 
 // pushObject assembles a JSVM object wrapping a swappable database and pushes it

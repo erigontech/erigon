@@ -4,7 +4,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
@@ -14,7 +14,7 @@ var zero = uint256.NewInt(0)
 
 // AddTransferLog adds transfer log into state
 func AddTransferLog(
-	state vm.IntraBlockState,
+	state evmtypes.IntraBlockState,
 
 	sender,
 	recipient common.Address,
@@ -43,7 +43,7 @@ func AddTransferLog(
 // AddFeeTransferLog adds transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(
-	state vm.IntraBlockState,
+	state evmtypes.IntraBlockState,
 
 	sender,
 	recipient common.Address,
@@ -71,7 +71,7 @@ func AddFeeTransferLog(
 
 // addTransferLog adds transfer log into state
 func addTransferLog(
-	state vm.IntraBlockState,
+	state evmtypes.IntraBlockState,
 	eventSig common.Hash,
 
 	sender,

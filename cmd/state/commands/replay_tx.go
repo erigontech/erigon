@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -114,7 +115,7 @@ func ReplayTx(genesis *core.Genesis) error {
 	}
 	defer agg.Close()
 	ac := agg.MakeContext()
-	workCh := make(chan *state.TxTask)
+	workCh := make(chan *exec22.TxTask)
 	rs := state.NewReconState(workCh)
 	if err = replayTxNum(ctx, allSnapshots, blockReader, txNum, txNums, rs, ac); err != nil {
 		return err
