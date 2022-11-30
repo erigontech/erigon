@@ -1356,7 +1356,8 @@ func (b *Block) Copy() *Block {
 	if b.withdrawals != nil {
 		withdrawals = make([]*Withdrawal, 0, len(b.withdrawals))
 		for _, withdrawal := range b.withdrawals {
-			withdrawals = append(withdrawals, withdrawal)
+			wCopy := *withdrawal
+			withdrawals = append(withdrawals, &wCopy)
 		}
 	}
 

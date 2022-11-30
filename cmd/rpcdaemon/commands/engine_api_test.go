@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -13,7 +14,7 @@ import (
 // Test case for https://github.com/ethereum/execution-apis/pull/217 responses
 func TestZeroLatestValidHash(t *testing.T) {
 	payloadStatus := remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{})}
-	json, err := convertPayloadStatus(nil, nil, &payloadStatus)
+	json, err := convertPayloadStatus(context.TODO(), nil, &payloadStatus)
 	require.NoError(t, err)
 	assert.Equal(t, "INVALID", json["status"])
 	assert.Equal(t, common.Hash{}, json["latestValidHash"])
