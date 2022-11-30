@@ -562,6 +562,18 @@ func (a *Aggregator22) Warmup(txFrom, limit uint64) {
 }
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
+func (a *Aggregator22) DiscardHistory() *Aggregator22 {
+	a.accounts.DiscardHistory(a.tmpdir)
+	a.storage.DiscardHistory(a.tmpdir)
+	a.code.DiscardHistory(a.tmpdir)
+	a.logAddrs.DiscardHistory(a.tmpdir)
+	a.logTopics.DiscardHistory(a.tmpdir)
+	a.tracesFrom.DiscardHistory(a.tmpdir)
+	a.tracesTo.DiscardHistory(a.tmpdir)
+	return a
+}
+
+// StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *Aggregator22) StartWrites() *Aggregator22 {
 	a.accounts.StartWrites(a.tmpdir)
 	a.storage.StartWrites(a.tmpdir)
@@ -617,7 +629,7 @@ func (a *Aggregator22) CanPruneFrom(tx kv.Tx) uint64 {
 	return math2.MaxUint64
 }
 func (a *Aggregator22) Prune(ctx context.Context, limit uint64) error {
-	a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
+	//a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	defer func(t time.Time) {
 		if time.Since(t) > time.Second {
 			log.Debug(fmt.Sprintf("prune took: %s\n", time.Since(t)))

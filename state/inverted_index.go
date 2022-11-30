@@ -321,10 +321,15 @@ func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.add(key, key)
 }
 
+func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
+	ii.walLock.Lock()
+	defer ii.walLock.Unlock()
+	ii.wal = ii.newWriter(tmpdir, false, true)
+}
 func (ii *InvertedIndex) StartWrites(tmpdir string) {
 	ii.walLock.Lock()
 	defer ii.walLock.Unlock()
-	ii.wal = ii.newWriter(tmpdir)
+	ii.wal = ii.newWriter(tmpdir, true, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.walLock.Lock()
@@ -338,7 +343,7 @@ func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 	defer ii.walLock.Unlock()
 	wal := ii.wal
 	if wal != nil {
-		ii.wal = ii.newWriter(ii.wal.tmpdir)
+		ii.wal = ii.newWriter(ii.wal.tmpdir, ii.wal.buffered, ii.wal.discard)
 	}
 	return wal
 }
@@ -349,6 +354,7 @@ type invertedIndexWAL struct {
 	indexKeys *etl.Collector
 	tmpdir    string
 	buffered  bool
+	discard   bool
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -389,14 +395,17 @@ func init() {
 	}
 }
 
-func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWAL {
+func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
 	w := &invertedIndexWAL{ii: ii,
-		buffered: true,
+		buffered: buffered,
+		discard:  discard,
 		tmpdir:   tmpdir,
+	}
+	if buffered {
 		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		index:     etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
-		indexKeys: etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
+		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 	}
 	w.index.LogLvl(log.LvlTrace)
 	w.indexKeys.LogLvl(log.LvlTrace)
@@ -404,6 +413,10 @@ func (ii *InvertedIndex) newWriter(tmpdir string) *invertedIndexWAL {
 }
 
 func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
+	if ii.discard {
+		return nil
+	}
+
 	if ii.buffered {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err

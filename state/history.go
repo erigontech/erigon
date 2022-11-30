@@ -444,11 +444,18 @@ func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
 	h.walLock.RUnlock()
 	return err
 }
+
+func (h *History) DiscardHistory(tmpdir string) {
+	h.InvertedIndex.StartWrites(tmpdir)
+	h.walLock.Lock()
+	defer h.walLock.Unlock()
+	h.wal = h.newWriter(tmpdir, false, true)
+}
 func (h *History) StartWrites(tmpdir string) {
 	h.InvertedIndex.StartWrites(tmpdir)
 	h.walLock.Lock()
 	defer h.walLock.Unlock()
-	h.wal = h.newWriter(tmpdir)
+	h.wal = h.newWriter(tmpdir, true, false)
 }
 func (h *History) FinishWrites() {
 	h.InvertedIndex.FinishWrites()
@@ -462,7 +469,7 @@ func (h *History) Rotate() historyFlusher {
 	h.walLock.Lock()
 	defer h.walLock.Unlock()
 	w := h.wal
-	h.wal = h.newWriter(h.wal.tmpdir)
+	h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
 	h.wal.autoIncrement = w.autoIncrement
 	return historyFlusher{w, h.InvertedIndex.Rotate()}
 }
@@ -490,6 +497,7 @@ type historyWAL struct {
 	historyKey       []byte
 	autoIncrement    uint64
 	buffered         bool
+	discard          bool
 }
 
 func (h *historyWAL) close() {
@@ -499,14 +507,17 @@ func (h *historyWAL) close() {
 	h.historyVals.Close()
 }
 
-func (h *History) newWriter(tmpdir string) *historyWAL {
+func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	w := &historyWAL{h: h,
-		tmpdir:           tmpdir,
+		tmpdir:   tmpdir,
+		buffered: buffered,
+		discard:  discard,
+
 		autoIncrementBuf: make([]byte, 8),
 		historyKey:       make([]byte, 0, 128),
-
-		buffered:    true,
-		historyVals: etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
+	}
+	if buffered {
+		w.historyVals = etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 	}
 	w.historyVals.LogLvl(log.LvlTrace)
 
@@ -536,6 +547,10 @@ func (h *historyWAL) flush(tx kv.RwTx) error {
 }
 
 func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
+	if h.discard {
+		return nil
+	}
+
 	/*
 		lk := len(key1) + len(key2)
 		historyKey := make([]byte, lk+8)
