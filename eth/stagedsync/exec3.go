@@ -107,12 +107,6 @@ func Exec3(ctx context.Context,
 	maxBlockNum uint64, chainConfig *params.ChainConfig,
 	genesis *core.Genesis,
 ) (err error) {
-	if debug.DiscardHistory() {
-		defer agg.DiscardHistory().FinishWrites()
-	} else {
-		defer agg.StartWrites().FinishWrites()
-	}
-
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
@@ -238,6 +232,11 @@ func Exec3(ctx context.Context,
 			defer rs.Finish()
 
 			agg.SetTx(tx)
+			if debug.DiscardHistory() {
+				defer agg.DiscardHistory().FinishWrites()
+			} else {
+				defer agg.StartWrites().FinishWrites()
+			}
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
@@ -401,6 +400,11 @@ func Exec3(ctx context.Context,
 	}
 
 	if !parallel {
+		if debug.DiscardHistory() {
+			defer agg.DiscardHistory().FinishWrites()
+		} else {
+			defer agg.StartWrites().FinishWrites()
+		}
 		execWorkers[0].ResetTx(applyTx)
 	}
 
