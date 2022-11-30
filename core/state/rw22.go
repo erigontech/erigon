@@ -573,8 +573,13 @@ type StateWriter22 struct {
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
 	return &StateWriter22{
-		rs:           rs,
-		writeLists:   newWriteList(),
+		rs: rs,
+		writeLists: map[string]*exec22.KvList{
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.PlainContractCode: {},
+			kv.IncarnationMap:    {},
+		},
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
@@ -587,7 +592,12 @@ func (w *StateWriter22) SetTxNum(txNum uint64) {
 }
 
 func (w *StateWriter22) ResetWriteSet() {
-	w.writeLists = newWriteList()
+	w.writeLists = map[string]*exec22.KvList{
+		kv.PlainState:        {},
+		kv.Code:              {},
+		kv.PlainContractCode: {},
+		kv.IncarnationMap:    {},
+	}
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
@@ -670,8 +680,13 @@ type StateReader22 struct {
 
 func NewStateReader22(rs *State22) *StateReader22 {
 	return &StateReader22{
-		rs:        rs,
-		readLists: newReadList(),
+		rs: rs,
+		readLists: map[string]*exec22.KvList{
+			kv.PlainState:     {},
+			kv.Code:           {},
+			CodeSizeTable:     {},
+			kv.IncarnationMap: {},
+		},
 	}
 }
 
@@ -684,7 +699,12 @@ func (r *StateReader22) SetTx(tx kv.Tx) {
 }
 
 func (r *StateReader22) ResetReadSet() {
-	r.readLists = newReadList()
+	r.readLists = map[string]*exec22.KvList{
+		kv.PlainState:     {},
+		kv.Code:           {},
+		CodeSizeTable:     {},
+		kv.IncarnationMap: {},
+	}
 }
 
 func (r *StateReader22) ReadSet() map[string]*exec22.KvList {

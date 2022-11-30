@@ -33,6 +33,7 @@ type Worker struct {
 	stateWriter *state.StateWriter22
 	stateReader *state.StateReader22
 	chainConfig *params.ChainConfig
+	getHeader   func(hash common.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -69,6 +70,13 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+	}
+	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
 	}
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
@@ -175,6 +183,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
@@ -183,14 +192,14 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
 		//	vmenv = rw.starkNetEvm
 		//} else {
-		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		//	vmenv = rw.evm
+		//rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		//vmenv = rw.evm
 		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 		} else {
-			blockContext := core.NewEVMBlockContext(header, txTask.GetHashFn, rw.engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
