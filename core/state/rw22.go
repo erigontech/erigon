@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
 )
 
@@ -33,7 +34,8 @@ type State22 struct {
 	triggerLock  sync.RWMutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]*btree.BTreeG[statePair]
+	changes      map[string]*btree2.BTreeG[statePair]
+	changes2     map[string]*btree.BTreeG[statePair]
 	sizeEstimate uint64
 	txsDone      *atomic2.Uint64
 	finished     bool
@@ -51,8 +53,9 @@ func NewState22() *State22 {
 	rs := &State22{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree.BTreeG[statePair]{},
-		txsDone:      atomic2.NewUint64(0),
+		//changes:      map[string]*btree.BTreeG[statePair]{},
+		changes: map[string]*btree2.BTreeG[statePair]{},
+		txsDone: atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -61,10 +64,10 @@ func NewState22() *State22 {
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[statePair](64, stateItemLess)
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 64, NoLocks: true})
 		rs.changes[table] = t
 	}
-	old, ok := t.ReplaceOrInsert(statePair{key: key, val: val})
+	old, ok := t.Set(statePair{key: key, val: val})
 	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
 	if ok {
 		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
@@ -99,7 +102,7 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
-		t.Ascend(func(item statePair) bool {
+		t.Ascend(statePair{}, func(item statePair) bool {
 			if len(item.val) == 0 {
 				if err = c.Delete(item.key); err != nil {
 					return false
@@ -116,7 +119,7 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
-		t.Clear(true)
+		t.Clear()
 	}
 	rs.sizeEstimate = 0
 	return nil
@@ -255,7 +258,7 @@ func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			}
 			if psChanges != nil {
 				search.key = addr1
-				psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
+				psChanges.Ascend(search, func(item statePair) bool {
 					if !bytes.HasPrefix(item.key, addr1) {
 						return false
 					}
@@ -528,7 +531,7 @@ func (rs *State22) SizeEstimate() uint64 {
 
 func (rs *State22) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	search := statePair{}
-	var t *btree.BTreeG[statePair]
+	var t *btree2.BTreeG[statePair]
 
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
