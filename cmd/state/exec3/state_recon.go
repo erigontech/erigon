@@ -238,6 +238,8 @@ type ReconWorker struct {
 	chain       ChainReader
 	isPoSA      bool
 	posa        consensus.PoSA
+
+	ibs *state2.IntraBlockState
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
@@ -261,6 +263,7 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 	}
 	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
+	rw.ibs = state2.New(rw.stateReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
@@ -285,8 +288,9 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.ibs.Reset()
+	ibs := rw.ibs
 	rules := txTask.Rules
-	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
