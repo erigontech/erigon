@@ -136,8 +136,8 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.txIndex = 0
 	maps.Clear(sdb.logs)
 	sdb.logSize = 0
-	sdb.clearJournalAndRefund()
-	sdb.accessList = newAccessList()
+	//sdb.clearJournalAndRefund()
+	//sdb.accessList = newAccessList() // this reset by .Prepare() method
 	maps.Clear(sdb.balanceInc)
 	//sdb.nilAccounts = make(map[common.Address]struct{})
 	//sdb.stateObjects = make(map[common.Address]*stateObject)
