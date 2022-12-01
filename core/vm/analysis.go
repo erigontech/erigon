@@ -29,14 +29,15 @@ func codeBitmap(code []byte) []uint64 {
 		// Short circruit for now on EOF ops with immediates.
 		// TODO(matt): make EOF-specific code bitmap
 		if op == RJUMP || op == RJUMPI || op == CALLF {
-			// TODO(CZ): optimise this. For now the logic of bitvec.setN has been copied from https://github.dev/lightclient/go-ethereum/blob/b3f36e10766956bf204f2d2b9415dcd8cfd2be6b/core/vm/analysis.go#L37
-			a := uint16(0b1111) << (pc % 8)
-			bits[pc/8] |= uint64(a)
-			if b := uint64(a >> 8); b != 0 {
-				bits[pc/8+1] = b
-			}
+			// TODO(CZ): For now the logic of bitvec.setN has been copied
+			// and modified to work with a uint64 slice instead of a bitvec.
+			// https://github.dev/lightclient/go-ethereum/blob/b3f36e10766956bf204f2d2b9415dcd8cfd2be6b/core/vm/analysis.go#L37
 
-			pc += 4
+			// Also applied @holiman suggestion in order to make legacy code tests work.
+			// https://github.com/ethereum/go-ethereum/pull/26133/files#r1026320917
+			bits[pc/64] |= 1 << (uint64(pc) & 63)
+			pc += 2
+
 			continue
 		}
 		if op >= PUSH1 && op <= PUSH32 {
