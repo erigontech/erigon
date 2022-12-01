@@ -928,10 +928,9 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 }
 
 // NewBlock creates a new block. The input data is copied,
-// changes to header and to the field values will not affect the
-// block.
+// changes to header and to the field values will not affect the block.
 //
-// The values of TxHash, UncleHash, ReceiptHash, Bloom and WithdrawalHash
+// The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
 func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
@@ -973,7 +972,10 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		h := DeriveSha(Withdrawals(withdrawals))
 		b.header.WithdrawalsHash = &h
 		b.withdrawals = make(Withdrawals, len(withdrawals))
-		copy(b.withdrawals, withdrawals)
+		for i, w := range withdrawals {
+			wCopy := *w
+			b.withdrawals[i] = &wCopy
+		}
 	}
 
 	return b
