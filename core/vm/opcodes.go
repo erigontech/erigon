@@ -288,8 +288,8 @@ var opCodeToString = map[OpCode]string{
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
-	//DUP:     "DUP",
-	//SWAP:    "SWAP",
+	// DUP:     "DUP",
+	// SWAP:    "SWAP",
 	MLOAD:    "MLOAD",
 	MSTORE:   "MSTORE",
 	MSTORE8:  "MSTORE8",
@@ -546,6 +546,7 @@ var stringToOp = map[string]OpCode{
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.
+// It panics if the string is not associated with any opcode.
 func StringToOp(str string) OpCode {
 	return stringToOp[str]
 }
