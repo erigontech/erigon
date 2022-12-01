@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
-func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(t *testing.T, aggStep uint64) (string, kv.RwDB, *InvertedIndex) {
 	t.Helper()
 	path := t.TempDir()
 	t.Cleanup(func() { os.RemoveAll(path) })
@@ -50,7 +50,7 @@ func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	ii, err := NewInvertedIndex(path, path, 16 /* aggregationStep */, "inv" /* filenameBase */, keysTable, indexTable)
+	ii, err := NewInvertedIndex(path, path, aggStep, "inv" /* filenameBase */, keysTable, indexTable)
 	require.NoError(t, err)
 	t.Cleanup(ii.Close)
 	return path, db, ii
@@ -59,7 +59,7 @@ func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 func TestInvIndexCollationBuild(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, ii := testDbAndInvertedIndex(t)
+	_, db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 func TestInvIndexAfterPrune(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, ii := testDbAndInvertedIndex(t)
+	_, db, ii := testDbAndInvertedIndex(t, 16)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -202,25 +202,25 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 	t.Helper()
-	path, db, ii := testDbAndInvertedIndex(t)
+	return filledInvIndexOfSize(t, uint64(1000), 16, 31)
+}
+
+func filledInvIndexOfSize(t *testing.T, txs, aggStep, module uint64) (string, kv.RwDB, *InvertedIndex, uint64) {
+	t.Helper()
+	path, db, ii := testDbAndInvertedIndex(t, aggStep)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 	ii.SetTx(tx)
 	ii.StartWrites("")
 	defer ii.FinishWrites()
 
-	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		ii.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+		for keyNum := uint64(1); keyNum <= module; keyNum++ {
 			if txNum%keyNum == 0 {
 				var k [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
@@ -231,11 +231,6 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 		if txNum%10 == 0 {
 			err = ii.Rotate().Flush(tx)
 			require.NoError(t, err)
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx, err = db.BeginRw(ctx)
-			require.NoError(t, err)
-			ii.SetTx(tx)
 		}
 	}
 	err = ii.Rotate().Flush(tx)
@@ -288,36 +283,25 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	defer logEvery.Stop()
 	ctx := context.Background()
 	// Leave the last 2 aggregation steps un-collated
-	var tx kv.RwTx
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ii.SetTx(tx)
+
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(ctx)
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx, logEvery)
 			require.NoError(t, err)
-			defer roTx.Rollback()
-			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
-			require.NoError(t, err)
-			roTx.Rollback()
 			sf, err := ii.buildFiles(ctx, step, bs)
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			tx, err = db.BeginRw(ctx)
-			require.NoError(t, err)
-			ii.SetTx(tx)
 			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
 			require.NoError(t, err)
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx = nil
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.endTxNumMinimax()
-			maxSpan := uint64(16 * 16)
+			maxSpan := ii.aggregationStep * 32
 			for found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan); found; found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan) {
 				outs, _ := ii.staticFilesInRange(startTxNum, endTxNum)
 				in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, 1)
@@ -328,6 +312,8 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			}
 		}()
 	}
+	err = tx.Commit()
+	require.NoError(t, err)
 }
 
 func TestInvIndexRanges(t *testing.T) {
@@ -335,33 +321,26 @@ func TestInvIndexRanges(t *testing.T) {
 	defer logEvery.Stop()
 	_, db, ii, txs := filledInvIndex(t)
 	ctx := context.Background()
-	var tx kv.RwTx
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ii.SetTx(tx)
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			roTx, err := db.BeginRo(ctx)
-			require.NoError(t, err)
-			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx, logEvery)
-			roTx.Rollback()
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx, logEvery)
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs)
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			tx, err = db.BeginRw(ctx)
-			require.NoError(t, err)
-			ii.SetTx(tx)
 			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
-			require.NoError(t, err)
-			err = tx.Commit()
 			require.NoError(t, err)
 		}()
 	}
+	err = tx.Commit()
+	require.NoError(t, err)
+
 	checkRanges(t, db, ii, txs)
 }
 

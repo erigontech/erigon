@@ -109,6 +109,11 @@ type RecSplit struct {
 }
 
 type RecSplitArgs struct {
+	// Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
+	// if Enum=false: can have unsorted and duplicated values
+	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
+	Enums bool
+
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
 	StartSeed   []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
@@ -118,7 +123,6 @@ type RecSplitArgs struct {
 	EtlBufLimit datasize.ByteSize
 	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize    uint16
-	Enums       bool // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -651,9 +655,7 @@ func (rs *RecSplit) Build() error {
 	_ = rs.indexW.Flush()
 	_ = rs.indexF.Sync()
 	_ = rs.indexF.Close()
-	if err := os.Rename(tmpIdxFilePath, rs.indexFile); err != nil {
-		return err
-	}
+	_ = os.Rename(tmpIdxFilePath, rs.indexFile)
 	return nil
 }
 

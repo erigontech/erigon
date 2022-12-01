@@ -66,13 +66,6 @@ func TestAggregator_Merge(t *testing.T) {
 		}
 		require.NoError(t, err)
 		require.NoError(t, agg.FinishTx())
-		if txNum%100 == 0 {
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
-			agg.SetTx(tx)
-		}
 	}
 	err = agg.Flush()
 	require.NoError(t, err)
