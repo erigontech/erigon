@@ -64,7 +64,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
-	github.com/tidwall/btree v1.5.1
+	github.com/tidwall/btree v1.5.0
 	github.com/torquem-ch/mdbx-go v0.26.3
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
