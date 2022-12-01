@@ -46,16 +46,28 @@ func (s *EthBackendClientDirect) NetPeerCount(ctx context.Context, in *remote.Ne
 	return s.server.NetPeerCount(ctx, in)
 }
 
-func (s *EthBackendClientDirect) EngineGetPayloadV1(ctx context.Context, in *remote.EngineGetPayloadRequest, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
-	return s.server.EngineGetPayloadV1(ctx, in)
-}
-
 func (s *EthBackendClientDirect) EngineNewPayloadV1(ctx context.Context, in *types.ExecutionPayload, opts ...grpc.CallOption) (*remote.EnginePayloadStatus, error) {
 	return s.server.EngineNewPayloadV1(ctx, in)
 }
 
+func (s *EthBackendClientDirect) EngineNewPayloadV2(ctx context.Context, in *types.ExecutionPayloadV2, opts ...grpc.CallOption) (*remote.EnginePayloadStatus, error) {
+	return s.server.EngineNewPayloadV2(ctx, in)
+}
+
 func (s *EthBackendClientDirect) EngineForkChoiceUpdatedV1(ctx context.Context, in *remote.EngineForkChoiceUpdatedRequest, opts ...grpc.CallOption) (*remote.EngineForkChoiceUpdatedReply, error) {
 	return s.server.EngineForkChoiceUpdatedV1(ctx, in)
+}
+
+func (s *EthBackendClientDirect) EngineForkChoiceUpdatedV2(ctx context.Context, in *remote.EngineForkChoiceUpdatedRequestV2, opts ...grpc.CallOption) (*remote.EngineForkChoiceUpdatedReply, error) {
+	return s.server.EngineForkChoiceUpdatedV2(ctx, in)
+}
+
+func (s *EthBackendClientDirect) EngineGetPayloadV1(ctx context.Context, in *remote.EngineGetPayloadRequest, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
+	return s.server.EngineGetPayloadV1(ctx, in)
+}
+
+func (s *EthBackendClientDirect) EngineGetPayloadV2(ctx context.Context, in *remote.EngineGetPayloadRequest, opts ...grpc.CallOption) (*types.ExecutionPayloadV2, error) {
+	return s.server.EngineGetPayloadV2(ctx, in)
 }
 
 func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
