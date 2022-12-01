@@ -1,0 +1,68 @@
+# Extends the mainnet preset
+# This *could* be 'minimal', but it's not recommended to use because not every client supports 'minimal'
+PRESET_BASE: 'mainnet'
+CONFIG_NAME: testnet # needs to exist because of Prysm. Otherwise it conflicts with mainnet genesis
+
+# Genesis
+# ---------------------------------------------------------------
+# `2**14` (= 16,384)
+MIN_GENESIS_ACTIVE_VALIDATOR_COUNT: 500
+MIN_GENESIS_TIME: 1667641735
+#GENESIS_FORK_VERSION: 0x01337902 # FIXME(IA)
+GENESIS_DELAY: 300
+
+# Forking
+# ---------------------------------------------------------------
+# Some forks are disabled for now:
+#  - These may be re-assigned to another fork-version later
+#  - Temporarily set to max uint64 value: 2**64 - 1
+
+# Altair
+#ALTAIR_FORK_VERSION: 0x11337902 # FIXME(IA)
+ALTAIR_FORK_EPOCH: 0
+# Merge
+#BELLATRIX_FORK_VERSION: 0x21337902 # FIXME(IA)
+BELLATRIX_FORK_EPOCH: 0
+TERMINAL_TOTAL_DIFFICULTY: 0
+# 0x0000...000 indicates that we use TERMINAL_TOTAL_DIFFICULTY instead of a block has to trigger the merge
+# See also: https://eips.ethereum.org/EIPS/eip-3675
+TERMINAL_BLOCK_HASH: 0x0000000000000000000000000000000000000000000000000000000000000000
+# NOTE: This is commented out because Nimbus warns us that it's an unrecognized parameter
+TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: 18446744073709551615
+# Sharding
+#SHARDING_FORK_VERSION: 0x31337902 # FIXME(IA)
+SHARDING_FORK_EPOCH: 18446744073709551615
+
+# Time parameters
+# ---------------------------------------------------------------
+# 12 seconds
+SECONDS_PER_SLOT: 12
+# 2**8 (= 256) epochs ~27 hours
+MIN_VALIDATOR_WITHDRAWABILITY_DELAY: 256
+# 2**8 (= 256) epochs ~27 hours
+SHARD_COMMITTEE_PERIOD: 256
+# It's very important that SECONDS_PER_ETH1_BLOCK * ETH1_FOLLOW_DISTANCE is a good amount of time, else
+#  jitter will cause the Beacon nodes to think they're far behind the Eth1 nodes and give up syncing
+SECONDS_PER_ETH1_BLOCK: 10
+ETH1_FOLLOW_DISTANCE: 30
+
+
+# Validator cycle
+# ---------------------------------------------------------------
+# 2**2 (= 4)
+INACTIVITY_SCORE_BIAS: 4
+# 2**4 (= 16)
+INACTIVITY_SCORE_RECOVERY_RATE: 16
+# 2**4 * 10**9 (= 16,000,000,000) Gwei
+EJECTION_BALANCE: 16000000000
+# 2**2 (= 4)
+MIN_PER_EPOCH_CHURN_LIMIT: 4
+# 2**16 (= 65,536)
+CHURN_LIMIT_QUOTIENT: 65536
+
+
+# Deposit contract
+# ---------------------------------------------------------------
+DEPOSIT_CHAIN_ID: 1337903
+DEPOSIT_NETWORK_ID: 1337903
+DEPOSIT_CONTRACT_ADDRESS: 0x4242424242424242424242424242424242424242

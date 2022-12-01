@@ -15,6 +15,7 @@ package clparams
 
 import (
 	"crypto/rand"
+	"embed"
 	"fmt"
 	"math"
 	"math/big"
@@ -23,7 +24,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed beacon_configs
+var beaconConfigFiles embed.FS
 
 type NetworkType int
 
@@ -193,7 +198,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         math.MaxUint64,
+		ContractDeploymentBlock:         0,
 		BootNodes:                       ShandongBootstrapNodes,
 	},
 }
@@ -210,6 +215,10 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	GoerliNetwork: {
 		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
+	},
+	ShandongNetwork: {
+		GenesisValidatorRoot: common.HexToHash("0xe794e45a596856bcd5412788f46752a559a4aa89fe556ab26a8c2cf0fc24cb5e"),
+		GenesisTime:          1667641735,
 	},
 }
 
@@ -696,11 +705,35 @@ func goerliConfig() BeaconChainConfig {
 	return cfg
 }
 
+func shandongConfig() BeaconChainConfig {
+	cfg := mainnetBeaconConfig
+	f, err := beaconConfigFiles.Open("beacon_configs/shandong.yml")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	decoder := yaml.NewDecoder(f)
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		panic(err)
+	}
+	// #GENESIS_FORK_VERSION: 0x01337902 # FIXME(IA)
+	cfg.GenesisForkVersion = []byte{0x01, 0x33, 0x79, 0x02}
+	// #ALTAIR_FORK_VERSION: 0x11337902 # FIXME(IA)
+	cfg.AltairForkVersion = []byte{0x11, 0x33, 0x79, 0x02}
+	// #BELLATRIX_FORK_VERSION: 0x21337902 # FIXME(IA)
+	cfg.BellatrixForkVersion = []byte{0x21, 0x33, 0x79, 0x02}
+	// #SHARDING_FORK_VERSION: 0x31337902 # FIXME(IA)
+	cfg.ShardingForkVersion = []byte{0x31, 0x33, 0x79, 0x02}
+	return cfg
+}
+
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
-	MainnetNetwork: mainnetConfig(),
-	SepoliaNetwork: sepoliaConfig(),
-	GoerliNetwork:  goerliConfig(),
+	MainnetNetwork:  mainnetConfig(),
+	SepoliaNetwork:  sepoliaConfig(),
+	GoerliNetwork:   goerliConfig(),
+	ShandongNetwork: shandongConfig(),
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
@@ -721,6 +754,9 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	case networkname.SepoliaChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
 		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
+	case networkname.ShandongChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ShandongNetwork)
+		return genesisCfg, networkCfg, beaconCfg, ShandongNetwork, nil
 	default:
 		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}

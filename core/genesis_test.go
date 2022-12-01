@@ -93,6 +93,9 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 	if block.Hash() != params.ShandongGenesisHash {
 		t.Errorf("wrong Shandong genesis hash, got %v, want %v", block.Hash(), params.ShandongGenesisHash)
 	}
+	if block.Root() != params.ShandongGenesisStateRoot {
+		t.Errorf("wrong Shandong genesis state root, got %v, want %v", block.Root(), common.Hash{})
+	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
