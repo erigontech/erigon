@@ -980,6 +980,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return SepoliaChainConfig
 	case genesisHash == RopstenGenesisHash:
 		return RopstenChainConfig
+	case genesisHash == ShandongGenesisHash:
+		return ShandongChainConfig
 	case genesisHash == RinkebyGenesisHash:
 		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:

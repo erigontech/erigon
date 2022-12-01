@@ -671,7 +671,7 @@ func readCallTraces(chaindata string, block uint64) error {
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("%x: %d\n", k, bm.ToArray())
+		// fmt.Printf("%x: %d\n", k, bm.ToArray())
 	}
 	if err != nil {
 		return err
@@ -1077,6 +1077,8 @@ func chainConfig(name string) error {
 		chainConfig = params.MainnetChainConfig
 	case "ropsten":
 		chainConfig = params.RopstenChainConfig
+	case "shandong":
+		chainConfig = params.ShandongChainConfig
 	case "sepolia":
 		chainConfig = params.SepoliaChainConfig
 	case "rinkeby":
