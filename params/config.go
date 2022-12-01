@@ -75,6 +75,7 @@ var (
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	ShandongGenesisHash   = common.HexToHash("0x314dd74a67fa1dbd85498d42871b1bb6a5bb23a9dbcc07848311b8e5a71cab38") // Source: https://explorer.shandong.ethdevops.io/block/0/transactions
 )
 
 var (
@@ -113,6 +114,8 @@ var (
 	SokolChainConfig = readChainSpec("chainspecs/sokol.json")
 
 	FermionChainConfig = readChainSpec("chainspecs/fermion.json")
+
+	ShandongChainConfig = readChainSpec("chainspecs/shandong.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.

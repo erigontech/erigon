@@ -84,9 +84,9 @@ type Genesis struct {
 type GenesisAlloc map[common.Address]GenesisAccount
 
 type AuthorityRoundSeal struct {
-	/// Seal step.
+	// / Seal step.
 	Step uint64 `json:"step"`
-	/// Seal signature.
+	// / Seal signature.
 	Signature common.Hash `json:"signature"`
 }
 
@@ -330,7 +330,7 @@ func sortedAllocKeys(m GenesisAlloc) []string {
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
-	_ = g.Alloc //nil-check
+	_ = g.Alloc // nil-check
 
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
@@ -636,6 +636,24 @@ func DefaultGoerliGenesisBlock() *Genesis {
 		GasLimit:   10485760,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/goerli.json"),
+	}
+}
+
+// DefaultShandongGenesisBlock returns the Shandong network genesis block.
+// Source: https://github.com/hyperledger/besu/blob/main/config/src/main/resources/shandong.json
+func DefaultShandongGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:    params.ShandongChainConfig,
+		Timestamp: 1667641735,
+		// ExtraData:  nil,
+		GasLimit:   0x400000,
+		BaseFee:    big.NewInt(1000000000),
+		Difficulty: big.NewInt(1),
+		Nonce:      0x1234,
+		Alloc:      readPrealloc("allocs/shandong.json"),
+		// Coinbase: 0x0
+		// Mixhash: 0x0
+		// ParentHash: 0x0
 	}
 }
 

@@ -1,0 +1,22 @@
+{
+  "ChainName": "shandong",
+  "chainId": 1337903,
+  "consensus": "ethash",
+  "homesteadBlock": 0,
+  "daoForkSupport": true,
+  "eip150Block": 0,
+  "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "eip155Block": 0,
+  "byzantiumBlock": 0,
+  "constantinopleBlock": 0,
+  "petersburgBlock": 0,
+  "istanbulBlock": 0,
+  "muirGlacierBlock": 0,
+  "berlinBlock": 0,
+  "londonBlock": 0,
+  "shanghaiBlock": 0,
+  "terminalTotalDifficulty": 0,
+  "terminalTotalDifficultyPassed": true,
+  "mergeNetsplitBlock": 0,
+  "ethash": {}
+}
