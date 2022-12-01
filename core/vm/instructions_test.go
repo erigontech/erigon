@@ -235,7 +235,7 @@ func TestAddMod(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
-// 		env         = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+// 		env         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 // 		stack       = stack.New()
 // 		pc          = uint64(0)
 // 		interpreter = env.interpreter.(*EVMInterpreter)
@@ -302,7 +302,7 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 			a.SetBytes(arg)
 			stack.Push(a)
 		}
-		op(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		op(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
 		stack.Pop()
 	}
 }
@@ -666,16 +666,16 @@ func TestRandom(t *testing.T) {
 		{name: "hash(0x010203)", random: crypto.Keccak256Hash([]byte{0x01, 0x02, 0x03})},
 	} {
 		var (
-			env            = NewEVM(BlockContext{Random: &tt.random}, TxContext{}, nil, params.TestChainConfig, Config{})
-			stack          = newstack()
+			env            = NewEVM(evmtypes.BlockContext{PrevRanDao: &tt.random}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+			stack          = stack.New()
 			pc             = uint64(0)
-			evmInterpreter = env.interpreter
+			evmInterpreter = env.interpreter.(*EVMInterpreter)
 		)
-		opRandom(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
-		if len(stack.data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", tt.name, len(stack.data))
+		opDifficulty(&pc, evmInterpreter, &ScopeContext{nil, stack, nil, 0, nil})
+		if len(stack.Data) != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", tt.name, len(stack.Data))
 		}
-		actual := stack.pop()
+		actual := stack.Pop()
 		expected, overflow := uint256.FromBig(new(big.Int).SetBytes(tt.random.Bytes()))
 		if overflow {
 			t.Errorf("Testcase %v: invalid overflow", tt.name)
@@ -704,12 +704,12 @@ func TestStaticRelativeJumps(t *testing.T) {
 	} {
 		var (
 			addr           = common.Address{0x42}
-			env            = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
-			stack          = newstack()
+			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+			stack          = stack.New()
 			pc             = uint64(0)
-			evmInterpreter = env.interpreter
+			evmInterpreter = env.interpreter.(*EVMInterpreter)
 			code           = makeEOF1([][]byte{common.Hex2Bytes(tt.code)}, nil)
-			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
+			contract       = NewContract(AccountRef(addr), AccountRef(addr), uint256.NewInt(0), 0, env.config.SkipAnalysis)
 			container, err = ParseEOF1Container(code)
 		)
 		if err != nil {
@@ -721,9 +721,9 @@ func TestStaticRelativeJumps(t *testing.T) {
 			opRjump(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.codeOffsets[0], uint64(container.codeSize[0])}}})
 		} else if tt.op == "RJUMPI" {
 			if tt.condition {
-				stack.push(uint256.NewInt(1))
+				stack.Push(uint256.NewInt(1))
 			} else {
-				stack.push(uint256.NewInt(0))
+				stack.Push(uint256.NewInt(0))
 			}
 			opRjumpi(&pc, evmInterpreter, &ScopeContext{nil, stack, contract, 0, []*SubroutineContext{{0, 0, 0, container.codeOffsets[0], uint64(container.codeSize[0])}}})
 		}
@@ -750,12 +750,12 @@ func TestEOFFunctions(t *testing.T) {
 	} {
 		var (
 			addr           = common.Address{0x42}
-			env            = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
-			stack          = newstack()
+			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+			stack          = stack.New()
 			pc             = uint64(0)
-			evmInterpreter = env.interpreter
+			evmInterpreter = env.interpreter.(*EVMInterpreter)
 			eofCode        = makeEOF1(code, []Annotation{{Input: 0, Output: 0}, {Input: 2, Output: 1}})
-			contract       = NewContract(AccountRef(addr), AccountRef(addr), common.Big0, 0)
+			contract       = NewContract(AccountRef(addr), AccountRef(addr), uint256.NewInt(0), 0, env.config.SkipAnalysis)
 			container, _   = ParseEOF1Container(eofCode)
 		)
 		contract.SetCallCode(&addr, common.Hash{}, eofCode, container)
@@ -768,7 +768,7 @@ func TestEOFFunctions(t *testing.T) {
 		}
 		// Fill stack.
 		for i := 0; i < tt.stack; i++ {
-			scope.Stack.push(uint256.NewInt(uint64(i)))
+			scope.Stack.Push(uint256.NewInt(uint64(i)))
 		}
 		pc = 4
 		if _, err := opCallf(&pc, evmInterpreter, scope); err == nil && tt.err {

@@ -72,7 +72,7 @@ func ParseEOF1Container(b []byte) (*EOF1Container, error) {
 	}
 	// Read type section if it exists.
 	if ts := int(c.typeSize); ts != 0 {
-		c.types = parseTypeSection(b[idx : idx+int(ts)])
+		c.types = parseTypeSection(b[idx : idx+ts])
 		if c.types[0].Input != 0 || c.types[0].Output != 0 {
 			return nil, ErrEOF1TypeSectionFirstEntryNonZero
 		}
