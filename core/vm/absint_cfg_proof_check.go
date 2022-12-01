@@ -9,8 +9,6 @@ import (
 )
 
 type CfgOpSem struct {
-	// reverts  bool
-	// halts    bool
 	isPush   bool
 	isDup    bool
 	isSwap   bool
@@ -32,8 +30,6 @@ func NewCfgAbsSem() *CfgAbsSem {
 			continue
 		}
 		opsem := CfgOpSem{}
-		// opsem.reverts = op.reverts
-		// opsem.halts = op.halts
 		opsem.isPush = op.isPush
 		opsem.isDup = op.isDup
 		opsem.isSwap = op.isSwap
@@ -98,7 +94,7 @@ func resolveCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int) (map[int]bo
 			if stack.hasIndices(0) {
 				jumpDest := stack.values[0]
 				if jumpDest.kind == InvalidValue {
-					//program terminates, don't add edges
+					// program terminates, don't add edges
 				} else if jumpDest.kind == TopValue {
 					empty := make(map[int]bool)
 					return empty, empty, errors.New("unresolvable jumps found")
@@ -113,7 +109,7 @@ func resolveCheck(sem *CfgAbsSem, code []byte, st0 *astate, pc0 int) (map[int]bo
 		}
 	}
 
-	//fall-thru edge
+	// fall-thru edge
 	if opcode != JUMP {
 		if pc0 < codeLen-opsem.numBytes {
 			succs[pc0+opsem.numBytes] = true
