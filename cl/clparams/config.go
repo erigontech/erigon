@@ -243,6 +243,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
+	ShandongNetwork: {},
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -778,5 +779,5 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
 func Supported(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111
+	return id == 1 || id == 5 || id == 11155111 || id == 1337903
 }
