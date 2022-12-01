@@ -34,7 +34,7 @@ type State22 struct {
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
 	changes      map[string]*btree2.BTreeG[statePair]
-	sizeEstimate uint64
+	sizeEstimate int
 	txsDone      *atomic2.Uint64
 	finished     bool
 
@@ -68,9 +68,9 @@ func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint)
 		rs.changes[table] = t
 	}
 	old, ok := t.SetHint(statePair{key: key, val: val}, hint)
-	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += btreeOverhead + len(key) + len(val)
 	if ok {
-		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
+		rs.sizeEstimate -= btreeOverhead + len(old.key) + len(old.val)
 	}
 }
 
@@ -81,9 +81,9 @@ func (rs *State22) put(table string, key, val []byte) {
 		rs.changes[table] = t
 	}
 	old, ok := t.Set(statePair{key: key, val: val})
-	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
+	rs.sizeEstimate += btreeOverhead + len(key) + len(val)
 	if ok {
-		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
+		rs.sizeEstimate -= btreeOverhead + len(old.key) + len(old.val)
 	}
 }
 
@@ -560,7 +560,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 
 func (rs *State22) DoneCount() uint64 { return rs.txsDone.Load() }
 
-func (rs *State22) SizeEstimate() uint64 {
+func (rs *State22) SizeEstimate() int {
 	rs.lock.RLock()
 	r := rs.sizeEstimate
 	rs.lock.RUnlock()
