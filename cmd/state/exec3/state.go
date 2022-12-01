@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -73,6 +72,7 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 	}
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
+
 	return w
 }
 
@@ -116,9 +116,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 	ibs := state.New(rw.stateReader)
-	if txTask.BlockNum == 5 {
-		ibs.SetTrace(true)
-	}
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
@@ -133,6 +130,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
@@ -180,6 +178,14 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
+		//var vmenv vm.VMInterface
+		//if txTask.Tx.IsStarkNet() {
+		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+		//	vmenv = rw.starkNetEvm
+		//} else {
+		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		//	vmenv = rw.evm
+		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
@@ -207,7 +213,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		//for addr, bal := range txTask.BalanceIncreaseSet {
 		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
 		//}
-		fmt.Printf("MakeWriteSet: %d,%d, coinbase: %x\n", txTask.BlockNum, txTask.TxNum, txTask.Coinbase)
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
