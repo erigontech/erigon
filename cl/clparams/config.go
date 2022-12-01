@@ -243,11 +243,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
-	ShandongNetwork: {
-		"https://does.not.exist",
-		"https://also.dne",
-		"https://404.not.found",
-	},
+	ShandongNetwork: {},
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
