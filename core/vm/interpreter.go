@@ -379,7 +379,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			logged = true
 		}
 		// fail if op is not available in legacy context
-		if operation.eof1 && callContext.Contract.IsLegacy() {
+		if operation.eof1Only && callContext.Contract.IsLegacy() {
 			_, err = opUndefined(&pc, in, callContext)
 			break
 		}

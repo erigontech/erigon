@@ -52,8 +52,8 @@ type operation struct {
 
 	undefined bool
 
-	// eof1 specifies if an instruction should only be available in eof1
-	eof1 bool
+	// eof1Only specifies if an instruction should only be available in eof1Only
+	eof1Only bool
 
 	// legacyOnly specifies if an instruction should only be available in legacy evm
 	legacyOnly bool
