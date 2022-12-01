@@ -64,7 +64,7 @@ func NewState22() *State22 {
 func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 64, NoLocks: true})
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 128, NoLocks: true})
 		rs.changes[table] = t
 	}
 	old, ok := t.SetHint(statePair{key: key, val: val}, hint)
@@ -77,7 +77,7 @@ func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint)
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 64, NoLocks: true})
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 128, NoLocks: true})
 		rs.changes[table] = t
 	}
 	old, ok := t.Set(statePair{key: key, val: val})
@@ -131,17 +131,19 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
-		t.Ascend(statePair{}, func(item statePair) bool {
-			if len(item.val) == 0 {
-				if err = c.Delete(item.key); err != nil {
-					return false
+		t.Walk(func(items []statePair) bool {
+			for _, item := range items {
+				if len(item.val) == 0 {
+					if err = c.Delete(item.key); err != nil {
+						return false
+					}
+					//fmt.Printf("Flush [%x]=>\n", item.key)
+				} else {
+					if err = c.Put(item.key, item.val); err != nil {
+						return false
+					}
+					//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 				}
-				//fmt.Printf("Flush [%x]=>\n", item.key)
-			} else {
-				if err = c.Put(item.key, item.val); err != nil {
-					return false
-				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 			}
 			return true
 		})
