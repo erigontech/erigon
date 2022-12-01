@@ -726,6 +726,7 @@ func shandongConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = []byte{0x21, 0x33, 0x79, 0x02}
 	// #SHARDING_FORK_VERSION: 0x31337902 # FIXME(IA)
 	cfg.ShardingForkVersion = []byte{0x31, 0x33, 0x79, 0x02}
+	cfg.InitializeForkSchedule()
 	return cfg
 }
 
