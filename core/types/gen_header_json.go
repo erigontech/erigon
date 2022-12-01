@@ -142,8 +142,6 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	if dec.BaseFee != nil {
 		h.BaseFee = (*big.Int)(dec.BaseFee)
 	}
-	if dec.WithdrawalsHash != nil {
-		h.WithdrawalsHash = dec.WithdrawalsHash
-	}
+	h.WithdrawalsHash = dec.WithdrawalsHash
 	return nil
 }
