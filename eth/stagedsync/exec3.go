@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -100,13 +101,17 @@ func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec3(ctx context.Context,
-	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
-	parallel bool, rs *state.State22, blockReader services.FullBlockReader,
-	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
-	maxBlockNum uint64, chainConfig *params.ChainConfig,
-	genesis *core.Genesis,
+func ExecV3(ctx context.Context,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
+	parallel bool, rs *state.State22, logPrefix string,
+	logger log.Logger,
+	maxBlockNum uint64,
 ) (err error) {
+	batchSize, chainDb := cfg.batchSize, cfg.db
+	blockReader := cfg.blockReader
+	agg, engine := cfg.agg, cfg.engine
+	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
@@ -433,9 +438,10 @@ func Exec3(ctx context.Context,
 			return h
 		}
 	}
+
 	var b *types.Block
 	var blockNum uint64
-loop:
+Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		t := time.Now()
 
@@ -478,7 +484,7 @@ loop:
 				}
 			}()
 		}
-
+		var gasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec22.TxTask{
@@ -517,6 +523,31 @@ loop:
 			if !parallel {
 				count++
 				execWorkers[0].RunTxTask(txTask)
+				if err := func() error {
+					if txTask.Final {
+						gasUsed += txTask.UsedGas
+						if gasUsed != txTask.Header.GasUsed {
+							return fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed, txTask.Header.GasUsed)
+						}
+						gasUsed = 0
+					} else {
+						gasUsed += txTask.UsedGas
+					}
+					return nil
+				}(); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
+						if cfg.hd != nil {
+							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+						}
+						if cfg.badBlockHalt {
+							return err
+						}
+					}
+					u.UnwindTo(blockNum-1, header.Hash())
+					break Loop
+				}
+
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					panic(fmt.Errorf("State22.Apply: %w", err))
 				}
@@ -579,7 +610,7 @@ loop:
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)
-			break loop
+			break Loop
 		default:
 		}
 
@@ -627,28 +658,28 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask := heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
-		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
-				panic(fmt.Errorf("State22.Apply: %w", err))
-			}
-			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
-			outputTxNum.Inc()
-			outputBlockNum.Store(txTask.BlockNum)
-			onSuccess()
-			if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
-				panic(fmt.Errorf("State22.Apply: %w", err))
-			}
-			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		} else {
+		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			rs.AddWork(txTask)
 			repeatCount.Inc()
+			continue
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
+
+		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
+			panic(fmt.Errorf("State22.Apply: %w", err))
+		}
+		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+		outputTxNum.Inc()
+		outputBlockNum.Store(txTask.BlockNum)
+		onSuccess()
+		if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+			panic(fmt.Errorf("State22.Apply: %w", err))
+		}
+		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 	}
 }
 

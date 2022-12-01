@@ -44,6 +44,8 @@ type TxTask struct {
 	Logs               []*types.Log
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
+
+	UsedGas uint64
 }
 
 type TxTaskQueue []*TxTask
