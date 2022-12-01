@@ -6,7 +6,10 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -16,18 +19,23 @@ type ChainTipSubscriber struct {
 
 	currBlock *cltypes.BeaconBlockBellatrix // Most recent gossipped block
 
-	lastUpdate *cltypes.LightClientUpdate
-	started    bool
-	sentinel   sentinel.SentinelClient
+	lastUpdate       *cltypes.LightClientUpdate
+	started          bool
+	sentinel         sentinel.SentinelClient
+	beaconConfig     *clparams.BeaconChainConfig
+	genesisConfig    *clparams.GenesisConfig
+	lastReceivedSlot uint64
 
 	mu sync.Mutex
 }
 
-func NewChainTipSubscriber(ctx context.Context, sentinel sentinel.SentinelClient) *ChainTipSubscriber {
+func NewChainTipSubscriber(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, sentinel sentinel.SentinelClient) *ChainTipSubscriber {
 	return &ChainTipSubscriber{
-		ctx:      ctx,
-		started:  false,
-		sentinel: sentinel,
+		ctx:           ctx,
+		started:       false,
+		sentinel:      sentinel,
+		genesisConfig: genesisConfig,
+		beaconConfig:  beaconConfig,
 	}
 }
 
@@ -70,6 +78,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		}
 
 		c.currBlock = block.Block
+		c.lastReceivedSlot = block.Block.Slot
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
 		if err := finalityUpdate.UnmarshalSSZ(data.Data); err != nil {
@@ -119,7 +128,34 @@ func (c *ChainTipSubscriber) PopLastUpdate() *cltypes.LightClientUpdate {
 func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlockBellatrix {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Check if we are up to date
+	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
+	// Gossip failed use the rpc and attempt to retrieve last block.
+	if c.lastReceivedSlot != currentSlot {
+		go c.retrieveTip()
+		return nil
+	}
 	block := c.currBlock
 	c.currBlock = nil
 	return block
+}
+
+func (c *ChainTipSubscriber) retrieveTip() {
+	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
+	objs, err := rpc.SendBeaconBlocksByRangeReq(c.ctx, currentSlot, 1, c.sentinel)
+	if err != nil {
+		return
+	}
+	// Count is one, must be 1
+	if len(objs) != 1 {
+		return
+	}
+	currentSlot = utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
+	block := objs[0].(*cltypes.SignedBeaconBlockBellatrix).Block
+	if currentSlot == block.Slot {
+		c.mu.Lock()
+		c.currBlock = block
+		c.lastReceivedSlot = currentSlot
+		defer c.mu.Unlock()
+	}
 }

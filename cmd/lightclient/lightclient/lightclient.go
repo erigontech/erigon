@@ -61,7 +61,7 @@ func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.Gen
 		ctx:               ctx,
 		beaconConfig:      beaconConfig,
 		genesisConfig:     genesisConfig,
-		chainTip:          NewChainTipSubscriber(ctx, sentinel),
+		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel),
 		recentHashesCache: recentHashesCache,
 		sentinel:          sentinel,
 		execution:         execution,
