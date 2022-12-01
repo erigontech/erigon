@@ -29,8 +29,13 @@ func codeBitmap(code []byte) []uint64 {
 		// Short circruit for now on EOF ops with immediates.
 		// TODO(matt): make EOF-specific code bitmap
 		if op == RJUMP || op == RJUMPI || op == CALLF {
-			// TODO CZ: verify that this is correct
-			bits[pc/64] |= 1 << uint(pc%64)
+			// TODO(CZ): optimise this. For now the logic of bitvec.setN has been copied from https://github.dev/lightclient/go-ethereum/blob/b3f36e10766956bf204f2d2b9415dcd8cfd2be6b/core/vm/analysis.go#L37
+			a := uint16(0b1111) << (pc % 8)
+			bits[pc/8] |= uint64(a)
+			if b := uint64(a >> 8); b != 0 {
+				bits[pc/8+1] = b
+			}
+
 			pc += 4
 			continue
 		}
