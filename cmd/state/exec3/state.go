@@ -194,12 +194,12 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
-		resss, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
-		txTask.UsedGas = resss.UsedGas
+		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
 		} else {
+			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
