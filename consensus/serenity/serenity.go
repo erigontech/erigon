@@ -119,23 +119,30 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 }
 
 func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
+	}
+	for _, w := range withdrawals {
+		state.AddBalance(w.Address, &w.Amount)
 	}
 	return txs, r, nil
 }
 
 func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall, call)
 	}
-	return types.NewBlock(header, txs, uncles, receipts), txs, receipts, nil
+	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
@@ -191,7 +198,19 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return errInvalidUncleHash
 	}
 
-	return misc.VerifyEip1559Header(chain.Config(), parent, header)
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		return err
+	}
+
+	// Verify existence / non-existence of withdrawalsHash
+	shanghai := chain.Config().IsShanghai(header.Number.Uint64())
+	if shanghai && header.WithdrawalsHash == nil {
+		return fmt.Errorf("missing withdrawalsHash")
+	}
+	if !shanghai && header.WithdrawalsHash != nil {
+		return consensus.ErrUnexpectedWithdrawals
+	}
+	return nil
 }
 
 func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {

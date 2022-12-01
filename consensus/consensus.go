@@ -103,7 +103,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
 	) (types.Transactions, types.Receipts, error)
 
@@ -113,7 +113,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
 	) (*types.Block, types.Transactions, types.Receipts, error)
 

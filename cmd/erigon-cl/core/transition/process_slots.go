@@ -3,6 +3,7 @@ package transition
 import (
 	"fmt"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
@@ -38,4 +39,13 @@ func (s *StateTransistor) processSlots(state *cltypes.BeaconState, slot uint64) 
 		state.Slot += 1
 	}
 	return nil
+}
+
+func (s *StateTransistor) verifyBlockSignature(state *cltypes.BeaconState, block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
+	proposer := state.Validators[block.Block.ProposerIndex]
+	signing_root, err := block.Block.Body.HashTreeRoot()
+	if err != nil {
+		return false, err
+	}
+	return bls.Verify(block.Signature[:], signing_root[:], proposer.PublicKey[:])
 }
