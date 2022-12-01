@@ -269,6 +269,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return SepoliaBootnodes
 	case networkname.RopstenChainName:
 		return RopstenBootnodes
+	case networkname.ShandongChainName:
+		return ShandongBootnodes
 	case networkname.RinkebyChainName:
 		return RinkebyBootnodes
 	case networkname.GoerliChainName:

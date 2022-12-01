@@ -838,6 +838,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultSepoliaGenesisBlock()
 	case networkname.RopstenChainName:
 		return DefaultRopstenGenesisBlock()
+	case networkname.ShandongChainName:
+		return DefaultShandongGenesisBlock()
 	case networkname.RinkebyChainName:
 		return DefaultRinkebyGenesisBlock()
 	case networkname.GoerliChainName:

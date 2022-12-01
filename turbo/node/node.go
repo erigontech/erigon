@@ -58,6 +58,8 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 		log.Info("Starting Erigon on Sepolia testnet...")
 	case networkname.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
+	case networkname.ShandongChainName:
+		log.Info("Starting Erigon on Shandong testnet...")
 	case networkname.RinkebyChainName:
 		log.Info("Starting Erigon on Rinkeby testnet...")
 	case networkname.GoerliChainName:
@@ -106,7 +108,7 @@ func New(
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
 ) (*ErigonNode, error) {
-	//prepareBuckets(optionalParams.CustomBuckets)
+	// prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(nodeConfig)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)

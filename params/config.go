@@ -902,6 +902,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return SepoliaChainConfig
 	case networkname.RopstenChainName:
 		return RopstenChainConfig
+	case networkname.ShandongChainName:
+		return ShandongChainConfig
 	case networkname.RinkebyChainName:
 		return RinkebyChainConfig
 	case networkname.GoerliChainName:
@@ -939,6 +941,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &SepoliaGenesisHash
 	case networkname.RopstenChainName:
 		return &RopstenGenesisHash
+	case networkname.ShandongChainName:
+		return &ShandongGenesisHash
 	case networkname.RinkebyChainName:
 		return &RinkebyGenesisHash
 	case networkname.GoerliChainName:

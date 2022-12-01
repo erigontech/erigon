@@ -28,9 +28,10 @@ import (
 type NetworkType int
 
 const (
-	MainnetNetwork NetworkType = 1
-	GoerliNetwork  NetworkType = 5
-	SepoliaNetwork NetworkType = 11155111
+	MainnetNetwork  NetworkType = 1
+	GoerliNetwork   NetworkType = 5
+	SepoliaNetwork  NetworkType = 11155111
+	ShandongNetwork NetworkType = 1337903
 )
 
 const (
@@ -76,6 +77,13 @@ var (
 		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
 		// Teku boot node
 		"enr:-Ly4QFoZTWR8ulxGVsWydTNGdwEESueIdj-wB6UmmjUcm-AOPxnQi7wprzwcdo7-1jBW_JxELlUKJdJES8TDsbl1EdNlh2F0dG5ldHOI__78_v2bsV-EZXRoMpA2-lATkAAAcf__________gmlkgnY0gmlwhBLYJjGJc2VjcDI1NmsxoQI0gujXac9rMAb48NtMqtSTyHIeNYlpjkbYpWJw46PmYYhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+	}
+
+	ShandongBootstrapNodes = []string{
+		"enr:-LK4QHkdCND7lcPwqP0oP8EvjtyEIEwlufo4Q2WLU7lfnE7wXaiPFYqrxG2ve0yjwobsv-JivPPnPgM5FXF9_AUe2JIGh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA6j89cITN5Av__________gmlkgnY0gmlwhC5lfi2Jc2VjcDI1NmsxoQO2iyKHl53XEZpkmqwzrNde8tJtHBG1juKX6GQ8maqYAIN0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QFUme0A5wcehaAVkgo3wILst__VwT-CS90IAHRf81EEDewxXYOY3tGH0kYg8jm3dRap-ebt9W2YpYxK4RhICoc4Gh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA6j89cITN5Av__________gmlkgnY0gmlwhLKAy_OJc2VjcDI1NmsxoQIioMWqai_HMbtalAFqTa97lLgjfA_D9NBt9BenWmKjDIN0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QClQvVrrQ9Jm0mOUX8I9vu-anp-dgD9FSiW8Ep0uR6pEZh4t8iMljhXnE2q1UjL2rHAJeIxlrdbwcn1wjeLaamwGh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA6j89cITN5Av__________gmlkgnY0gmlwhI5draqJc2VjcDI1NmsxoQKZ1U-C4IWnkiu6EvbIls9iRazxW5RZej-htHgwNf3Ef4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QGMlUKIzZVYqB2uIsizLIaKrPlHrGyZFCg5ond0soaGGOdsV9oR_50PAnOTE_6GZN6p_uqqkvGtnXPyhKEiizbYGh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA6j89cITN5Av__________gmlkgnY0gmlwhKRcrjiJc2VjcDI1NmsxoQIO0t2j7TMxczat4kjQJaFikgg3mNCMQmgUX99zotTV5YN0Y3CCIyiDdWRwgiMo",
 	}
 )
 
@@ -167,6 +175,26 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         4367322,
 		BootNodes:                       GoerliBootstrapNodes,
+	},
+
+	ShandongNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         math.MaxUint64,
+		BootNodes:                       ShandongBootstrapNodes,
 	},
 }
 
@@ -599,7 +627,7 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	EpochsPerSyncCommitteePeriod: 256,
 
 	// Updated penalty values.
-	InactivityPenaltyQuotientAltair:         3 * 1 << 24, //50331648
+	InactivityPenaltyQuotientAltair:         3 * 1 << 24, // 50331648
 	MinSlashingPenaltyQuotientAltair:        64,
 	ProportionalSlashingMultiplierAltair:    2,
 	MinSlashingPenaltyQuotientBellatrix:     32,

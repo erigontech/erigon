@@ -17,6 +17,7 @@ const (
 	BorDevnetChainName  = "bor-devnet"
 	GnosisChainName     = "gnosis"
 	ChiadoChainName     = "chiado"
+	ShandongChainName   = "shandong"
 )
 
 var All = []string{
@@ -25,15 +26,16 @@ var All = []string{
 	RopstenChainName,
 	RinkebyChainName,
 	GoerliChainName,
-	//DevChainName,
+	// DevChainName,
 	SokolChainName,
 	FermionChainName,
 	BSCChainName,
 	ChapelChainName,
-	//RialtoChainName,
+	// RialtoChainName,
 	MumbaiChainName,
 	BorMainnetChainName,
 	BorDevnetChainName,
 	GnosisChainName,
 	ChiadoChainName,
+	ShandongChainName,
 }
