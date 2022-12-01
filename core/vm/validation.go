@@ -26,7 +26,7 @@ import (
 func validateCode(code []byte, codeSections int, jumpTable *JumpTable) error {
 	var (
 		i        = 0
-		analysis []byte
+		analysis []uint64
 		opcode   OpCode
 	)
 	for i < len(code) {
@@ -52,8 +52,7 @@ func validateCode(code []byte, codeSections int, jumpTable *JumpTable) error {
 			// Check if offset points to non-code segment.
 			// TODO(matt): include CALLF and RJUMPs in analysis.
 			if analysis == nil {
-				// TODO CZ: implement the logic https://github.com/ethereum/go-ethereum/pull/26133/commits/370c24c344f7fc26cc29fba9b33825baeded8876#diff-882af11429522494f308c57017fe1c44e86b338e3bf5c308584d9d187606d252L64
-				// analysis = codeBitmap(code)
+				analysis = codeBitmap(code)
 			}
 			if analysis[pos/64]&(1<<(uint64(pos)&63)) != 0 {
 				return ErrEOF1InvalidRelativeOffset
