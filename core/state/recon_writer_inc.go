@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -82,7 +83,6 @@ func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnat
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
 	} else {
 		//fmt.Printf("delete ode [%x], txNum: %d\n", address, w.txNum)
-		w.rs.Delete(kv.CodeD, codeHashBytes, nil, w.txNum)
 		w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	}
 	return nil
@@ -94,14 +94,41 @@ func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *ac
 	if err != nil {
 		return err
 	}
+	if txKey != nil {
+		if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum == w.txNum {
+			fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
+			w.rs.Delete(kv.PlainStateD, addr, nil, w.txNum)
+		}
+	}
+	// Iterate over storage of this contract and delete it too
+	var c kv.Cursor
+	if c, err = w.tx.Cursor(kv.XStorage); err != nil {
+		return err
+	}
+	defer c.Close()
+	var k, v []byte
+	for k, v, err = c.Seek(addr); err == nil && bytes.HasPrefix(k, addr); k, v, err = c.Next() {
+		storageTxNum := binary.BigEndian.Uint64(v)
+		if w.txNum == storageTxNum {
+			fmt.Printf("delete account storage [%x] [%x]=>{} txNum: %d\n", address, k[20:], w.txNum)
+			w.rs.Delete(kv.PlainStateD, addr, common.CopyBytes(k[20:]), w.txNum)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	// Delete code
+	txKey, err = w.tx.GetOne(kv.XCode, addr)
+	if err != nil {
+		return err
+	}
 	if txKey == nil {
 		return nil
 	}
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
 		return nil
 	}
-	//fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
-	w.rs.Delete(kv.PlainStateD, addr, nil, w.txNum)
+	w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	return nil
 }
 

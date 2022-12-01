@@ -122,6 +122,10 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 				panic(err)
 			}
 			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+		} else {
+			if err := plainStateCollector.Collect(key, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -131,19 +135,22 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
+	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
 		key, val, progress := it.Next()
 		fw.progress.Store(progress)
 		fw.currentKey = key
+		copy(compositeKey[:20], key[:20])
+		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
-			copy(compositeKey[:20], key[:20])
-			binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
-			copy(compositeKey[20+8:], key[20:])
-
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
 				panic(err)
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+		} else {
+			if err := plainStateCollector.Collect(compositeKey, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -153,14 +160,14 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
 	fw.total.Store(it.Total())
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
+	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 	for it.HasNext() {
 		key, val, progress := it.Next()
 		fw.progress.Store(progress)
 		fw.currentKey = key
+		copy(compositeKey, key)
 		if len(val) > 0 {
-			copy(compositeKey, key)
-			binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 			codeHash, err := common.HashData(val)
 			if err != nil {
@@ -173,6 +180,10 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 				panic(err)
 			}
 			//fmt.Printf("Code [%x] => %d\n", compositeKey, len(val))
+		} else {
+			if err := plainContractCollector.Collect(compositeKey, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -325,7 +336,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
-	rw.stateReader.SetTrace(txTask.TxNum == 183040707)
+	rw.stateReader.SetTrace(txTask.TxNum == 102137677)
 	rules := txTask.Rules
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -345,7 +356,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
@@ -390,7 +401,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {

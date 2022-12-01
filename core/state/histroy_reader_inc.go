@@ -63,6 +63,9 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 	}
 	if !noState {
 		if txKey == nil {
+			if hr.trace {
+				fmt.Printf("ReadAccountData [%x] => [] txKey nil, noState=%t, txNum: %d\n", address, noState, hr.txNum)
+			}
 			return nil, nil
 		}
 		if !hr.rs.Done(stateTxNum) {
@@ -135,6 +138,9 @@ func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnati
 	if txKey != nil {
 		stateTxNum = binary.BigEndian.Uint64(txKey)
 	}
+	if hr.trace {
+		fmt.Printf("ReadAccountStorage [%x] [%x] => hr.txNum=%d, stateTxNum=%d\n", address, key.Bytes(), hr.txNum, stateTxNum)
+	}
 	var enc []byte
 	noState := false
 	if stateTxNum >= hr.txNum {
@@ -144,6 +150,9 @@ func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnati
 	}
 	if !noState {
 		if txKey == nil {
+			if hr.trace {
+				fmt.Printf("ReadAccountStorage [%x] [%x] => [] txKey nil, txNum: %d\n", address, key.Bytes(), hr.txNum)
+			}
 			return nil, nil
 		}
 		if !hr.rs.Done(stateTxNum) {
@@ -153,6 +162,9 @@ func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnati
 		}
 
 		enc = hr.rs.Get(kv.PlainStateR, addr, k, stateTxNum)
+		if hr.trace {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => hr.txNum=%d, enc=%x\n", address, key.Bytes(), hr.txNum, enc)
+		}
 		if enc == nil {
 			if hr.tx == nil {
 				return nil, fmt.Errorf("hr.tx is nil")

@@ -952,9 +952,6 @@ func reconstituteStep(last bool,
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
-				if bn == 5335164 {
-					fmt.Printf("create task blockNum=%d, txIndex=%d, txNum=%d\n", bn, txIndex, inputTxNum)
-				}
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &state.TxTask{
 					BlockNum:     bn,
