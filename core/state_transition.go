@@ -242,6 +242,10 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Pariry behaviour
 func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	fmt.Printf("rules: %d, %+v\n", evm.Context().BlockNumber, evm.ChainRules())
+	fmt.Printf("blkCtx: %+v\n", evm.Context())
+	fmt.Printf("txCtx: %+v\n", evm.TxContext())
+	fmt.Printf("cc: %+v\n", evm.ChainConfig())
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 

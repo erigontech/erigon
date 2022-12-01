@@ -17,6 +17,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -59,6 +61,8 @@ func applyTransaction(config *params.ChainConfig, engine consensus.Engine, gp *G
 	if err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("ApplyMessage: %s, %s\n", err, result.Err)
+
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
