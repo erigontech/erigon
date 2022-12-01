@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -34,11 +35,16 @@ func (w *StateReconWriterInc) SetTx(tx kv.Tx) {
 	w.tx = tx
 }
 
+var addr1 common.Address = common.HexToAddress("0xfffffffff047852f159827f782a42141f39857ed")
+
 func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
 	txKey, err := w.tx.GetOne(kv.XAccount, addr)
 	if err != nil {
 		return err
+	}
+	if address == addr1 {
+		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d, txKey [%x]\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum, txKey)
 	}
 	if txKey == nil {
 		return nil
@@ -51,7 +57,9 @@ func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original
 		account.Incarnation = FirstContractIncarnation
 	}
 	account.EncodeForStorage(value)
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	if address == addr1 {
+		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	}
 	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
 	return nil
 }
@@ -73,6 +81,7 @@ func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnat
 		w.rs.Put(kv.CodeR, codeHashBytes, nil, common.CopyBytes(code), w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
 	} else {
+		//fmt.Printf("delete ode [%x], txNum: %d\n", address, w.txNum)
 		w.rs.Delete(kv.CodeD, codeHashBytes, nil, w.txNum)
 		w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	}

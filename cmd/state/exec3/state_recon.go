@@ -182,7 +182,7 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-var addr1 common.Address = common.HexToAddress("0x981816992ca910b8d00d88db0217b07c199e995a")
+var addr1 common.Address = common.HexToAddress("0xfffffffff047852f159827f782a42141f39857ed")
 
 func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	it := sw.as.IterateAccountsTxs(sw.txNum)
@@ -322,14 +322,10 @@ var noop = state.NewNoopWriter()
 func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	if txTask.BlockNum == 5335164 {
-		rw.stateReader.SetTrace(true)
-	} else {
-		rw.stateReader.SetTrace(false)
-	}
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.stateReader.SetTrace(txTask.TxNum == 183040707)
 	rules := txTask.Rules
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -349,7 +345,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
@@ -394,7 +390,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
