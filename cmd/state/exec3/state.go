@@ -34,7 +34,6 @@ type Worker struct {
 	stateWriter *state.StateWriter22
 	stateReader *state.StateReader22
 	chainConfig *params.ChainConfig
-	getHeader   func(hash common.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -71,13 +70,6 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-	}
-	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
 	}
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
@@ -141,20 +133,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &params.Rules{}
 	} else if daoForkTx {
-		fmt.Printf("dao\n")
-		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
-		}
-		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
-		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
-		fmt.Printf("dao soft finalize: %T\n", rw.engine)
 		ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
-		fmt.Printf("dbggg -1: %T\n", rw.engine)
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		if rw.isPoSA {
@@ -165,7 +146,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
-		fmt.Printf("how to check, gasUsed? %d \n", header.GasUsed)
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
@@ -197,25 +177,16 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//var vmenv vm.VMInterface
-		//if txTask.Tx.IsStarkNet() {
-		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-		//	vmenv = rw.starkNetEvm
-		//} else {
-		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		//	vmenv = rw.evm
-		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
-			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+			vmenv = rw.starkNetEvm
 		} else {
-			blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-			txContext := core.NewEVMTxContext(msg)
-			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			vmenv = rw.evm
 		}
 		resss, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		txTask.UsedGas = resss.UsedGas
