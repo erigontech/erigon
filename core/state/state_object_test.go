@@ -23,25 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-func BenchmarkName(b *testing.B) {
-	b.Run("a", func(b *testing.B) {
-		for i := uint64(0); i < uint64(b.N); i++ {
-			var a uint64
-			for j := uint64(0); j < 1_000_000; j++ {
-				a += j
-			}
-		}
-	})
-	b.Run("b", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			var a int
-			for j := 0; j < 1_000_000; j++ {
-				a += j
-			}
-		}
-	})
-}
-
 func BenchmarkCutOriginal(b *testing.B) {
 	value := common.HexToHash("0x01")
 	for i := 0; i < b.N; i++ {
