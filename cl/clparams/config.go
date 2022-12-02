@@ -243,9 +243,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
-	ShandongNetwork: {
-		"https://raw.githubusercontent.com/ethereumjs/consensus-deployment-ansible/master/shandong-testnet/custom_config_data/genesis.ssz",
-	},
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
