@@ -111,6 +111,7 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
@@ -120,8 +121,8 @@ func ExecV3(ctx context.Context,
 		}
 		defer applyTx.Rollback()
 	} else {
-		if blockReader.(WithSnapshots).Snapshots().Cfg().Enabled {
-			defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
+		if blockSnapshots.Cfg().Enabled {
+			defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
 		}
 	}
 
@@ -614,8 +615,10 @@ Loop:
 		default:
 		}
 
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
+		if blockSnapshots.Cfg().Produce {
+			if err := agg.BuildFilesInBackground(chainDb); err != nil {
+				return err
+			}
 		}
 	}
 	if parallel {
@@ -628,6 +631,12 @@ Loop:
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
+			return err
+		}
+	}
+
+	if blockSnapshots.Cfg().Produce {
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
 			return err
 		}
 	}
