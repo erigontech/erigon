@@ -24,7 +24,40 @@ var (
 	blockHash43 = "3ff92b54cba8067044f6b6ca0a69c7a6344154de2a38742e7a89b1057877fffa"
 	stateHash44 = "81954d95a6452e516c076f3254424cac99ae3e8c757f33d8aacb97fd8ef02864"
 	blockHash44 = "3ff92b54cba8067044f6b6ca0a69c7a6344154de2a38742e7a89b1057877fffa"
+
+	testPubKey    = [48]byte{152, 250, 212, 202, 139, 152, 8, 45, 224, 234, 128, 186, 142, 67, 172, 78, 124, 69, 173, 39, 48, 98, 75, 146, 244, 131, 55, 15, 138, 170, 246, 81, 77, 88, 244, 114, 1, 47, 123, 123, 55, 174, 58, 139, 90, 249, 237, 19}
+	testSignature = [96]byte{141, 154, 97, 227, 33, 202, 245, 163, 252, 75, 124, 240, 197, 188, 117, 88, 146, 35, 171, 19, 247, 222, 208, 78, 160, 135, 37, 246, 251, 1, 170, 160, 121, 83, 11, 146, 207, 100, 82, 101, 243, 131, 17, 142, 201, 231, 170, 116, 5, 62, 23, 250, 166, 178, 120, 64, 214, 70, 122, 203, 30, 156, 153, 12, 69, 247, 193, 208, 73, 4, 245, 70, 97, 67, 42, 217, 30, 98, 191, 21, 190, 47, 168, 218, 36, 52, 59, 238, 88, 14, 100, 105, 16, 231, 157, 172}
+	badSignature  = [96]byte{182, 82, 244, 116, 233, 59, 56, 251, 52, 194, 122, 255, 161, 96, 204, 165, 43, 97, 19, 48, 130, 187, 17, 200, 223, 62, 114, 194, 225, 19, 242, 174, 224, 24, 188, 83, 118, 45, 23, 192, 205, 200, 47, 165, 212, 35, 193, 189, 10, 165, 161, 72, 81, 250, 195, 186, 174, 197, 26, 208, 165, 254, 31, 214, 135, 140, 129, 47, 211, 59, 87, 136, 55, 242, 93, 149, 128, 30, 84, 126, 182, 157, 70, 90, 68, 113, 7, 92, 70, 230, 164, 54, 120, 16, 180, 151}
+	testValidator = &cltypes.Validator{
+		PublicKey: testPubKey,
+	}
+	testStateRoot = [32]byte{243, 188, 193, 154, 58, 176, 139, 235, 38, 219, 21, 196, 194, 30, 119, 102, 233, 246, 197, 228, 242, 75, 89, 204, 102, 150, 82, 251, 101, 124, 98, 78}
+
+	stateHashValidator0 = "8545b3e58b298e4b847eba8d6bbc7264df21e36f75924e970aea914bbee82cd9"
+	blockHashValidator0 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
+	stateHashValidator1 = "5e8ab9f10c2afd511b3fd1079b40686716c449b7195e27ecdf393db2d36467e8"
+	blockHashValidator1 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
 )
+
+func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
+	return &cltypes.SignedBeaconBlockBellatrix{
+		Block: &cltypes.BeaconBlockBellatrix{
+			ProposerIndex: 0,
+			Body: &cltypes.BeaconBodyBellatrix{
+				Graffiti: make([]byte, 32),
+				SyncAggregate: &cltypes.SyncAggregate{
+					SyncCommiteeBits: make([]byte, 64),
+				},
+				ExecutionPayload: &cltypes.ExecutionPayload{
+					LogsBloom:     make([]byte, 256),
+					BaseFeePerGas: make([]byte, 32),
+				},
+			},
+			StateRoot: testStateRoot,
+		},
+		Signature: testSignature,
+	}
+}
 
 func getTestBeaconState() *cltypes.BeaconState {
 	return &cltypes.BeaconState{
@@ -54,8 +87,14 @@ func getTestBeaconState() *cltypes.BeaconState {
 	}
 }
 
-func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string) *cltypes.BeaconState {
-	nextState := getTestBeaconState()
+func getTestBeaconStateWithValidator() *cltypes.BeaconState {
+	res := getTestBeaconState()
+	res.Validators = append(res.Validators, testValidator)
+	res.Validators[0].WithdrawalCredentials = make([]byte, 32)
+	return res
+}
+
+func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string, nextState *cltypes.BeaconState) *cltypes.BeaconState {
 	// Set slot to initial index.
 	for i, val := range slots {
 		nextState.Slot = val
@@ -95,6 +134,7 @@ func TestTransitionSlot(t *testing.T) {
 				[]uint64{0},
 				[]string{stateHash0},
 				[]string{blockHash0},
+				getTestBeaconState(),
 			),
 			wantErr: false,
 		},
@@ -106,6 +146,7 @@ func TestTransitionSlot(t *testing.T) {
 				[]uint64{42},
 				[]string{stateHash42},
 				[]string{blockHash42},
+				getTestBeaconState(),
 			),
 			wantErr: false,
 		},
@@ -160,6 +201,7 @@ func TestProcessSlots(t *testing.T) {
 				[]uint64{0, 1},
 				[]string{stateHash0, stateHash1},
 				[]string{blockHash0, blockHash1},
+				getTestBeaconState(),
 			),
 			numSlots:  2,
 			startSlot: 0,
@@ -173,6 +215,7 @@ func TestProcessSlots(t *testing.T) {
 				[]uint64{42, 43, 44},
 				[]string{stateHash42, stateHash43, stateHash44},
 				[]string{blockHash42, blockHash43, blockHash44},
+				getTestBeaconState(),
 			),
 			numSlots:  3,
 			startSlot: 42,
@@ -200,6 +243,138 @@ func TestProcessSlots(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			s := New(tc.prevState, testBeaconConfig, nil)
 			err := s.processSlots(tc.prevState, tc.startSlot+tc.numSlots)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("unexpected success, wanted error")
+				}
+				return
+			}
+
+			// Non-failure case.
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if got := tc.prevState; !cmp.Equal(got, tc.expectedState) {
+				t.Errorf("unexpected result state: %v", cmp.Diff(got, tc.expectedState))
+			}
+		})
+	}
+}
+
+func TestVerifyBlockSignature(t *testing.T) {
+	badSigBlock := getTestBeaconBlock()
+	badSigBlock.Signature = badSignature
+	testCases := []struct {
+		description string
+		state       *cltypes.BeaconState
+		block       *cltypes.SignedBeaconBlockBellatrix
+		wantValid   bool
+		wantErr     bool
+	}{
+		{
+			description: "success",
+			state:       getTestBeaconStateWithValidator(),
+			block:       getTestBeaconBlock(),
+			wantErr:     false,
+			wantValid:   true,
+		},
+		{
+			description: "failure_empty_block",
+			state:       getTestBeaconStateWithValidator(),
+			block: &cltypes.SignedBeaconBlockBellatrix{
+				Block: &cltypes.BeaconBlockBellatrix{
+					Body: &cltypes.BeaconBodyBellatrix{},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			description: "failure_bad_signature",
+			state:       getTestBeaconStateWithValidator(),
+			block:       badSigBlock,
+			wantErr:     false,
+			wantValid:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			s := New(tc.state, testBeaconConfig, nil)
+			valid, err := s.verifyBlockSignature(tc.state, tc.block)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("unexpected success, wanted error")
+				}
+				return
+			}
+			// Non-failure case.
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Confirm that validity matches what we expect.
+			if valid != tc.wantValid {
+				t.Errorf("unexpected difference in validity: want %v, got %v", tc.wantValid, valid)
+			}
+		})
+	}
+}
+
+func TestTransitionState(t *testing.T) {
+	slot2 := getTestBeaconBlock()
+	slot2.Block.Slot = 2
+	badSigBlock := getTestBeaconBlock()
+	badSigBlock.Signature = badSignature
+	badStateRootBlock := getTestBeaconBlock()
+	badStateRootBlock.Block.StateRoot = [32]byte{}
+	testCases := []struct {
+		description   string
+		prevState     *cltypes.BeaconState
+		block         *cltypes.SignedBeaconBlockBellatrix
+		expectedState *cltypes.BeaconState
+		wantErr       bool
+	}{
+		{
+			description: "success_2_slots",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       slot2,
+			expectedState: prepareNextBeaconState(
+				t,
+				[]uint64{0, 1},
+				[]string{stateHashValidator0, stateHashValidator1},
+				[]string{blockHashValidator0, blockHashValidator1},
+				getTestBeaconStateWithValidator(),
+			),
+			wantErr: false,
+		},
+		{
+			description: "error_empty_block_body",
+			prevState:   getTestBeaconStateWithValidator(),
+			block: &cltypes.SignedBeaconBlockBellatrix{
+				Block: &cltypes.BeaconBlockBellatrix{
+					Body: &cltypes.BeaconBodyBellatrix{},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			description: "error_bad_signature",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       badSigBlock,
+			wantErr:     true,
+		},
+		{
+			description: "error_bad_state_root",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       badStateRootBlock,
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			s := New(tc.prevState, testBeaconConfig, nil)
+			err := s.transitionState(tc.prevState, tc.block, true)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

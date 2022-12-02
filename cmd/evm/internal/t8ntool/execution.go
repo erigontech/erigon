@@ -56,6 +56,7 @@ type stEnv struct {
 	Ommers           []ommer                             `json:"ommers,omitempty"`
 	BaseFee          *big.Int                            `json:"currentBaseFee,omitempty"`
 	ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
+	Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 }
 
 type stEnvMarshaling struct {

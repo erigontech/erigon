@@ -201,12 +201,26 @@ func (back *RemoteBackend) EngineNewPayloadV1(ctx context.Context, payload *type
 	return back.remoteEthBackend.EngineNewPayloadV1(ctx, payload)
 }
 
+func (back *RemoteBackend) EngineNewPayloadV2(ctx context.Context, payload *types2.ExecutionPayloadV2) (res *remote.EnginePayloadStatus, err error) {
+	return back.remoteEthBackend.EngineNewPayloadV2(ctx, payload)
+}
+
 func (back *RemoteBackend) EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	return back.remoteEthBackend.EngineForkChoiceUpdatedV1(ctx, request)
 }
 
+func (back *RemoteBackend) EngineForkchoiceUpdatedV2(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequestV2) (*remote.EngineForkChoiceUpdatedReply, error) {
+	return back.remoteEthBackend.EngineForkChoiceUpdatedV2(ctx, request)
+}
+
 func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayload, err error) {
 	return back.remoteEthBackend.EngineGetPayloadV1(ctx, &remote.EngineGetPayloadRequest{
+		PayloadId: payloadId,
+	})
+}
+
+func (back *RemoteBackend) EngineGetPayloadV2(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayloadV2, err error) {
+	return back.remoteEthBackend.EngineGetPayloadV2(ctx, &remote.EngineGetPayloadRequest{
 		PayloadId: payloadId,
 	})
 }

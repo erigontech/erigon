@@ -307,6 +307,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
+	// Check whether the init code size has been exceeded.
+	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
+		return nil, address, gas, ErrMaxInitCodeSizeExceeded
+	}
 	if evm.config.Debug {
 		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
@@ -330,10 +334,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
-	}
-	// Check whether the init code size has been exceeded.
-	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
-		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
