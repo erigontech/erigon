@@ -18,7 +18,6 @@ type ProcessFn func(
 type ForwardBeaconDownloader struct {
 	ctx                  context.Context
 	highestSlotProcessed uint64
-	lastDownloadedSlot   uint64
 	targetSlot           uint64
 	sentinel             sentinel.SentinelClient // Sentinel
 	process              ProcessFn
@@ -77,7 +76,6 @@ func (f *ForwardBeaconDownloader) SetHighestProcessSlot(highestSlotProcessed uin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.highestSlotProcessed = highestSlotProcessed
-	f.lastDownloadedSlot = highestSlotProcessed
 }
 
 // addSegment process new block segment.
@@ -89,7 +87,6 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBel
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Skip if does continue the segment.
-	f.lastDownloadedSlot++
 	f.segments = append(f.segments, block)
 }
 
@@ -102,7 +99,7 @@ func (f *ForwardBeaconDownloader) RequestMore(count int) {
 			}
 			// count must match the target slot
 			if f.highestSlotProcessed+count+1 > f.targetSlot {
-				count = f.targetSlot - f.highestSlotProcessed + 1
+				count = f.targetSlot - f.highestSlotProcessed
 			}
 			responses, err := rpc.SendBeaconBlocksByRangeReq(
 				f.ctx,
@@ -131,7 +128,6 @@ func (f *ForwardBeaconDownloader) ProcessBlocks() error {
 	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, f.segments); err != nil {
 		return err
 	}
-	f.lastDownloadedSlot = highestSlotProcessed
 	f.highestSlotProcessed = highestSlotProcessed
 	// clear segments
 	f.segments = f.segments[:0]
