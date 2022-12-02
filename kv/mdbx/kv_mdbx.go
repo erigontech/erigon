@@ -32,12 +32,12 @@ import (
 	stack2 "github.com/go-stack/stack"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pbnjay/memory"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
-
-	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -256,11 +256,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, err
 		}
 
-		defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
-		if err != nil {
-			return nil, err
-		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, defaultDirtyPagesLimit*2); err != nil { // default is RAM/42
+		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
+		// but for reproducibility of benchmarks - please don't rely on Available RAM
+		if err = env.SetOption(mdbx.OptTxnDpLimit, 2*(memory.TotalMemory()/42/opts.pageSize)); err != nil {
 			return nil, err
 		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
