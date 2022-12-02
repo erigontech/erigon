@@ -31,6 +31,12 @@ var (
 	testValidator = &cltypes.Validator{
 		PublicKey: testPubKey,
 	}
+	testStateRoot = [32]byte{243, 188, 193, 154, 58, 176, 139, 235, 38, 219, 21, 196, 194, 30, 119, 102, 233, 246, 197, 228, 242, 75, 89, 204, 102, 150, 82, 251, 101, 124, 98, 78}
+
+	stateHashValidator0 = "8545b3e58b298e4b847eba8d6bbc7264df21e36f75924e970aea914bbee82cd9"
+	blockHashValidator0 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
+	stateHashValidator1 = "5e8ab9f10c2afd511b3fd1079b40686716c449b7195e27ecdf393db2d36467e8"
+	blockHashValidator1 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
 )
 
 func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
@@ -47,6 +53,7 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
 					BaseFeePerGas: make([]byte, 32),
 				},
 			},
+			StateRoot: testStateRoot,
 		},
 		Signature: testSignature,
 	}
@@ -83,11 +90,11 @@ func getTestBeaconState() *cltypes.BeaconState {
 func getTestBeaconStateWithValidator() *cltypes.BeaconState {
 	res := getTestBeaconState()
 	res.Validators = append(res.Validators, testValidator)
+	res.Validators[0].WithdrawalCredentials = make([]byte, 32)
 	return res
 }
 
-func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string) *cltypes.BeaconState {
-	nextState := getTestBeaconState()
+func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string, nextState *cltypes.BeaconState) *cltypes.BeaconState {
 	// Set slot to initial index.
 	for i, val := range slots {
 		nextState.Slot = val
@@ -127,6 +134,7 @@ func TestTransitionSlot(t *testing.T) {
 				[]uint64{0},
 				[]string{stateHash0},
 				[]string{blockHash0},
+				getTestBeaconState(),
 			),
 			wantErr: false,
 		},
@@ -138,6 +146,7 @@ func TestTransitionSlot(t *testing.T) {
 				[]uint64{42},
 				[]string{stateHash42},
 				[]string{blockHash42},
+				getTestBeaconState(),
 			),
 			wantErr: false,
 		},
@@ -192,6 +201,7 @@ func TestProcessSlots(t *testing.T) {
 				[]uint64{0, 1},
 				[]string{stateHash0, stateHash1},
 				[]string{blockHash0, blockHash1},
+				getTestBeaconState(),
 			),
 			numSlots:  2,
 			startSlot: 0,
@@ -205,6 +215,7 @@ func TestProcessSlots(t *testing.T) {
 				[]uint64{42, 43, 44},
 				[]string{stateHash42, stateHash43, stateHash44},
 				[]string{blockHash42, blockHash43, blockHash44},
+				getTestBeaconState(),
 			),
 			numSlots:  3,
 			startSlot: 42,
@@ -304,6 +315,79 @@ func TestVerifyBlockSignature(t *testing.T) {
 			// Confirm that validity matches what we expect.
 			if valid != tc.wantValid {
 				t.Errorf("unexpected difference in validity: want %v, got %v", tc.wantValid, valid)
+			}
+		})
+	}
+}
+
+func TestTransitionState(t *testing.T) {
+	slot2 := getTestBeaconBlock()
+	slot2.Block.Slot = 2
+	badSigBlock := getTestBeaconBlock()
+	badSigBlock.Signature = badSignature
+	badStateRootBlock := getTestBeaconBlock()
+	badStateRootBlock.Block.StateRoot = [32]byte{}
+	testCases := []struct {
+		description   string
+		prevState     *cltypes.BeaconState
+		block         *cltypes.SignedBeaconBlockBellatrix
+		expectedState *cltypes.BeaconState
+		wantErr       bool
+	}{
+		{
+			description: "success_2_slots",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       slot2,
+			expectedState: prepareNextBeaconState(
+				t,
+				[]uint64{0, 1},
+				[]string{stateHashValidator0, stateHashValidator1},
+				[]string{blockHashValidator0, blockHashValidator1},
+				getTestBeaconStateWithValidator(),
+			),
+			wantErr: false,
+		},
+		{
+			description: "error_empty_block_body",
+			prevState:   getTestBeaconStateWithValidator(),
+			block: &cltypes.SignedBeaconBlockBellatrix{
+				Block: &cltypes.BeaconBlockBellatrix{
+					Body: &cltypes.BeaconBodyBellatrix{},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			description: "error_bad_signature",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       badSigBlock,
+			wantErr:     true,
+		},
+		{
+			description: "error_bad_state_root",
+			prevState:   getTestBeaconStateWithValidator(),
+			block:       badStateRootBlock,
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			s := New(tc.prevState, testBeaconConfig, nil)
+			err := s.transitionState(tc.prevState, tc.block, true)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("unexpected success, wanted error")
+				}
+				return
+			}
+
+			// Non-failure case.
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if got := tc.prevState; !cmp.Equal(got, tc.expectedState) {
+				t.Errorf("unexpected result state: %v", cmp.Diff(got, tc.expectedState))
 			}
 		})
 	}
