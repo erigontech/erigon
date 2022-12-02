@@ -270,7 +270,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -384,4 +384,45 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
 	assert.Equal(t, header, decoded)
+}
+
+func TestWithdrawalsEncoding(t *testing.T) {
+	header := Header{
+		ParentHash: common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
+		Coinbase:   common.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
+		Root:       common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
+		Difficulty: common.Big0,
+		Number:     big.NewInt(20_000_000),
+		GasLimit:   30_000_000,
+		GasUsed:    3_074_345,
+		Time:       1666343339,
+		Extra:      make([]byte, 0),
+		MixDigest:  common.HexToHash("0x7f04e338b206ef863a1fad30e082bbb61571c74e135df8d1677e3f8b8171a09b"),
+		BaseFee:    big.NewInt(7_000_000_000),
+	}
+
+	withdrawals := make([]*Withdrawal, 2)
+	withdrawals[0] = &Withdrawal{
+		Index:     44555666,
+		Validator: 89,
+		Address:   common.HexToAddress("0x690b9a9e9aa1c9db991c7721a92d351db4fac990"),
+		Amount:    *uint256.NewInt(2 * params.Ether),
+	}
+	withdrawals[1] = &Withdrawal{
+		Index:     44555667,
+		Validator: 37,
+		Address:   common.HexToAddress("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5"),
+		Amount:    *uint256.NewInt(5 * params.Ether),
+	}
+
+	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	_ = block.Size()
+
+	encoded, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+
+	var decoded Block
+	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
+
+	assert.Equal(t, block, &decoded)
 }

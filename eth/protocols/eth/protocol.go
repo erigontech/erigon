@@ -430,12 +430,14 @@ type BlockBodiesRLPPacket66 struct {
 type BlockBody struct {
 	Transactions []types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header     // Uncles contained within a block
+	Withdrawals  []*types.Withdrawal // Withdrawals contained within a block
 }
 
 // BlockRawBody represents the data content of a single block.
 type BlockRawBody struct {
-	Transactions [][]byte        // Transactions contained within a block
-	Uncles       []*types.Header // Uncles contained within a block
+	Transactions [][]byte            // Transactions contained within a block
+	Uncles       []*types.Header     // Uncles contained within a block
+	Withdrawals  []*types.Withdrawal // Withdrawals contained within a block
 }
 
 func (bb BlockBody) EncodeRLP(w io.Writer) error {
