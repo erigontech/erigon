@@ -249,7 +249,7 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) {
 	for i := 0; i < 256; i++ {
 		prefix := []byte{byte(i)}
 		go func(perfix []byte) {
-			_ = db.View(ctx, func(tx kv.Tx) error {
+			if err := db.View(ctx, func(tx kv.Tx) error {
 				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
 					select {
 					case <-ctx.Done():
@@ -258,7 +258,9 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) {
 					}
 					return nil
 				})
-			})
+			}); err != nil {
+				log.Warn("warmup", "err", err)
+			}
 		}(prefix)
 	}
 }
