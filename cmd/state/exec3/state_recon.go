@@ -1,7 +1,6 @@
 package exec3
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -193,16 +192,11 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-var addr1 common.Address = common.HexToAddress("0xfffffffff047852f159827f782a42141f39857ed")
-
 func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
 	it := sw.as.IterateAccountsTxs(sw.txNum)
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, del := it.Next()
-		if bytes.Equal(key, addr1[:]) {
-			fmt.Printf("BitmapAccounts %x %d %t\n", key, txNum, del)
-		}
 		if del {
 			if err := accountCollectorX.Collect(key, nil); err != nil {
 				panic(err)
@@ -336,7 +330,6 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
-	rw.stateReader.SetTrace(txTask.TxNum == 102137677)
 	rules := txTask.Rules
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1

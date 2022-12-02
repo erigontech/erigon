@@ -937,6 +937,10 @@ func reconstituteStep(last bool,
 		if err != nil {
 			return err
 		}
+		if b == nil {
+			fmt.Printf("could not find block %d\n", bn)
+			panic("")
+		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -1008,6 +1012,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
 	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
 
@@ -1363,6 +1368,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}); err != nil {
 		return err
 	}
+	log.Info("Reconstitution done", "in", time.Since(startTime))
 	return nil
 }
 
