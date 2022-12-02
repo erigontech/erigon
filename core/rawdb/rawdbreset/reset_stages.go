@@ -149,6 +149,12 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 				kv.LogTopicsKeys, kv.LogTopicsIdx,
 				kv.TracesFromKeys, kv.TracesFromIdx,
 				kv.TracesToKeys, kv.TracesToIdx,
+
+				kv.AccountChangeSet,
+				kv.StorageChangeSet,
+				kv.Receipts,
+				kv.Log,
+				kv.CallTraceSet,
 			}
 			if err := clearTables(ctx, db, tx, buckets...); err != nil {
 				return nil
@@ -166,6 +172,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 
 			genesis := core.DefaultGenesisBlockByChainName(chain)
 			if _, _, err := genesis.WriteGenesisState(tx); err != nil {
+				panic(err)
 				return err
 			}
 		}
@@ -268,7 +275,7 @@ func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
 	warmup(ctx, db, table)
 	log.Info("Clear", "table", table)
-	return tx.ClearBucket(kv.HashedAccounts)
+	return tx.ClearBucket(table)
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
