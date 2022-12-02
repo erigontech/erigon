@@ -280,8 +280,8 @@ func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 }
 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
-	clear := warmup(ctx, db, table)
-	defer clear()
+	clean := warmup(ctx, db, table)
+	defer clean()
 	log.Info("Clear", "table", table)
 	return tx.ClearBucket(table)
 }
