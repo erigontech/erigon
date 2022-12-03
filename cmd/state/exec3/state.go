@@ -78,7 +78,6 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 		}
 		return h
 	}
-
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
 
 	return w
@@ -183,17 +182,13 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		//getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//var vmenv vm.VMInterface
-		//if txTask.Tx.IsStarkNet() {
-		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-		//	vmenv = rw.starkNetEvm
-		//} else {
-		//rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		//vmenv = rw.evm
-		//}
+		//blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+		//txContext := core.NewEVMTxContext(msg)
+		//vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
