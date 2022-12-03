@@ -2,6 +2,7 @@ package rawdbreset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -262,7 +263,9 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
 					return nil
 				})
 			}); err != nil {
-				log.Warn("warmup", "err", err)
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("warmup", "err", err)
+				}
 			}
 		}(prefix)
 	}
