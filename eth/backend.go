@@ -413,11 +413,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.DeprecatedTxPool.Disable {
 		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
 	} else {
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
+		// cacheConfig := kvcache.DefaultCoherentCacheConfig
+		// cacheConfig.MetricsLabel = "txpool"
 
 		backend.newTxs2 = make(chan types2.Hashes, 1024)
-		//defer close(newTxs)
+		// defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
 		)
@@ -519,15 +519,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
+
 		bs, err := clcore.RetrieveBeaconState(ctx,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
-
-		if err != nil {
-			return nil, err
-		}
-
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
-			return nil, err
+		if err == nil {
+			// If we have a beacon state, we can start the light client,
+			// and we expect/demand that if the beacon state IS available (err == nil),
+			// that the beacon checkpoint is ALSO available.
+			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
+			// Otherwise, the beacon state fetch failed for some reason, eg dead link, no link available, etc,
+			// then we should WARN about the error, but proceed without the beacon state feature.
+			log.Warn("Failed to retrieve beacon state", "err", err)
 		}
 
 		go lc.Start()
@@ -584,9 +589,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					log.Error("add mined block to body downloader", "err", err)
 				}
 
-				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
-				//rpcdaemon
+				// p2p
+				// backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				// rpcdaemon
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
@@ -636,12 +641,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
+	// eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
 	}
-	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+	// eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
@@ -694,7 +699,7 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 //
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
-func (s *Ethereum) isLocalBlock(block *types.Block) bool { //nolint
+func (s *Ethereum) isLocalBlock(block *types.Block) bool { // nolint
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
@@ -704,7 +709,7 @@ func (s *Ethereum) isLocalBlock(block *types.Block) bool { //nolint
 // shouldPreserve checks whether we should preserve the given block
 // during the chain reorg depending on whether the author of block
 // is a local account.
-func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
+func (s *Ethereum) shouldPreserve(block *types.Block) bool { // nolint
 	// The reason we need to disable the self-reorg preserving for clique
 	// is it can be probable to introduce a deadlock.
 	//
