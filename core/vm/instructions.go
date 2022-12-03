@@ -746,7 +746,6 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	//TODO: use uint256.Int instead of converting with toBig()
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
