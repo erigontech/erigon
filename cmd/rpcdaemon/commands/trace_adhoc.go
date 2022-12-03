@@ -485,6 +485,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
+			sb.Grow(len(ot.idx))
 			for _, idx := range ot.idx {
 				sb.WriteString(idx)
 			}
