@@ -174,6 +174,15 @@ func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts {
 }
 
 func (opts MdbxOpts) Open() (kv.RwDB, error) {
+	if dbg.WriteMap() {
+		opts = opts.WriteMap() //nolint
+	}
+	if dbg.MergeTr() > 0 {
+		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
+	}
+	if dbg.MdbxReadAhead() {
+		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
+	}
 	env, err := mdbx.NewEnv()
 	if err != nil {
 		return nil, err
