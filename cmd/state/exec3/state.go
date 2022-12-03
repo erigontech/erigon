@@ -182,13 +182,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
-		//getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//blockContext := core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-		//txContext := core.NewEVMTxContext(msg)
-		//vmenv := vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
