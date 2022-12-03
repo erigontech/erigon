@@ -29,7 +29,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"golang.org/x/crypto/sha3"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 )
 
 // Lengths of hashes and addresses in bytes.
@@ -246,10 +246,12 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := sha3.NewLegacyKeccak256()
+	sha := cryptopool.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
+	cryptopool.ReturnToPoolKeccak256(sha)
+
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]
 		if i%2 == 0 {
@@ -507,10 +509,11 @@ func (a *Address32) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := sha3.NewLegacyKeccak256()
+	sha := cryptopool.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
+	cryptopool.ReturnToPoolKeccak256(sha)
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]
 		if i%2 == 0 {
