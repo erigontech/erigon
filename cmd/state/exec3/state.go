@@ -33,6 +33,7 @@ type Worker struct {
 	stateWriter *state.StateWriter22
 	stateReader *state.StateReader22
 	chainConfig *params.ChainConfig
+	getHeader   func(hash common.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -181,6 +182,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		//getHashFn := core.GetHashFn(header, rw.getHeader)
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 

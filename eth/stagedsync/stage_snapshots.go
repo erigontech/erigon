@@ -13,6 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -410,7 +411,7 @@ Loop:
 					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", s.LogPrefix(), stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
-				libcommon.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),

@@ -28,7 +28,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
@@ -339,15 +339,15 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		} else {
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
-		if debug.WriteMap() {
+		if dbg.WriteMap() {
 			log.Info("[db] Enabling WriteMap")
 			opts = opts.WriteMap()
 		}
-		if debug.MergeTr() > 0 {
-			log.Info("[db] Setting", "MergeThreshold", debug.MergeTr())
-			opts = opts.WriteMergeThreshold(uint64(debug.MergeTr() * 8192))
+		if dbg.MergeTr() > 0 {
+			log.Info("[db] Setting", "MergeThreshold", dbg.MergeTr())
+			opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192))
 		}
-		if debug.MdbxReadAhead() {
+		if dbg.MdbxReadAhead() {
 			log.Info("[db] Setting Enabling ReadAhead")
 			opts = opts.Flags(func(u uint) uint {
 				return u &^ mdbx2.NoReadahead

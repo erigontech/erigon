@@ -19,6 +19,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -63,7 +63,7 @@ type Progress struct {
 func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
@@ -238,7 +238,7 @@ func ExecV3(ctx context.Context,
 			defer rs.Finish()
 
 			agg.SetTx(tx)
-			if debug.DiscardHistory() {
+			if dbg.DiscardHistory() {
 				defer agg.DiscardHistory().FinishWrites()
 			} else {
 				defer agg.StartWrites().FinishWrites()
@@ -406,7 +406,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if !parallel {
-		if debug.DiscardHistory() {
+		if dbg.DiscardHistory() {
 			defer agg.DiscardHistory().FinishWrites()
 		} else {
 			defer agg.StartWrites().FinishWrites()
@@ -766,7 +766,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
@@ -829,7 +829,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
@@ -873,7 +873,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
@@ -953,7 +953,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				return
 			case <-logEvery.C:
 				var m runtime.MemStats
-				common.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 				sizeEstimate := rs.SizeEstimate()
 				count = rs.DoneCount()
 				rollbackCount = rs.RollbackCount()
@@ -1166,7 +1166,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
@@ -1186,7 +1186,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
@@ -1206,7 +1206,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for doneCount.Load() < uint64(workerCount) {
 		<-logEvery.C
 		var m runtime.MemStats
-		common.ReadMemStats(&m)
+		dbg.ReadMemStats(&m)
 		var p float64
 		for i := 0; i < workerCount; i++ {
 			if total := fillWorkers[i].Total(); total > 0 {
