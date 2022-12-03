@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -55,21 +54,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
-
-	if debug2.WriteMap() {
-		log.Info("[db] Enabling WriteMap")
-		opts = opts.WriteMap()
-	}
-	if debug2.MergeTr() > 0 {
-		log.Info("[db] Setting", "MergeThreshold", debug2.MergeTr())
-		opts = opts.WriteMergeThreshold(uint64(debug2.MergeTr() * 8192))
-	}
-	if debug2.MdbxReadAhead() {
-		log.Info("[db] Setting Enabling ReadAhead")
-		opts = opts.Flags(func(u uint) uint {
-			return u &^ mdbx.NoReadahead
-		})
-	}
 
 	db := opts.MustOpen()
 	if applyMigrations {

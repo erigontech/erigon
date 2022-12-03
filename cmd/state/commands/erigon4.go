@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -307,7 +308,7 @@ func (s *stat23) print(aStats libstate.FilesStats, logger log.Logger) {
 
 func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat23 {
 	currentTime := time.Now()
-	libcommon.ReadMemStats(&s.mem)
+	dbg.ReadMemStats(&s.mem)
 
 	interval := currentTime.Sub(s.prevTime).Seconds()
 	s.blockNum = blockNum
