@@ -113,7 +113,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
 		evmtypes.TxContext{
 			Origin:   msg.From(),
-			GasPrice: msg.GasPrice().ToBig(),
+			GasPrice: msg.GasPrice(),
 		}
 }
 
