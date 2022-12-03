@@ -33,6 +33,10 @@ type MiningBlock struct {
 	Txs         types.Transactions
 	Receipts    types.Receipts
 	PreparedTxs types.TransactionsStream
+	Withdrawals []*types.Withdrawal
+
+	LocalTxs  types.TransactionsStream
+	RemoteTxs types.TransactionsStream
 }
 
 type MiningState struct {
@@ -198,6 +202,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 		current.Header = header
 		current.Uncles = nil
+		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
 		return nil
 	}
 
@@ -288,6 +293,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
+	current.Withdrawals = nil
 	return nil
 }
 

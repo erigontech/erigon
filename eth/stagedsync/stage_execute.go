@@ -234,7 +234,7 @@ func newStateReaderWriter(
 
 // ================ Erigon3 ================
 
-func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
 	//workersCount := 2
 	if !initialCycle {
@@ -274,10 +274,8 @@ func ExecBlock22(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	rs := state.NewState22()
 	parallel := initialCycle && tx == nil
-	if err := Exec3(ctx, s, workersCount, cfg.batchSize, cfg.db, tx, parallel, rs,
-		cfg.blockReader, log.New(), cfg.agg, cfg.engine,
-		to,
-		cfg.chainConfig, cfg.genesis); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
+		log.New(), to); err != nil {
 		return err
 	}
 
@@ -351,7 +349,7 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
-		if err = ExecBlock22(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
+		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
 			return err
 		}
 		return nil

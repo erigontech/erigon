@@ -1125,7 +1125,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
 }
 
 func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
@@ -1137,7 +1137,7 @@ func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64)
 	if body == nil {
 		return nil, nil, fmt.Errorf("body not found for block %d, %x", number, hash)
 	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
+	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
 	senders, err := ReadSenders(tx, hash, number)
 	if err != nil {
 		return nil, nil, err

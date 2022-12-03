@@ -340,12 +340,15 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
 		if debug.WriteMap() {
+			log.Info("[db] Enabling WriteMap")
 			opts = opts.WriteMap()
 		}
 		if debug.MergeTr() > 0 {
+			log.Info("[db] Setting", "MergeThreshold", debug.MergeTr())
 			opts = opts.WriteMergeThreshold(uint64(debug.MergeTr() * 8192))
 		}
 		if debug.MdbxReadAhead() {
+			log.Info("[db] Setting Enabling ReadAhead")
 			opts = opts.Flags(func(u uint) uint {
 				return u &^ mdbx2.NoReadahead
 			})

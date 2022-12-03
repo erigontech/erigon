@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/Giulio2002/bls v0.0.0-20221103221031-e1945063d0cf
+	github.com/Giulio2002/bls v0.0.0-20221130111651-ff2d397f3b99
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.23.0

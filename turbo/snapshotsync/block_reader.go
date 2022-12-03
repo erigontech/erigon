@@ -435,7 +435,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		}
 		if ok && b != nil {
 			if txsAmount == 0 {
-				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles)
+				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals)
 				if len(senders) != block.Transactions().Len() {
 					return block, senders, nil // no senders is fine - will recover them on the fly
 				}
@@ -455,7 +455,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 				return nil, nil, err
 			}
 			if ok {
-				block = types.NewBlockFromStorage(hash, h, txs, b.Uncles)
+				block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 				if len(senders) != block.Transactions().Len() {
 					return block, senders, nil // no senders is fine - will recover them on the fly
 				}

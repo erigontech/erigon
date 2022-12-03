@@ -632,11 +632,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	}
 
 	if reset {
-		err = reset2.ResetSenders(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
 	}
 
 	s := stage(sync, tx, nil, stages.Senders)
@@ -687,10 +683,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	_, agg := allSnapshots(db)
 
 	if reset {
-		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, chain) }); err != nil {
-			return err
-		}
-		return nil
+		return reset2.ResetExec(ctx, db, chain)
 	}
 
 	if txtrace {
@@ -754,18 +747,15 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	_, agg := allSnapshots(db)
 
+	if reset {
+		return reset2.ResetIH(ctx, db)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if reset {
-		if err := stagedsync.ResetIH(tx); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 	execStage := stage(sync, tx, nil, stages.Execution)
 	s := stage(sync, tx, nil, stages.IntermediateHashes)
 
@@ -808,19 +798,15 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.HashState))
 	_, agg := allSnapshots(db)
 
+	if reset {
+		return reset2.ResetHashState(ctx, db)
+	}
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	if reset {
-		err = stagedsync.ResetHashState(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 
 	s := stage(sync, tx, nil, stages.HashState)
 	if pruneTo > 0 {
@@ -864,19 +850,14 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
+	if reset {
+		return reset2.ResetLogIndex(ctx, db)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	if reset {
-		err = reset2.ResetLogIndex(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 
 	execAt := progress(tx, stages.Execution)
 	s := stage(sync, tx, nil, stages.LogIndex)
@@ -921,19 +902,16 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
+
+	if reset {
+		return reset2.ResetCallTraces(ctx, db)
+	}
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	if reset {
-		err = reset2.ResetCallTraces(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
@@ -985,19 +963,15 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
+	if reset {
+		return reset2.ResetHistory(ctx, db)
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if reset {
-		err = reset2.ResetHistory(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 	execStage := progress(tx, stages.Execution)
 	stageStorage := stage(sync, tx, nil, stages.StorageHistoryIndex)
 	stageAcc := stage(sync, tx, nil, stages.AccountHistoryIndex)
@@ -1058,19 +1032,15 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.TxLookup))
 	sn, _ := allSnapshots(db)
 
+	if reset {
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetTxLookup(tx) })
+	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if reset {
-		err = reset2.ResetTxLookup(tx)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 	s := stage(sync, tx, nil, stages.TxLookup)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
