@@ -31,7 +31,8 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 	}
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.BeaconAggregateAndProofSsz,
+		// Cause problem due to buggy msg id will uncomment in the future.
+		//sentinel.BeaconAggregateAndProofSsz,
 		sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,

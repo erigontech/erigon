@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	ssz "github.com/ferranbt/fastssz"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
@@ -15,41 +13,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 )
-
-func DecodeGossipData(data *sentinel.GossipData) (ssz.Unmarshaler, error) {
-	switch data.Type {
-	case sentinel.GossipType_BeaconBlockGossipType:
-		pkt := &cltypes.SignedBeaconBlockBellatrix{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_AggregateAndProofGossipType:
-		pkt := &cltypes.SignedAggregateAndProof{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_VoluntaryExitGossipType:
-		pkt := &cltypes.SignedVoluntaryExit{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_ProposerSlashingGossipType:
-		pkt := &cltypes.ProposerSlashing{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_AttesterSlashingGossipType:
-		pkt := &cltypes.AttesterSlashing{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_LightClientOptimisticUpdateGossipType:
-		pkt := &cltypes.LightClientOptimisticUpdate{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
-		pkt := &cltypes.LightClientFinalityUpdate{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	default:
-		return nil, fmt.Errorf("invalid gossip type: %d", data.Type)
-	}
-}
 
 func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client sentinel.SentinelClient) (*cltypes.LightClientFinalityUpdate, error) {
 	responsePacket := &cltypes.LightClientFinalityUpdate{}
