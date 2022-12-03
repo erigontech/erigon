@@ -587,12 +587,7 @@ func (w *StateWriter22) SetTxNum(txNum uint64) {
 }
 
 func (w *StateWriter22) ResetWriteSet() {
-	w.writeLists = map[string]*exec22.KvList{
-		kv.PlainState:        {},
-		kv.Code:              {},
-		kv.PlainContractCode: {},
-		kv.IncarnationMap:    {},
-	}
+	w.writeLists = newWriteList()
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
 	w.storagePrevs = map[string][]byte{}
@@ -675,13 +670,8 @@ type StateReader22 struct {
 
 func NewStateReader22(rs *State22) *StateReader22 {
 	return &StateReader22{
-		rs: rs,
-		readLists: map[string]*exec22.KvList{
-			kv.PlainState:     {},
-			kv.Code:           {},
-			CodeSizeTable:     {},
-			kv.IncarnationMap: {},
-		},
+		rs:        rs,
+		readLists: newReadList(),
 	}
 }
 
@@ -694,12 +684,7 @@ func (r *StateReader22) SetTx(tx kv.Tx) {
 }
 
 func (r *StateReader22) ResetReadSet() {
-	r.readLists = map[string]*exec22.KvList{
-		kv.PlainState:     {},
-		kv.Code:           {},
-		CodeSizeTable:     {},
-		kv.IncarnationMap: {},
-	}
+	r.readLists = newReadList()
 }
 
 func (r *StateReader22) ReadSet() map[string]*exec22.KvList {
@@ -836,22 +821,13 @@ var writeListPool = sync.Pool{
 }
 
 func newWriteList() map[string]*exec22.KvList {
-	return map[string]*exec22.KvList{
-		kv.PlainState:        {},
-		kv.Code:              {},
-		kv.PlainContractCode: {},
-		kv.IncarnationMap:    {},
+	w := writeListPool.Get().(map[string]*exec22.KvList)
+	for _, tbl := range w {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
-
-	//w := writeListPool.Get().(map[string]*exec22.KvList)
-	//for _, tbl := range w {
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
-	//return w
+	return w
 }
-func returnWriteList(w map[string]*exec22.KvList) {
-	//writeListPool.Put(w)
-}
+func returnWriteList(w map[string]*exec22.KvList) { writeListPool.Put(w) }
 
 var readListPool = sync.Pool{
 	New: func() any {
@@ -865,19 +841,10 @@ var readListPool = sync.Pool{
 }
 
 func newReadList() map[string]*exec22.KvList {
-	return map[string]*exec22.KvList{
-		kv.PlainState:     {},
-		kv.Code:           {},
-		CodeSizeTable:     {},
-		kv.IncarnationMap: {},
+	w := readListPool.Get().(map[string]*exec22.KvList)
+	for _, tbl := range w {
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
-
-	//w := readListPool.Get().(map[string]*exec22.KvList)
-	//for _, tbl := range w {
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
-	//return w
+	return w
 }
-func returnReadList(w map[string]*exec22.KvList) {
-	//readListPool.Put(w)
-}
+func returnReadList(w map[string]*exec22.KvList) { readListPool.Put(w) }
