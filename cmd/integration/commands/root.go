@@ -57,15 +57,12 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
 
 	if dbg.WriteMap() {
-		log.Info("[db] Enabling WriteMap")
 		opts = opts.WriteMap()
 	}
 	if dbg.MergeTr() > 0 {
-		log.Info("[db] Setting", "MergeThreshold", dbg.MergeTr())
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192))
 	}
 	if dbg.MdbxReadAhead() {
-		log.Info("[db] Setting Enabling ReadAhead")
 		opts = opts.Flags(func(u uint) uint {
 			return u &^ mdbx.NoReadahead
 		})
