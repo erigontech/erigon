@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -519,7 +520,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
 		"blk/s", fmt.Sprintf("%.1f", speed),

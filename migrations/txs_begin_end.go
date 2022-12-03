@@ -10,6 +10,7 @@ import (
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -61,7 +62,7 @@ var txsBeginEnd = Migration{
 			select {
 			case <-logEvery.C:
 				var m runtime.MemStats
-				common2.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 				log.Info("[database version migration] Adding system-txs",
 					"progress", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
