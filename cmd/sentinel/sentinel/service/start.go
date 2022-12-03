@@ -66,7 +66,7 @@ WaitingLoop:
 		case <-timeOutTimer.C:
 			return nil, fmt.Errorf("[Server] timeout beginning server")
 		default:
-			if _, err := server.GetPeers(ctx, &sentinelrpc.EmptyRequest{}); err == nil {
+			if _, err := server.GetPeers(ctx, &sentinelrpc.EmptyMessage{}); err == nil {
 				break WaitingLoop
 			}
 		}

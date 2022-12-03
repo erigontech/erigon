@@ -196,7 +196,7 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyMessage{})
 			if err != nil {
 				log.Warn("could not read peers", "err", err)
 				continue

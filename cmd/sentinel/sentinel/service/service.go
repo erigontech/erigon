@@ -27,7 +27,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *Sentin
 	}
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyRequest, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 	}, err
 }
 
-func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyRequest) (*sentinelrpc.PeerCount, error) {
+func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
 		Amount: uint64(s.sentinel.GetPeersCount()),

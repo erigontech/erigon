@@ -191,7 +191,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 }
 
 func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
-	subscription, err := s.SubscribeGossip(ctx, &sentinelrpc.EmptyRequest{})
+	subscription, err := s.SubscribeGossip(ctx, &sentinelrpc.EmptyMessage{})
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return
