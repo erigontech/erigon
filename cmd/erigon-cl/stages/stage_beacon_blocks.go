@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -58,8 +59,10 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	// On new blocks we just check slot sequencing for now :)
 	cfg.downloader.SetProcessFunction(func(
 		highestSlotProcessed uint64,
-		newBlocks []*cltypes.SignedBeaconBlockBellatrix) (newHighestSlotProcessed uint64, err error) {
+		highestRootProcessed common.Hash,
+		newBlocks []*cltypes.SignedBeaconBlockBellatrix) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
 		newHighestSlotProcessed = highestSlotProcessed
+		newHighestBlockRootProcessed = highestRootProcessed
 		for _, block := range newBlocks {
 			slot := block.Block.Slot
 			if slot <= highestSlotProcessed || slot > newHighestSlotProcessed+maxOptimisticDistance || slot > targetSlot {
@@ -70,18 +73,25 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
 				return
 			}
+			newHighestBlockRootProcessed, err = block.Block.HashTreeRoot()
+			if err != nil {
+				return
+			}
 		}
 		return
 	})
 	cfg.downloader.SetIsDownloading(true)
 	logInterval := time.NewTicker(30 * time.Second)
 	defer logInterval.Stop()
-	triggerInterval := time.NewTicker(40 * time.Millisecond)
+	triggerInterval := time.NewTicker(50 * time.Millisecond)
 	defer triggerInterval.Stop()
 	// Process blocks until we reach our target
 	for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); targetSlot > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-		// Send request every 20 Millisecond
-		cfg.downloader.RequestMore(1)
+		currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+		// Send request every 50 Millisecond only if not on chain tip
+		if currentSlot != highestProcessed {
+			cfg.downloader.RequestMore()
+		}
 
 		if err := cfg.downloader.ProcessBlocks(); err != nil {
 			return err

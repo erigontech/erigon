@@ -63,6 +63,9 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 
 	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	downloader := network.NewForwardBeaconDownloader(ctx, s)
+	gossipManager := network.NewGossipReceiver(ctx, s)
+	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
+	go gossipManager.Loop()
 	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, genesisCfg, beaconConfig, cpState, nil, false)
 	if err != nil {
 		return err
