@@ -753,7 +753,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	// TODO: use uint256.Int instead of converting with toBig()
+	//TODO: use uint256.Int instead of converting with toBig()
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
@@ -925,16 +925,15 @@ func makePush(size uint64, pushByteSize uint64) executionFunc {
 		var (
 			context    = scope.RetStack[len(scope.RetStack)-1]
 			codeEnd    = context.CodeOffset + context.CodeLength
-			startMin   = codeEnd
 			pcAbsolute = context.CodeOffset + *pc
+			startMin   = pcAbsolute + 1
 		)
-		if pcAbsolute+1 < startMin {
-			startMin = pcAbsolute + 1
+		if startMin >= codeEnd {
+			startMin = codeEnd
 		}
-
-		endMin := codeEnd
-		if startMin+pushByteSize < endMin {
-			endMin = startMin + pushByteSize
+		endMin := startMin + pushByteSize
+		if endMin >= codeEnd {
+			endMin = codeEnd
 		}
 
 		integer := new(uint256.Int)
