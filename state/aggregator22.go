@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
@@ -693,7 +694,7 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	}
 
 	var m runtime.MemStats
-	common2.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	log.Info("[Snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", a.maxTxNum.Load()/1_000_000),

@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -1725,7 +1726,7 @@ func (p *TxPool) logStats() {
 	defer p.lock.Unlock()
 
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	ctx := []interface{}{
 		"block", p.lastSeenBlock.Load(),
 		"pending", p.pending.Len(),

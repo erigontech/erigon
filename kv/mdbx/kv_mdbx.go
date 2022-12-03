@@ -67,7 +67,7 @@ type MdbxOpts struct {
 }
 
 func NewMDBX(log log.Logger) MdbxOpts {
-	return MdbxOpts{
+	opts := MdbxOpts{
 		bucketsCfg:     WithChaindataTables,
 		flags:          mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:            log,
@@ -75,6 +75,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		growthStep:     2 * datasize.GB,
 		mergeThreshold: 32768,
 	}
+	return opts
 }
 
 func (opts MdbxOpts) GetLabel() kv.Label  { return opts.label }

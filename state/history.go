@@ -52,6 +52,10 @@ import (
 
 type History struct {
 	*InvertedIndex
+
+	// Files:
+	//  .v - list of values
+	//  .vi - txNum+key -> offset in .v
 	files            *btree.BTreeG[*filesItem]
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	settingsTable    string
@@ -1450,6 +1454,121 @@ func (hi *HistoryIterator1) Next(keyBuf, valBuf []byte) ([]byte, []byte) {
 	k := append(keyBuf, hi.nextKey...)
 	v := append(valBuf, hi.nextVal...)
 	hi.advance()
+	return k, v
+}
+
+func (hc *HistoryContext) IterateRecentlyChanged(startTxNum, endTxNum uint64, roTx kv.Tx, f func([]byte, []byte) error) error {
+	col := etl.NewCollector("", hc.h.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer col.Close()
+	col.LogLvl(log.LvlTrace)
+
+	it := hc.IterateRecentlyChangedUnordered(startTxNum, endTxNum, roTx)
+	defer it.Close()
+	for it.HasNext() {
+		k, v := it.Next()
+		if err := col.Collect(k, v); err != nil {
+			return err
+		}
+	}
+	return col.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return f(k, v)
+	}, etl.TransformArgs{})
+}
+
+func (hc *HistoryContext) IterateRecentlyChangedUnordered(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator2 {
+	hi := HistoryIterator2{
+		hasNext:      true,
+		roTx:         roTx,
+		idxKeysTable: hc.h.indexKeysTable,
+		valsTable:    hc.h.historyValsTable,
+		hc:           hc,
+		startTxNum:   startTxNum,
+		endTxNum:     endTxNum,
+	}
+	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
+	hi.advanceInDb()
+	return &hi
+}
+
+type HistoryIterator2 struct {
+	roTx          kv.Tx
+	txNum2kCursor kv.CursorDupSort
+	hc            *HistoryContext
+	idxKeysTable  string
+	valsTable     string
+	nextKey       []byte
+	nextVal       []byte
+	endTxNum      uint64
+	startTxNum    uint64
+	advDbCnt      int
+	startTxKey    [8]byte
+	hasNext       bool
+}
+
+func (hi *HistoryIterator2) Stat() int { return hi.advDbCnt }
+
+func (hi *HistoryIterator2) Close() {
+	if hi.txNum2kCursor != nil {
+		hi.txNum2kCursor.Close()
+	}
+}
+
+func (hi *HistoryIterator2) advanceInDb() {
+	hi.advDbCnt++
+	var k, v []byte
+	var err error
+	if hi.txNum2kCursor == nil {
+		if hi.txNum2kCursor, err = hi.roTx.CursorDupSort(hi.idxKeysTable); err != nil {
+			panic(err)
+		}
+		if k, v, err = hi.txNum2kCursor.Seek(hi.startTxKey[:]); err != nil {
+			// TODO pass error properly around
+			panic(err)
+		}
+	} else {
+		if k, v, err = hi.txNum2kCursor.NextDup(); err != nil {
+			panic(err)
+		}
+		if k == nil {
+			k, v, err = hi.txNum2kCursor.NextNoDup()
+			if err != nil {
+				panic(err)
+			}
+			if k != nil && binary.BigEndian.Uint64(k) >= hi.endTxNum {
+				k = nil // end
+			}
+		}
+	}
+	if k != nil {
+		hi.nextKey = v[:len(v)-8]
+		hi.hasNext = true
+
+		valNum := v[len(v)-8:]
+
+		if binary.BigEndian.Uint64(valNum) == 0 {
+			// This is special valNum == 0, which is empty value
+			hi.nextVal = []byte{}
+			return
+		}
+		val, err := hi.roTx.GetOne(hi.valsTable, valNum)
+		if err != nil {
+			panic(err)
+		}
+		hi.nextVal = val
+		return
+	}
+	hi.txNum2kCursor.Close()
+	hi.txNum2kCursor = nil
+	hi.hasNext = false
+}
+
+func (hi *HistoryIterator2) HasNext() bool {
+	return hi.hasNext
+}
+
+func (hi *HistoryIterator2) Next() ([]byte, []byte) {
+	k, v := hi.nextKey, hi.nextVal
+	hi.advanceInDb()
 	return k, v
 }
 
