@@ -184,14 +184,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//var vmenv vm.VMInterface
-		//if txTask.Tx.IsStarkNet() {
-		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-		//	vmenv = rw.starkNetEvm
-		//} else {
-		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		//	vmenv = rw.evm
-		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
