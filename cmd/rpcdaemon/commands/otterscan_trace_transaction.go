@@ -84,5 +84,5 @@ func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Add
 
 func (l *TransactionTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	last := l.Results[len(l.Results)-1]
-	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value), nil})
+	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
 }

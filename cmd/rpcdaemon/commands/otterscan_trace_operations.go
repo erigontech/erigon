@@ -56,5 +56,5 @@ func (t *OperationsTracer) CaptureStart(env *vm.EVM, depth int, from common.Addr
 }
 
 func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value)})
+	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
 }

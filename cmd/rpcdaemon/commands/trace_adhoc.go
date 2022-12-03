@@ -535,7 +535,7 @@ func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, 
 	action := &SuicideTraceAction{}
 	action.Address = from
 	action.RefundAddress = to
-	action.Balance.ToInt().Set(value)
+	action.Balance.ToInt().Set(value.ToBig())
 	trace.Action = action
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	traceIdx := topTrace.Subtraces
