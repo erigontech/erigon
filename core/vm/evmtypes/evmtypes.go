@@ -36,7 +36,7 @@ type TxContext struct {
 	// Message information
 	TxHash   common.Hash
 	Origin   common.Address // Provides information for ORIGIN
-	GasPrice *big.Int       // Provides information for GASPRICE
+	GasPrice *uint256.Int   // Provides information for GASPRICE
 }
 
 type (
