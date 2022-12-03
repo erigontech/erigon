@@ -174,7 +174,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 
 			genesis := core.DefaultGenesisBlockByChainName(chain)
 			if _, _, err := genesis.WriteGenesisState(tx); err != nil {
-				panic(err)
 				return err
 			}
 		}
