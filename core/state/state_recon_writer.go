@@ -55,6 +55,7 @@ type ReconState struct {
 
 	lock         sync.RWMutex
 	changes      map[string]*btree2.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
+	hints        map[string]*btree2.PathHint
 	sizeEstimate uint64
 }
 
@@ -76,9 +77,10 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	if !ok {
 		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 32, NoLocks: true})
 		rs.changes[table] = t
+		rs.hints[table] = &btree2.PathHint{}
 	}
 	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
-	old, ok := t.Set(item)
+	old, ok := t.SetHint(item, rs.hints[table])
 	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
 	if ok {
 		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
@@ -92,7 +94,7 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 	if !ok {
 		return nil
 	}
-	i, ok := t.Get(reconPair{txNum: txNum, key1: key1, key2: key2})
+	i, ok := t.GetHint(reconPair{txNum: txNum, key1: key1, key2: key2}, rs.hints[table])
 	if !ok {
 		return nil
 	}
@@ -104,22 +106,24 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
 		var err error
-		t.Ascend(reconPair{}, func(item reconPair) bool {
-			if len(item.val) == 0 {
-				return true
-			}
-			var composite []byte
-			if item.key2 == nil {
-				composite = make([]byte, 8+len(item.key1))
-			} else {
-				composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
-				binary.BigEndian.PutUint64(composite[8+len(item.key1):], FirstContractIncarnation)
-				copy(composite[8+len(item.key1)+8:], item.key2)
-			}
-			binary.BigEndian.PutUint64(composite, item.txNum)
-			copy(composite[8:], item.key1)
-			if err = rwTx.Put(table, composite, item.val); err != nil {
-				return false
+		t.Walk(func(items []reconPair) bool {
+			for _, item := range items {
+				if len(item.val) == 0 {
+					return true
+				}
+				var composite []byte
+				if item.key2 == nil {
+					composite = make([]byte, 8+len(item.key1))
+				} else {
+					composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
+					binary.BigEndian.PutUint64(composite[8+len(item.key1):], FirstContractIncarnation)
+					copy(composite[8+len(item.key1)+8:], item.key2)
+				}
+				binary.BigEndian.PutUint64(composite, item.txNum)
+				copy(composite[8:], item.key1)
+				if err = rwTx.Put(table, composite, item.val); err != nil {
+					return false
+				}
 			}
 			return true
 		})
