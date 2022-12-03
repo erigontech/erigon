@@ -139,6 +139,7 @@ func (sdb *IntraBlockState) Reset() {
 	//sdb.clearJournalAndRefund()
 	//sdb.accessList = newAccessList() // this reset by .Prepare() method
 	maps.Clear(sdb.balanceInc)
+
 	//sdb.nilAccounts = make(map[common.Address]struct{})
 	//sdb.stateObjects = make(map[common.Address]*stateObject)
 	//sdb.stateObjectsDirty = make(map[common.Address]struct{})
