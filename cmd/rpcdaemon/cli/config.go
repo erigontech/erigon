@@ -97,6 +97,11 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
+
+	rootCmd.PersistentFlags().BoolVar(&cfg.TCPServerEnabled, "tcp", false, "Enable TCP server")
+	rootCmd.PersistentFlags().StringVar(&cfg.TCPListenAddress, "tcp.addr", nodecfg.DefaultTCPHost, "TCP server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.TCPPort, "tcp.port", nodecfg.DefaultTCPPort, "TCP server listening port")
+
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceRequests, utils.HTTPTraceFlag.Name, false, "Trace HTTP requests with INFO level")
 	rootCmd.PersistentFlags().DurationVar(&cfg.HTTPTimeouts.ReadTimeout, "http.timeouts.read", rpccfg.DefaultHTTPTimeouts.ReadTimeout, "Maximum duration for reading the entire request, including the body.")
 	rootCmd.PersistentFlags().DurationVar(&cfg.HTTPTimeouts.WriteTimeout, "http.timeouts.write", rpccfg.DefaultHTTPTimeouts.WriteTimeout, "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read")
@@ -516,6 +521,23 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
+
+	if cfg.TCPServerEnabled {
+		tcpEndpoint := fmt.Sprintf("%s:%d", cfg.TCPListenAddress, cfg.TCPPort)
+		tcpListener, err := net.Listen("tcp", tcpEndpoint)
+		if err != nil {
+			return fmt.Errorf("could not start TCP Listener: %w", err)
+		}
+		go func() {
+			defer tcpListener.Close()
+			err := srv.ServeListener(tcpListener)
+			if err != nil {
+				log.Error("TCP Listener Fatal Error", "err", err)
+			}
+		}()
+		log.Info("TCP Endpoint opened", "url", tcpEndpoint)
+	}
+
 	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
