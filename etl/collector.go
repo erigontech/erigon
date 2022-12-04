@@ -19,6 +19,7 @@ package etl
 import (
 	"bytes"
 	"container/heap"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -288,9 +289,9 @@ func makeCurrentKeyStr(k []byte) string {
 	if k == nil {
 		currentKeyStr = "final"
 	} else if len(k) < 4 {
-		currentKeyStr = fmt.Sprintf("%x", k)
+		currentKeyStr = hex.EncodeToString(k)
 	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
-		currentKeyStr = fmt.Sprintf("%x", k)
+		currentKeyStr = hex.EncodeToString(k)
 	} else {
 		currentKeyStr = fmt.Sprintf("%x...", k[:4])
 	}
