@@ -280,7 +280,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALLT, caller, addr, input, gas, new(uint256.Int), false)
+	return evm.call(STATICCALLT, caller, addr, input, gas, nil, false)
 }
 
 type codeAndHash struct {
