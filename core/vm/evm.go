@@ -221,6 +221,8 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis)
 		} else if callType == DELEGATECALLT {
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis).AsDelegate()
+		} else if callType == STATICCALLT {
+			contract = NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.config.SkipAnalysis)
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
