@@ -25,6 +25,10 @@ func Uint32ToBytes4(n uint32) (ret [4]byte) {
 	return
 }
 
+func Bytes4ToUint32(bytes4 [4]byte) uint32 {
+	return binary.BigEndian.Uint32(bytes4[:])
+}
+
 func BytesToBytes4(b []byte) (ret [4]byte) {
 	copy(ret[:], b)
 	return

@@ -4,8 +4,10 @@ import (
 	"context"
 
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
@@ -58,6 +60,18 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 		Data:  respData,
 		Error: foundErrReq,
 	}, err
+}
+
+func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
+	// Send the request and get the data if we get an answer.
+	s.sentinel.SetStatus(&cltypes.Status{
+		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
+		FinalizedRoot:  gointerfaces.ConvertH256ToHash(req.FinalizedRoot),
+		HeadRoot:       gointerfaces.ConvertH256ToHash(req.HeadRoot),
+		FinalizedEpoch: req.FinalizedEpoch,
+		HeadSlot:       req.HeadSlot,
+	})
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
