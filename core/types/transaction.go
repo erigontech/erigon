@@ -319,7 +319,7 @@ func (s *TxByPriceAndTime) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
-	old[n-1] = nil
+	old[n-1] = nil // avoid memory leak
 	*s = old[0 : n-1]
 	return x
 }
@@ -442,6 +442,7 @@ func (t *TransactionsFixedOrder) Peek() Transaction {
 // Shift replaces the current best head with the next one from the same account.
 func (t *TransactionsFixedOrder) Shift() {
 	t.Transactions = t.Transactions[1:]
+	t.Transactions[0] = nil // avoid memory leak
 }
 
 // Pop removes the best transaction, *not* replacing it with the next one from
@@ -449,6 +450,7 @@ func (t *TransactionsFixedOrder) Shift() {
 // and hence all subsequent ones should be discarded from the same account.
 func (t *TransactionsFixedOrder) Pop() {
 	t.Transactions = t.Transactions[1:]
+	t.Transactions[0] = nil // avoid memory leak
 }
 
 // Message is a fully derived transaction and implements core.Message
