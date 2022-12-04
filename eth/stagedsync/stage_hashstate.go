@@ -811,7 +811,6 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}, quiet bool) error {
 	prom := NewPromoter(tx, cfg.dirs, quit)
 	if cfg.historyV3 {
-		defer func(t time.Time) { fmt.Printf("stage_hashstate.go:498: %s\n", time.Since(t)) }(time.Now())
 		cfg.agg.SetTx(tx)
 		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, quiet); err != nil {
 			return err

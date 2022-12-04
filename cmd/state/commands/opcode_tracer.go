@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"os/signal"
 	"strconv"
@@ -360,7 +359,7 @@ func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 
 }
 
-func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 func (ot *opcodeTracer) CaptureAccountRead(account common.Address) error {
 	return nil

@@ -852,7 +852,7 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
 	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if interpreter.evm.Config().Debug {
-		interpreter.evm.Config().Tracer.CaptureSelfDestruct(callerAddr, beneficiaryAddr, balance.ToBig())
+		interpreter.evm.Config().Tracer.CaptureSelfDestruct(callerAddr, beneficiaryAddr, balance)
 	}
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	interpreter.evm.IntraBlockState().Suicide(callerAddr)
