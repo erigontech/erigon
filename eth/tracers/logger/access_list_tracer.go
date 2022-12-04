@@ -17,7 +17,6 @@
 package logger
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -171,7 +170,7 @@ func (*AccessListTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas,
 }
 func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
-func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 func (*AccessListTracer) CaptureAccountRead(account common.Address) error {
 	return nil
