@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -162,7 +163,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	sha.Write(rawRlpData) //nolint:errcheck
 	sha.Read(h[:])        //nolint:errcheck
-	crypto.ReturnToPoolKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
 
@@ -170,7 +171,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck
-	crypto.ReturnToPoolKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
 
@@ -185,6 +186,6 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	}
 	//nolint:errcheck
 	sha.Read(h[:])
-	crypto.ReturnToPoolKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
