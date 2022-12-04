@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -149,8 +149,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	results := []map[string]interface{}{}
 
-	bundleHash := crypto.NewLegacyKeccak256()
-	defer crypto.ReturnToPoolKeccak256(bundleHash)
+	bundleHash := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
 
 	for _, txn := range txs {
 		msg, err := txn.AsMessage(*signer, nil, rules)

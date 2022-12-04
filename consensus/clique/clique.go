@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -524,8 +525,8 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header) (hash common.Hash) {
-	hasher := crypto.NewLegacyKeccak256()
-	defer crypto.ReturnToPoolKeccak256(hasher)
+	hasher := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
 
 	encodeSigHeader(hasher, header)
 	hasher.Sum(hash[:0])
