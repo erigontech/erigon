@@ -596,7 +596,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
-	engine.Initialize(cc, chain, epochReader, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+	engine.Initialize(cc, chain, epochReader, header, ibs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */)
 	})
 	noop := state.NewNoopWriter()

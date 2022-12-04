@@ -149,7 +149,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Uncles, syscall)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)

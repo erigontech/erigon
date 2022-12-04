@@ -109,8 +109,7 @@ type EngineWriter interface {
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header,
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header, state *state.IntraBlockState, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.

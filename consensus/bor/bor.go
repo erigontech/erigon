@@ -839,8 +839,7 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 	return nil
 }
 
-func (c *Bor) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (c *Bor) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
