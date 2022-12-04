@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 	"time"
 
@@ -485,6 +484,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
+			sb.Grow(len(ot.idx))
 			for _, idx := range ot.idx {
 				sb.WriteString(idx)
 			}
@@ -530,13 +530,13 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
-func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	trace := &ParityTrace{}
 	trace.Type = SUICIDE
 	action := &SuicideTraceAction{}
 	action.Address = from
 	action.RefundAddress = to
-	action.Balance.ToInt().Set(value)
+	action.Balance.ToInt().Set(value.ToBig())
 	trace.Action = action
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	traceIdx := topTrace.Subtraces

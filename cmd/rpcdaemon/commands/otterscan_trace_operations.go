@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -56,6 +55,6 @@ func (t *OperationsTracer) CaptureStart(env *vm.EVM, depth int, from common.Addr
 	}
 }
 
-func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
-	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value)})
+func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
+	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
 }
