@@ -54,7 +54,9 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		}
 	}
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	sent.SetStatus(initialStatus)
+	if initialStatus != nil {
+		sent.SetStatus(initialStatus)
+	}
 	server := NewSentinelServer(ctx, sent)
 	if creds == nil {
 		creds = insecure.NewCredentials()
