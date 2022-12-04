@@ -28,7 +28,7 @@ var hashersPool = sync.Pool{
 func NewHasher() *Hasher {
 	h := hashersPool.Get().(*Hasher)
 	h.Sha.Reset()
-	return nil
+	return h
 }
 func ReturnHasherToPool(h *Hasher) { hashersPool.Put(h) }
 
