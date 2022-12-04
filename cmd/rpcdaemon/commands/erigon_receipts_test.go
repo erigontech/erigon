@@ -24,7 +24,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
 	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
@@ -59,7 +59,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
 	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
