@@ -188,9 +188,9 @@ func TraceTx(
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := fmt.Sprintf("%x", result.Return())
+		returnVal := hex.EncodeToString(result.Return())
 		if len(result.Revert()) > 0 {
-			returnVal = fmt.Sprintf("%x", result.Revert())
+			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
