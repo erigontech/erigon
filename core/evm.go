@@ -30,7 +30,7 @@ import (
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader, author *common.Address) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {

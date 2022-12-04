@@ -78,7 +78,8 @@ func TestCallMany(t *testing.T) {
 	var secondNonce hexutil.Uint64 = 2
 
 	db := contractBackend.DB()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	engine := contractBackend.Engine()
+	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout, engine), db, nil, nil, nil, 5000000)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

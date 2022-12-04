@@ -304,6 +304,7 @@ func (p *Parlia) Type() params.ConsensusType {
 // Author retrieves the Ethereum address of the account that minted the given
 // block, which may be different from the header's coinbase if a consensus
 // engine is based on signatures.
+// This is thread-safe (only access the header.Coinbase)
 func (p *Parlia) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }

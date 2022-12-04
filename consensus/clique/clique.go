@@ -246,6 +246,8 @@ func (c *Clique) Type() params.ConsensusType {
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
+// This is thread-safe (only access the header, as well as signatures, which
+// are lru.ARCCache, which is thread-safe)
 func (c *Clique) Author(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures)
 }
