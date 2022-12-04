@@ -642,26 +642,6 @@ func Deserialise2(a *Account, enc []byte) error {
 	return nil
 }
 
-func Serialise2Len(a *Account) int {
-	var l int
-	l++
-	if a.Nonce > 0 {
-		l += (bits.Len64(a.Nonce) + 7) / 8
-	}
-	l++
-	if !a.Balance.IsZero() {
-		l += a.Balance.ByteLen()
-	}
-	l++
-	if !a.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if a.Incarnation > 0 {
-		l += (bits.Len64(a.Incarnation) + 7) / 8
-	}
-	return l
-}
 func Serialise2(a *Account) []byte {
 	var l int
 	l++
