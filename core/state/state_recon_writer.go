@@ -76,7 +76,7 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 32, NoLocks: true})
+		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 128, NoLocks: true})
 		rs.changes[table] = t
 		rs.hints[table] = &btree2.PathHint{}
 	}
