@@ -592,7 +592,7 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.ctx["to"] = to
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
-	jst.ctx["gasPrice"] = env.TxContext().GasPrice
+	jst.ctx["gasPrice"] = env.TxContext().GasPrice.ToBig()
 	jst.ctx["value"] = value
 
 	// Initialize the context

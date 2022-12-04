@@ -77,7 +77,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:   msg.From(),
-		GasPrice: msg.GasPrice().ToBig(),
+		GasPrice: msg.GasPrice(),
 	}
 }
 

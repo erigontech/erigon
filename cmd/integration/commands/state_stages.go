@@ -543,7 +543,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 		if err = sync.Run(db, tx, initialCycle, false /* quiet */); err != nil {
 			return err
 		}
-		fmt.Printf("loop time: %s\n", time.Since(t))
+		log.Info("[Integration] ", "loop time", time.Since(t))
 		tx.Rollback()
 		tx, err = db.BeginRw(ctx)
 		if err != nil {
