@@ -105,6 +105,7 @@ func (rh *ReconHeap) Pop() interface{} {
 	old := *rh
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*rh = old[0 : n-1]
 	return x
 }

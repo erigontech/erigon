@@ -442,6 +442,7 @@ func (ch *CursorHeap) Pop() interface{} {
 	old := *ch
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*ch = old[0 : n-1]
 	return x
 }
@@ -1012,7 +1013,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 	return nil
 }
 
-//nolint
+// nolint
 func (d *Domain) warmup(txFrom, limit uint64, tx kv.Tx) error {
 	domainKeysCursor, err := tx.CursorDupSort(d.keysTable)
 	if err != nil {

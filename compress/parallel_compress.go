@@ -232,6 +232,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	old := *cq
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*cq = old[0 : n-1]
 	return x
 }

@@ -277,6 +277,7 @@ func (db *DictionaryBuilder) Pop() interface{} {
 	old := db.items
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	db.items = old[0 : n-1]
 	return x
 }
@@ -436,6 +437,7 @@ func (ph *PatternHeap) Pop() interface{} {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*ph = old[0 : n-1]
 	return x
 }
@@ -542,6 +544,7 @@ func (ph *PositionHeap) Pop() interface{} {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*ph = old[0 : n-1]
 	return x
 }

@@ -65,6 +65,7 @@ func (h *Heap) Pop() interface{} {
 	old := h.elems
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = HeapElem{}
 	h.elems = old[0 : n-1]
 	return x
 }
