@@ -92,6 +92,7 @@
               "mode": "off"
             }
           },
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -108,32 +109,7 @@
           },
           "unit": "short"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "execution: mainnet2-2:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 7,
@@ -818,7 +794,32 @@
           },
           "unit": "decbytes"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "db_mi_last_pgno: bsc-sn3-2:6061"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 5,
@@ -852,6 +853,19 @@
           "interval": "",
           "legendFormat": "size: {{instance}}",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "db_mi_last_pgno{instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "db_mi_last_pgno: {{instance}}",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "DB Size",
@@ -902,8 +916,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1042,8 +1055,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1152,8 +1164,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1432,8 +1443,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7097,10 +7107,10 @@
         "current": {
           "selected": true,
           "text": [
-            "mainnet2-2:6061"
+            "All"
           ],
           "value": [
-            "mainnet2-2:6061"
+            "$__all"
           ]
         },
         "datasource": {
@@ -7132,7 +7142,7 @@
         "auto_count": 30,
         "auto_min": "10s",
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "1m",
           "value": "1m"
         },
@@ -7235,6 +7245,6 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 85,
+  "version": 89,
   "weekStart": ""
 }
