@@ -1,6 +1,7 @@
 package exec3
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -192,61 +193,57 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
+var addr1 common.Address = common.HexToAddress("0x4E21fc375a0567A3Ce4F76a05add6CDbd6C61014")
+
+func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) error {
 	it := sw.as.IterateAccountsTxs(sw.txNum)
 	var txKey [8]byte
 	for it.HasNext() {
 		key, txNum, del := it.Next()
-		if del {
-			if err := accountCollectorX.Collect(key, nil); err != nil {
-				panic(err)
-			}
-		} else {
-			binary.BigEndian.PutUint64(txKey[:], txNum)
-			if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
-				panic(err)
-			}
-			sw.bitmap.Add(txNum)
+		if bytes.Equal(key, addr1[:]) {
+			fmt.Printf("BitmapAccounts %x, %d, %t\n", key, txNum, del)
 		}
+		//if !del {
+		binary.BigEndian.PutUint64(txKey[:], txNum)
+		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
+			return err
+		}
+		sw.bitmap.Add(txNum)
+		//}
 	}
+	return nil
 }
 
-func (sw *ScanWorker) BitmapStorage(storageCollectorX *etl.Collector) {
+func (sw *ScanWorker) BitmapStorage(storageCollectorX *etl.Collector) error {
 	it := sw.as.IterateStorageTxs(sw.txNum)
 	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, del := it.Next()
-		if del {
-			if err := storageCollectorX.Collect(key, nil); err != nil {
-				panic(err)
-			}
-		} else {
-			binary.BigEndian.PutUint64(txKey[:], txNum)
-			if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
-				panic(err)
-			}
-			sw.bitmap.Add(txNum)
+		key, txNum, _ := it.Next()
+		//if !del {
+		binary.BigEndian.PutUint64(txKey[:], txNum)
+		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
+			return err
 		}
+		sw.bitmap.Add(txNum)
+		//}
 	}
+	return nil
 }
 
-func (sw *ScanWorker) BitmapCode(codeCollectorX *etl.Collector) {
+func (sw *ScanWorker) BitmapCode(codeCollectorX *etl.Collector) error {
 	it := sw.as.IterateCodeTxs(sw.txNum)
 	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, del := it.Next()
-		if del {
-			if err := codeCollectorX.Collect(key, nil); err != nil {
-				panic(err)
-			}
-		} else {
-			binary.BigEndian.PutUint64(txKey[:], txNum)
-			if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
-				panic(err)
-			}
-			sw.bitmap.Add(txNum)
+		key, txNum, _ := it.Next()
+		//if !del {
+		binary.BigEndian.PutUint64(txKey[:], txNum)
+		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
+			return err
 		}
+		sw.bitmap.Add(txNum)
+		//}
 	}
+	return nil
 }
 
 func bytesToUint64(buf []byte) (x uint64) {
@@ -308,6 +305,10 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 	rw.stateWriter.SetTx(tx)
 }
 
+func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
+	rw.stateReader.SetChainTx(chainTx)
+}
+
 func (rw *ReconWorker) Run() {
 	defer rw.wg.Done()
 	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
@@ -330,6 +331,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.stateReader.SetTrace(txTask.TxNum == 100015293)
 	rules := txTask.Rules
 	ibs := state.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -349,7 +351,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
@@ -394,7 +396,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {

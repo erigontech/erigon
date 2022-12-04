@@ -754,6 +754,9 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			}
 		}
 		if !signedRecently {
+			if header.Number.Uint64() == 6034350 {
+				fmt.Printf("Slash %d for block %d\n", spoiledVal, header.Number.Uint64())
+			}
 			//log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
 			var tx types.Transaction
 			var receipt *types.Receipt

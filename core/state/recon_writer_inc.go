@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -35,16 +36,27 @@ func (w *StateReconWriterInc) SetTx(tx kv.Tx) {
 	w.tx = tx
 }
 
+var addr1 common.Address = common.HexToAddress("0x4E21fc375a0567A3Ce4F76a05add6CDbd6C61014")
+
 func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
+	if address == addr1 {
+		fmt.Printf("account [%x] => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
+	}
 	txKey, err := w.tx.GetOne(kv.XAccount, addr)
 	if err != nil {
 		return err
 	}
 	if txKey == nil {
+		if address == addr1 {
+			fmt.Printf("account [%x] txKey nil => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
+		}
 		return nil
 	}
 	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
+		if address == addr1 {
+			fmt.Printf("account [%x] txKey => (balance: %d, nonce: %d), txNum = %d, stateTxNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum, stateTxNum)
+		}
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -53,6 +65,9 @@ func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original
 	}
 	account.EncodeForStorage(value)
 	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
+	if address == addr1 {
+		fmt.Printf("account done [%x] => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
+	}
 	return nil
 }
 
