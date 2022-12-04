@@ -32,6 +32,8 @@ const (
 	DefaultWSPort      = 8546        // Default TCP port for the websocket RPC server
 	DefaultGRPCHost    = "localhost" // Default host interface for the GRPC server
 	DefaultGRPCPort    = 8547        // Default TCP port for the GRPC server
+	DefaultTCPHost     = "localhost" // default host interrface for TCP RPC server
+	DefaultTCPPort     = 8548        // default TCP port for TCP RPC server
 )
 
 // DefaultConfig contains reasonable default settings.
