@@ -279,7 +279,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	}()
 	//var wg sync.WaitGroup
 	//wg.Add(7)
-	errCh := make(chan error, 7)
+	//errCh := make(chan error, 7)
 	//go func() {
 	//	defer wg.Done()
 	var err error
@@ -287,11 +287,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//
@@ -302,11 +304,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -316,11 +320,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.code, err = a.code.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -330,11 +336,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -344,11 +352,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -358,11 +368,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -372,27 +384,29 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
-		errCh <- err
+		return sf, err
+		//		errCh <- err
 	}
 	//}()
 	//go func() {
 	//	wg.Wait()
-	close(errCh)
+	//close(errCh)
 	//}()
-	var lastError error
-	for err := range errCh {
-		if err != nil {
-			lastError = err
-		}
-	}
-	if lastError == nil {
-		closeColl = false
-	}
-	return sf, lastError
+	//var lastError error
+	//for err := range errCh {
+	//	if err != nil {
+	//		lastError = err
+	//	}
+	//}
+	//if lastError == nil {
+	closeColl = false
+	//}
+	return sf, nil
 }
 
 type Agg22StaticFiles struct {
