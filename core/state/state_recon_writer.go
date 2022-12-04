@@ -66,6 +66,7 @@ func NewReconState(workCh chan *exec22.TxTask) *ReconState {
 			triggers: map[uint64][]*exec22.TxTask{},
 		},
 		changes: map[string]*btree2.BTreeG[reconPair]{},
+		hints:   map[string]*btree2.PathHint{},
 	}
 	return rs
 }
