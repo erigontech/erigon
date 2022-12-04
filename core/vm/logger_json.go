@@ -97,7 +97,7 @@ func (l *JSONLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint6
 	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(startGas - endGas), t, errMsg})
 }
 
-func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (l *JSONLogger) CaptureAccountRead(account common.Address) error {

@@ -105,6 +105,7 @@ func (bp *PeersByMinBlock) Pop() interface{} {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = PeerRef{}
 	*bp = old[0 : n-1]
 	return x
 }

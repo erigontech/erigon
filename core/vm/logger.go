@@ -125,7 +125,7 @@ type Tracer interface {
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
 	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error)
-	CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int)
+	CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int)
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
 }
@@ -264,7 +264,7 @@ func (l *StructLogger) CaptureEnd(depth int, output []byte, startGas, endGas uin
 	}
 }
 
-func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (l *StructLogger) CaptureAccountRead(account common.Address) error {
@@ -445,7 +445,7 @@ func (t *mdLogger) CaptureEnd(_ int, output []byte, startGas, endGas uint64, tm 
 		output, startGas-endGas, err)
 }
 
-func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (t *mdLogger) CaptureAccountRead(account common.Address) error {
