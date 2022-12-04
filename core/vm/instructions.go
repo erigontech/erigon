@@ -457,11 +457,7 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 }
 
 func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	v, overflow := uint256.FromBig(interpreter.evm.TxContext().GasPrice)
-	if overflow {
-		return nil, fmt.Errorf("interpreter.evm.GasPrice higher than 2^256-1")
-	}
-	scope.Stack.Push(v)
+	scope.Stack.Push(interpreter.evm.TxContext().GasPrice)
 	return nil, nil
 }
 
@@ -750,7 +746,6 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	//TODO: use uint256.Int instead of converting with toBig()
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
