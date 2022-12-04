@@ -217,13 +217,14 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		// The contract is a scoped environment for this execution context only.
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
 		var contract *Contract
-		if callType == CALLCODET {
+		switch callType {
+		case CALLCODET:
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis)
-		} else if callType == DELEGATECALLT {
+		case DELEGATECALLT:
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis).AsDelegate()
-		} else if callType == STATICCALLT {
+		case STATICCALLT:
 			contract = NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.config.SkipAnalysis)
-		} else {
+		default:
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
