@@ -184,6 +184,8 @@ func (rs *State22) RegisterSender(txTask *exec22.TxTask) bool {
 }
 
 func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
+	rs.txsDone.Add(1)
+
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	count := uint64(0)
@@ -199,7 +201,6 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txsDone.Add(1)
 	return count
 }
 
