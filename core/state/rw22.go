@@ -425,7 +425,7 @@ func (rs *State22) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
-func (rs *State22) ApplyHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
+func (rs *State22) ApplyHistory(txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
