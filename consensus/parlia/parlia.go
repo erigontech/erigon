@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -173,8 +174,8 @@ func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header, chainId *big.Int) (hash common.Hash) {
-	hasher := crypto.NewLegacyKeccak256()
-	defer crypto.ReturnToPoolKeccak256(hasher)
+	hasher := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
 
 	encodeSigHeader(hasher, header, chainId)
 	hasher.Sum(hash[:0])
@@ -303,6 +304,7 @@ func (p *Parlia) Type() params.ConsensusType {
 // Author retrieves the Ethereum address of the account that minted the given
 // block, which may be different from the header's coinbase if a consensus
 // engine is based on signatures.
+// This is thread-safe (only access the header.Coinbase)
 func (p *Parlia) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }

@@ -62,6 +62,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
+	engine := api.engine()
 
 	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
@@ -74,7 +75,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if api.historyV3(tx) {
 		panic("not implemented!")
 	}
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -225,6 +226,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
@@ -233,7 +235,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if block == nil {
 		return nil, nil
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}

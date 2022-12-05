@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -20,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
 )
 
@@ -33,10 +33,12 @@ type State22 struct {
 	triggerLock  sync.RWMutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]*btree.BTreeG[statePair]
+	changes      map[string]*btree2.BTreeG[statePair]
 	sizeEstimate uint64
 	txsDone      *atomic2.Uint64
 	finished     bool
+
+	applyStateHint *btree2.PathHint //only for apply func (it always work in 1-thread), only for kv.PlainState table
 }
 
 type statePair struct {
@@ -49,22 +51,36 @@ func stateItemLess(i, j statePair) bool {
 
 func NewState22() *State22 {
 	rs := &State22{
-		triggers:     map[uint64]*exec22.TxTask{},
-		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree.BTreeG[statePair]{},
-		txsDone:      atomic2.NewUint64(0),
+		triggers:       map[uint64]*exec22.TxTask{},
+		senderTxNums:   map[common.Address]uint64{},
+		changes:        map[string]*btree2.BTreeG[statePair]{},
+		txsDone:        atomic2.NewUint64(0),
+		applyStateHint: &btree2.PathHint{},
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
+func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint) {
+	t, ok := rs.changes[table]
+	if !ok {
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 128, NoLocks: true})
+		rs.changes[table] = t
+	}
+	old, ok := t.SetHint(statePair{key: key, val: val}, hint)
+	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
+	if ok {
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
+	}
+}
+
 func (rs *State22) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree.NewG[statePair](64, stateItemLess)
+		t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 128, NoLocks: true})
 		rs.changes[table] = t
 	}
-	old, ok := t.ReplaceOrInsert(statePair{key: key, val: val})
+	old, ok := t.Set(statePair{key: key, val: val})
 	rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
 	if ok {
 		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key)) + uint64(len(old.val))
@@ -73,6 +89,12 @@ func (rs *State22) put(table string, key, val []byte) {
 
 const btreeOverhead = 16
 
+func (rs *State22) GetHint(table string, key []byte, hint *btree2.PathHint) []byte {
+	rs.lock.RLock()
+	v := rs.getHint(table, key, hint)
+	rs.lock.RUnlock()
+	return v
+}
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
 	v := rs.get(table, key)
@@ -80,6 +102,16 @@ func (rs *State22) Get(table string, key []byte) []byte {
 	return v
 }
 
+func (rs *State22) getHint(table string, key []byte, hint *btree2.PathHint) []byte {
+	t, ok := rs.changes[table]
+	if !ok {
+		return nil
+	}
+	if i, ok := t.GetHint(statePair{key: key}, hint); ok {
+		return i.val
+	}
+	return nil
+}
 func (rs *State22) get(table string, key []byte) []byte {
 	t, ok := rs.changes[table]
 	if !ok {
@@ -99,24 +131,26 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
-		t.Ascend(func(item statePair) bool {
-			if len(item.val) == 0 {
-				if err = c.Delete(item.key); err != nil {
-					return false
+		t.Walk(func(items []statePair) bool {
+			for _, item := range items {
+				if len(item.val) == 0 {
+					if err = c.Delete(item.key); err != nil {
+						return false
+					}
+					//fmt.Printf("Flush [%x]=>\n", item.key)
+				} else {
+					if err = c.Put(item.key, item.val); err != nil {
+						return false
+					}
+					//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 				}
-				//fmt.Printf("Flush [%x]=>\n", item.key)
-			} else {
-				if err = c.Put(item.key, item.val); err != nil {
-					return false
-				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 			}
 			return true
 		})
 		if err != nil {
 			return err
 		}
-		t.Clear(true)
+		t.Clear()
 	}
 	rs.sizeEstimate = 0
 	return nil
@@ -150,6 +184,8 @@ func (rs *State22) RegisterSender(txTask *exec22.TxTask) bool {
 }
 
 func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
+	rs.txsDone.Add(1)
+
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	count := uint64(0)
@@ -165,7 +201,6 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 			delete(rs.senderTxNums, *sender)
 		}
 	}
-	rs.txsDone.Add(1)
 	return count
 }
 
@@ -255,7 +290,7 @@ func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			}
 			if psChanges != nil {
 				search.key = addr1
-				psChanges.AscendGreaterOrEqual(search, func(item statePair) bool {
+				psChanges.Ascend(search, func(item statePair) bool {
 					if !bytes.HasPrefix(item.key, addr1) {
 						return false
 					}
@@ -327,7 +362,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	for addr := range txTask.BalanceIncreaseSet {
 		addrBytes := addr.Bytes()
 		increase := txTask.BalanceIncreaseSet[addr]
-		enc0 := rs.get(kv.PlainState, addrBytes)
+		enc0 := rs.getHint(kv.PlainState, addrBytes, rs.applyStateHint)
 		if enc0 == nil {
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
@@ -351,7 +386,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
 		}
-		rs.put(kv.PlainState, addrBytes, enc1)
+		rs.putHint(kv.PlainState, addrBytes, enc1, rs.applyStateHint)
 		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
 			return err
 		}
@@ -359,8 +394,15 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
-			for i, key := range list.Keys {
-				rs.put(table, key, list.Vals[i])
+			if table == kv.PlainState {
+				for i, key := range list.Keys {
+					rs.putHint(table, key, list.Vals[i], rs.applyStateHint)
+				}
+			} else {
+				for i, key := range list.Keys {
+					rs.put(table, key, list.Vals[i])
+				}
+
 			}
 		}
 	}
@@ -528,7 +570,7 @@ func (rs *State22) SizeEstimate() uint64 {
 
 func (rs *State22) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	search := statePair{}
-	var t *btree.BTreeG[statePair]
+	var t *btree2.BTreeG[statePair]
 
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -676,6 +718,8 @@ type StateReader22 struct {
 	rs        *State22
 	composite []byte
 	readLists map[string]*exec22.KvList
+
+	stateHint *btree2.PathHint
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
@@ -687,6 +731,7 @@ func NewStateReader22(rs *State22) *StateReader22 {
 			CodeSizeTable:     {},
 			kv.IncarnationMap: {},
 		},
+		stateHint: &btree2.PathHint{},
 	}
 }
 
@@ -717,7 +762,7 @@ func (r *StateReader22) SetTrace(trace bool) {
 
 func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc := r.rs.Get(kv.PlainState, addr)
+	enc := r.rs.GetHint(kv.PlainState, addr, r.stateHint)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, addr)
@@ -750,7 +795,7 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 	binary.BigEndian.PutUint64(r.composite[20:], incarnation)
 	copy(r.composite[20+8:], key.Bytes())
 
-	enc := r.rs.Get(kv.PlainState, r.composite)
+	enc := r.rs.GetHint(kv.PlainState, r.composite, r.stateHint)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, r.composite)

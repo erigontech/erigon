@@ -138,7 +138,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 			return nil, fmt.Errorf("error converting to address info, err=%s", err)
 		}
 
-		if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
+		if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
 			log.Trace("[Sentinel] couldn't connect to peer", "err", err)
 			continue
 		}

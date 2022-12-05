@@ -424,7 +424,6 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	var key AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -454,7 +453,6 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 	key := &AccountItem{}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -477,7 +475,6 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	var key StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -503,7 +500,6 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 	var key CodeItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -558,7 +554,6 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 	var ai AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -608,7 +603,6 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var ai AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -689,7 +683,6 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 	var ai AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -706,7 +699,6 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 	var ai AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -721,7 +713,6 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 	var si StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -794,7 +785,6 @@ func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, locat
 	var si StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -812,7 +802,6 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 	var si StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -835,7 +824,6 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 	var si StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -857,7 +845,6 @@ func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byt
 	var ci CodeItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -872,7 +859,6 @@ func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 	var ci CodeItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -886,7 +872,6 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 	var ci CodeItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
@@ -905,7 +890,6 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	var ci CodeItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	//nolint:errcheck
 	h.Sha.Write(address)
 	//nolint:errcheck
