@@ -22,9 +22,10 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentinelClient interface {
-	SubscribeGossip(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
+	SubscribeGossip(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
 	SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error)
-	GetPeers(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*PeerCount, error)
+	SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error)
+	GetPeers(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*PeerCount, error)
 }
 
 type sentinelClient struct {
@@ -35,7 +36,7 @@ func NewSentinelClient(cc grpc.ClientConnInterface) SentinelClient {
 	return &sentinelClient{cc}
 }
 
-func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
+func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Sentinel_ServiceDesc.Streams[0], "/sentinel.Sentinel/SubscribeGossip", opts...)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,16 @@ func (c *sentinelClient) SendRequest(ctx context.Context, in *RequestData, opts 
 	return out, nil
 }
 
-func (c *sentinelClient) GetPeers(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*PeerCount, error) {
+func (c *sentinelClient) SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, "/sentinel.Sentinel/SetStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentinelClient) GetPeers(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*PeerCount, error) {
 	out := new(PeerCount)
 	err := c.cc.Invoke(ctx, "/sentinel.Sentinel/GetPeers", in, out, opts...)
 	if err != nil {
@@ -89,9 +99,10 @@ func (c *sentinelClient) GetPeers(ctx context.Context, in *EmptyRequest, opts ..
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
 type SentinelServer interface {
-	SubscribeGossip(*EmptyRequest, Sentinel_SubscribeGossipServer) error
+	SubscribeGossip(*EmptyMessage, Sentinel_SubscribeGossipServer) error
 	SendRequest(context.Context, *RequestData) (*ResponseData, error)
-	GetPeers(context.Context, *EmptyRequest) (*PeerCount, error)
+	SetStatus(context.Context, *Status) (*EmptyMessage, error)
+	GetPeers(context.Context, *EmptyMessage) (*PeerCount, error)
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -99,13 +110,16 @@ type SentinelServer interface {
 type UnimplementedSentinelServer struct {
 }
 
-func (UnimplementedSentinelServer) SubscribeGossip(*EmptyRequest, Sentinel_SubscribeGossipServer) error {
+func (UnimplementedSentinelServer) SubscribeGossip(*EmptyMessage, Sentinel_SubscribeGossipServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeGossip not implemented")
 }
 func (UnimplementedSentinelServer) SendRequest(context.Context, *RequestData) (*ResponseData, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendRequest not implemented")
 }
-func (UnimplementedSentinelServer) GetPeers(context.Context, *EmptyRequest) (*PeerCount, error) {
+func (UnimplementedSentinelServer) SetStatus(context.Context, *Status) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
+}
+func (UnimplementedSentinelServer) GetPeers(context.Context, *EmptyMessage) (*PeerCount, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPeers not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
@@ -122,7 +136,7 @@ func RegisterSentinelServer(s grpc.ServiceRegistrar, srv SentinelServer) {
 }
 
 func _Sentinel_SubscribeGossip_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(EmptyRequest)
+	m := new(EmptyMessage)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
@@ -160,8 +174,26 @@ func _Sentinel_SendRequest_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentinel_SetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Status)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).SetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentinel.Sentinel/SetStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).SetStatus(ctx, req.(*Status))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Sentinel_GetPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EmptyRequest)
+	in := new(EmptyMessage)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -173,7 +205,7 @@ func _Sentinel_GetPeers_Handler(srv interface{}, ctx context.Context, dec func(i
 		FullMethod: "/sentinel.Sentinel/GetPeers",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SentinelServer).GetPeers(ctx, req.(*EmptyRequest))
+		return srv.(SentinelServer).GetPeers(ctx, req.(*EmptyMessage))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -188,6 +220,10 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendRequest",
 			Handler:    _Sentinel_SendRequest_Handler,
+		},
+		{
+			MethodName: "SetStatus",
+			Handler:    _Sentinel_SetStatus_Handler,
 		},
 		{
 			MethodName: "GetPeers",
