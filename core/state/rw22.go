@@ -753,6 +753,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 			return nil, err
 		}
 	}
+	// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
 	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	if len(enc) == 0 {
@@ -804,7 +805,7 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 		}
 	}
 	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
-	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc) // no reason to copy, because `rs` is immutable and `tx` is immutable until `rs.Flush`
+	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
