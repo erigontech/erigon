@@ -204,7 +204,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Number.Uint64())
+	shanghai := chain.Config().IsShanghai(header.Number.Uint64()) && chain.Config().ChainID.Cmp(params.ShandongChainConfig.ChainID) != 0 /* Shandong testnet does not configure Withdrawals */
 	if shanghai && header.WithdrawalsHash == nil {
 		return fmt.Errorf("missing withdrawalsHash")
 	}
