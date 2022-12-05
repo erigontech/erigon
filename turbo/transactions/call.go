@@ -107,9 +107,6 @@ func DoCall(
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
 	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
 }
-func GetEvmContext(engine consensus.EngineReader, msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (evmtypes.BlockContext, evmtypes.TxContext) {
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */), core.NewEVMTxContext(msg)
-}
 
 func getHashGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
