@@ -688,7 +688,6 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 		if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
 			panic(fmt.Errorf("State22.Apply: %w", err))
 		}
-		rs.Succeed(txTask)
 		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 	}
 	if txTask != nil {

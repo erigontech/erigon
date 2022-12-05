@@ -210,16 +210,6 @@ func (rs *State22) queuePush(t *exec22.TxTask) {
 	rs.queueLock.Unlock()
 }
 
-func (rs *State22) Succeed(txTask *exec22.TxTask) {
-	if txTask.ReadLists != nil {
-		returnReadList(txTask.ReadLists)
-		txTask.ReadLists = nil
-	}
-	if txTask.WriteLists != nil {
-		returnWriteList(txTask.WriteLists)
-		txTask.WriteLists = nil
-	}
-}
 func (rs *State22) AddWork(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	if txTask.ReadLists != nil {
