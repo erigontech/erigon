@@ -555,7 +555,7 @@ Loop:
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Inc()
 				outputBlockNum.Store(txTask.BlockNum)
-				if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+				if err := rs.ApplyHistory(txTask, agg); err != nil {
 					panic(fmt.Errorf("State22.Apply: %w", err))
 				}
 			}
@@ -685,7 +685,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 		outputTxNum.Inc()
 		onSuccess()
-		if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+		if err := rs.ApplyHistory(txTask, agg); err != nil {
 			panic(fmt.Errorf("State22.Apply: %w", err))
 		}
 		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
