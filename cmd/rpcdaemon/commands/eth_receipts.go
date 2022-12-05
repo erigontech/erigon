@@ -334,6 +334,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var skipAnalysis bool
 	stateReader := state.NewHistoryReader22(ac)
 	stateReader.SetTx(tx)
+	ibs := state.New(stateReader)
+
 	//stateReader.SetTrace(true)
 	iter := txNumbers.Iterator()
 
@@ -350,6 +352,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
 	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
+	var blockCtx evmtypes.BlockContext
 
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
@@ -389,6 +392,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			if err != nil {
 				return nil, err
 			}
+			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -406,11 +410,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
-		ibs := state.New(stateReader)
+
+		ibs.Reset()
 		ibs.Prepare(txHash, blockHash, txIndex)
 
-		blockCtx, txCtx := transactions.GetEvmContext(engine, msg, header, true /* requireCanonical */, tx, api._blockReader)
-		evm.ResetBetweenBlocks(blockCtx, txCtx, ibs, vmConfig, rules)
+		evm.ResetBetweenBlocks(blockCtx, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
