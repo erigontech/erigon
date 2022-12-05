@@ -329,7 +329,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -412,7 +412,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
+			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
 		}
 		return nil, nil, fmt.Errorf("no engine to generate blocks")

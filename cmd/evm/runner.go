@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -216,11 +216,12 @@ func runCmd(ctx *cli.Context) error {
 		initialGas = genesisConfig.GasLimit
 	}
 	value, _ := uint256.FromBig(utils.BigFlagValue(ctx, ValueFlag.Name))
+	gasPrice, _ := uint256.FromBig(utils.BigFlagValue(ctx, PriceFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
-		GasPrice:    utils.BigFlagValue(ctx, PriceFlag.Name),
+		GasPrice:    gasPrice,
 		Value:       value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),

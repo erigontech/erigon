@@ -3,6 +3,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/bits"
 	"time"
@@ -1504,9 +1505,9 @@ func makeCurrentKeyStr(k []byte) string {
 	if k == nil {
 		currentKeyStr = "final"
 	} else if len(k) < 4 {
-		currentKeyStr = fmt.Sprintf("%x", k)
+		currentKeyStr = hex.EncodeToString(k)
 	} else {
-		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -238,6 +239,10 @@ type ReconWorker struct {
 	chain       ChainReader
 	isPoSA      bool
 	posa        consensus.PoSA
+
+	starkNetEvm *vm.CVMAdapter
+	evm         *vm.EVM
+	ibs         *state2.IntraBlockState
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
@@ -258,9 +263,12 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
 		logger:      logger,
 		genesis:     genesis,
 		engine:      engine,
+		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
 	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
+	rw.ibs = state2.New(rw.stateReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
@@ -285,8 +293,9 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.ibs.Reset()
+	ibs := rw.ibs
 	rules := txTask.Rules
-	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
@@ -309,7 +318,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
 				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 			}
 		}
@@ -338,9 +347,11 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
-			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+			vmenv = rw.starkNetEvm
 		} else {
-			vmenv = vm.NewEVM(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.chainConfig, vmConfig)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			vmenv = rw.evm
 		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)

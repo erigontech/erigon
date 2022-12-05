@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -27,7 +28,9 @@ func main() {
 			defer borDb.Close()
 		}
 
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg)
+		// TODO: Replace with correct consensus Engine
+		engine := ethash.NewFaker()
+		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil
