@@ -484,6 +484,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
+			sb.Grow(len(ot.idx))
 			for _, idx := range ot.idx {
 				sb.WriteString(idx)
 			}
@@ -771,7 +772,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		}
 	}
 	return result, nil
-
 }
 
 func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string) ([]*TraceCallResult, error) {
@@ -857,6 +857,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if blockNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
@@ -935,7 +936,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
+	blockCtx, txCtx := transactions.GetEvmContext(engine, msg, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -1066,6 +1067,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if parentNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
@@ -1150,7 +1152,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
+		blockCtx, txCtx := transactions.GetEvmContext(engine, msg, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true

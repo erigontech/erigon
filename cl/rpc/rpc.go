@@ -7,8 +7,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
@@ -18,7 +18,7 @@ func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client sentinel.Sent
 	responsePacket := &cltypes.LightClientFinalityUpdate{}
 
 	message, err := client.SendRequest(ctx, &sentinel.RequestData{
-		Topic: handlers.LightClientFinalityUpdateV1,
+		Topic: communication.LightClientFinalityUpdateV1,
 	})
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client sentinel.S
 	responsePacket := &cltypes.LightClientOptimisticUpdate{}
 
 	message, err := client.SendRequest(ctx, &sentinel.RequestData{
-		Topic: handlers.LightClientOptimisticUpdateV1,
+		Topic: communication.LightClientOptimisticUpdateV1,
 	})
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot,
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.LightClientBootstrapV1,
+		Topic: communication.LightClientBootstrapV1,
 	})
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client sent
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.LightClientUpdatesByRangeV1,
+		Topic: communication.LightClientUpdatesByRangeV1,
 	})
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client
 
 	data := common.CopyBytes(buffer.Bytes())
 	return sendBlocksRequest(ctx, blocksRequestOpts{
-		topic:   handlers.BeaconBlocksByRangeProtocolV2,
+		topic:   communication.BeaconBlocksByRangeProtocolV2,
 		count:   int(count),
 		client:  client,
 		reqData: data,
@@ -168,7 +168,7 @@ func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client sen
 	}
 	data := common.CopyBytes(buffer.Bytes())
 	return sendBlocksRequest(ctx, blocksRequestOpts{
-		topic:   handlers.BeaconBlocksByRootProtocolV2,
+		topic:   communication.BeaconBlocksByRootProtocolV2,
 		count:   len(roots),
 		client:  client,
 		reqData: data,
@@ -186,7 +186,7 @@ func SendStatusReq(ctx context.Context, ourStatus *cltypes.Status, client sentin
 
 	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.StatusProtocolV1,
+		Topic: communication.StatusProtocolV1,
 	})
 	if err != nil {
 		return nil, err

@@ -580,6 +580,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	if err != nil {
 		return err
 	}
+	engine := api.engine()
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
@@ -775,7 +776,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 			stream.WriteObjectEnd()
 			continue
 		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
+		blockCtx, txCtx := transactions.GetEvmContext(engine, msg, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
 		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 		cachedReader := state.NewCachedReader(stateReader, stateCache)

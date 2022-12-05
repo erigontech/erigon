@@ -772,19 +772,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	t := time.Now()
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	log.Info("Scan accounts history", "took", time.Since(t))
 
@@ -835,19 +839,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	t = time.Now()
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	log.Info("Scan storage history", "took", time.Since(t))
 
@@ -879,19 +887,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollectorX.Close()
@@ -1172,19 +1184,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
@@ -1192,19 +1208,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillStorage(plainStateCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
@@ -1212,19 +1232,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillCode(codeCollectors[i], plainContractCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	db.Close()
 	// Load all collections into the main collector

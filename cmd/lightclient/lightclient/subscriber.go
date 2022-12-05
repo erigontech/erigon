@@ -46,7 +46,7 @@ func (c *ChainTipSubscriber) StartLoop() {
 	}
 	log.Info("[LightClient Gossip] Started Gossip")
 	c.started = true
-	stream, err := c.sentinel.SubscribeGossip(c.ctx, &sentinel.EmptyRequest{})
+	stream, err := c.sentinel.SubscribeGossip(c.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
 		log.Warn("could not start lightclient", "reason", err)
 		return

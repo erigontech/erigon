@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"runtime"
 	"time"
@@ -464,7 +465,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", fmt.Sprintf("%x", from))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", hex.EncodeToString(from))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -496,7 +497,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", fmt.Sprintf("%x", to))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", hex.EncodeToString(to))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:

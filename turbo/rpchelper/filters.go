@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -571,7 +572,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 		txs[i], decodeErr = types.DecodeTransaction(s)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", fmt.Sprintf("%x", rlpTx))
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", hex.EncodeToString(rlpTx))
 			break
 		}
 	}

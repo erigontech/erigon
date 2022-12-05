@@ -43,7 +43,7 @@ type Config struct {
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
-	GasPrice    *big.Int
+	GasPrice    *uint256.Int
 	Value       *uint256.Int
 	Debug       bool
 	EVMConfig   vm.Config
@@ -91,7 +91,7 @@ func setDefaults(cfg *Config) {
 		cfg.GasLimit = math.MaxUint64
 	}
 	if cfg.GasPrice == nil {
-		cfg.GasPrice = new(big.Int)
+		cfg.GasPrice = new(uint256.Int)
 	}
 	if cfg.Value == nil {
 		cfg.Value = new(uint256.Int)

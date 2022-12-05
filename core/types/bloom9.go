@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 )
 
 type bytesBacked interface {
@@ -139,7 +140,7 @@ func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byt
 	sha := crypto.NewKeccakState()
 	sha.Write(data)   //nolint:errcheck
 	sha.Read(hashbuf) //nolint:errcheck
-	crypto.ReturnToPoolKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
 	v2 := byte(1 << (hashbuf[3] & 0x7))
