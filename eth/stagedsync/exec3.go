@@ -678,7 +678,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			repeatCount.Inc()
 			// immediately retry once
 			applyWorker.RunTxTask(txTask)
-			if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
+			if txTask.Error != nil {
 				log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
 				rs.AddWork(txTask)
 				repeatCount.Inc()
