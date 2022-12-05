@@ -11,7 +11,7 @@
    limitations under the License.
 */
 
-package handlers
+package communication
 
 const MaximumRequestClientUpdates = 128
 
