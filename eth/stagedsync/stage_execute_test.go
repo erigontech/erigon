@@ -146,7 +146,7 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 			if err := rs.ApplyState(tx, txTask, agg); err != nil {
 				panic(err)
 			}
-			if err := rs.ApplyHistory(tx, txTask, agg); err != nil {
+			if err := rs.ApplyHistory(txTask, agg); err != nil {
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
