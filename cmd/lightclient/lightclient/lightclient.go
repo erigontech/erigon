@@ -18,11 +18,13 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -83,6 +85,8 @@ func (l *LightClient) Start() {
 	}
 	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
+
+	updateStatusSentinel := time.NewTicker(2 * time.Minute)
 	go l.chainTip.StartLoop()
 	for {
 		start := time.Now()
@@ -196,12 +200,17 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyMessage{})
 			if err != nil {
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
 			log.Info("[LightClient] P2P", "peers", peers.Amount)
+		case <-updateStatusSentinel.C:
+			if err := l.updateStatus(); err != nil {
+				log.Error("Could not update sentinel status", "err", err)
+				return
+			}
 		case <-l.ctx.Done():
 			return
 		}
@@ -244,4 +253,27 @@ func (l *LightClient) importBlockIfPossible() {
 	} else {
 		l.highestSeen = eth1Number
 	}
+}
+
+func (l *LightClient) updateStatus() error {
+	forkDigest, err := fork.ComputeForkDigest(l.beaconConfig, l.genesisConfig)
+	if err != nil {
+		return err
+	}
+	finalizedRoot, err := l.store.finalizedHeader.HashTreeRoot()
+	if err != nil {
+		return err
+	}
+	headRoot, err := l.store.optimisticHeader.HashTreeRoot()
+	if err != nil {
+		return err
+	}
+	_, err = l.sentinel.SetStatus(l.ctx, &sentinel.Status{
+		ForkDigest:     utils.Bytes4ToUint32(forkDigest),
+		FinalizedRoot:  gointerfaces.ConvertHashToH256(finalizedRoot),
+		FinalizedEpoch: l.store.finalizedHeader.Slot / 32,
+		HeadRoot:       gointerfaces.ConvertHashToH256(headRoot),
+		HeadSlot:       l.store.optimisticHeader.Slot,
+	})
+	return err
 }

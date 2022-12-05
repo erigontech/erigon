@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -69,7 +68,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		}
 		return h
 	}
-	engine := ethash.NewFaker()
+	engine := api.engine()
 
 	blockReceipts := rawdb.ReadReceipts(dbtx, block, senders)
 	header := block.Header()

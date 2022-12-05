@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -1594,7 +1596,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			return false, err
 		}
 		if dataRLP == nil {
-			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
+			log.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
 
@@ -1838,7 +1840,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	p.Total.Store(uint64(d.Count()))
 
 	hasher := crypto.NewKeccakState()
-	defer crypto.ReturnToPoolKeccak256(hasher)
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		p.Processed.Inc()

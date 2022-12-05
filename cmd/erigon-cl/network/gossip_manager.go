@@ -35,7 +35,7 @@ func (g *GossipManager) AddReceiver(t sentinel.GossipType, receiver GossipReceiv
 }
 
 func (g *GossipManager) Loop() {
-	subscription, err := g.sentinel.SubscribeGossip(g.ctx, &sentinel.EmptyRequest{})
+	subscription, err := g.sentinel.SubscribeGossip(g.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
 		return
 	}

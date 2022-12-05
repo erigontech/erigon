@@ -47,6 +47,8 @@ type Worker struct {
 
 	starkNetEvm *vm.CVMAdapter
 	evm         *vm.EVM
+
+	ibs *state.IntraBlockState
 }
 
 func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
@@ -71,13 +73,9 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
-	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
+
+	w.ibs = state.New(w.stateReader)
+
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
 
 	return w
@@ -122,7 +120,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
-	ibs := state.New(rw.stateReader)
+	rw.ibs.Reset()
+	ibs := rw.ibs
+
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error

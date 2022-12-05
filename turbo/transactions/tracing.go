@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -35,14 +34,13 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.Aggregator22, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.Aggregator22, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	header := block.HeaderNoCopy()
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
 	if historyV3 {
-		//engine := ethash.NewFaker()
 		ibs := state.New(reader)
 		if txIndex == 0 && len(block.Transactions()) == 0 {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
@@ -53,12 +51,11 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		txn := block.Transactions()[txIndex]
 		signer := types.MakeSigner(cfg, block.NumberU64())
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64()))
-		blockCtx, txCtx := GetEvmContext(msg, header, true /* requireCanonical */, dbtx, headerReader)
+		blockCtx, txCtx := GetEvmContext(engine, msg, header, true /* requireCanonical */, dbtx, headerReader)
 		return msg, blockCtx, txCtx, ibs, reader, nil
 
 	}
 
-	engine := ethash.NewFaker()
 	getHeader := func(hash common.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
@@ -191,9 +188,9 @@ func TraceTx(
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := fmt.Sprintf("%x", result.Return())
+		returnVal := hex.EncodeToString(result.Return())
 		if len(result.Revert()) > 0 {
-			returnVal = fmt.Sprintf("%x", result.Revert())
+			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
@@ -381,7 +378,7 @@ func (l *JsonStreamLogger) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, ga
 func (l *JsonStreamLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (l *JsonStreamLogger) CaptureAccountRead(account common.Address) error {
