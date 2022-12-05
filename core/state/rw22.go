@@ -766,7 +766,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 		}
 	}
 	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -781,25 +781,17 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	if cap(r.composite) < 20+8+32 {
-		r.composite = make([]byte, 20+8+32)
-	} else if len(r.composite) != 20+8+32 {
-		r.composite = r.composite[:20+8+32]
-	}
-	copy(r.composite, address.Bytes())
-	binary.BigEndian.PutUint64(r.composite[20:], incarnation)
-	copy(r.composite[20+8:], key.Bytes())
-
-	enc := r.rs.GetHint(kv.PlainState, r.composite, r.stateHint)
+	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	enc := r.rs.GetHint(kv.PlainState, composite, r.stateHint)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.PlainState, r.composite)
+		enc, err = r.tx.GetOne(kv.PlainState, composite)
 		if err != nil {
 			return nil, err
 		}
 	}
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, common2.Copy(r.composite))
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, common2.Copy(enc))
+	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, composite)
+	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	if r.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), r.txNum)
@@ -824,7 +816,7 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 		}
 	}
 	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
-	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, common2.Copy(enc))
+	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc) // no reason to copy, because `rs` is immutable and `tx` is immutable until `rs.Flush`
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -862,7 +854,7 @@ func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, 
 		}
 	}
 	r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
-	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, common2.Copy(enc))
+	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
 	if len(enc) == 0 {
 		return 0, nil
 	}
