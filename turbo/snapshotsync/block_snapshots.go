@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -385,7 +387,7 @@ func (s *RoSnapshots) SegmentsMax() uint64     { return s.segmentsMax.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
-	common2.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	log.Info("[Snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
@@ -939,7 +941,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			return ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			common2.ReadMemStats(&m)
+			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
@@ -1469,7 +1471,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		case <-logEvery.C:
 			var m runtime.MemStats
 			if lvl >= log.LvlInfo {
-				common2.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 			}
 			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
@@ -1550,7 +1552,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		case <-logEvery.C:
 			var m runtime.MemStats
 			if lvl >= log.LvlInfo {
-				common2.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 			}
 			log.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
@@ -1594,7 +1596,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			return false, err
 		}
 		if dataRLP == nil {
-			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
+			log.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
 
@@ -1608,7 +1610,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		case <-logEvery.C:
 			var m runtime.MemStats
 			if lvl >= log.LvlInfo {
-				common2.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 			}
 			log.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
@@ -1838,7 +1840,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	p.Total.Store(uint64(d.Count()))
 
 	hasher := crypto.NewKeccakState()
-	defer crypto.ReturnToPoolKeccak256(hasher)
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		p.Processed.Inc()

@@ -2,10 +2,8 @@ package stagedsync
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"time"
 
@@ -15,7 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -26,15 +25,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningBlock struct {
-	Header   *types.Header
-	Uncles   []*types.Header
-	Txs      types.Transactions
-	Receipts types.Receipts
+	Header      *types.Header
+	Uncles      []*types.Header
+	Txs         types.Transactions
+	Receipts    types.Receipts
+	PreparedTxs types.TransactionsStream
+	Withdrawals []*types.Withdrawal
 
 	LocalTxs  types.TransactionsStream
 	RemoteTxs types.TransactionsStream
@@ -111,6 +110,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
+
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
@@ -129,45 +129,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	blockNum := executionAt + 1
-	txSlots := types2.TxsRlp{}
-	var onTime bool
-	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
-		var err error
-		counter := 0
-		for !onTime && counter < 1000 {
-			if onTime, err = cfg.txPool2.Best(maxTransactions, &txSlots, poolTx, executionAt); err != nil {
-				return err
-			}
-			time.Sleep(1 * time.Millisecond)
-			counter++
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var skipByChainIDMismatch uint64 = 0
-	var txs []types.Transaction //nolint:prealloc
-	for i := range txSlots.Txs {
-		s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
-
-		transaction, err := types.DecodeTransaction(s)
-		if err == io.EOF {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
-			skipByChainIDMismatch++
-			continue
-		}
-		var sender common.Address
-		copy(sender[:], txSlots.Senders.At(i))
-		// Check if tx nonce is too low
-		txs = append(txs, transaction)
-		txs[len(txs)-1].SetSender(sender)
-	}
-	log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
@@ -219,15 +180,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
-	txs, err = filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee, cfg.tmpdir)
-	if err != nil {
-		return err
-	}
-	current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
-	// txpool v2 - doesn't prioritise local txs over remote
-	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
-
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit, "txs", len(txs))
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
@@ -249,6 +202,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 		current.Header = header
 		current.Uncles = nil
+		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
 		return nil
 	}
 
@@ -339,6 +293,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
+	current.Withdrawals = nil
 	return nil
 }
 

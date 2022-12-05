@@ -44,6 +44,8 @@ type TxTask struct {
 	Logs               []*types.Log
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
+
+	UsedGas uint64
 }
 
 type TxTaskQueue []*TxTask
@@ -65,9 +67,12 @@ func (h *TxTaskQueue) Push(a interface{}) {
 }
 
 func (h *TxTaskQueue) Pop() interface{} {
-	c := *h
-	*h = c[:len(c)-1]
-	return c[len(c)-1]
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	old[n-1] = nil
+	*h = old[:n-1]
+	return x
 }
 
 // KvList sort.Interface to sort write list by keys

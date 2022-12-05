@@ -114,7 +114,7 @@ var resetBlocks4 = Migration{
 			return err
 		}
 
-		if err := rawdbreset.ResetSenders(tx); err != nil {
+		if err := rawdbreset.ResetSenders(context.Background(), db, tx); err != nil {
 			return err
 		}
 

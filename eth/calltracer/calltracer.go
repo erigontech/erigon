@@ -2,7 +2,6 @@ package calltracer
 
 import (
 	"encoding/binary"
-	"math/big"
 	"sort"
 	"time"
 
@@ -46,7 +45,7 @@ func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 }
 func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
-func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = false
 }
