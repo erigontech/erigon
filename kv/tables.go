@@ -249,6 +249,9 @@ const (
 
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
 
+	// EIP-4895 - Beacon chain push withdrawals as operations
+	Withdrawals = "Withdrawal" //  withdrawal_index_u64 -> rlp(withdrawal)
+
 	// EthTx - stores only txs of canonical blocks. As a result - id's used in this table are also
 	// canonical - same across all nodex in network - regardless reorgs. Transactions of
 	// non-canonical blocs are not removed, but moved to NonCanonicalTransaction - then during re-org don't
@@ -473,6 +476,7 @@ var ChaindataTables = []string{
 	ContractCode,
 	HeaderNumber,
 	BlockBody,
+	Withdrawals,
 	Receipts,
 	TxLookup,
 	ConfigTable,
