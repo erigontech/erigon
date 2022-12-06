@@ -258,11 +258,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
-			if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled && blocknum <= cfg.snapshots.BlocksAvailable() {
-				log.Warn("TxLookup pruning, empty block body", "height", blocknum)
-				return nil
-			}
-			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+			log.Warn("TxLookup pruning, empty block body", "height", blocknum)
+			return nil
 		}
 
 		for _, txn := range body.Transactions {

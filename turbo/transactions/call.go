@@ -79,7 +79,8 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(engine, msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -103,19 +104,8 @@ func DoCall(
 	return result, nil
 }
 
-func GetEvmContext(engine consensus.EngineReader, msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (evmtypes.BlockContext, evmtypes.TxContext) {
-	var baseFee uint256.Int
-	if header.BaseFee != nil {
-		overflow := baseFee.SetFromBig(header.BaseFee)
-		if overflow {
-			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
-		}
-	}
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */),
-		evmtypes.TxContext{
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice(),
-		}
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
+	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
 }
 
 func getHashGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) common.Hash {
@@ -216,7 +206,9 @@ func NewReusableCaller(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(engine, msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, chainConfig, vm.Config{NoBaseFee: true})
 

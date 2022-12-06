@@ -88,7 +88,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 	}
-	st := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	parent := rawdb.ReadHeader(tx, hash, stateBlockNumber)
 	if parent == nil {
@@ -117,8 +117,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(engine, firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
-	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	txCtx := core.NewEVMTxContext(firstMsg)
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
