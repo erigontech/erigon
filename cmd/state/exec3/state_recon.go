@@ -307,6 +307,7 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 
 func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 	rw.stateReader.SetChainTx(chainTx)
+	rw.stateWriter.SetChainTx(chainTx)
 }
 
 func (rw *ReconWorker) Run() {
@@ -351,7 +352,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
@@ -396,7 +397,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) {
 			txContext := core.NewEVMTxContext(msg)
 			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
 		}
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {

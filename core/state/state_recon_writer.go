@@ -112,6 +112,25 @@ func (rs *ReconState) Delete(table string, key1, key2 []byte, txNum uint64) {
 	}
 }
 
+func (rs *ReconState) RemoveAll(table string, key1 []byte) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	t, ok := rs.changes[table]
+	if !ok {
+		return
+	}
+	t.AscendGreaterOrEqual(reconPair{key1: key1, key2: nil}, func(item reconPair) bool {
+		if !bytes.Equal(item.key1, key1) {
+			return false
+		}
+		if item.key2 == nil {
+			return true
+		}
+		t.Delete(item)
+		return true
+	})
+}
+
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()

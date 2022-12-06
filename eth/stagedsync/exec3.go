@@ -1287,15 +1287,21 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var lastTxKey [8]byte
 	binary.BigEndian.PutUint64(lastTxKey[:], txNum)
 	for i := 0; i < workerCount; i++ {
-		if err = plainStateCollectors[i].Load(nil, "", etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = plainStateCollectors[i].Load(nil, "", func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return plainStateCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollectors[i].Close()
-		if err = codeCollectors[i].Load(nil, "", etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = codeCollectors[i].Load(nil, "", func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return codeCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollectors[i].Close()
-		if err = plainContractCollectors[i].Load(nil, "", etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = plainContractCollectors[i].Load(nil, "", func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return plainContractCollector.Collect(k, v)
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainContractCollectors[i].Close()

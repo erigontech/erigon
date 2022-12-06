@@ -18,6 +18,7 @@ type StateReconWriterInc struct {
 	rs        *ReconState
 	txNum     uint64
 	tx        kv.Tx
+	chainTx   kv.Tx
 	composite []byte
 }
 
@@ -36,7 +37,11 @@ func (w *StateReconWriterInc) SetTx(tx kv.Tx) {
 	w.tx = tx
 }
 
-var addr1 common.Address = common.HexToAddress("0x4E21fc375a0567A3Ce4F76a05add6CDbd6C61014")
+func (w *StateReconWriterInc) SetChainTx(chainTx kv.Tx) {
+	w.chainTx = chainTx
+}
+
+var addr1 common.Address = common.HexToAddress("0x0000000000000000000000000000000000001000")
 
 func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
@@ -84,11 +89,9 @@ func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnat
 		return nil
 	}
 	if len(code) > 0 {
-		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
 		w.rs.Put(kv.CodeR, codeHashBytes, nil, common.CopyBytes(code), w.txNum)
 		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
 	} else {
-		//fmt.Printf("delete ode [%x], txNum: %d\n", address, w.txNum)
 		w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	}
 	return nil
@@ -108,21 +111,23 @@ func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *ac
 	}
 	// Iterate over storage of this contract and delete it too
 	var c kv.Cursor
-	if c, err = w.tx.Cursor(kv.XStorage); err != nil {
+	if c, err = w.chainTx.Cursor(kv.PlainState); err != nil {
 		return err
 	}
 	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.Seek(addr); err == nil && bytes.HasPrefix(k, addr); k, v, err = c.Next() {
-		storageTxNum := binary.BigEndian.Uint64(v)
-		if w.txNum == storageTxNum {
-			//fmt.Printf("delete account storage [%x] [%x]=>{} txNum: %d\n", address, k[20:], w.txNum)
-			w.rs.Delete(kv.PlainStateD, addr, common.CopyBytes(k[20:]), w.txNum)
+	var k []byte
+	for k, _, err = c.Seek(addr); err == nil && bytes.HasPrefix(k, addr); k, _, err = c.Next() {
+		//fmt.Printf("delete account storage [%x] [%x]=>{} txNum: %d\n", address, k[20+8:], w.txNum)
+		if len(k) > 20 {
+			w.rs.Delete(kv.PlainStateD, addr, common.CopyBytes(k[20+8:]), w.txNum)
 		}
 	}
 	if err != nil {
 		return err
 	}
+	// Delete all pending storage for this contract
+	w.rs.RemoveAll(kv.PlainStateR, addr)
+	w.rs.RemoveAll(kv.PlainStateD, addr)
 	// Delete code
 	txKey, err = w.tx.GetOne(kv.XCode, addr)
 	if err != nil {
