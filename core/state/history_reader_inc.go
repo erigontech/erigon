@@ -44,7 +44,6 @@ func (hr *HistoryReaderInc) SetTrace(trace bool) {
 }
 
 func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	hr.trace = address == addr1
 	addr := address.Bytes()
 	txKey, err := hr.tx.GetOne(kv.XAccount, addr)
 	if err != nil {

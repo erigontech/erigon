@@ -662,23 +662,23 @@ func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 }
 
 func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs types.Transactions, systemTxs types.Transactions, err error) {
-	for _, tx := range txs {
+	userTxs = types.Transactions{}
+	systemTxs = types.Transactions{}
+	trace := header.Number.Uint64() == 6034350
+	for i, tx := range txs {
 		isSystemTx, err2 := p.IsSystemTransaction(tx, header)
 		if err2 != nil {
 			err = err2
 			return
+		}
+		if trace {
+			fmt.Printf("block %d, idx %d, tx.To %x, tx.GasPrice %d\n", header.Number.Uint64(), i, *tx.GetTo(), tx.GetPrice())
 		}
 		if isSystemTx {
 			systemTxs = append(systemTxs, tx)
 		} else {
 			userTxs = append(userTxs, tx)
 		}
-	}
-	if userTxs == nil {
-		userTxs = types.Transactions{}
-	}
-	if systemTxs == nil {
-		systemTxs = types.Transactions{}
 	}
 	return
 }
@@ -755,14 +755,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 		if !signedRecently {
 			if header.Number.Uint64() == 6034350 {
-				fmt.Printf("Slash %d for block %d\n", spoiledVal, header.Number.Uint64())
+				fmt.Printf("Slash %x for block %d, systemTxs = %d\n", spoiledVal, header.Number.Uint64(), len(systemTxs))
 			}
 			//log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
 			var tx types.Transaction
 			var receipt *types.Receipt
 			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
-				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal, "error", err)
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
@@ -771,6 +771,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+		log.Error("distributeIncoming", "block hash", header.Hash(), "error", err, "systemTxs", len(systemTxs))
 		return nil, nil, err
 	}
 	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
@@ -944,6 +945,9 @@ func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header)
 	sender, err := tx.Sender(*p.signer)
 	if err != nil {
 		return false, errors.New("UnAuthorized transaction")
+	}
+	if header.Number.Uint64() == 6034350 {
+		fmt.Printf("block %d, sender %x, tx.To %x, tx.GasPrice %d\n", header.Number.Uint64(), sender, *tx.GetTo(), tx.GetPrice())
 	}
 	if sender == header.Coinbase && isToSystemContract(*tx.GetTo()) && tx.GetPrice().IsZero() {
 		return true, nil
@@ -1192,8 +1196,11 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if len(systemTxs) == 0 || systemTxs[0] == nil {
+		if len(systemTxs) == 0 {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
+		}
+		if systemTxs[0] == nil {
+			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get nil")
 		}
 		actualTx := systemTxs[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)
