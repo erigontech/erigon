@@ -753,6 +753,15 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 			return nil, err
 		}
 	}
+	if r.readLists == nil {
+		panic(1)
+	}
+	if r.readLists[kv.PlainState] == nil {
+		panic(1)
+	}
+	if r.readLists[kv.PlainState].Keys == nil {
+		panic(1)
+	}
 	// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
 	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
