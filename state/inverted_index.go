@@ -246,11 +246,9 @@ func (ii *InvertedIndex) openFiles() error {
 		fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 		if !dir.FileExist(datPath) {
-			log.Warn("open files: not exists!", "name", fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 			invalidFileItems = append(invalidFileItems, item)
 		}
 		if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-			log.Warn("open files: compress.NewDecompressor!", "err", err, "name", fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 			log.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
 			return false
 		}
@@ -259,13 +257,10 @@ func (ii *InvertedIndex) openFiles() error {
 			idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					log.Warn("open files: recsplit.OpenIndex!", "err", err, "name", fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
-					log.Info("open files: not exists!", "name", fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+					log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
-			} else {
-				log.Warn("open files: not exists!", "name", fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 			}
 		}
 		return true

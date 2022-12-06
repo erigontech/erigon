@@ -182,7 +182,6 @@ func (h *History) scanStateFiles(files []fs.DirEntry) {
 				continue
 			}
 		}
-		log.Info("scan files", "name", fmt.Sprintf("%s.%d-%d.v", h.filenameBase, startStep, endStep))
 		h.files.ReplaceOrInsert(item)
 	}
 	if len(uselessFiles) > 0 {
@@ -202,12 +201,10 @@ func (h *History) openFiles() error {
 		fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 		datPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 		if !dir.FileExist(datPath) {
-			log.Warn("open files: not exists!", "name", fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 			invalidFileItems = append(invalidFileItems, item)
 			return true
 		}
 		if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-			log.Warn("open files: NewDecompressor!", "err", err, "name", fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 			log.Debug("Hisrory.openFiles: %w, %s", err, datPath)
 			return false
 		}
@@ -215,13 +212,10 @@ func (h *History) openFiles() error {
 			idxPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					log.Warn("open files: recsplit.OpenIndex!", "err", err, "name", fmt.Sprintf("%s.%d-%d.v", h.filenameBase, fromStep, toStep))
 					log.Debug("Hisrory.openFiles: %w, %s", err, idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()
-			} else {
-				log.Warn("open files: not exists!", "err", fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 			}
 		}
 		return true
