@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestHasEOFMagic(t *testing.T) {
