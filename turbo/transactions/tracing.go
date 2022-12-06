@@ -51,7 +51,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		txn := block.Transactions()[txIndex]
 		signer := types.MakeSigner(cfg, block.NumberU64())
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64()))
-		blockCtx, txCtx := GetEvmContext(engine, msg, header, true /* requireCanonical */, dbtx, headerReader)
+		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
+		txCtx := core.NewEVMTxContext(msg)
 		return msg, blockCtx, txCtx, ibs, reader, nil
 
 	}
@@ -188,9 +189,9 @@ func TraceTx(
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := fmt.Sprintf("%x", result.Return())
+		returnVal := hex.EncodeToString(result.Return())
 		if len(result.Revert()) > 0 {
-			returnVal = fmt.Sprintf("%x", result.Revert())
+			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
