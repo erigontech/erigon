@@ -212,14 +212,10 @@ func (rs *State22) queuePush(t *exec22.TxTask) {
 
 func (rs *State22) AddWork(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
-	if txTask.ReadLists != nil {
-		returnReadList(txTask.ReadLists)
-		txTask.ReadLists = nil
-	}
-	if txTask.WriteLists != nil {
-		returnWriteList(txTask.WriteLists)
-		txTask.WriteLists = nil
-	}
+	returnReadList(txTask.ReadLists)
+	txTask.ReadLists = nil
+	returnWriteList(txTask.WriteLists)
+	txTask.WriteLists = nil
 	txTask.ResultsSize = 0
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
@@ -879,7 +875,6 @@ func newWriteList() map[string]*exec22.KvList {
 }
 func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
-		panic(1)
 		return
 	}
 	writeListPool.Put(v)
@@ -905,7 +900,6 @@ func newReadList() map[string]*exec22.KvList {
 }
 func returnReadList(v map[string]*exec22.KvList) {
 	if v == nil {
-		panic(2)
 		return
 	}
 	readListPool.Put(v)
