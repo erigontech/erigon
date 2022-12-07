@@ -463,7 +463,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
-	tx.RawRead = true
 	return &MdbxTx{
 		db:       db,
 		tx:       tx,
@@ -490,7 +489,6 @@ func (db *MdbxKV) beginRw(flags uint) (txn kv.RwTx, err error) {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
-	tx.RawRead = true
 	return &MdbxTx{
 		db: db,
 		tx: tx,
@@ -1047,7 +1045,6 @@ func (tx *MdbxTx) Reset() (err error) {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return fmt.Errorf("%w, lable: %s, trace: %s", err, tx.db.opts.label.String(), stack2.Trace().String())
 	}
-	tx.tx.RawRead = true
 	return nil
 }
 
