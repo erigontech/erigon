@@ -240,8 +240,8 @@ func getNextTransactions(
 	}
 
 	var txs []types.Transaction //nolint:prealloc
-	var reader *bytes.Reader
-	var stream *rlp.Stream
+	reader := bytes.NewReader([]byte{})
+	stream := new(rlp.Stream)
 	for i := range txSlots.Txs {
 		reader.Reset(txSlots.Txs[i])
 		stream.Reset(reader, uint64(len(txSlots.Txs[i])))
