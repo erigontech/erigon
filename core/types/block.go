@@ -1105,7 +1105,7 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 				return err
 			}
 		case *SignedBlobTx:
-			if err := t.MarshalBinary(w); err != nil {
+			if err := t.EncodeRLP(w); err != nil {
 				return err
 			}
 		}

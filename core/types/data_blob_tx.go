@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -624,11 +625,17 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	return int(codec.ContainerLength(&stx.Message, &stx.Signature)), nonceLen, gasLen, accessListLen
 }
 
-// TODO: Review encoding order
-// by trangtran
 func (stx SignedBlobTx) encodePayload(w io.Writer) error {
 	wcodec := codec.NewEncodingWriter(w)
 	return wcodec.Container(&stx.Message, &stx.Signature)
+}
+
+func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
+	var buf bytes.Buffer
+	if err := stx.MarshalBinary(&buf); err != nil {
+		return err
+	}
+	return rlp.Encode(w, buf.Bytes())
 }
 
 func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *uint256.Int) {
