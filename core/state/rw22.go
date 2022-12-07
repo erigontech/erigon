@@ -212,14 +212,10 @@ func (rs *State22) queuePush(t *exec22.TxTask) {
 
 func (rs *State22) AddWork(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
-	if txTask.ReadLists != nil {
-		returnReadList(txTask.ReadLists)
-		txTask.ReadLists = nil
-	}
-	if txTask.WriteLists != nil {
-		returnWriteList(txTask.WriteLists)
-		txTask.WriteLists = nil
-	}
+	returnReadList(txTask.ReadLists)
+	txTask.ReadLists = nil
+	returnWriteList(txTask.WriteLists)
+	txTask.WriteLists = nil
 	txTask.ResultsSize = 0
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
@@ -862,13 +858,18 @@ var writeListPool = sync.Pool{
 }
 
 func newWriteList() map[string]*exec22.KvList {
-	w := writeListPool.Get().(map[string]*exec22.KvList)
-	for _, tbl := range w {
+	v := writeListPool.Get().(map[string]*exec22.KvList)
+	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
-	return w
+	return v
 }
-func returnWriteList(w map[string]*exec22.KvList) { writeListPool.Put(w) }
+func returnWriteList(v map[string]*exec22.KvList) {
+	if v == nil {
+		return
+	}
+	writeListPool.Put(v)
+}
 
 var readListPool = sync.Pool{
 	New: func() any {
@@ -882,10 +883,15 @@ var readListPool = sync.Pool{
 }
 
 func newReadList() map[string]*exec22.KvList {
-	w := readListPool.Get().(map[string]*exec22.KvList)
-	for _, tbl := range w {
+	v := readListPool.Get().(map[string]*exec22.KvList)
+	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
-	return w
+	return v
 }
-func returnReadList(w map[string]*exec22.KvList) { readListPool.Put(w) }
+func returnReadList(v map[string]*exec22.KvList) {
+	if v == nil {
+		return
+	}
+	readListPool.Put(v)
+}
