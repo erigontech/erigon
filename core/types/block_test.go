@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	. "github.com/protolambda/ztyp/view"
 )
 
 // from bcValidBlockTest.json, "SimpleTx"
@@ -274,6 +275,19 @@ func makeBenchBlock() *Block {
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+
+	var signedBlobTx Transaction = &SignedBlobTx{
+		Message: BlobTxMessage{
+			ChainID:    Uint256View(*uint256.NewInt(1)),
+			Nonce:      Uint64View(0),
+			AccessList: AccessListView(accesses),
+		},
+	}
+	var signedBlobTxBuf bytes.Buffer
+	require.Nil(t, signedBlobTx.MarshalBinary(&signedBlobTxBuf))
+
 	body := &RawBody{
 		Uncles: []*Header{
 			{
@@ -305,6 +319,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 			{
 				40, 50, 60,
 			},
+			signedBlobTxBuf.Bytes(),
 		},
 	}
 	expectedJson, err := json.Marshal(body)
@@ -335,7 +350,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(rawBody.Transactions) != 2 {
+	if len(rawBody.Transactions) != 3 {
 		t.Fatalf("expected there to be 1 transaction once decoded")
 	}
 	if rawBody.Transactions[0][0] != 10 {
@@ -344,6 +359,10 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if rawBody.Transactions[1][2] != 60 {
 		t.Fatal("expected 2nd element in transactions to end in 60")
 	}
+	if rawBody.Transactions[2][0] != BlobTxType {
+		t.Fatal("expected 3rd element in transaction is a signed blob tx")
+	}
+
 	if rawBody.Uncles[0].GasLimit != 50 {
 		t.Fatal("expected gas limit of first uncle to be 50")
 	}
