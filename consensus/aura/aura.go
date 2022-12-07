@@ -337,7 +337,7 @@ type AuRa struct {
 	EmptyStepsSet     *EmptyStepSet
 	EpochManager      *EpochManager // Mutex<EpochManager>,
 
-	certifier *common.Address // certifies service transactions
+	certifier     *common.Address // certifies service transactions
 	certifierLock sync.RWMutex
 }
 
