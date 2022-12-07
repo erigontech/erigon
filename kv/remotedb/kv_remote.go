@@ -160,6 +160,9 @@ func (db *RemoteKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 func (db *RemoteKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
 }
+func (db *RemoteKV) BeginRwAsync(ctx context.Context) (kv.RwTx, error) {
+	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
+}
 
 func (db *RemoteKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	tx, err := db.BeginRo(ctx)

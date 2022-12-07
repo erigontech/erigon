@@ -25,24 +25,24 @@ import (
 )
 
 type TemporaryMdbx struct {
-	db        kv.RwDB
-	chaindata string
+	db   kv.RwDB
+	path string
 }
 
 func NewTemporaryMdbx() (kv.RwDB, error) {
-	chaindata, err := os.MkdirTemp("", "mdbx-temp")
+	path, err := os.MkdirTemp("", "mdbx-temp")
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := Open(chaindata, log.Root(), false)
+	db, err := Open(path, log.Root(), false)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
 
 	return &TemporaryMdbx{
-		db:        db,
-		chaindata: chaindata,
+		db:   db,
+		path: path,
 	}, nil
 }
 
@@ -52,6 +52,9 @@ func (t *TemporaryMdbx) Update(ctx context.Context, f func(kv.RwTx) error) error
 
 func (t *TemporaryMdbx) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return t.db.BeginRw(ctx)
+}
+func (t *TemporaryMdbx) BeginRwAsync(ctx context.Context) (kv.RwTx, error) {
+	return t.db.BeginRwAsync(ctx)
 }
 
 func (t *TemporaryMdbx) View(ctx context.Context, f func(kv.Tx) error) error {
@@ -72,5 +75,5 @@ func (t *TemporaryMdbx) PageSize() uint64 {
 
 func (t *TemporaryMdbx) Close() {
 	t.db.Close()
-	os.RemoveAll(t.chaindata)
+	os.RemoveAll(t.path)
 }

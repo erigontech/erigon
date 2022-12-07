@@ -471,7 +471,10 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}, nil
 }
 
-func (db *MdbxKV) BeginRw(_ context.Context) (txn kv.RwTx, err error) {
+func (db *MdbxKV) BeginRw(_ context.Context) (kv.RwTx, error)      { return db.beginRw(0) }
+func (db *MdbxKV) BeginRwAsync(_ context.Context) (kv.RwTx, error) { return db.beginRw(mdbx.TxNoSync) }
+
+func (db *MdbxKV) beginRw(flags uint) (txn kv.RwTx, err error) {
 	if db.closed.Load() {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -482,7 +485,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn kv.RwTx, err error) {
 		}
 	}()
 
-	tx, err := db.env.BeginTxn(nil, 0)
+	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())

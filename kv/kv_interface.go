@@ -180,6 +180,7 @@ type RwDB interface {
 	Update(ctx context.Context, f func(tx RwTx) error) error
 
 	BeginRw(ctx context.Context) (RwTx, error)
+	BeginRwAsync(ctx context.Context) (RwTx, error)
 }
 
 type StatelessReadTx interface {
