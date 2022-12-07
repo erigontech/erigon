@@ -259,23 +259,6 @@ func ExecV3(ctx context.Context,
 					stepsInDB := idxStepsInDB(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 					if rs.SizeEstimate() < commitThreshold {
-						// too much steps in db will slow-down everything: flush and prune
-						// it means better spend time for pruning, before flushing more data to db
-						// also better do it now - instead of before Commit() - because Commit does block execution
-						if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-						} else if stepsInDB > 2 {
-							if err = agg.PruneWithTiemout(ctx, 20*time.Second); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-						}
-
-						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
-						if err := agg.Flush(tx); err != nil {
-							panic(err)
-						}
 						break
 					}
 
