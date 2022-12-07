@@ -177,6 +177,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if dbg.WriteMap() {
 		opts = opts.WriteMap() //nolint
 	}
+	if dbg.NoSync() {
+		opts = opts.Flags(func(u uint) uint { return u | mdbx.SafeNoSync }) //nolint
+	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}

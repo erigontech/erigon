@@ -59,6 +59,22 @@ func WriteMap() bool {
 }
 
 var (
+	noSync     bool
+	noSyncOnce sync.Once
+)
+
+func NoSync() bool {
+	noSyncOnce.Do(func() {
+		v, _ := os.LookupEnv("NO_SYNC")
+		if v == "true" {
+			noSync = true
+			log.Info("[Experiment]", "NO_SYNC", noSync)
+		}
+	})
+	return noSync
+}
+
+var (
 	mergeTr     int
 	mergeTrOnce sync.Once
 )
