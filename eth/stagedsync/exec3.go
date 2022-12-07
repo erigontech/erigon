@@ -384,6 +384,9 @@ func ExecV3(ctx context.Context,
 							}
 						}
 					}
+					if err = agg.Flush(tx); err != nil {
+						panic(err)
+					}
 				}
 			}
 			if err = rs.Flush(tx); err != nil {
