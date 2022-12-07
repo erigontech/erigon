@@ -278,6 +278,7 @@ coverage:
 .PHONY: hive
 hive:
 	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker pull thorax/hive:latest
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
 
 ## help:                              print commands help
