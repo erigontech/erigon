@@ -162,6 +162,8 @@ func TestChainId(t *testing.T) {
 	for _, testCase := range testCases {
 		tc := testCase
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tx := tc.tx
 
 			var err error
@@ -180,5 +182,35 @@ func TestChainId(t *testing.T) {
 				t.Error("expected no error")
 			}
 		})
+	}
+}
+
+func TestSigning_SignedBlobDataTx(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+
+	chainId := uint256.NewInt(18)
+	var signedBlobTx Transaction = &SignedBlobTx{
+		Message: BlobTxMessage{
+			ChainID:    Uint256View(*chainId),
+			Nonce:      Uint64View(0),
+			AccessList: AccessListView(accesses),
+		},
+	}
+
+	signer := LatestSignerForChainID(chainId.ToBig())
+	tx, err := SignTx(signedBlobTx, *signer, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	from, err := tx.Sender(*signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from != addr {
+		t.Errorf("exected from and address to be equal. Got %x want %x", from, addr)
 	}
 }
