@@ -147,7 +147,7 @@ func replayTxNum(ctx context.Context, allSnapshots *snapshotsync.RoSnapshots, bl
 	stateReader.SetTxNum(txNum)
 	stateWriter.SetTxNum(txNum)
 	noop := state.NewNoopWriter()
-	rules := chainConfig.Rules(bn)
+	rules := chainConfig.Rules(bn, header.Time)
 	for {
 		stateReader.ResetError()
 		ibs := state.New(stateReader)
