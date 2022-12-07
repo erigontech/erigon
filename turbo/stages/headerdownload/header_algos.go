@@ -660,7 +660,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 
 		if headerHash != hd.posAnchor.parentHash {
 			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
-				log.Info("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+				log.Debug("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
 				return nil, nil
 			}
 			log.Debug("[Downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
