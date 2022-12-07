@@ -28,7 +28,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
-	github.com/ferranbt/fastssz v0.1.2
+	github.com/ferranbt/fastssz v0.0.0-20210120143747-11b9eff30ea9
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/goccy/go-json v0.9.7
@@ -56,6 +56,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.6
 	github.com/pion/stun v0.3.5
+	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/rs/cors v1.8.2
@@ -153,6 +154,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
+	github.com/prysmaticlabs/gohashtree v0.0.2-alpha // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/supranational/blst v0.3.10 // indirect
