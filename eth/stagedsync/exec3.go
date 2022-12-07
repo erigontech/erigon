@@ -370,13 +370,8 @@ func ExecV3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				case <-pruneEvery.C:
-					if agg.CanPrune(tx) {
-						t := time.Now()
-						for time.Since(t) < 2*time.Second {
-							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-						}
+					if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
+						panic(err)
 					}
 					if err = agg.Flush(tx); err != nil {
 						panic(err)
