@@ -59,6 +59,26 @@ func WriteMap() bool {
 }
 
 var (
+	dirtySace     uint64
+	dirtySaceOnce sync.Once
+)
+
+func DirtySpace() uint64 {
+	dirtySaceOnce.Do(func() {
+		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
+		if v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
+			dirtySace = uint64(i * 1024 * 1024)
+			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", dirtySace)
+		}
+	})
+	return dirtySace
+}
+
+var (
 	noSync     bool
 	noSyncOnce sync.Once
 )

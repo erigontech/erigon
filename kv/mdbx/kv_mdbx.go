@@ -60,6 +60,7 @@ type MdbxOpts struct {
 	growthStep     datasize.ByteSize
 	flags          uint
 	pageSize       uint64
+	dirtySpace     uint64 // if exeed this space, modified pages will `spill` to disk
 	mergeThreshold uint64
 	verbosity      kv.DBVerbosityLvl
 	label          kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
@@ -72,6 +73,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		flags:          mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:            log,
 		pageSize:       kv.DefaultPageSize(),
+		dirtySpace:     2 * (memory.TotalMemory() / 42),
 		growthStep:     2 * datasize.GB,
 		mergeThreshold: 32768,
 	}
@@ -84,6 +86,11 @@ func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
 
 func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
+	return opts
+}
+
+func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts {
+	opts.dirtySpace = s
 	return opts
 }
 
@@ -177,8 +184,14 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if dbg.WriteMap() {
 		opts = opts.WriteMap() //nolint
 	}
+	if dbg.DirtySpace() > 0 {
+		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
+	}
 	if dbg.NoSync() {
 		opts = opts.Flags(func(u uint) uint { return u | mdbx.SafeNoSync }) //nolint
+	}
+	if dbg.MergeTr() > 0 {
+		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
@@ -271,7 +284,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 
 		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
 		// but for reproducibility of benchmarks - please don't rely on Available RAM
-		if err = env.SetOption(mdbx.OptTxnDpLimit, 2*(memory.TotalMemory()/42/opts.pageSize)); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
@@ -347,7 +360,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		if staleReaders, err := db.env.ReaderCheck(); err != nil {
 			db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
+			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
 		}
 
 	}
@@ -604,7 +617,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
 			tx.db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			tx.db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
+			tx.db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
 		}
 	}
 
