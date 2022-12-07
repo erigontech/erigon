@@ -353,7 +353,7 @@ func ExecV3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				case <-pruneEvery.C:
-					if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
+					if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
 						panic(err)
 					}
 					if err = agg.Flush(tx); err != nil {
