@@ -30,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	stack2 "github.com/go-stack/stack"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -257,9 +256,12 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 	opts.pageSize = uint64(in.PageSize)
 
+	//nolint
+	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
+	}
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if opts.flags&mdbx.Accede == 0 && opts.flags&mdbx.Readonly == 0 {
+	if opts.flags&mdbx.Readonly == 0 {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -307,7 +309,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-		targetSemCount := int64(cmp.Max(32, runtime.GOMAXPROCS(-1)*8))
+		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 8)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 	db := &MdbxKV{
