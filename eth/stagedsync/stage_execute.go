@@ -286,15 +286,20 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
 func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	sendersProgress, err := senderStageProgress(tx, db)
+	if err != nil {
+		return 0, false, err
+	}
+	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumMinimax())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 			return err
 		}); err != nil {
 			return
 		}
 	} else {
-		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 	}
 	return
 }
