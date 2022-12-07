@@ -267,7 +267,7 @@ func ExecV3(ctx context.Context,
 								panic(err)
 							}
 						} else if stepsInDB > 2 {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/20); err != nil { // prune part of retired data, before commit
+							if err = agg.PruneWithTiemout(ctx, 20*time.Second); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
