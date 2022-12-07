@@ -1,7 +1,6 @@
 package exec3
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -193,55 +192,29 @@ func (fw *FillWorker) ResetProgress() {
 	fw.progress.Store(0)
 }
 
-var addr1 common.Address = common.HexToAddress("0x4E21fc375a0567A3Ce4F76a05add6CDbd6C61014")
-
-func (sw *ScanWorker) BitmapAccounts(accountCollectorX *etl.Collector) error {
+func (sw *ScanWorker) BitmapAccounts() error {
 	it := sw.as.IterateAccountsTxs(sw.txNum)
-	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, del := it.Next()
-		if bytes.Equal(key, addr1[:]) {
-			fmt.Printf("BitmapAccounts %x, %d, %t\n", key, txNum, del)
-		}
-		//if !del {
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
-			return err
-		}
+		_, txNum, _ := it.Next()
 		sw.bitmap.Add(txNum)
-		//}
 	}
 	return nil
 }
 
-func (sw *ScanWorker) BitmapStorage(storageCollectorX *etl.Collector) error {
+func (sw *ScanWorker) BitmapStorage() error {
 	it := sw.as.IterateStorageTxs(sw.txNum)
-	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, _ := it.Next()
-		//if !del {
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
-			return err
-		}
+		_, txNum, _ := it.Next()
 		sw.bitmap.Add(txNum)
-		//}
 	}
 	return nil
 }
 
-func (sw *ScanWorker) BitmapCode(codeCollectorX *etl.Collector) error {
+func (sw *ScanWorker) BitmapCode() error {
 	it := sw.as.IterateCodeTxs(sw.txNum)
-	var txKey [8]byte
 	for it.HasNext() {
-		key, txNum, _ := it.Next()
-		//if !del {
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
-			return err
-		}
+		_, txNum, _ := it.Next()
 		sw.bitmap.Add(txNum)
-		//}
 	}
 	return nil
 }
@@ -276,18 +249,17 @@ type ReconWorker struct {
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
-	a *libstate.Aggregator22, as *libstate.AggregatorStep, blockReader services.FullBlockReader,
+	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
-	ac := a.MakeContext()
 	rw := &ReconWorker{
 		lock:        lock,
 		wg:          wg,
 		rs:          rs,
 		blockReader: blockReader,
 		ctx:         context.Background(),
-		stateWriter: state.NewStateReconWriterInc(ac, rs),
+		stateWriter: state.NewStateReconWriterInc(as, rs),
 		stateReader: state.NewHistoryReaderInc(as, rs),
 		chainConfig: chainConfig,
 		logger:      logger,

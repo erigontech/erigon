@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -14,7 +13,7 @@ import (
 )
 
 type StateReconWriterInc struct {
-	ac        *libstate.Aggregator22Context
+	as        *libstate.AggregatorStep
 	rs        *ReconState
 	txNum     uint64
 	tx        kv.Tx
@@ -22,9 +21,9 @@ type StateReconWriterInc struct {
 	composite []byte
 }
 
-func NewStateReconWriterInc(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriterInc {
+func NewStateReconWriterInc(as *libstate.AggregatorStep, rs *ReconState) *StateReconWriterInc {
 	return &StateReconWriterInc{
-		ac: ac,
+		as: as,
 		rs: rs,
 	}
 }
@@ -45,23 +44,7 @@ var addr1 common.Address = common.HexToAddress("0x000000000000000000000000000000
 
 func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
-	if address == addr1 {
-		fmt.Printf("account [%x] => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
-	}
-	txKey, err := w.tx.GetOne(kv.XAccount, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		if address == addr1 {
-			fmt.Printf("account [%x] txKey nil => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
-		}
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		if address == addr1 {
-			fmt.Printf("account [%x] txKey => (balance: %d, nonce: %d), txNum = %d, stateTxNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum, stateTxNum)
-		}
+	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); !ok || stateTxNum != w.txNum {
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -78,14 +61,7 @@ func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original
 
 func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	txKey, err := w.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
+	if ok, stateTxNum := w.as.MaxTxNumCode(addr); !ok || stateTxNum != w.txNum {
 		return nil
 	}
 	if len(code) > 0 {
@@ -99,18 +75,13 @@ func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnat
 
 func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addr := address.Bytes()
-	txKey, err := w.tx.GetOne(kv.XAccount, addr)
-	if err != nil {
-		return err
-	}
-	if txKey != nil {
-		if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum == w.txNum {
-			//fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
-			w.rs.Delete(kv.PlainStateD, addr, nil, w.txNum)
-		}
+	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); ok && stateTxNum == w.txNum {
+		//fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
+		w.rs.Delete(kv.PlainStateD, addr, nil, w.txNum)
 	}
 	// Iterate over storage of this contract and delete it too
 	var c kv.Cursor
+	var err error
 	if c, err = w.chainTx.Cursor(kv.PlainState); err != nil {
 		return err
 	}
@@ -129,38 +100,15 @@ func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *ac
 	w.rs.RemoveAll(kv.PlainStateR, addr)
 	w.rs.RemoveAll(kv.PlainStateD, addr)
 	// Delete code
-	txKey, err = w.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return err
+	if ok, stateTxNum := w.as.MaxTxNumCode(addr); ok && stateTxNum == w.txNum {
+		w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	w.rs.Delete(kv.PlainContractD, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, w.txNum)
 	return nil
 }
 
 func (w *StateReconWriterInc) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if cap(w.composite) < 20+32 {
-		w.composite = make([]byte, 20+32)
-	} else {
-		w.composite = w.composite[:20+32]
-	}
 	addr, k := address.Bytes(), key.Bytes()
-
-	copy(w.composite, addr)
-	copy(w.composite[20:], k)
-	txKey, err := w.tx.GetOne(kv.XStorage, w.composite)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
+	if ok, stateTxNum := w.as.MaxTxNumStorage(addr, k); !ok || stateTxNum != w.txNum {
 		return nil
 	}
 	if value.IsZero() {

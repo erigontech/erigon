@@ -10,12 +10,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 type reconPair struct {
@@ -262,104 +257,4 @@ func (rs *ReconState) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.sizeEstimate
-}
-
-type StateReconWriter struct {
-	ac        *libstate.Aggregator22Context
-	rs        *ReconState
-	txNum     uint64
-	tx        kv.Tx
-	composite []byte
-}
-
-func NewStateReconWriter(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriter {
-	return &StateReconWriter{
-		ac: ac,
-		rs: rs,
-	}
-}
-
-func (w *StateReconWriter) SetTxNum(txNum uint64) {
-	w.txNum = txNum
-}
-
-func (w *StateReconWriter) SetTx(tx kv.Tx) {
-	w.tx = tx
-}
-
-func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	addr := address.Bytes()
-	txKey, err := w.tx.GetOne(kv.XAccount, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	value := make([]byte, account.EncodingLengthForStorage())
-	if account.Incarnation > 0 {
-		account.Incarnation = FirstContractIncarnation
-	}
-	account.EncodeForStorage(value)
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
-	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
-	return nil
-}
-
-func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	txKey, err := w.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	w.rs.Put(kv.CodeR, codeHashBytes, nil, common.CopyBytes(code), w.txNum)
-	if len(code) > 0 {
-		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
-		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
-	}
-	return nil
-}
-
-func (w *StateReconWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
-	return nil
-}
-
-func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if cap(w.composite) < 20+32 {
-		w.composite = make([]byte, 20+32)
-	} else {
-		w.composite = w.composite[:20+32]
-	}
-	addr, k := address.Bytes(), key.Bytes()
-
-	copy(w.composite, addr)
-	copy(w.composite[20:], k)
-	txKey, err := w.tx.GetOne(kv.XStorage, w.composite)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	if !value.IsZero() {
-		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
-		w.rs.Put(kv.PlainStateR, addr, k, value.Bytes(), w.txNum)
-	}
-	return nil
-}
-
-func (w *StateReconWriter) CreateContract(address common.Address) error {
-	return nil
 }

@@ -3,13 +3,20 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
+
+type RequiredStateError struct {
+	StateTxNum uint64
+}
+
+func (r *RequiredStateError) Error() string {
+	return fmt.Sprintf("required state at txNum %d", r.StateTxNum)
+}
 
 type HistoryReaderInc struct {
 	as         *libstate.AggregatorStep
@@ -45,29 +52,13 @@ func (hr *HistoryReaderInc) SetTrace(trace bool) {
 
 func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	txKey, err := hr.tx.GetOne(kv.XAccount, addr)
-	if err != nil {
-		return nil, err
-	}
-	var stateTxNum uint64 = math.MaxUint64
-	if txKey != nil {
-		stateTxNum = binary.BigEndian.Uint64(txKey)
-	}
+	enc, noState, stateTxNum := hr.as.ReadAccountDataNoState(addr, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, stateTxNum=%d\n", address, hr.txNum, stateTxNum)
+		fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
 	}
-	var enc []byte
-	noState := false
-	if txKey != nil && stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.as.ReadAccountDataNoState(addr, hr.txNum); err != nil {
-			return nil, err
-		}
-		if hr.trace {
-			fmt.Printf("ReadAccountData [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
-		}
-	}
+	var err error
 	if !noState {
-		if txKey == nil {
+		if stateTxNum == hr.txNum {
 			enc, err = hr.chainTx.GetOne(kv.PlainState, addr)
 			if err != nil {
 				return nil, err
@@ -125,34 +116,11 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 }
 
 func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	if cap(hr.composite) < 20+32 {
-		hr.composite = make([]byte, 20+32)
-	} else {
-		hr.composite = hr.composite[:20+32]
-	}
 	addr, k := address.Bytes(), key.Bytes()
-	copy(hr.composite, addr)
-	copy(hr.composite[20:], k)
-	txKey, err := hr.tx.GetOne(kv.XStorage, hr.composite)
-	if err != nil {
-		return nil, err
-	}
-	var stateTxNum uint64 = math.MaxUint64
-	if txKey != nil {
-		stateTxNum = binary.BigEndian.Uint64(txKey)
-	}
-	if hr.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => hr.txNum=%d, stateTxNum=%d\n", address, key.Bytes(), hr.txNum, stateTxNum)
-	}
-	var enc []byte
-	noState := false
-	if txKey != nil && stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.as.ReadAccountStorageNoState(addr, k, hr.txNum); err != nil {
-			return nil, err
-		}
-	}
+	var err error
+	enc, noState, stateTxNum := hr.as.ReadAccountStorageNoState(addr, k, hr.txNum)
 	if !noState {
-		if txKey == nil {
+		if stateTxNum == hr.txNum {
 			if cap(hr.composite) < 20+8+32 {
 				hr.composite = make([]byte, 20+8+32)
 			} else if len(hr.composite) != 20+8+32 {
@@ -207,24 +175,11 @@ func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnati
 
 func (hr *HistoryReaderInc) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	addr := address.Bytes()
-	txKey, err := hr.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return nil, err
-	}
-	var stateTxNum uint64 = math.MaxUint64
-	if txKey != nil {
-		stateTxNum = binary.BigEndian.Uint64(txKey)
-	}
-	var enc []byte
-	noState := false
-	if txKey != nil && stateTxNum >= hr.txNum {
-		if enc, noState, err = hr.as.ReadAccountCodeNoState(addr, hr.txNum); err != nil {
-			return nil, err
-		}
-	}
+	enc, noState, stateTxNum := hr.as.ReadAccountCodeNoState(addr, hr.txNum)
+	var err error
 	if !noState {
 		cHash := codeHash.Bytes()
-		if txKey == nil {
+		if stateTxNum == hr.txNum {
 			enc, err = hr.chainTx.GetOne(kv.Code, cHash)
 			if err != nil {
 				return nil, err
@@ -259,30 +214,14 @@ func (hr *HistoryReaderInc) ReadAccountCode(address common.Address, incarnation 
 
 func (hr *HistoryReaderInc) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	addr := address.Bytes()
-	txKey, err := hr.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return 0, err
-	}
-	var stateTxNum uint64 = math.MaxUint64
-	if txKey != nil {
-		stateTxNum = binary.BigEndian.Uint64(txKey)
-	}
+	size, noState, stateTxNum := hr.as.ReadAccountCodeSizeNoState(addr, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCodeSize [%x] [%x]=> hr.txNum=%d, stateTxNum=%d\n", address, codeHash, hr.txNum, stateTxNum)
+		fmt.Printf("ReadAccountCodeSize [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
 	}
-	var size int
-	noState := false
-	if txKey != nil && stateTxNum >= hr.txNum {
-		if size, noState, err = hr.as.ReadAccountCodeSizeNoState(addr, hr.txNum); err != nil {
-			return 0, err
-		}
-		if hr.trace {
-			fmt.Printf("ReadAccountCodeSize [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
-		}
-	}
+	var err error
 	if !noState {
 		cHash := codeHash.Bytes()
-		if txKey == nil {
+		if stateTxNum == hr.txNum {
 			enc, err := hr.chainTx.GetOne(kv.Code, cHash)
 			if err != nil {
 				return 0, err

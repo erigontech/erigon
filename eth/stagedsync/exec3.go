@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"encoding/binary"
@@ -727,63 +728,21 @@ func reconstituteStep(last bool,
 	scanWorker := exec3.NewScanWorker(txNum, as)
 
 	t := time.Now()
-	accountCollectorX := etl.NewCollector("account scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	accountCollectorX.LogLvl(log.LvlInfo)
-	if err := scanWorker.BitmapAccounts(accountCollectorX); err != nil {
+	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.XAccount)
-	}); err != nil {
-		return err
-	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return accountCollectorX.Load(tx, kv.XAccount, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	accountCollectorX.Close()
-	accountCollectorX = nil //nolint
 	log.Info("Scan accounts history", "took", time.Since(t))
 
 	t = time.Now()
-	storageCollectorX := etl.NewCollector("storage scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	storageCollectorX.LogLvl(log.LvlInfo)
-	if err := scanWorker.BitmapStorage(storageCollectorX); err != nil {
+	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.XStorage)
-	}); err != nil {
-		return err
-	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return storageCollectorX.Load(tx, kv.XStorage, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	storageCollectorX.Close()
-	storageCollectorX = nil
 	log.Info("Scan storage history", "took", time.Since(t))
 
 	t = time.Now()
-	codeCollectorX := etl.NewCollector("code scan X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	codeCollectorX.LogLvl(log.LvlInfo)
-	if err := scanWorker.BitmapCode(codeCollectorX); err != nil {
+	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.XCode)
-	}); err != nil {
-		return err
-	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return codeCollectorX.Load(tx, kv.XCode, etl.IdentityLoadFunc, etl.TransformArgs{})
-	}); err != nil {
-		return err
-	}
-	codeCollectorX.Close()
-	codeCollectorX = nil
 	log.Info("Scan code history", "took", time.Since(t))
 	bitmap := scanWorker.Bitmap()
 
@@ -822,7 +781,7 @@ func reconstituteStep(last bool,
 		} else {
 			localAs = as.Clone()
 		}
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, agg, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 		reconWorkers[i].SetChainTx(chainTxs[i])
 	}
@@ -1031,40 +990,53 @@ func reconstituteStep(last bool,
 	defer codeCollector.Close()
 	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
 	defer plainContractCollector.Close()
+	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
-			return plainStateCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return plainStateCollector.Collect(transposedKey, v)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateD, nil, math.MaxUint32)
-		if err = roTx.ForEach(kv.PlainStateD, nil, func(_, v []byte) error {
-			return plainStateCollector.Collect(v, nil)
+		if err = roTx.ForEach(kv.PlainStateD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return plainStateCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
-			return codeCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return codeCollector.Collect(transposedKey, v)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeD, nil, math.MaxUint32)
-		if err = roTx.ForEach(kv.CodeD, nil, func(_, v []byte) error {
-			return codeCollector.Collect(v, nil)
+		if err = roTx.ForEach(kv.CodeD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return codeCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
-			return plainContractCollector.Collect(k[8:], v)
+			transposedKey = append(transposedKey[:0], k[8:]...)
+			transposedKey = append(transposedKey, k[:8]...)
+			return plainContractCollector.Collect(transposedKey, v)
 		}); err != nil {
 			return err
 		}
 		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractD, nil, math.MaxUint32)
-		if err = roTx.ForEach(kv.PlainContractD, nil, func(_, v []byte) error {
-			return plainContractCollector.Collect(v, nil)
+		if err = roTx.ForEach(kv.PlainContractD, nil, func(k, v []byte) error {
+			transposedKey = append(transposedKey[:0], v...)
+			transposedKey = append(transposedKey, k...)
+			return plainContractCollector.Collect(transposedKey, nil)
 		}); err != nil {
 			return err
 		}
@@ -1096,18 +1068,90 @@ func reconstituteStep(last bool,
 		return err
 	}
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
-		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		var lastKey []byte
+		var lastVal []byte
+		if err = plainStateCollector.Load(tx, kv.PlainState, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				if lastKey != nil {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
+				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+			}
+			lastVal = append(lastVal[:0], v...)
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainStateCollector.Close()
-		if err = codeCollector.Load(tx, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if lastKey != nil {
+			if len(lastVal) > 0 {
+				if e := tx.Put(kv.PlainState, lastKey, lastVal); e != nil {
+					return e
+				}
+			} else {
+				if e := tx.Delete(kv.PlainState, lastKey); e != nil {
+					return e
+				}
+			}
+		}
+		lastKey = nil
+		lastVal = nil
+		if err = codeCollector.Load(tx, kv.Code, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				if lastKey != nil {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
+				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+			}
+			lastVal = append(lastVal[:0], v...)
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		codeCollector.Close()
-		if err = plainContractCollector.Load(tx, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if lastKey != nil {
+			if len(lastVal) > 0 {
+				if e := tx.Put(kv.Code, lastKey, lastVal); e != nil {
+					return e
+				}
+			} else {
+				if e := tx.Delete(kv.Code, lastKey); e != nil {
+					return e
+				}
+			}
+		}
+		lastKey = nil
+		lastVal = nil
+		if err = plainContractCollector.Load(tx, kv.PlainContractCode, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if !bytes.Equal(k[:len(k)-8], lastKey) {
+				if lastKey != nil {
+					if e := next(lastKey, lastKey, lastVal); e != nil {
+						return e
+					}
+				}
+				lastKey = append(lastKey[:0], k[:len(k)-8]...)
+			}
+			lastVal = append(lastVal[:0], v...)
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		plainContractCollector.Close()
+		if lastKey != nil {
+			if len(lastVal) > 0 {
+				if e := tx.Put(kv.PlainContractCode, lastKey, lastVal); e != nil {
+					return e
+				}
+			} else {
+				if e := tx.Delete(kv.PlainContractCode, lastKey); e != nil {
+					return e
+				}
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
