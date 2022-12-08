@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -46,7 +47,7 @@ func NewTransactionTracer(ctx context.Context) *TransactionTracer {
 	}
 }
 
-func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if precompile {
 		return
 	}
@@ -54,7 +55,7 @@ func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Add
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
-	_value.Set(value)
+	_value.Set(value.ToBig())
 	if callType == vm.CALLT {
 		t.Results = append(t.Results, &TraceEntry{"CALL", depth, from, to, (*hexutil.Big)(_value), inputCopy})
 		return
@@ -72,16 +73,16 @@ func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Add
 		return
 	}
 	if callType == vm.CREATET {
-		t.Results = append(t.Results, &TraceEntry{"CREATE", depth, from, to, (*hexutil.Big)(value), inputCopy})
+		t.Results = append(t.Results, &TraceEntry{"CREATE", depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
 		return
 	}
 	if callType == vm.CREATE2T {
-		t.Results = append(t.Results, &TraceEntry{"CREATE2", depth, from, to, (*hexutil.Big)(value), inputCopy})
+		t.Results = append(t.Results, &TraceEntry{"CREATE2", depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
 		return
 	}
 }
 
-func (l *TransactionTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (l *TransactionTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	last := l.Results[len(l.Results)-1]
-	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value), nil})
+	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
 }

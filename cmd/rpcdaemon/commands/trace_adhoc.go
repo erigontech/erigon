@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 	"time"
 
@@ -235,7 +234,7 @@ type OeTracer struct {
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
@@ -266,7 +265,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && value.Sign() <= 0 {
+	if precompile && depth > 0 && value == nil {
 		ot.precompile = true
 		return
 	}
@@ -289,16 +288,16 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if calltype == vm.DELEGATECALLT {
+		if callType == vm.DELEGATECALLT {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
-				value = action.Value.ToInt()
+				value, _ = uint256.FromBig(action.Value.ToInt())
 			case *CallTraceAction:
-				value = action.Value.ToInt()
+				value, _ = uint256.FromBig(action.Value.ToInt())
 			}
 		}
-		if calltype == vm.STATICCALLT {
-			value = big.NewInt(0)
+		if callType == vm.STATICCALLT {
+			value = uint256.NewInt(0)
 		}
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
@@ -308,11 +307,11 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		action.From = from
 		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
-		action.Value.ToInt().Set(value)
+		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else {
 		action := CallTraceAction{}
-		switch calltype {
+		switch callType {
 		case vm.CALLT:
 			action.CallType = CALL
 		case vm.CALLCODET:
@@ -326,7 +325,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.CopyBytes(input)
-		action.Value.ToInt().Set(value)
+		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
@@ -485,6 +484,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
+			sb.Grow(len(ot.idx))
 			for _, idx := range ot.idx {
 				sb.WriteString(idx)
 			}
@@ -530,13 +530,13 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
-func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	trace := &ParityTrace{}
 	trace.Type = SUICIDE
 	action := &SuicideTraceAction{}
 	action.Address = from
 	action.RefundAddress = to
-	action.Balance.ToInt().Set(value)
+	action.Balance.ToInt().Set(value.ToBig())
 	trace.Action = action
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	traceIdx := topTrace.Subtraces
@@ -734,7 +734,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum), chainConfig.Rules(blockNum))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum), chainConfig.Rules(blockNum, block.Time()))
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +772,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		}
 	}
 	return result, nil
-
 }
 
 func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string) ([]*TraceCallResult, error) {
@@ -818,7 +817,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber), chainConfig.Rules(blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber), chainConfig.Rules(blockNumber, block.Time()))
 	if err != nil {
 		return nil, err
 	}
@@ -858,6 +857,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if blockNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
@@ -936,7 +936,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
+	txCtx := core.NewEVMTxContext(msg)
+
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -1067,6 +1069,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if parentNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
@@ -1084,6 +1087,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	ibs := state.New(cachedReader)
 
 	// TODO: can read here only parent header
 	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
@@ -1151,12 +1155,14 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
+		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
+		txCtx := core.NewEVMTxContext(msg)
+
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
 		}
-		ibs := state.New(cachedReader)
+		ibs.Reset()
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)

@@ -17,9 +17,9 @@
 package logger
 
 import (
-	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -138,7 +138,7 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 	}
 }
 
-func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
@@ -170,7 +170,7 @@ func (*AccessListTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas,
 }
 func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
-func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 func (*AccessListTracer) CaptureAccountRead(account common.Address) error {
 	return nil

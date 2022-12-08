@@ -270,7 +270,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 		return newCfg, nil, err
 	}
 	storedCfg, storedErr := rawdb.ReadChainConfig(db, storedHash)
-	if storedErr != nil {
+	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
@@ -431,7 +431,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, nil), statedb, nil
 }
 
 func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {

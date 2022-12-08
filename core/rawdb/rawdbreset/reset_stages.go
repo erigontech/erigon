@@ -2,7 +2,9 @@ package rawdbreset
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -17,51 +19,35 @@ import (
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	// don't reset senders here
-	if err := db.Update(ctx, stagedsync.ResetHashState); err != nil {
+	if err := ResetHashState(ctx, db); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, stagedsync.ResetIH); err != nil {
+	if err := ResetIH(ctx, db); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, ResetHistory); err != nil {
+	if err := ResetHistory(ctx, db); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, ResetLogIndex); err != nil {
+	if err := ResetLogIndex(ctx, db); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, ResetCallTraces); err != nil {
+	if err := ResetCallTraces(ctx, db); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, ResetFinish); err != nil {
+	if err := ResetFinish(ctx, db); err != nil {
 		return err
 	}
 
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return ResetExec(tx, chain) }); err != nil {
+	if err := ResetExec(ctx, db, chain); err != nil {
 		return err
 	}
 	return nil
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.HeaderAndCanonicalReader, tmpdir string) error {
-	go func() { //inverted read-ahead - to warmup data
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			c, err := tx.Cursor(kv.EthTx)
-			if err != nil {
-				return err
-			}
-			defer c.Close()
-			for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}()
-
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -95,13 +81,12 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.NonCanonicalTxs); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.EthTx); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.MaxTxNum); err != nil {
+
+	if err := clearTables(context.Background(), db, tx,
+		kv.NonCanonicalTxs,
+		kv.EthTx,
+		kv.MaxTxNum,
+	); err != nil {
 		return err
 	}
 	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
@@ -123,153 +108,105 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 
 	return nil
 }
-func ResetSenders(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.Senders); err != nil {
-		return err
+func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
+	if err := clearTables(ctx, db, tx, kv.Senders); err != nil {
+		return nil
 	}
-	if err := stages.SaveStageProgress(tx, stages.Senders, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.Senders, 0); err != nil {
-		return err
-	}
-	return nil
+	return clearStageProgress(tx, stages.Senders)
 }
 
-func ResetExec(tx kv.RwTx, chain string) (err error) {
-	if err = stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
-		return err
-	}
-	if err = stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-	if err = stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
-		return err
-	}
-	if err = stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
-		return err
-	}
-
-	stateBuckets := []string{
-		kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
-		kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-		kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
-	}
-	for _, b := range stateBuckets {
-		log.Info("Clear", "table", b)
-		if err := tx.ClearBucket(b); err != nil {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
 			return err
 		}
-	}
 
-	historyV3, err := rawdb.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	if historyV3 {
-		buckets := []string{
-			kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-			kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
-			kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
-			kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-			kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
-			kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
-			kv.LogAddressKeys, kv.LogAddressIdx,
-			kv.LogTopicsKeys, kv.LogTopicsIdx,
-			kv.TracesFromKeys, kv.TracesFromIdx,
-			kv.TracesToKeys, kv.TracesToIdx,
+		stateBuckets := []string{
+			kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
+			kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
+			kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 		}
-		for _, b := range buckets {
-			log.Info("Clear", "table", b)
+		if err := clearTables(ctx, db, tx, stateBuckets...); err != nil {
+			return nil
+		}
+		for _, b := range stateBuckets {
 			if err := tx.ClearBucket(b); err != nil {
 				return err
 			}
 		}
-	} else {
-		if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
+
+		historyV3, err := rawdb.HistoryV3.Enabled(tx)
+		if err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.Receipts); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.Log); err != nil {
-			return err
-		}
-		if err := tx.ClearBucket(kv.CallTraceSet); err != nil {
-			return err
+		if historyV3 {
+			buckets := []string{
+				kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+				kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
+				kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
+				kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+				kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
+				kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
+				kv.LogAddressKeys, kv.LogAddressIdx,
+				kv.LogTopicsKeys, kv.LogTopicsIdx,
+				kv.TracesFromKeys, kv.TracesFromIdx,
+				kv.TracesToKeys, kv.TracesToIdx,
+
+				kv.AccountChangeSet,
+				kv.StorageChangeSet,
+				kv.Receipts,
+				kv.Log,
+				kv.CallTraceSet,
+			}
+			if err := clearTables(ctx, db, tx, buckets...); err != nil {
+				return nil
+			}
+		} else {
+			if err := clearTables(ctx, db, tx,
+				kv.AccountChangeSet,
+				kv.StorageChangeSet,
+				kv.Receipts,
+				kv.Log,
+				kv.CallTraceSet,
+			); err != nil {
+				return nil
+			}
+
+			genesis := core.DefaultGenesisBlockByChainName(chain)
+			if _, _, err := genesis.WriteGenesisState(tx); err != nil {
+				return err
+			}
 		}
 
-		genesis := core.DefaultGenesisBlockByChainName(chain)
-		if _, _, err := genesis.WriteGenesisState(tx); err != nil {
-			return err
-		}
-	}
-
-	return nil
+		return nil
+	})
 }
 
-func ResetHistory(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.AccountsHistory); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.StorageHistory); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.AccountHistoryIndex, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.AccountHistoryIndex, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
-		return err
-	}
-
-	return nil
+func ResetHistory(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearTables(ctx, db, tx, kv.AccountsHistory, kv.StorageHistory); err != nil {
+			return nil
+		}
+		return clearStageProgress(tx, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
+	})
 }
 
-func ResetLogIndex(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.LogAddressIndex); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.LogTopicIndex); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.LogIndex, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.LogIndex, 0); err != nil {
-		return err
-	}
-	return nil
+func ResetLogIndex(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearTables(ctx, db, tx, kv.LogAddressIndex, kv.LogTopicIndex); err != nil {
+			return nil
+		}
+		return clearStageProgress(tx, stages.LogIndex)
+	})
 }
 
-func ResetCallTraces(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.CallFromIndex); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.CallToIndex); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.CallTraces, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.CallTraces, 0); err != nil {
-		return err
-	}
-	return nil
+func ResetCallTraces(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearTables(ctx, db, tx, kv.CallFromIndex, kv.CallToIndex); err != nil {
+			return nil
+		}
+		return clearStageProgress(tx, stages.CallTraces)
+	})
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
@@ -285,12 +222,80 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetFinish(tx kv.RwTx) error {
-	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
-		return err
+func ResetFinish(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return clearStageProgress(tx, stages.Finish)
+	})
+}
+
+func ResetHashState(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearTables(ctx, db, tx, kv.HashedAccounts, kv.HashedStorage, kv.ContractCode); err != nil {
+			return nil
+		}
+		return clearStageProgress(tx, stages.HashState)
+	})
+}
+
+func ResetIH(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := clearTables(ctx, db, tx, kv.TrieOfAccounts, kv.TrieOfStorage); err != nil {
+			return nil
+		}
+		return clearStageProgress(tx, stages.IntermediateHashes)
+	})
+}
+
+func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
+	wg := sync.WaitGroup{}
+	for i := 0; i < 256; i++ {
+		prefix := []byte{byte(i)}
+		wg.Add(1)
+		go func(perfix []byte) {
+			defer wg.Done()
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+					return nil
+				})
+			}); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("warmup", "err", err)
+				}
+			}
+		}(prefix)
 	}
-	if err := stages.SaveStagePruneProgress(tx, stages.Finish, 0); err != nil {
-		return err
+	return func() { wg.Wait() }
+}
+
+func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
+	for _, tbl := range tables {
+		if err := clearTable(ctx, db, tx, tbl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
+	clean := warmup(ctx, db, table)
+	defer clean()
+	log.Info("Clear", "table", table)
+	return tx.ClearBucket(table)
+}
+
+func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
+	for _, stage := range stagesList {
+		if err := stages.SaveStageProgress(tx, stage, 0); err != nil {
+			return err
+		}
+		if err := stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
+			return err
+		}
 	}
 	return nil
 }

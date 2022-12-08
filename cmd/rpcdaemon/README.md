@@ -271,8 +271,11 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_unsubscribe                            | Yes     | Websock Only                         |
 |                                            |         |                                      |
 | engine_newPayloadV1                        | Yes     |                                      |
+| engine_newPayloadV2                        | Yes     |                                      |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                      |
+| engine_forkchoiceUpdatedV2                 | Yes     |                                      |
 | engine_getPayloadV1                        | Yes     |                                      |
+| engine_getPayloadV2                        | Yes     |                                      |
 | engine_exchangeTransitionConfigurationV1   | Yes     |                                      |
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |

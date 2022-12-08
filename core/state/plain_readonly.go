@@ -255,7 +255,6 @@ func (s *PlainState) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	_, err := h.Sha.Write(key[:])
 	if err != nil {
 		return err

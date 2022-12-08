@@ -20,14 +20,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"golang.org/x/crypto/sha3"
 )
 
 type DerivableList interface {
@@ -160,37 +159,26 @@ func intsize(i uint) (size int) {
 	}
 }
 
-// hasherPool holds LegacyKeccak hashers.
-var hasherPool = sync.Pool{
-	New: func() interface{} {
-		return sha3.NewLegacyKeccak256()
-	},
-}
-
 func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
-	sha := hasherPool.Get().(crypto.KeccakState)
-	defer hasherPool.Put(sha)
-	sha.Reset()
+	sha := crypto.NewKeccakState()
 	sha.Write(rawRlpData) //nolint:errcheck
 	sha.Read(h[:])        //nolint:errcheck
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
 
 func rlpHash(x interface{}) (h common.Hash) {
-	sha := hasherPool.Get().(crypto.KeccakState)
-	defer hasherPool.Put(sha)
-	sha.Reset()
+	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }
 
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
 func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
-	sha := hasherPool.Get().(crypto.KeccakState)
-	defer hasherPool.Put(sha)
-	sha.Reset()
+	sha := crypto.NewKeccakState()
 	//nolint:errcheck
 	sha.Write([]byte{prefix})
 	if err := rlp.Encode(sha, x); err != nil {
@@ -198,5 +186,6 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	}
 	//nolint:errcheck
 	sha.Read(h[:])
+	cryptopool.ReturnToPoolKeccak256(sha)
 	return h
 }

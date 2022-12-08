@@ -8,6 +8,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -380,7 +381,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 	}
 
 	var m runtime.MemStats
-	libcommon.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
@@ -394,7 +395,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 func logWritingBodies(logPrefix string, committed, headerProgress uint64) {
 	var m runtime.MemStats
-	libcommon.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
 	log.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
 		"block_num", committed,
