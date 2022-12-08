@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -26,7 +27,7 @@ func (t *DefaultTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 func (t *DefaultTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, d time.Duration, err error) {
 }
 
-func (t *DefaultTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (t *DefaultTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (t *DefaultTracer) CaptureAccountRead(account common.Address) error {

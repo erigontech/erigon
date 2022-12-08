@@ -40,17 +40,25 @@ type HttpCfg struct {
 	StateCache               kvcache.CoherentConfig
 	Snap                     ethconfig.Snapshot
 	Sync                     ethconfig.Sync
-	GRPCServerEnabled        bool
-	GRPCListenAddress        string
-	GRPCPort                 int
-	GRPCHealthCheckEnabled   bool
-	StarknetGRPCAddress      string
-	JWTSecretPath            string // Engine API Authentication
-	TraceRequests            bool   // Always trace requests in INFO level
-	HTTPTimeouts             rpccfg.HTTPTimeouts
-	AuthRpcTimeouts          rpccfg.HTTPTimeouts
-	EvmCallTimeout           time.Duration
-	InternalCL               bool
-	LogDirVerbosity          string
-	LogDirPath               string
+
+	// GRPC server
+	GRPCServerEnabled      bool
+	GRPCListenAddress      string
+	GRPCPort               int
+	GRPCHealthCheckEnabled bool
+
+	// Raw TCP Server
+	TCPServerEnabled bool
+	TCPListenAddress string
+	TCPPort          int
+
+	StarknetGRPCAddress string
+	JWTSecretPath       string // Engine API Authentication
+	TraceRequests       bool   // Always trace requests in INFO level
+	HTTPTimeouts        rpccfg.HTTPTimeouts
+	AuthRpcTimeouts     rpccfg.HTTPTimeouts
+	EvmCallTimeout      time.Duration
+	InternalCL          bool
+	LogDirVerbosity     string
+	LogDirPath          string
 }

@@ -65,6 +65,7 @@ func CreateClientsReport(ctx context.Context, db database.DB, limit uint, maxPin
 
 func (report *ClientsReport) String() string {
 	var builder strings.Builder
+	builder.Grow(2 + 2*len(report.Clients))
 	builder.WriteString("clients:")
 	builder.WriteRune('\n')
 	for _, client := range report.Clients {

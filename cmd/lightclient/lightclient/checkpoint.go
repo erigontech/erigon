@@ -26,7 +26,7 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 	for store.Load() == nil {
 		select {
 		case <-logInterval.C:
-			peers, err := l.sentinel.GetPeers(ctx, &sentinel.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(ctx, &sentinel.EmptyMessage{})
 			if err != nil {
 				return err
 			}

@@ -72,12 +72,12 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
-		p.banBadPeer(pid)
+		p.BanBadPeer(pid)
 		p.penalties.Remove(pid)
 	}
 }
 
-func (p *Peers) banBadPeer(pid peer.ID) {
+func (p *Peers) BanBadPeer(pid peer.ID) {
 	p.DisconnectPeer(pid)
 	p.badPeers.Add(pid, []byte{0})
 	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", pid)
@@ -86,4 +86,5 @@ func (p *Peers) banBadPeer(pid peer.ID) {
 func (p *Peers) DisconnectPeer(pid peer.ID) {
 	log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", pid)
 	p.host.Peerstore().RemovePeer(pid)
+	p.host.Network().ClosePeer(pid)
 }

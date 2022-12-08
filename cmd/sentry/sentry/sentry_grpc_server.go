@@ -105,6 +105,7 @@ func (bp *PeersByMinBlock) Pop() interface{} {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = PeerRef{}
 	*bp = old[0 : n-1]
 	return x
 }
@@ -503,6 +504,9 @@ func runPeer(
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case 11:
+			// Ignore
+			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
 			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -1081,7 +1082,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	}
 
 	var m runtime.MemStats
-	libcommon.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,

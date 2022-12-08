@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -26,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -62,7 +63,7 @@ type Progress struct {
 func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
@@ -100,13 +101,18 @@ func (p *Progress) Log(rs *state.State22, rwsLen int, queueSize, count, inputBlo
 	p.prevRepeatCount = repeatCount
 }
 
-func Exec3(ctx context.Context,
-	execStage *StageState, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB, applyTx kv.RwTx,
-	parallel bool, rs *state.State22, blockReader services.FullBlockReader,
-	logger log.Logger, agg *state2.Aggregator22, engine consensus.Engine,
-	maxBlockNum uint64, chainConfig *params.ChainConfig,
-	genesis *core.Genesis,
+func ExecV3(ctx context.Context,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
+	parallel bool, rs *state.State22, logPrefix string,
+	logger log.Logger,
+	maxBlockNum uint64,
 ) (err error) {
+	batchSize, chainDb := cfg.batchSize, cfg.db
+	blockReader := cfg.blockReader
+	agg, engine := cfg.agg, cfg.engine
+	chainConfig, genesis := cfg.chainConfig, cfg.genesis
+	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
 		applyTx, err = chainDb.BeginRw(ctx)
@@ -115,8 +121,8 @@ func Exec3(ctx context.Context,
 		}
 		defer applyTx.Rollback()
 	} else {
-		if blockReader.(WithSnapshots).Snapshots().Cfg().Enabled {
-			defer blockReader.(WithSnapshots).Snapshots().EnableMadvNormal().DisableReadAhead()
+		if blockSnapshots.Cfg().Enabled {
+			defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
 		}
 	}
 
@@ -232,7 +238,7 @@ func Exec3(ctx context.Context,
 			defer rs.Finish()
 
 			agg.SetTx(tx)
-			if debug.DiscardHistory() {
+			if dbg.DiscardHistory() {
 				defer agg.DiscardHistory().FinishWrites()
 			} else {
 				defer agg.StartWrites().FinishWrites()
@@ -400,7 +406,7 @@ func Exec3(ctx context.Context,
 	}
 
 	if !parallel {
-		if debug.DiscardHistory() {
+		if dbg.DiscardHistory() {
 			defer agg.DiscardHistory().FinishWrites()
 		} else {
 			defer agg.StartWrites().FinishWrites()
@@ -433,14 +439,14 @@ func Exec3(ctx context.Context,
 			return h
 		}
 	}
+
 	var b *types.Block
 	var blockNum uint64
-loop:
+Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		t := time.Now()
 
 		inputBlockNum.Store(blockNum)
-		rules := chainConfig.Rules(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
@@ -478,7 +484,8 @@ loop:
 				}
 			}()
 		}
-
+		rules := chainConfig.Rules(blockNum, b.Time())
+		var gasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec22.TxTask{
@@ -517,13 +524,38 @@ loop:
 			if !parallel {
 				count++
 				execWorkers[0].RunTxTask(txTask)
+				if err := func() error {
+					if txTask.Final {
+						gasUsed += txTask.UsedGas
+						if gasUsed != txTask.Header.GasUsed {
+							return fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed, txTask.Header.GasUsed)
+						}
+						gasUsed = 0
+					} else {
+						gasUsed += txTask.UsedGas
+					}
+					return nil
+				}(); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
+						if cfg.hd != nil {
+							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+						}
+						if cfg.badBlockHalt {
+							return err
+						}
+					}
+					u.UnwindTo(blockNum-1, header.Hash())
+					break Loop
+				}
+
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					panic(fmt.Errorf("State22.Apply: %w", err))
 				}
-				rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Inc()
 				outputBlockNum.Store(txTask.BlockNum)
-				if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
+				if err := rs.ApplyHistory(txTask, agg); err != nil {
 					panic(fmt.Errorf("State22.Apply: %w", err))
 				}
 			}
@@ -579,12 +611,14 @@ loop:
 		case <-interruptCh:
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next run will start with block %d", blockNum))
 			maxTxNum.Store(inputTxNum)
-			break loop
+			break Loop
 		default:
 		}
 
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
+		if blockSnapshots.Cfg().Produce {
+			if err := agg.BuildFilesInBackground(chainDb); err != nil {
+				return err
+			}
 		}
 	}
 	if parallel {
@@ -597,6 +631,12 @@ loop:
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
+			return err
+		}
+	}
+
+	if blockSnapshots.Cfg().Produce {
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
 			return err
 		}
 	}
@@ -627,28 +667,31 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx,
-	triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) {
+	var txTask *exec22.TxTask
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
-		txTask := heap.Pop(rws).(*exec22.TxTask)
+		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
-		if txTask.Error == nil && rs.ReadsValid(txTask.ReadLists) {
-			if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
-				panic(fmt.Errorf("State22.Apply: %w", err))
-			}
-			triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
-			outputTxNum.Inc()
-			outputBlockNum.Store(txTask.BlockNum)
-			onSuccess()
-			if err := rs.ApplyHistory(applyTx, txTask, agg); err != nil {
-				panic(fmt.Errorf("State22.Apply: %w", err))
-			}
-			//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		} else {
+		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			rs.AddWork(txTask)
 			repeatCount.Inc()
+			continue
 			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
+
+		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
+			panic(fmt.Errorf("State22.Apply: %w", err))
+		}
+		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+		outputTxNum.Inc()
+		onSuccess()
+		if err := rs.ApplyHistory(txTask, agg); err != nil {
+			panic(fmt.Errorf("State22.Apply: %w", err))
+		}
+		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+	}
+	if txTask != nil {
+		outputBlockNum.Store(txTask.BlockNum)
 	}
 }
 
@@ -724,19 +767,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	t := time.Now()
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan accounts history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	log.Info("Scan accounts history", "took", time.Since(t))
 
@@ -787,19 +834,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	t = time.Now()
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan storage history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	log.Info("Scan storage history", "took", time.Since(t))
 
@@ -831,19 +882,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].BitmapCode(codeCollectorsX[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Scan code history", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	codeCollectorX := etl.NewCollector("code scan total X", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollectorX.Close()
@@ -913,7 +968,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 				return
 			case <-logEvery.C:
 				var m runtime.MemStats
-				common.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 				sizeEstimate := rs.SizeEstimate()
 				count = rs.DoneCount()
 				rollbackCount = rs.RollbackCount()
@@ -989,7 +1044,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	for bn = uint64(0); bn <= blockNum; bn++ {
 		t = time.Now()
-		rules := chainConfig.Rules(bn)
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
 			return err
@@ -1007,6 +1061,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		rules := chainConfig.Rules(blockNum, b.Time())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
@@ -1124,19 +1179,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillAccounts(plainStateCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling accounts", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
@@ -1144,19 +1203,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillStorage(plainStateCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling storage", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	doneCount.Store(0)
 	for i := 0; i < workerCount; i++ {
@@ -1164,19 +1227,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		go fillWorkers[i].FillCode(codeCollectors[i], plainContractCollectors[i])
 	}
 	for doneCount.Load() < uint64(workerCount) {
-		<-logEvery.C
-		var m runtime.MemStats
-		common.ReadMemStats(&m)
-		var p float64
-		for i := 0; i < workerCount; i++ {
-			if total := fillWorkers[i].Total(); total > 0 {
-				p += float64(fillWorkers[i].Progress()) / float64(total)
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			var p float64
+			for i := 0; i < workerCount; i++ {
+				if total := fillWorkers[i].Total(); total > 0 {
+					p += float64(fillWorkers[i].Progress()) / float64(total)
+				}
 			}
+			p *= 100.0
+			log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+			time.Sleep(500 * time.Millisecond)
 		}
-		p *= 100.0
-		log.Info("Filling code", "workers", workerCount, "progress", fmt.Sprintf("%.2f%%", p),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
 	}
 	db.Close()
 	// Load all collections into the main collector

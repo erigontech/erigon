@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -46,10 +45,10 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		}
 		return h
 	}
-	engine := ethash.NewFaker()
+	engine := api.engine()
 
 	header := block.Header()
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	for idx, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), idx)
 
@@ -62,7 +61,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return err
 		}
-		_ = ibs.FinalizeTx(vmenv.ChainConfig().Rules(block.NumberU64()), cachedWriter)
+		_ = ibs.FinalizeTx(rules, cachedWriter)
 
 		if tracer.Found() {
 			tracer.SetTransaction(tx)

@@ -75,11 +75,26 @@ type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
+	EngineReader
+	EngineWriter
+}
+
+// EngineReader are read-only methods of the consensus engine
+// All of these methods should have thread-safe implementations
+type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
 	Author(header *types.Header) (common.Address, error)
 
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
+
+	Type() params.ConsensusType
+}
+
+// EngineReader are write methods of the consensus engine
+type EngineWriter interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
 	// given engine. Verifying the seal may be done optionally here, or explicitly
 	// via the VerifySeal method.
@@ -103,7 +118,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
 	) (types.Transactions, types.Receipts, error)
 
@@ -113,7 +128,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
 	) (*types.Block, types.Transactions, types.Receipts, error)
 
@@ -133,13 +148,9 @@ type Engine interface {
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
-	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
-
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
-	Type() params.ConsensusType
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
 }

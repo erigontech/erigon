@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -41,11 +40,11 @@ func TestGasPrice(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.description, func(t *testing.T) {
-			db := createGasPriceTestKV(t, testCase.chainSize)
-			defer db.Close()
+			m := createGasPriceTestKV(t, testCase.chainSize)
+			defer m.DB.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout)
-			eth := NewEthAPI(base, db, nil, nil, nil, 5000000)
+			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -61,7 +60,7 @@ func TestGasPrice(t *testing.T) {
 
 }
 
-func createGasPriceTestKV(t *testing.T, chainSize int) kv.RwDB {
+func createGasPriceTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -90,5 +89,5 @@ func createGasPriceTestKV(t *testing.T, chainSize int) kv.RwDB {
 		t.Error(err)
 	}
 
-	return m.DB
+	return m
 }
