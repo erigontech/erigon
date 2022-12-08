@@ -18,8 +18,8 @@ package trie
 
 import (
 	"errors"
-	"fmt"
 	"hash"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
@@ -49,30 +49,23 @@ type keccakState interface {
 	Read([]byte) (int, error)
 }
 
-// hashers live in a global db.
-var hasherPool = make(chan *hasher, 128)
-
-func newHasher(valueNodesRlpEncoded bool) *hasher {
-	var h *hasher
-	select {
-	case h = <-hasherPool:
-	default:
-		h = &hasher{
+var hashersPool = sync.Pool{
+	New: func() any {
+		return &hasher{
 			sha: sha3.NewLegacyKeccak256().(crypto.KeccakState),
 			bw:  &ByteArrayWriter{},
 		}
-	}
+	},
+}
+
+func newHasher(valueNodesRlpEncoded bool) *hasher {
+	h := hashersPool.Get().(*hasher)
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
 }
-
 func returnHasherToPool(h *hasher) {
 	h.callback = nil
-	select {
-	case hasherPool <- h:
-	default:
-		fmt.Printf("Allowing hasher to be garbage collected, pool is full\n")
-	}
+	hashersPool.Put(h)
 }
 
 // hash calculates node's RLP for hashing

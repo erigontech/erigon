@@ -2,8 +2,8 @@ package commands
 
 import (
 	"context"
-	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -38,23 +38,23 @@ func NewOperationsTracer(ctx context.Context) *OperationsTracer {
 	}
 }
 
-func (t *OperationsTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (t *OperationsTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if depth == 0 {
 		return
 	}
 
 	if calltype == vm.CALLT && value.Uint64() != 0 {
-		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value)})
+		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return
 	}
 	if calltype == vm.CREATET {
-		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.Big)(value)})
+		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.Big)(value.ToBig())})
 	}
 	if calltype == vm.CREATE2T {
-		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value)})
+		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value.ToBig())})
 	}
 }
 
-func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
-	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value)})
+func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
+	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
 }

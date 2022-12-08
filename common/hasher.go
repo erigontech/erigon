@@ -1,8 +1,8 @@
 package common
 
 import (
-	"fmt"
 	"hash"
+	"sync"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -19,30 +19,22 @@ type Hasher struct {
 	Sha keccakState
 }
 
-var hasherPool = make(chan *Hasher, 128)
+var hashersPool = sync.Pool{
+	New: func() any {
+		return &Hasher{Sha: sha3.NewLegacyKeccak256().(keccakState)}
+	},
+}
 
 func NewHasher() *Hasher {
-	var h *Hasher
-	select {
-	case h = <-hasherPool:
-	default:
-		h = &Hasher{Sha: sha3.NewLegacyKeccak256().(keccakState)}
-	}
+	h := hashersPool.Get().(*Hasher)
+	h.Sha.Reset()
 	return h
 }
-
-func ReturnHasherToPool(h *Hasher) {
-	select {
-	case hasherPool <- h:
-	default:
-		fmt.Printf("Allowing Hasher to be garbage collected, pool is full\n")
-	}
-}
+func ReturnHasherToPool(h *Hasher) { hashersPool.Put(h) }
 
 func HashData(data []byte) (Hash, error) {
 	h := NewHasher()
 	defer ReturnHasherToPool(h)
-	h.Sha.Reset()
 
 	_, err := h.Sha.Write(data)
 	if err != nil {

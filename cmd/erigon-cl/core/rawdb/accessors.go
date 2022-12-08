@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	rawdb2 "github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 func EncodeNumber(n uint64) []byte {
@@ -226,6 +226,9 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatr
 	if err != nil {
 		return nil, err
 	}
+	if len(beaconBlockBytesCompressed) == 0 {
+		return nil, nil
+	}
 	beaconBlockBytes, err := utils.DecompressSnappy(beaconBlockBytesCompressed)
 	if err != nil {
 		return nil, err
@@ -328,7 +331,9 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatr
 	// Process payload
 	header := rawdb2.ReadHeader(tx, hash, blockNumber)
 	if header == nil {
-		return nil, fmt.Errorf("no header was found: %d, hash: %x", blockNumber, beaconBody.Eth1Data.BlockHash[:])
+		beaconBlock.Body = beaconBody
+		signedBeaconBlock.Block = beaconBlock
+		return signedBeaconBlock, nil // Header is empty so avoid writing EL data.
 	}
 	// Pack basic
 	payload := &cltypes.ExecutionPayload{

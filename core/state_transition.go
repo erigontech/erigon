@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -63,7 +64,7 @@ type StateTransition struct {
 	initialGas uint64
 	value      *uint256.Int
 	data       []byte
-	state      vm.IntraBlockState
+	state      evmtypes.IntraBlockState
 	evm        vm.VMInterface
 
 	//some pre-allocated intermediate variables

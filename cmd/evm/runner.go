@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -216,11 +216,12 @@ func runCmd(ctx *cli.Context) error {
 		initialGas = genesisConfig.GasLimit
 	}
 	value, _ := uint256.FromBig(utils.BigFlagValue(ctx, ValueFlag.Name))
+	gasPrice, _ := uint256.FromBig(utils.BigFlagValue(ctx, PriceFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
-		GasPrice:    utils.BigFlagValue(ctx, PriceFlag.Name),
+		GasPrice:    gasPrice,
 		Value:       value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
@@ -285,7 +286,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &params.Rules{}
 		if chainConfig != nil {
-			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
+			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)

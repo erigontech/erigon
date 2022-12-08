@@ -242,8 +242,6 @@ func (hd *HeaderDownload) logAnchorState() {
 	var ss []string
 	currentTime := time.Now()
 	for anchorParent, anchor := range hd.anchors {
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("{%8d", anchor.blockHeight))
 		// Try to figure out end
 		var end uint64
 		var searchList []*Link
@@ -263,6 +261,7 @@ func (hd *HeaderDownload) logAnchorState() {
 			bs = append(bs, int(link.blockHeight))
 		}
 		var sbb strings.Builder
+		sbb.Grow(len(bs))
 		slices.Sort(bs)
 		for j, b := range bs {
 			if j == 0 {
@@ -291,6 +290,8 @@ func (hd *HeaderDownload) logAnchorState() {
 				}
 			}
 		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("{%8d", anchor.blockHeight))
 		sb.WriteString(fmt.Sprintf("-%d links=%d (%s)}", end, len(bs), sbb.String()))
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
 		sb.WriteString(fmt.Sprintf(", anchorQueue.idx=%d", anchor.idx))
@@ -659,7 +660,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 
 		if headerHash != hd.posAnchor.parentHash {
 			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
-				log.Info("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+				log.Debug("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
 				return nil, nil
 			}
 			log.Debug("[Downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))

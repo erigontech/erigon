@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"io"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {

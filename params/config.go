@@ -134,7 +134,7 @@ var (
 		GrayGlacierBlock:              big.NewInt(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiBlock:                 big.NewInt(0),
+		ShanghaiTime:                  big.NewInt(0),
 		Ethash:                        new(EthashConfig),
 	}
 
@@ -201,7 +201,7 @@ var (
 		Aura:                  &AuRaConfig{},
 	}
 
-	TestRules = TestChainConfig.Rules(0)
+	TestRules = TestChainConfig.Rules(0, 0)
 )
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -241,8 +241,8 @@ type ChainConfig struct {
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
-	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Shanghai switch block (nil = no fork, 0 = already activated)
-	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch block (nil = no fork, 0 = already activated)
+	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already activated)
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already activated)
 
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
@@ -314,20 +314,30 @@ func (b *ParliaConfig) String() string {
 // BorConfig is the consensus engine configs for Matic bor based sealing.
 type BorConfig struct {
 	Period                map[string]uint64 `json:"period"`                // Number of seconds between blocks to enforce
-	ProducerDelay         uint64            `json:"producerDelay"`         // Number of seconds delay between two producer interval
-	Sprint                uint64            `json:"sprint"`                // Epoch length to proposer
+	ProducerDelay         map[string]uint64 `json:"producerDelay"`         // Number of seconds delay between two producer interval
+	Sprint                map[string]uint64 `json:"sprint"`                // Epoch length to proposer
 	BackupMultiplier      map[string]uint64 `json:"backupMultiplier"`      // Backup multiplier to determine the wiggle time
 	ValidatorContract     string            `json:"validatorContract"`     // Validator set contract
 	StateReceiverContract string            `json:"stateReceiverContract"` // State receiver contract
 
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
-	JaipurBlock              uint64                 `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+
+	JaipurBlock *big.Int `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	DelhiBlock  *big.Int `json:"delhiBlock"`  // Delhi switch block (nil = no fork, 0 = already on delhi)
 }
 
 // String implements the stringer interface, returning the consensus engine details.
 func (b *BorConfig) String() string {
 	return "bor"
+}
+
+func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
+	return c.calculateSprintSizeHelper(c.ProducerDelay, number)
+}
+
+func (c *BorConfig) CalculateSprint(number uint64) uint64 {
+	return c.calculateSprintSizeHelper(c.Sprint, number)
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
@@ -339,7 +349,11 @@ func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
-	return number >= c.JaipurBlock
+	return isForked(c.JaipurBlock, number)
+}
+
+func (c *BorConfig) IsDelhi(number uint64) bool {
+	return isForked(c.DelhiBlock, number)
 }
 
 func (c *BorConfig) calculateBorConfigHelper(field map[string]uint64, number uint64) uint64 {
@@ -355,6 +369,26 @@ func (c *BorConfig) calculateBorConfigHelper(field map[string]uint64, number uin
 			return field[keys[i]]
 		}
 	}
+	return field[keys[len(keys)-1]]
+}
+
+func (c *BorConfig) calculateSprintSizeHelper(field map[string]uint64, number uint64) uint64 {
+	keys := make([]string, 0, len(field))
+	for k := range field {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	for i := 0; i < len(keys)-1; i++ {
+		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
+		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
+
+		if number >= valUint && number < valUintNext {
+			return field[keys[i]]
+		}
+	}
+
 	return field[keys[len(keys)-1]]
 }
 
@@ -378,7 +412,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Gibbs: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -388,6 +422,7 @@ func (c *ChainConfig) String() string {
 			c.GibbsBlock,
 			c.NanoBlock,
 			c.MoranBlock,
+			c.GibbsBlock,
 			engine,
 		)
 	}
@@ -410,8 +445,8 @@ func (c *ChainConfig) String() string {
 		c.GrayGlacierBlock,
 		c.TerminalTotalDifficulty,
 		c.MergeNetsplitBlock,
-		c.ShanghaiBlock,
-		c.CancunBlock,
+		c.ShanghaiTime,
+		c.CancunTime,
 		engine,
 	)
 }
@@ -586,14 +621,14 @@ func (c *ChainConfig) IsGrayGlacier(num uint64) bool {
 	return isForked(c.GrayGlacierBlock, num)
 }
 
-// IsShanghai returns whether num is either equal to the Shanghai fork block or greater.
-func (c *ChainConfig) IsShanghai(num uint64) bool {
-	return isForked(c.ShanghaiBlock, num)
+// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
+func (c *ChainConfig) IsShanghai(time uint64) bool {
+	return isForked(c.ShanghaiTime, time)
 }
 
-// IsCancun returns whether num is either equal to the Cancun fork block or greater.
-func (c *ChainConfig) IsCancun(num uint64) bool {
-	return isForked(c.CancunBlock, num)
+// IsCancun returns whether time is either equal to the Cancun fork time or greater.
+func (c *ChainConfig) IsCancun(time uint64) bool {
+	return isForked(c.CancunTime, time)
 }
 
 func (c *ChainConfig) IsEip1559FeeCollector(num uint64) bool {
@@ -647,8 +682,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
-		{name: "shanghaiBlock", block: c.ShanghaiBlock},
-		{name: "cancunBlock", block: c.CancunBlock},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -724,12 +757,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
-	}
-	if isForkIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, head) {
-		return newCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
-	}
-	if isForkIncompatible(c.CancunBlock, newcfg.CancunBlock, head) {
-		return newCompatError("Cancun fork block", c.CancunBlock, newcfg.CancunBlock)
 	}
 
 	// Parlia forks
@@ -825,13 +852,13 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
-	IsNano, IsMoran                                         bool
+	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsStarknet, IsAura                            bool
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num uint64) *Rules {
+func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -847,8 +874,8 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsIstanbul:            c.IsIstanbul(num),
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
-		IsShanghai:            c.IsShanghai(num),
-		IsCancun:              c.IsCancun(num),
+		IsShanghai:            c.IsShanghai(time),
+		IsCancun:              c.IsCancun(time),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),

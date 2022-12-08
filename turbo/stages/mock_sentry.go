@@ -337,11 +337,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
-	isBor := mock.ChainConfig.Bor != nil
-	var sprint uint64
-	if isBor {
-		sprint = mock.ChainConfig.Bor.Sprint
-	}
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
@@ -390,7 +385,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, isBor, sprint),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
@@ -416,7 +411,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil),
 			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),

@@ -7,10 +7,11 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -23,6 +24,7 @@ import (
 
 func DoCall(
 	ctx context.Context,
+	engine consensus.EngineReader,
 	args ethapi2.CallArgs,
 	tx kv.Tx,
 	blockNrOrHash rpc.BlockNumberOrHash,
@@ -77,7 +79,8 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -101,19 +104,8 @@ func DoCall(
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) (vm.BlockContext, vm.TxContext) {
-	var baseFee uint256.Int
-	if header.BaseFee != nil {
-		overflow := baseFee.SetFromBig(header.BaseFee)
-		if overflow {
-			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
-		}
-	}
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), ethash.NewFaker() /* TODO Discover correcrt engine type */, nil /* author */),
-		vm.TxContext{
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice().ToBig(),
-		}
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
+	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
 }
 
 func getHashGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) common.Hash {
@@ -181,6 +173,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 }
 
 func NewReusableCaller(
+	engine consensus.EngineReader,
 	stateReader state.StateReader,
 	overrides *ethapi2.StateOverrides,
 	header *types.Header,
@@ -213,7 +206,9 @@ func NewReusableCaller(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, chainConfig, vm.Config{NoBaseFee: true})
 

@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
@@ -18,6 +19,7 @@ import (
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
@@ -25,7 +27,7 @@ import (
 )
 
 func main() {
-	app := sentinelapp.MakeApp(runConsensusLayerNode, flags.LightClientDefaultFlags)
+	app := sentinelapp.MakeApp(runConsensusLayerNode, flags.CLDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -37,7 +39,7 @@ func main() {
 
 func runConsensusLayerNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
-	lcCfg, _ := lcCli.SetUpLightClientCfg(cliCtx)
+	cfg, _ := lcCli.SetupConsensusClientCfg(cliCtx)
 
 	db, err := mdbx.NewTemporaryMdbx()
 	if err != nil {
@@ -55,36 +57,60 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	log.Info("[Sentinel] running sentinel with configuration", "cfg", lcCfg)
-	s, err := startSentinel(cliCtx, *lcCfg)
+	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
+	s, err := startSentinel(cliCtx, *cfg, cpState)
 	if err != nil {
 		log.Error("Could not start sentinel service", "err", err)
 	}
 
 	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	downloader := network.NewForwardBeaconDownloader(ctx, s)
-
-	if err := stages.SpawnStageBeaconsBlocks(stages.StageBeaconsBlock(db, downloader, genesisCfg, beaconConfig, cpState), nil, ctx); err != nil {
+	gossipManager := network.NewGossipReceiver(ctx, s)
+	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
+	go gossipManager.Loop()
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, genesisCfg, beaconConfig, cpState, nil, false)
+	if err != nil {
 		return err
 	}
-	return stages.SpawnStageBeaconState(stages.StageBeaconState(db, genesisCfg, beaconConfig, cpState), nil, ctx)
+Loop:
+	for {
+		if err := stageloop.Run(db, nil, false, true); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			break Loop
+		default:
+		}
+	}
+	return nil
 }
 
-func startSentinel(cliCtx *cli.Context, lcCfg lcCli.LightClientCliCfg) (consensusrpc.SentinelClient, error) {
+func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *cltypes.BeaconState) (sentinelrpc.SentinelClient, error) {
+	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
+	if err != nil {
+		return nil, err
+	}
 	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        lcCfg.Addr,
-		Port:          int(lcCfg.Port),
-		TCPPort:       lcCfg.ServerTcpPort,
-		GenesisConfig: lcCfg.GenesisCfg,
-		NetworkConfig: lcCfg.NetworkCfg,
-		BeaconConfig:  lcCfg.BeaconCfg,
-		NoDiscovery:   lcCfg.NoDiscovery,
-	}, nil, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr}, nil)
+		IpAddr:        cfg.Addr,
+		Port:          int(cfg.Port),
+		TCPPort:       cfg.ServerTcpPort,
+		GenesisConfig: cfg.GenesisCfg,
+		NetworkConfig: cfg.NetworkCfg,
+		BeaconConfig:  cfg.BeaconCfg,
+		NoDiscovery:   cfg.NoDiscovery,
+	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+		ForkDigest:     forkDigest,
+		FinalizedRoot:  state.FinalizedCheckpoint.Root,
+		FinalizedEpoch: state.FinalizedCheckpoint.Epoch,
+		HeadSlot:       state.FinalizedCheckpoint.Epoch * 32,
+		HeadRoot:       state.FinalizedCheckpoint.Root,
+	}, handshake.FullClientRule)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 		return nil, err
 	}
-	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
+	log.Info("Sentinel started", "addr", cfg.ServerAddr)
 	return s, nil
 }
 

@@ -3,16 +3,18 @@ package service
 import (
 	"context"
 
-	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type SentinelServer struct {
-	consensusrpc.UnimplementedSentinelServer
+	sentinelrpc.UnimplementedSentinelServer
 
 	ctx            context.Context
 	sentinel       *sentinel.Sentinel
@@ -27,7 +29,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *Sentin
 	}
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *consensusrpc.EmptyRequest, stream consensusrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -41,7 +43,7 @@ func (s *SentinelServer) SubscribeGossip(_ *consensusrpc.EmptyRequest, stream co
 		case <-stream.Context().Done():
 			return nil
 		case packet := <-ch:
-			if err := stream.Send(&consensusrpc.GossipData{
+			if err := stream.Send(&sentinelrpc.GossipData{
 				Data: packet.data,
 				Type: packet.t,
 			}); err != nil {
@@ -51,18 +53,30 @@ func (s *SentinelServer) SubscribeGossip(_ *consensusrpc.EmptyRequest, stream co
 	}
 }
 
-func (s *SentinelServer) SendRequest(_ context.Context, req *consensusrpc.RequestData) (*consensusrpc.ResponseData, error) {
+func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	// Send the request and get the data if we get an answer.
 	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
-	return &consensusrpc.ResponseData{
+	return &sentinelrpc.ResponseData{
 		Data:  respData,
 		Error: foundErrReq,
 	}, err
 }
 
-func (s *SentinelServer) GetPeers(_ context.Context, _ *consensusrpc.EmptyRequest) (*consensusrpc.PeerCount, error) {
+func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
 	// Send the request and get the data if we get an answer.
-	return &consensusrpc.PeerCount{
+	s.sentinel.SetStatus(&cltypes.Status{
+		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
+		FinalizedRoot:  gointerfaces.ConvertH256ToHash(req.FinalizedRoot),
+		HeadRoot:       gointerfaces.ConvertH256ToHash(req.HeadRoot),
+		FinalizedEpoch: req.FinalizedEpoch,
+		HeadSlot:       req.HeadSlot,
+	})
+	return &sentinelrpc.EmptyMessage{}, nil
+}
+
+func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+	// Send the request and get the data if we get an answer.
+	return &sentinelrpc.PeerCount{
 		Amount: uint64(s.sentinel.GetPeersCount()),
 	}, nil
 }
@@ -93,19 +107,19 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 	}
 	switch pkt.Packet.(type) {
 	case *cltypes.SignedBeaconBlockBellatrix:
-		s.gossipNotifier.notify(consensusrpc.GossipType_BeaconBlockGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data)
 	case *cltypes.SignedAggregateAndProof:
-		s.gossipNotifier.notify(consensusrpc.GossipType_AggregateAndProofGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data)
 	case *cltypes.SignedVoluntaryExit:
-		s.gossipNotifier.notify(consensusrpc.GossipType_VoluntaryExitGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_VoluntaryExitGossipType, data)
 	case *cltypes.ProposerSlashing:
-		s.gossipNotifier.notify(consensusrpc.GossipType_ProposerSlashingGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_ProposerSlashingGossipType, data)
 	case *cltypes.AttesterSlashing:
-		s.gossipNotifier.notify(consensusrpc.GossipType_AttesterSlashingGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_AttesterSlashingGossipType, data)
 	case *cltypes.LightClientFinalityUpdate:
-		s.gossipNotifier.notify(consensusrpc.GossipType_LightClientFinalityUpdateGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_LightClientFinalityUpdateGossipType, data)
 	case *cltypes.LightClientOptimisticUpdate:
-		s.gossipNotifier.notify(consensusrpc.GossipType_LightClientOptimisticUpdateGossipType, data)
+		s.gossipNotifier.notify(sentinelrpc.GossipType_LightClientOptimisticUpdateGossipType, data)
 	default:
 	}
 	return nil

@@ -29,10 +29,8 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"golang.org/x/crypto/sha3"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -42,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -247,6 +246,8 @@ func (c *Clique) Type() params.ConsensusType {
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
+// This is thread-safe (only access the header, as well as signatures, which
+// are lru.ARCCache, which is thread-safe)
 func (c *Clique) Author(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures)
 }
@@ -364,8 +365,8 @@ func (c *Clique) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
@@ -375,14 +376,14 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), txs, receipts, nil
+	return types.NewBlock(header, txs, nil, receipts, withdrawals), txs, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -526,7 +527,9 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
+
 	encodeSigHeader(hasher, header)
 	hasher.Sum(hash[:0])
 	return hash

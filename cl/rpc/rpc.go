@@ -5,57 +5,20 @@ import (
 	"context"
 	"fmt"
 
-	ssz "github.com/ferranbt/fastssz"
-
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 )
 
-func DecodeGossipData(data *consensusrpc.GossipData) (ssz.Unmarshaler, error) {
-	switch data.Type {
-	case consensusrpc.GossipType_BeaconBlockGossipType:
-		pkt := &cltypes.SignedBeaconBlockBellatrix{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_AggregateAndProofGossipType:
-		pkt := &cltypes.SignedAggregateAndProof{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_VoluntaryExitGossipType:
-		pkt := &cltypes.SignedVoluntaryExit{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_ProposerSlashingGossipType:
-		pkt := &cltypes.ProposerSlashing{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_AttesterSlashingGossipType:
-		pkt := &cltypes.AttesterSlashing{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_LightClientOptimisticUpdateGossipType:
-		pkt := &cltypes.LightClientOptimisticUpdate{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	case consensusrpc.GossipType_LightClientFinalityUpdateGossipType:
-		pkt := &cltypes.LightClientFinalityUpdate{}
-		err := pkt.UnmarshalSSZ(data.Data)
-		return pkt, err
-	default:
-		return nil, fmt.Errorf("invalid gossip type: %d", data.Type)
-	}
-}
-
-func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client consensusrpc.SentinelClient) (*cltypes.LightClientFinalityUpdate, error) {
+func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client sentinel.SentinelClient) (*cltypes.LightClientFinalityUpdate, error) {
 	responsePacket := &cltypes.LightClientFinalityUpdate{}
 
-	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
-		Topic: handlers.LightClientFinalityUpdateV1,
+	message, err := client.SendRequest(ctx, &sentinel.RequestData{
+		Topic: communication.LightClientFinalityUpdateV1,
 	})
 	if err != nil {
 		return nil, err
@@ -71,11 +34,11 @@ func SendLightClientFinaltyUpdateReqV1(ctx context.Context, client consensusrpc.
 	return responsePacket, nil
 }
 
-func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client consensusrpc.SentinelClient) (*cltypes.LightClientOptimisticUpdate, error) {
+func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client sentinel.SentinelClient) (*cltypes.LightClientOptimisticUpdate, error) {
 	responsePacket := &cltypes.LightClientOptimisticUpdate{}
 
-	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
-		Topic: handlers.LightClientOptimisticUpdateV1,
+	message, err := client.SendRequest(ctx, &sentinel.RequestData{
+		Topic: communication.LightClientOptimisticUpdateV1,
 	})
 	if err != nil {
 		return nil, err
@@ -91,16 +54,16 @@ func SendLightClientOptimisticUpdateReqV1(ctx context.Context, client consensusr
 	return responsePacket, nil
 }
 
-func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot, client consensusrpc.SentinelClient) (*cltypes.LightClientBootstrap, error) {
+func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot, client sentinel.SentinelClient) (*cltypes.LightClientBootstrap, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, err
 	}
 	responsePacket := &cltypes.LightClientBootstrap{}
 	data := common.CopyBytes(buffer.Bytes())
-	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
+	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.LightClientBootstrapV1,
+		Topic: communication.LightClientBootstrapV1,
 	})
 	if err != nil {
 		return nil, err
@@ -115,7 +78,7 @@ func SendLightClientBootstrapReqV1(ctx context.Context, req *cltypes.SingleRoot,
 	return responsePacket, nil
 }
 
-func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client consensusrpc.SentinelClient) (*cltypes.LightClientUpdate, error) {
+func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client sentinel.SentinelClient) (*cltypes.LightClientUpdate, error) {
 	// This is approximately one day worth of data, we dont need to receive more than 1.
 	req := &cltypes.LightClientUpdatesByRangeRequest{
 		Period: period,
@@ -129,9 +92,9 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 	responsePacket := []cltypes.ObjectSSZ{&cltypes.LightClientUpdate{}}
 
 	data := common.CopyBytes(buffer.Bytes())
-	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
+	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.LightClientUpdatesByRangeV1,
+		Topic: communication.LightClientUpdatesByRangeV1,
 	})
 	if err != nil {
 		return nil, err
@@ -149,7 +112,7 @@ func SendLightClientUpdatesReqV1(ctx context.Context, period uint64, client cons
 type blocksRequestOpts struct {
 	topic   string
 	count   int
-	client  consensusrpc.SentinelClient
+	client  sentinel.SentinelClient
 	reqData []byte
 }
 
@@ -160,7 +123,7 @@ func sendBlocksRequest(ctx context.Context, opts blocksRequestOpts) ([]cltypes.O
 		responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
 	}
 
-	message, err := opts.client.SendRequest(ctx, &consensusrpc.RequestData{
+	message, err := opts.client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  opts.reqData,
 		Topic: opts.topic,
 	})
@@ -177,7 +140,7 @@ func sendBlocksRequest(ctx context.Context, opts blocksRequestOpts) ([]cltypes.O
 	return responsePacket, nil
 }
 
-func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client consensusrpc.SentinelClient) ([]cltypes.ObjectSSZ, error) {
+func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client sentinel.SentinelClient) ([]cltypes.ObjectSSZ, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -190,14 +153,14 @@ func SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64, client
 
 	data := common.CopyBytes(buffer.Bytes())
 	return sendBlocksRequest(ctx, blocksRequestOpts{
-		topic:   handlers.BeaconBlocksByRangeProtocolV2,
+		topic:   communication.BeaconBlocksByRangeProtocolV2,
 		count:   int(count),
 		client:  client,
 		reqData: data,
 	})
 }
 
-func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client consensusrpc.SentinelClient) ([]cltypes.ObjectSSZ, error) {
+func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client sentinel.SentinelClient) ([]cltypes.ObjectSSZ, error) {
 	var req cltypes.BeaconBlocksByRootRequest = roots
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
@@ -205,14 +168,14 @@ func SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte, client con
 	}
 	data := common.CopyBytes(buffer.Bytes())
 	return sendBlocksRequest(ctx, blocksRequestOpts{
-		topic:   handlers.BeaconBlocksByRootProtocolV2,
+		topic:   communication.BeaconBlocksByRootProtocolV2,
 		count:   len(roots),
 		client:  client,
 		reqData: data,
 	})
 }
 
-func SendStatusReq(ctx context.Context, ourStatus *cltypes.Status, client consensusrpc.SentinelClient) (*cltypes.Status, error) {
+func SendStatusReq(ctx context.Context, ourStatus *cltypes.Status, client sentinel.SentinelClient) (*cltypes.Status, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, ourStatus); err != nil {
 		return nil, err
@@ -221,9 +184,9 @@ func SendStatusReq(ctx context.Context, ourStatus *cltypes.Status, client consen
 
 	data := common.CopyBytes(buffer.Bytes())
 
-	message, err := client.SendRequest(ctx, &consensusrpc.RequestData{
+	message, err := client.SendRequest(ctx, &sentinel.RequestData{
 		Data:  data,
-		Topic: handlers.StatusProtocolV1,
+		Topic: communication.StatusProtocolV1,
 	})
 	if err != nil {
 		return nil, err
