@@ -35,6 +35,7 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState,
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
+
 	beaconState := &cltypes.BeaconState{}
 	err = beaconState.UnmarshalSSZ(marshaled)
 	if err != nil {

@@ -144,10 +144,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	// Get a new instance of the EVM
-	signer := types.MakeSigner(chainConfig, blockNum)
-	rules := chainConfig.Rules(blockNum)
-
 	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
@@ -175,7 +171,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		BaseFee:     &baseFee,
 	}
 
+	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	signer := types.MakeSigner(chainConfig, blockNum)
+	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	timeoutMilliSeconds := int64(5000)
 

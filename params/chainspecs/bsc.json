@@ -18,6 +18,7 @@
   "eulerBlock": 18907621,
   "nanoBlock": 21962149,
   "moranBlock": 22107423,
+  "gibbsBlock": 23846001,
   "parlia": {
     "DBPath": "",
     "InMemory": false,

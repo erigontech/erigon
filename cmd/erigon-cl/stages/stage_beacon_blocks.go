@@ -47,13 +47,24 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 		defer tx.Rollback()
 	}
-	// For now just collect the blocks downloaded in an array
-	progress := cfg.state.LatestBlockHeader.Slot
+	progress := s.BlockNumber
+	if progress == 0 {
+		//progress = cfg.state.LatestBlockHeader.Slot
+		progress = cfg.state.FinalizedCheckpoint.Epoch * 32
+	}
+	/*lastRoot, err := cfg.state.BlockRoot()
+	if err != nil {
+		return err
+	}*/
+	lastRoot := cfg.state.FinalizedCheckpoint.Root
 	// We add one so that we wait for Gossiped blocks if we are on chain tip.
 	targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
 
 	log.Info("[Beacon Downloading] Started", "start", progress, "target", targetSlot)
-	cfg.downloader.SetHighestProcessSlot(progress)
+	cfg.downloader.SetHighestProcessedSlot(progress)
+	if cfg.downloader.HighestProcessedRoot() == (common.Hash{}) {
+		cfg.downloader.SetHighestProcessedRoot(lastRoot)
+	}
 	cfg.downloader.SetTargetSlot(targetSlot)
 	cfg.downloader.SetLimitSegmentsLength(1024)
 	// On new blocks we just check slot sequencing for now :)
@@ -61,24 +72,53 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		highestSlotProcessed uint64,
 		highestRootProcessed common.Hash,
 		newBlocks []*cltypes.SignedBeaconBlockBellatrix) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+		// Setup
 		newHighestSlotProcessed = highestSlotProcessed
 		newHighestBlockRootProcessed = highestRootProcessed
-		for _, block := range newBlocks {
-			slot := block.Block.Slot
-			if slot <= highestSlotProcessed || slot > newHighestSlotProcessed+maxOptimisticDistance || slot > targetSlot {
-				continue
-			}
+		// Skip if segment is empty
+		if len(newBlocks) == 0 {
+			return
+		}
+		// Retrieve last blocks to do reverse soft checks
+		var lastRootInSegment common.Hash
+		lastBlockInSegment := newBlocks[len(newBlocks)-1]
+		lastSlotInSegment := lastBlockInSegment.Block.Slot
+		lastRootInSegment, err = lastBlockInSegment.Block.HashTreeRoot()
+		parentRoot := lastBlockInSegment.Block.ParentRoot
 
-			newHighestSlotProcessed = slot
-			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
-				return
-			}
-			newHighestBlockRootProcessed, err = block.Block.HashTreeRoot()
+		if err != nil {
+			return
+		}
+
+		for i := len(newBlocks) - 2; i >= 0; i-- {
+			var blockRoot common.Hash
+			blockRoot, err = newBlocks[i].Block.HashTreeRoot()
 			if err != nil {
 				return
 			}
+			// Check if block root makes sense, if not segment is invalid
+			if blockRoot != parentRoot {
+				return
+			}
+			// Update the parent root.
+			parentRoot = newBlocks[i].Block.ParentRoot
+			if parentRoot == highestRootProcessed {
+				// We found a connection point? interrupt cycle and move on.
+				newBlocks = newBlocks[i:]
+				break
+			}
 		}
-		return
+		// If segment is not recconecting then skip.
+		if parentRoot != highestRootProcessed {
+			return
+		}
+		for _, block := range newBlocks {
+			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
+				return
+			}
+		}
+		// Checks done, update all internals accordingly
+		return lastSlotInSegment, lastRootInSegment, nil
 	})
 	cfg.downloader.SetIsDownloading(true)
 	logInterval := time.NewTicker(30 * time.Second)
