@@ -1233,7 +1233,7 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 	receipt := types.NewReceipt(false, *usedGas)
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
-	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64()), state.NewNoopWriter()); err != nil {
+	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64(), header.Time), state.NewNoopWriter()); err != nil {
 		return nil, nil, nil, err
 	}
 	// Set the receipt logs and create a bloom for filtering

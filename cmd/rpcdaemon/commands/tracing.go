@@ -84,7 +84,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 	for idx, txn := range block.Transactions() {
 		select {
@@ -332,10 +332,6 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	// Get a new instance of the EVM
-	signer := types.MakeSigner(chainConfig, blockNum)
-	rules := chainConfig.Rules(blockNum)
-
 	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
@@ -363,7 +359,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		BaseFee:     &baseFee,
 	}
 
+	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	signer := types.MakeSigner(chainConfig, blockNum)
+	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.

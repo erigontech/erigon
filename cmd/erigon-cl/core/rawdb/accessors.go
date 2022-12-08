@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	rawdb2 "github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 func EncodeNumber(n uint64) []byte {

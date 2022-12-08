@@ -398,7 +398,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
 
 	// Create an initial tracer
 	prevTracer := logger.NewAccessListTracer(nil, *args.From, to, precompiles)
