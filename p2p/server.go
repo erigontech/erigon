@@ -144,6 +144,7 @@ type Config struct {
 	AllowedPorts []uint
 
 	// eth/66, eth/67, etc
+	// eth/66, eth/67, eth/68, etc
 	ProtocolVersion []uint
 
 	SentryAddr []string

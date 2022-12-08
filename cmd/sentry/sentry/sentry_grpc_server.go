@@ -507,6 +507,17 @@ func runPeer(
 		case 11:
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
+		case eth.VotesMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+
 		default:
 			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
@@ -554,7 +565,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 		peersStreams: NewPeersStreams(),
 	}
 
-	if protocol != eth.ETH66 && protocol != eth.ETH67 {
+	if protocol != eth.ETH66 && protocol != eth.ETH67 && protocol != eth.ETH68 {
 		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
 	}
 

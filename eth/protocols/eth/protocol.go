@@ -35,11 +35,13 @@ import (
 const (
 	ETH66 = 66
 	ETH67 = 67
+	ETH68 = 68
 )
 
 var ProtocolToString = map[uint]string{
 	ETH66: "eth66",
 	ETH67: "eth67",
+	ETH68: "eth68",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -69,6 +71,9 @@ const (
 	NewPooledTransactionHashesMsg = 0x08
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
+
+	// Protocol messages overloaded in eth/68
+	VotesMsg = 0x20
 )
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
@@ -101,6 +106,21 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+	},
+	ETH68: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+		VotesMsg:                      proto_sentry.MessageId_VOTE_MESSAGE_68,
 	},
 }
 
@@ -135,12 +155,32 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
+	ETH68: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		proto_sentry.MessageId_VOTE_MESSAGE_68:                  VotesMsg,
+	},
 }
 
 // Packet represents a p2p message in the `eth` protocol.
 type Packet interface {
 	Name() string // Name returns a string corresponding to the message type.
 	Kind() byte   // Kind returns the message type.
+}
+
+// VotesPacket is the network packet for votes record.
+type VotesPacket struct {
+	Votes []*types.VoteEnvelope
 }
 
 // StatusPacket is the network packet for the status message for eth/64 and later.
@@ -997,3 +1037,6 @@ func (*GetPooledTransactionsPacket) Kind() byte   { return GetPooledTransactions
 
 func (*PooledTransactionsPacket) Name() string { return "PooledTransactions" }
 func (*PooledTransactionsPacket) Kind() byte   { return PooledTransactionsMsg }
+
+func (*VotesPacket) Name() string { return "Votes" }
+func (*VotesPacket) Kind() byte   { return VotesMsg }
