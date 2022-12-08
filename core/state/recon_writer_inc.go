@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -40,8 +39,6 @@ func (w *StateReconWriterInc) SetChainTx(chainTx kv.Tx) {
 	w.chainTx = chainTx
 }
 
-var addr1 common.Address = common.HexToAddress("0x0000000000000000000000000000000000001000")
-
 func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); !ok || stateTxNum != w.txNum {
@@ -53,9 +50,6 @@ func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original
 	}
 	account.EncodeForStorage(value)
 	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
-	if address == addr1 {
-		fmt.Printf("account done [%x] => (balance: %d, nonce: %d), txNum = %d\n", addr, &account.Balance, account.Nonce, w.txNum)
-	}
 	return nil
 }
 
