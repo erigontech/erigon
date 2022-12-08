@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState, error) {
+func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconStateBellatrix, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -36,7 +36,7 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState,
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
 
-	beaconState := &cltypes.BeaconState{}
+	beaconState := &cltypes.BeaconStateBellatrix{}
 	err = beaconState.UnmarshalSSZ(marshaled)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)

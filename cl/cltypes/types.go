@@ -308,9 +308,8 @@ type SignedAggregateAndProof struct {
 	Signature [96]byte `ssz-size:"96"`
 }
 
-// BeaconState is used to create the initial store through checkpoint sync.
-// we only use FinalizedCheckpoint field.
-type BeaconState struct {
+// BellatrixBeaconState is the bellatrix beacon state.
+type BeaconStateBellatrix struct {
 	GenesisTime                  uint64
 	GenesisValidatorsRoot        [32]byte `ssz-size:"32"`
 	Slot                         uint64
@@ -339,7 +338,7 @@ type BeaconState struct {
 }
 
 // BlockRoot retrieves a the state block root from the state.
-func (b *BeaconState) BlockRoot() ([32]byte, error) {
+func (b *BeaconStateBellatrix) BlockRoot() ([32]byte, error) {
 	stateRoot, err := b.HashTreeRoot()
 	if err != nil {
 		return [32]byte{}, nil

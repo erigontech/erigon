@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (s *StateTransistor) transitionState(state *cltypes.BeaconState, block *cltypes.SignedBeaconBlockBellatrix, validate bool) error {
+func (s *StateTransistor) transitionState(state *cltypes.BeaconStateBellatrix, block *cltypes.SignedBeaconBlockBellatrix, validate bool) error {
 	cur_block := block.Block
 	s.processSlots(state, cur_block.Slot)
 	if validate {
@@ -33,7 +33,7 @@ func (s *StateTransistor) transitionState(state *cltypes.BeaconState, block *clt
 }
 
 // transitionSlot is called each time there is a new slot to process
-func (s *StateTransistor) transitionSlot(state *cltypes.BeaconState) error {
+func (s *StateTransistor) transitionSlot(state *cltypes.BeaconStateBellatrix) error {
 	previousStateRoot, err := state.HashTreeRoot()
 	if err != nil {
 		return err
@@ -50,7 +50,7 @@ func (s *StateTransistor) transitionSlot(state *cltypes.BeaconState) error {
 	return nil
 }
 
-func (s *StateTransistor) processSlots(state *cltypes.BeaconState, slot uint64) error {
+func (s *StateTransistor) processSlots(state *cltypes.BeaconStateBellatrix, slot uint64) error {
 	if slot <= state.Slot {
 		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, state.Slot)
 	}
@@ -66,7 +66,7 @@ func (s *StateTransistor) processSlots(state *cltypes.BeaconState, slot uint64) 
 	return nil
 }
 
-func (s *StateTransistor) verifyBlockSignature(state *cltypes.BeaconState, block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
+func (s *StateTransistor) verifyBlockSignature(state *cltypes.BeaconStateBellatrix, block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
 	proposer := state.Validators[block.Block.ProposerIndex]
 	signing_root, err := block.Block.Body.HashTreeRoot()
 	if err != nil {
