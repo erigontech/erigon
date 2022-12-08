@@ -1,2 +1,0 @@
-t=2022-12-08T08:04:09+0000 lvl=eror msg="could not start RPC api for engine: could not start RPC api: listen tcp 127.0.0.1:8551: bind: address already in use"
-t=2022-12-08T08:04:10+0000 lvl=eror msg="Update status message for the sentry" err="could not start server: listen tcp :1: bind: address already in use"

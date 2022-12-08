@@ -164,8 +164,14 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 				}
 				binary.BigEndian.PutUint64(composite, item.txNum)
 				copy(composite[8:], item.key1)
-				if err = rwTx.Put(table, composite, item.val); err != nil {
-					return false
+				if len(item.val) == 0 {
+					if err = rwTx.Put(table, composite[:8], composite[8:]); err != nil {
+						return false
+					}
+				} else {
+					if err = rwTx.Put(table, composite, item.val); err != nil {
+						return false
+					}
 				}
 			}
 			return true
