@@ -118,7 +118,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		// some code paths pre-load transactions such as from the integration tool
 		// we need to make sure these transactions are processed instead of
 		// looking in the pool
-		if !current.PreparedTxs.Empty() {
+		if current.PreparedTxs != nil && !current.PreparedTxs.Empty() {
 			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, current.PreparedTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId)
 			if err != nil {
 				return err
@@ -240,8 +240,8 @@ func getNextTransactions(
 	}
 
 	var txs []types.Transaction //nolint:prealloc
-	var reader *bytes.Reader
-	var stream *rlp.Stream
+	reader := bytes.NewReader([]byte{})
+	stream := new(rlp.Stream)
 	for i := range txSlots.Txs {
 		reader.Reset(txSlots.Txs[i])
 		stream.Reset(reader, uint64(len(txSlots.Txs[i])))

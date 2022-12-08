@@ -39,11 +39,38 @@ var (
 	blockHashValidator1 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
 )
 
+func getEmptyState() *cltypes.BeaconState {
+	return &cltypes.BeaconState{
+		Fork:                         &cltypes.Fork{},
+		LatestBlockHeader:            &cltypes.BeaconBlockHeader{},
+		Eth1Data:                     &cltypes.Eth1Data{},
+		CurrentJustifiedCheckpoint:   &cltypes.Checkpoint{},
+		FinalizedCheckpoint:          &cltypes.Checkpoint{},
+		PreviousJustifiedCheckpoint:  &cltypes.Checkpoint{},
+		CurrentSyncCommittee:         &cltypes.SyncCommittee{},
+		NextSyncCommittee:            &cltypes.SyncCommittee{},
+		LatestExecutionPayloadHeader: &cltypes.ExecutionHeader{},
+	}
+}
+
+func getEmptyBlock() *cltypes.SignedBeaconBlockBellatrix {
+	return &cltypes.SignedBeaconBlockBellatrix{
+		Block: &cltypes.BeaconBlockBellatrix{
+			Body: &cltypes.BeaconBodyBellatrix{
+				Eth1Data:         &cltypes.Eth1Data{},
+				SyncAggregate:    &cltypes.SyncAggregate{},
+				ExecutionPayload: &cltypes.ExecutionPayload{},
+			},
+		},
+	}
+}
+
 func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
 	return &cltypes.SignedBeaconBlockBellatrix{
 		Block: &cltypes.BeaconBlockBellatrix{
 			ProposerIndex: 0,
 			Body: &cltypes.BeaconBodyBellatrix{
+				Eth1Data: &cltypes.Eth1Data{},
 				Graffiti: make([]byte, 32),
 				SyncAggregate: &cltypes.SyncAggregate{
 					SyncCommiteeBits: make([]byte, 64),
@@ -152,7 +179,7 @@ func TestTransitionSlot(t *testing.T) {
 		},
 		{
 			description:   "failure_empty_state",
-			prevState:     &cltypes.BeaconState{},
+			prevState:     getEmptyState(),
 			expectedState: nil,
 			wantErr:       true,
 		},
@@ -231,7 +258,7 @@ func TestProcessSlots(t *testing.T) {
 		},
 		{
 			description:   "error_empty_state",
-			prevState:     &cltypes.BeaconState{},
+			prevState:     getEmptyState(),
 			expectedState: nil,
 			startSlot:     0,
 			numSlots:      1,
@@ -281,12 +308,8 @@ func TestVerifyBlockSignature(t *testing.T) {
 		{
 			description: "failure_empty_block",
 			state:       getTestBeaconStateWithValidator(),
-			block: &cltypes.SignedBeaconBlockBellatrix{
-				Block: &cltypes.BeaconBlockBellatrix{
-					Body: &cltypes.BeaconBodyBellatrix{},
-				},
-			},
-			wantErr: true,
+			block:       getEmptyBlock(),
+			wantErr:     true,
 		},
 		{
 			description: "failure_bad_signature",
@@ -350,12 +373,8 @@ func TestTransitionState(t *testing.T) {
 		{
 			description: "error_empty_block_body",
 			prevState:   getTestBeaconStateWithValidator(),
-			block: &cltypes.SignedBeaconBlockBellatrix{
-				Block: &cltypes.BeaconBlockBellatrix{
-					Body: &cltypes.BeaconBodyBellatrix{},
-				},
-			},
-			wantErr: true,
+			block:       getEmptyBlock(),
+			wantErr:     true,
 		},
 		{
 			description: "error_bad_signature",
