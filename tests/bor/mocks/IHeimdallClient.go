@@ -10,7 +10,8 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 	clerk "github.com/ledgerwatch/erigon/consensus/bor/clerk"
-	heimdall "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	checkpoint "github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
+	span "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 )
 
 // MockIHeimdallClient is a mock of IHeimdallClient interface.
@@ -36,47 +37,74 @@ func (m *MockIHeimdallClient) EXPECT() *MockIHeimdallClientMockRecorder {
 	return m.recorder
 }
 
-// Fetch mocks base method.
-func (m *MockIHeimdallClient) Fetch(arg0 context.Context, arg1, arg2 string) (*heimdall.ResponseWithHeight, error) {
+// Close mocks base method.
+func (m *MockIHeimdallClient) Close() {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Fetch", arg0, arg1, arg2)
-	ret0, _ := ret[0].(*heimdall.ResponseWithHeight)
+	m.ctrl.Call(m, "Close")
+}
+
+// Close indicates an expected call of Close.
+func (mr *MockIHeimdallClientMockRecorder) Close() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockIHeimdallClient)(nil).Close))
+}
+
+// FetchCheckpoint mocks base method.
+func (m *MockIHeimdallClient) FetchCheckpoint(arg0 context.Context, arg1 int64) (*checkpoint.Checkpoint, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchCheckpoint", arg0, arg1)
+	ret0, _ := ret[0].(*checkpoint.Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Fetch indicates an expected call of Fetch.
-func (mr *MockIHeimdallClientMockRecorder) Fetch(arg0, arg1, arg2 interface{}) *gomock.Call {
+// FetchCheckpoint indicates an expected call of FetchCheckpoint.
+func (mr *MockIHeimdallClientMockRecorder) FetchCheckpoint(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Fetch", reflect.TypeOf((*MockIHeimdallClient)(nil).Fetch), arg0, arg1, arg2)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoint", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchCheckpoint), arg0, arg1)
 }
 
-// FetchStateSyncEvents mocks base method.
-func (m *MockIHeimdallClient) FetchStateSyncEvents(arg0 context.Context, arg1 uint64, arg2 int64) ([]*clerk.EventRecordWithTime, error) {
+// FetchCheckpointCount mocks base method.
+func (m *MockIHeimdallClient) FetchCheckpointCount(arg0 context.Context) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchStateSyncEvents", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchCheckpointCount", arg0)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchCheckpointCount indicates an expected call of FetchCheckpointCount.
+func (mr *MockIHeimdallClientMockRecorder) FetchCheckpointCount(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointCount", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchCheckpointCount), arg0)
+}
+
+// Span mocks base method.
+func (m *MockIHeimdallClient) Span(arg0 context.Context, arg1 uint64) (*span.HeimdallSpan, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Span", arg0, arg1)
+	ret0, _ := ret[0].(*span.HeimdallSpan)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Span indicates an expected call of Span.
+func (mr *MockIHeimdallClientMockRecorder) Span(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Span", reflect.TypeOf((*MockIHeimdallClient)(nil).Span), arg0, arg1)
+}
+
+// StateSyncEvents mocks base method.
+func (m *MockIHeimdallClient) StateSyncEvents(arg0 context.Context, arg1 uint64, arg2 int64) ([]*clerk.EventRecordWithTime, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateSyncEvents", arg0, arg1, arg2)
 	ret0, _ := ret[0].([]*clerk.EventRecordWithTime)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchStateSyncEvents indicates an expected call of FetchStateSyncEvents.
-func (mr *MockIHeimdallClientMockRecorder) FetchStateSyncEvents(arg0, arg1, arg2 interface{}) *gomock.Call {
+// StateSyncEvents indicates an expected call of StateSyncEvents.
+func (mr *MockIHeimdallClientMockRecorder) StateSyncEvents(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvents", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchStateSyncEvents), arg0, arg1, arg2)
-}
-
-// FetchWithRetry mocks base method.
-func (m *MockIHeimdallClient) FetchWithRetry(arg0 context.Context, arg1, arg2 string) (*heimdall.ResponseWithHeight, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchWithRetry", arg0, arg1, arg2)
-	ret0, _ := ret[0].(*heimdall.ResponseWithHeight)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// FetchWithRetry indicates an expected call of FetchWithRetry.
-func (mr *MockIHeimdallClientMockRecorder) FetchWithRetry(arg0, arg1, arg2 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchWithRetry", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchWithRetry), arg0, arg1, arg2)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateSyncEvents", reflect.TypeOf((*MockIHeimdallClient)(nil).StateSyncEvents), arg0, arg1, arg2)
 }

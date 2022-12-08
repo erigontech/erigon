@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 // Meters count events to produce exponentially-weighted moving average rates
@@ -21,19 +19,84 @@ type Meter interface {
 	Stop()
 }
 
-// NewMeterForced constructs a new StandardMeter and launches a goroutine no matter
-// the global switch is enabled or not.
+// GetOrRegisterMeter returns an existing Meter or constructs and registers a
+// new StandardMeter.
+// Be sure to unregister the meter from the registry once it is of no use to
+// allow for garbage collection.
+func GetOrRegisterMeter(name string, r Registry) Meter {
+	if nil == r {
+		r = DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewMeter).(Meter)
+}
+
+// GetOrRegisterMeterForced returns an existing Meter or constructs and registers a
+// new StandardMeter no matter the global switch is enabled or not.
+// Be sure to unregister the meter from the registry once it is of no use to
+// allow for garbage collection.
+func GetOrRegisterMeterForced(name string, r Registry) Meter {
+	if nil == r {
+		r = DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewMeterForced).(Meter)
+}
+
+// NewMeter constructs a new StandardMeter and launches a goroutine.
 // Be sure to call Stop() once the meter is of no use to allow for garbage collection.
-func NewMeterForced() Meter {
+func NewMeter() Meter {
+	if !Enabled {
+		return NilMeter{}
+	}
 	m := newStandardMeter()
-	arbiter.mu.Lock()
-	defer arbiter.mu.Unlock()
+	arbiter.Lock()
+	defer arbiter.Unlock()
 	arbiter.meters[m] = struct{}{}
 	if !arbiter.started {
 		arbiter.started = true
 		go arbiter.tick()
 	}
 	return m
+}
+
+// NewMeterForced constructs a new StandardMeter and launches a goroutine no matter
+// the global switch is enabled or not.
+// Be sure to call Stop() once the meter is of no use to allow for garbage collection.
+func NewMeterForced() Meter {
+	m := newStandardMeter()
+	arbiter.Lock()
+	defer arbiter.Unlock()
+	arbiter.meters[m] = struct{}{}
+	if !arbiter.started {
+		arbiter.started = true
+		go arbiter.tick()
+	}
+	return m
+}
+
+// NewRegisteredMeter constructs and registers a new StandardMeter
+// and launches a goroutine.
+// Be sure to unregister the meter from the registry once it is of no use to
+// allow for garbage collection.
+func NewRegisteredMeter(name string, r Registry) Meter {
+	c := NewMeter()
+	if nil == r {
+		r = DefaultRegistry
+	}
+	r.Register(name, c)
+	return c
+}
+
+// NewRegisteredMeterForced constructs and registers a new StandardMeter
+// and launches a goroutine no matter the global switch is enabled or not.
+// Be sure to unregister the meter from the registry once it is of no use to
+// allow for garbage collection.
+func NewRegisteredMeterForced(name string, r Registry) Meter {
+	c := NewMeterForced()
+	if nil == r {
+		r = DefaultRegistry
+	}
+	r.Register(name, c)
+	return c
 }
 
 // MeterSnapshot is a read-only copy of another Meter.
@@ -127,9 +190,9 @@ func newStandardMeter() *StandardMeter {
 func (m *StandardMeter) Stop() {
 	stopped := atomic.SwapUint32(&m.stopped, 1)
 	if stopped != 1 {
-		arbiter.mu.Lock()
+		arbiter.Lock()
 		delete(arbiter.meters, m)
-		arbiter.mu.Unlock()
+		arbiter.Unlock()
 	}
 }
 
@@ -144,9 +207,7 @@ func (m *StandardMeter) Count() int64 {
 
 // Mark records the occurrence of n events.
 func (m *StandardMeter) Mark(n int64) {
-	m.lock.Lock()
-	m.snapshot.temp = n
-	m.lock.Unlock()
+	atomic.AddInt64(&m.snapshot.temp, n)
 }
 
 // Rate1 returns the one-minute moving average rate of events per second.
@@ -216,7 +277,7 @@ func (m *StandardMeter) tick() {
 // meterArbiter ticks meters every 5s from a single goroutine.
 // meters are references in a set for future stopping.
 type meterArbiter struct {
-	mu      sync.RWMutex
+	sync.RWMutex
 	started bool
 	meters  map[*StandardMeter]struct{}
 	ticker  *time.Ticker
@@ -226,15 +287,14 @@ var arbiter = meterArbiter{ticker: time.NewTicker(5 * time.Second), meters: make
 
 // Ticks meters on the scheduled interval
 func (ma *meterArbiter) tick() {
-	defer debug.LogPanic()
 	for range ma.ticker.C {
 		ma.tickMeters()
 	}
 }
 
 func (ma *meterArbiter) tickMeters() {
-	ma.mu.RLock()
-	defer ma.mu.RUnlock()
+	ma.RLock()
+	defer ma.RUnlock()
 	for meter := range ma.meters {
 		meter.tick()
 	}

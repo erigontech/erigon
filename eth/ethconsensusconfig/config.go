@@ -11,7 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -22,7 +24,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallgRPCAddress string, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -65,9 +67,22 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.BorConfig:
 		spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
+		borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
+		db := db.OpenDatabase(borDbPath, logger, false, readonly)
+
 		if chainConfig.Bor != nil {
-			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
-			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false, readonly), HeimdallURL, WithoutHeimdall, spanner)
+
+			var heimdallClient bor.IHeimdallClient
+			if WithoutHeimdall {
+				return bor.New(chainConfig, db, nil, spanner)
+			} else {
+				if HeimdallgRPCAddress != "" {
+					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(HeimdallgRPCAddress)
+				} else {
+					heimdallClient = heimdall.NewHeimdallClient(HeimdallURL)
+				}
+				eng = bor.New(chainConfig, db, heimdallClient, spanner)
+			}
 		}
 	}
 
