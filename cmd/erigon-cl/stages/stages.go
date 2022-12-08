@@ -52,7 +52,7 @@ func NewConsensusStagedSync(ctx context.Context,
 	forwardDownloader *network.ForwardBeaconDownloader,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
-	state *cltypes.BeaconState,
+	state *cltypes.BeaconStateBellatrix,
 	triggerExecution triggerExecutionFunc,
 	clearEth1Data bool,
 ) (*stagedsync.Sync, error) {

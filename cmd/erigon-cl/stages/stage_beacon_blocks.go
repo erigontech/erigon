@@ -20,13 +20,13 @@ type StageBeaconsBlockCfg struct {
 	downloader *network.ForwardBeaconDownloader
 	genesisCfg *clparams.GenesisConfig
 	beaconCfg  *clparams.BeaconChainConfig
-	state      *cltypes.BeaconState
+	state      *cltypes.BeaconStateBellatrix
 }
 
 const maxOptimisticDistance = 8
 
 func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconState) StageBeaconsBlockCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconStateBellatrix) StageBeaconsBlockCfg {
 	return StageBeaconsBlockCfg{
 		db:         db,
 		downloader: downloader,
