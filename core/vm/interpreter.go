@@ -69,6 +69,15 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	CodeSection uint64
+	ReturnStack []*ReturnContext
+}
+
+type ReturnContext struct {
+	Section     uint64
+	Pc          uint64
+	StackHeight int
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -82,7 +91,8 @@ type keccakState interface {
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
 	*VM
-	jt *JumpTable // EVM instruction table
+	legacyJt *JumpTable // Legacy EVM instruction table
+	eofJt    *JumpTable // EOF EVM instruction table
 }
 
 // structcheck doesn't see embedding
@@ -112,12 +122,14 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	var jt *JumpTable
+	var jt, eofJt *JumpTable
 	switch {
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
+		eofJt = &cancunEOFInstructionSet
 	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
+		eofJt = &shanghaiEOFInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case evm.ChainRules().IsBerlin:
@@ -153,49 +165,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 			evm: evm,
 			cfg: cfg,
 		},
-		jt: jt,
-	}
-}
-
-func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
-	var jt *JumpTable
-	switch {
-	case vm.evm.ChainRules().IsCancun:
-		jt = &cancunInstructionSet
-	case vm.evm.ChainRules().IsShanghai:
-		jt = &shanghaiInstructionSet
-	case vm.evm.ChainRules().IsLondon:
-		jt = &londonInstructionSet
-	case vm.evm.ChainRules().IsBerlin:
-		jt = &berlinInstructionSet
-	case vm.evm.ChainRules().IsIstanbul:
-		jt = &istanbulInstructionSet
-	case vm.evm.ChainRules().IsConstantinople:
-		jt = &constantinopleInstructionSet
-	case vm.evm.ChainRules().IsByzantium:
-		jt = &byzantiumInstructionSet
-	case vm.evm.ChainRules().IsSpuriousDragon:
-		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules().IsTangerineWhistle:
-		jt = &tangerineWhistleInstructionSet
-	case vm.evm.ChainRules().IsHomestead:
-		jt = &homesteadInstructionSet
-	default:
-		jt = &frontierInstructionSet
-	}
-	if len(vm.cfg.ExtraEips) > 0 {
-		for i, eip := range vm.cfg.ExtraEips {
-			if err := EnableEIP(eip, jt); err != nil {
-				// Disable it, so caller can check if it's activated or not
-				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "err", err)
-			}
-		}
-	}
-
-	return &EVMInterpreter{
-		VM: vm,
-		jt: jt,
+		legacyJt: jt,
+		eofJt:    eofJt,
 	}
 }
 
@@ -225,13 +196,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	var (
+		jt          *JumpTable    // current jump table
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:   mem,
-			Stack:    locStack,
-			Contract: contract,
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			CodeSection: 0,
+			ReturnStack: []*ReturnContext{{Section: 0, Pc: 0, StackHeight: 0}},
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -250,6 +224,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// they are returned to the pools
 	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
+
+	if contract.IsEOF() {
+		jt = in.eofJt
+	} else {
+		jt = in.legacyJt
+	}
 
 	if in.cfg.Debug {
 		defer func() {
@@ -279,8 +259,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(_pc)
-		operation := in.jt[op]
+		op = contract.GetOp(_pc, callContext.CodeSection)
+		operation := jt[op]
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.minStack {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}

@@ -888,12 +888,13 @@ func makeLog(size int) executionFunc {
 // opPush1 is a specialized version of pushN
 func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		codeLen = uint64(len(scope.Contract.Code))
+		code    = scope.Contract.CodeAt(scope.CodeSection)
+		codeLen = uint64(len(code))
 		integer = new(uint256.Int)
 	)
 	*pc++
 	if *pc < codeLen {
-		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[*pc])))
+		scope.Stack.Push(integer.SetUint64(uint64(code[*pc])))
 	} else {
 		scope.Stack.Push(integer.Clear())
 	}
@@ -903,7 +904,8 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-		codeLen := len(scope.Contract.Code)
+		code := scope.Contract.CodeAt(scope.CodeSection)
+		codeLen := len(code)
 
 		startMin := int(*pc + 1)
 		if startMin >= codeLen {
@@ -916,8 +918,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 
 		integer := new(uint256.Int)
 		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			scope.Contract.Code[startMin:endMin], pushByteSize)))
+			code[startMin:endMin], pushByteSize)))
 
 		*pc += size
 		return nil, nil

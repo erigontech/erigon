@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -231,7 +232,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code)
+		contract.SetCallCode(&addrCopy, codeHash, code, evm.maybeParseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
@@ -349,6 +350,21 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
 	}
+
+	// Initialise a new contract and set the code that is to be used by the EVM.
+	// The contract is a scoped environment for this execution context only.
+	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
+	contract.SetCodeOptionalHash(&address, codeAndHash)
+
+	// If the initcode is EOF, verify it is well-formed.
+	if evm.chainRules.IsShanghai && hasEOFByte(codeAndHash.code) {
+		var c Container
+		if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
+			return nil, common.Address{}, 0, fmt.Errorf("%v: %v", ErrInvalidEOF, err)
+		}
+		contract.Container = &c
+	}
+
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -356,11 +372,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		evm.intraBlockState.SetNonce(address, 1)
 	}
 	evm.context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
-
-	// Initialise a new contract and set the code that is to be used by the EVM.
-	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
-	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil
@@ -458,4 +469,17 @@ func (evm *EVM) TxContext() evmtypes.TxContext {
 
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
+}
+
+func (evm *EVM) maybeParseContainer(b []byte) *Container {
+	if evm.chainRules.IsShanghai {
+		var c Container
+		if err := c.UnmarshalBinary(b); err != nil && err.Error() == "invalid magic" {
+			return nil
+		} else if err != nil {
+			panic(fmt.Sprintf("unexpected error: %v", err))
+		}
+		return &c
+	}
+	return nil
 }

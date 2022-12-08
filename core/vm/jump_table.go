@@ -66,17 +66,31 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
+	shanghaiEOFInstructionSet      = newShanghaiEOFInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
+	cancunEOFInstructionSet        = newCancunEOFInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
 type JumpTable [256]*operation
+
+func newCancunEOFInstructionSet() JumpTable {
+	instructionSet := newCancunInstructionSet()
+	enableEOF(&instructionSet)
+	return instructionSet
+}
 
 // newCancunInstructionSet returns the frontier, homestead, byzantium,
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
+	return instructionSet
+}
+
+func newShanghaiEOFInstructionSet() JumpTable {
+	instructionSet := newShanghaiInstructionSet()
+	enableEOF(&instructionSet)
 	return instructionSet
 }
 
