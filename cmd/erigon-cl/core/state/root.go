@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -9,7 +10,22 @@ func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	return state_encoding.MerkleRootFromLeaves(b.leaves)
+
+	currentLayer := b.leaves
+	// Pad to 32 of length
+	for len(currentLayer) != 32 {
+		currentLayer = append(currentLayer, [32]byte{})
+	}
+
+	for len(currentLayer) > 1 {
+		layer := make([][32]byte, 0)
+		for i := 0; i < len(currentLayer); i += 2 {
+			hashedChunk := utils.Keccak256(currentLayer[i][:], currentLayer[i+1][:])
+			layer = append(layer, hashedChunk)
+		}
+		currentLayer = layer
+	}
+	return currentLayer[0], nil
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -91,7 +107,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		if err != nil {
 			return err
 		}
-		b.updateLeaf(Eth1DataLeafIndex, votesRoot)
+		b.updateLeaf(Eth1DataVotesLeafIndex, votesRoot)
 	}
 
 	// Field(10): Eth1DepositIndex
@@ -214,12 +230,12 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(24): LatestExecutionPayloadHeader
-	if b.isLeafDirty(LatestBlockHeaderLeafIndex) {
-		headerRoot, err := b.latestBlockHeader.HashTreeRoot()
+	if b.isLeafDirty(LatestExecutionPayloadHeaderLeafIndex) {
+		headerRoot, err := b.latestExecutionPayloadHeader.HashTreeRoot()
 		if err != nil {
 			return err
 		}
-		b.updateLeaf(LatestBlockHeaderLeafIndex, headerRoot)
+		b.updateLeaf(LatestExecutionPayloadHeaderLeafIndex, headerRoot)
 	}
 	return nil
 }
