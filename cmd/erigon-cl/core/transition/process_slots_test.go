@@ -39,11 +39,38 @@ var (
 	blockHashValidator1 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
 )
 
+func getEmptyState() *cltypes.BeaconStateBellatrix {
+	return &cltypes.BeaconStateBellatrix{
+		Fork:                         &cltypes.Fork{},
+		LatestBlockHeader:            &cltypes.BeaconBlockHeader{},
+		Eth1Data:                     &cltypes.Eth1Data{},
+		CurrentJustifiedCheckpoint:   &cltypes.Checkpoint{},
+		FinalizedCheckpoint:          &cltypes.Checkpoint{},
+		PreviousJustifiedCheckpoint:  &cltypes.Checkpoint{},
+		CurrentSyncCommittee:         &cltypes.SyncCommittee{},
+		NextSyncCommittee:            &cltypes.SyncCommittee{},
+		LatestExecutionPayloadHeader: &cltypes.ExecutionHeader{},
+	}
+}
+
+func getEmptyBlock() *cltypes.SignedBeaconBlockBellatrix {
+	return &cltypes.SignedBeaconBlockBellatrix{
+		Block: &cltypes.BeaconBlockBellatrix{
+			Body: &cltypes.BeaconBodyBellatrix{
+				Eth1Data:         &cltypes.Eth1Data{},
+				SyncAggregate:    &cltypes.SyncAggregate{},
+				ExecutionPayload: &cltypes.ExecutionPayload{},
+			},
+		},
+	}
+}
+
 func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
 	return &cltypes.SignedBeaconBlockBellatrix{
 		Block: &cltypes.BeaconBlockBellatrix{
 			ProposerIndex: 0,
 			Body: &cltypes.BeaconBodyBellatrix{
+				Eth1Data: &cltypes.Eth1Data{},
 				Graffiti: make([]byte, 32),
 				SyncAggregate: &cltypes.SyncAggregate{
 					SyncCommiteeBits: make([]byte, 64),
@@ -59,8 +86,8 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
 	}
 }
 
-func getTestBeaconState() *cltypes.BeaconState {
-	return &cltypes.BeaconState{
+func getTestBeaconState() *cltypes.BeaconStateBellatrix {
+	return &cltypes.BeaconStateBellatrix{
 		BlockRoots:        make([][32]byte, 8192),
 		StateRoots:        make([][32]byte, 8192),
 		RandaoMixes:       make([][32]byte, 65536),
@@ -87,14 +114,14 @@ func getTestBeaconState() *cltypes.BeaconState {
 	}
 }
 
-func getTestBeaconStateWithValidator() *cltypes.BeaconState {
+func getTestBeaconStateWithValidator() *cltypes.BeaconStateBellatrix {
 	res := getTestBeaconState()
 	res.Validators = append(res.Validators, testValidator)
 	res.Validators[0].WithdrawalCredentials = make([]byte, 32)
 	return res
 }
 
-func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string, nextState *cltypes.BeaconState) *cltypes.BeaconState {
+func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs []string, nextState *cltypes.BeaconStateBellatrix) *cltypes.BeaconStateBellatrix {
 	// Set slot to initial index.
 	for i, val := range slots {
 		nextState.Slot = val
@@ -122,8 +149,8 @@ func TestTransitionSlot(t *testing.T) {
 	slot42.Slot = 42
 	testCases := []struct {
 		description   string
-		prevState     *cltypes.BeaconState
-		expectedState *cltypes.BeaconState
+		prevState     *cltypes.BeaconStateBellatrix
+		expectedState *cltypes.BeaconStateBellatrix
 		wantErr       bool
 	}{
 		{
@@ -152,7 +179,7 @@ func TestTransitionSlot(t *testing.T) {
 		},
 		{
 			description:   "failure_empty_state",
-			prevState:     &cltypes.BeaconState{},
+			prevState:     getEmptyState(),
 			expectedState: nil,
 			wantErr:       true,
 		},
@@ -187,8 +214,8 @@ func TestProcessSlots(t *testing.T) {
 	slot42.Slot = 42
 	testCases := []struct {
 		description   string
-		prevState     *cltypes.BeaconState
-		expectedState *cltypes.BeaconState
+		prevState     *cltypes.BeaconStateBellatrix
+		expectedState *cltypes.BeaconStateBellatrix
 		numSlots      uint64
 		startSlot     uint64
 		wantErr       bool
@@ -231,7 +258,7 @@ func TestProcessSlots(t *testing.T) {
 		},
 		{
 			description:   "error_empty_state",
-			prevState:     &cltypes.BeaconState{},
+			prevState:     getEmptyState(),
 			expectedState: nil,
 			startSlot:     0,
 			numSlots:      1,
@@ -266,7 +293,7 @@ func TestVerifyBlockSignature(t *testing.T) {
 	badSigBlock.Signature = badSignature
 	testCases := []struct {
 		description string
-		state       *cltypes.BeaconState
+		state       *cltypes.BeaconStateBellatrix
 		block       *cltypes.SignedBeaconBlockBellatrix
 		wantValid   bool
 		wantErr     bool
@@ -281,12 +308,8 @@ func TestVerifyBlockSignature(t *testing.T) {
 		{
 			description: "failure_empty_block",
 			state:       getTestBeaconStateWithValidator(),
-			block: &cltypes.SignedBeaconBlockBellatrix{
-				Block: &cltypes.BeaconBlockBellatrix{
-					Body: &cltypes.BeaconBodyBellatrix{},
-				},
-			},
-			wantErr: true,
+			block:       getEmptyBlock(),
+			wantErr:     true,
 		},
 		{
 			description: "failure_bad_signature",
@@ -329,9 +352,9 @@ func TestTransitionState(t *testing.T) {
 	badStateRootBlock.Block.StateRoot = [32]byte{}
 	testCases := []struct {
 		description   string
-		prevState     *cltypes.BeaconState
+		prevState     *cltypes.BeaconStateBellatrix
 		block         *cltypes.SignedBeaconBlockBellatrix
-		expectedState *cltypes.BeaconState
+		expectedState *cltypes.BeaconStateBellatrix
 		wantErr       bool
 	}{
 		{
@@ -350,12 +373,8 @@ func TestTransitionState(t *testing.T) {
 		{
 			description: "error_empty_block_body",
 			prevState:   getTestBeaconStateWithValidator(),
-			block: &cltypes.SignedBeaconBlockBellatrix{
-				Block: &cltypes.BeaconBlockBellatrix{
-					Body: &cltypes.BeaconBodyBellatrix{},
-				},
-			},
-			wantErr: true,
+			block:       getEmptyBlock(),
+			wantErr:     true,
 		},
 		{
 			description: "error_bad_signature",

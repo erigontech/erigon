@@ -86,7 +86,7 @@ Loop:
 	return nil
 }
 
-func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *cltypes.BeaconState) (sentinelrpc.SentinelClient, error) {
+func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *cltypes.BeaconStateBellatrix) (sentinelrpc.SentinelClient, error) {
 	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context, db kv.RwDB) (*cltypes.BeaconState, error) {
+func getCheckpointState(ctx context.Context, db kv.RwDB) (*cltypes.BeaconStateBellatrix, error) {
 
 	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
 

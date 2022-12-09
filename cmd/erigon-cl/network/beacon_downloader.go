@@ -79,11 +79,25 @@ func (f *ForwardBeaconDownloader) SetProcessFunction(fn ProcessFn) {
 	f.process = fn
 }
 
-// SetHighestProcessSlot sets the highest processed slot so far.
-func (f *ForwardBeaconDownloader) SetHighestProcessSlot(highestSlotProcessed uint64) {
+// SetHighestProcessedSlot sets the highest processed slot so far.
+func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.highestSlotProcessed = highestSlotProcessed
+}
+
+// SetHighestProcessedRoot sets the highest processed block root so far.
+func (f *ForwardBeaconDownloader) SetHighestProcessedRoot(root common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.highestBlockRootProcessed = root
+}
+
+// HighestProcessedRoot returns the highest processed block root so far.
+func (f *ForwardBeaconDownloader) HighestProcessedRoot() common.Hash {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.highestBlockRootProcessed
 }
 
 // addSegment process new block segment.

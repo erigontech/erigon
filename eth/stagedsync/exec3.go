@@ -422,7 +422,6 @@ Loop:
 		t := time.Now()
 
 		inputBlockNum.Store(blockNum)
-		rules := chainConfig.Rules(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
@@ -460,6 +459,7 @@ Loop:
 				}
 			}()
 		}
+		rules := chainConfig.Rules(blockNum, b.Time())
 		var gasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -1019,7 +1019,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	for bn = uint64(0); bn <= blockNum; bn++ {
 		t = time.Now()
-		rules := chainConfig.Rules(bn)
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
 			return err
@@ -1037,6 +1036,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		rules := chainConfig.Rules(blockNum, b.Time())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
