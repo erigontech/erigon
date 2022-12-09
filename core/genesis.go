@@ -603,18 +603,6 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultRopstenGenesisBlock returns the Ropsten network genesis block.
-func DefaultRopstenGenesisBlock() *Genesis {
-	return &Genesis{
-		Config:     params.RopstenChainConfig,
-		Nonce:      66,
-		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
-		GasLimit:   16777216,
-		Difficulty: big.NewInt(1048576),
-		Alloc:      readPrealloc("allocs/ropsten.json"),
-	}
-}
-
 // DefaultRinkebyGenesisBlock returns the Rinkeby network genesis block.
 func DefaultRinkebyGenesisBlock() *Genesis {
 	return &Genesis{
@@ -807,8 +795,6 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultGenesisBlock()
 	case networkname.SepoliaChainName:
 		return DefaultSepoliaGenesisBlock()
-	case networkname.RopstenChainName:
-		return DefaultRopstenGenesisBlock()
 	case networkname.RinkebyChainName:
 		return DefaultRinkebyGenesisBlock()
 	case networkname.GoerliChainName:

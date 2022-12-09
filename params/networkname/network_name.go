@@ -3,7 +3,6 @@ package networkname
 const (
 	MainnetChainName    = "mainnet"
 	SepoliaChainName    = "sepolia"
-	RopstenChainName    = "ropsten"
 	RinkebyChainName    = "rinkeby"
 	GoerliChainName     = "goerli"
 	DevChainName        = "dev"
@@ -21,7 +20,6 @@ const (
 var All = []string{
 	MainnetChainName,
 	SepoliaChainName,
-	RopstenChainName,
 	RinkebyChainName,
 	GoerliChainName,
 	SokolChainName,

@@ -62,7 +62,6 @@ const (
 var (
 	MainnetGenesisHash    = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	SepoliaGenesisHash    = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	RopstenGenesisHash    = common.HexToHash("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d")
 	RinkebyGenesisHash    = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash     = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	SokolGenesisHash      = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
@@ -92,9 +91,6 @@ var (
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
-
-	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
-	RopstenChainConfig = readChainSpec("chainspecs/ropsten.json")
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = readChainSpec("chainspecs/rinkeby.json")
@@ -886,8 +882,6 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return MainnetChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
-	case networkname.RopstenChainName:
-		return RopstenChainConfig
 	case networkname.RinkebyChainName:
 		return RinkebyChainConfig
 	case networkname.GoerliChainName:
@@ -921,8 +915,6 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &MainnetGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
-	case networkname.RopstenChainName:
-		return &RopstenGenesisHash
 	case networkname.RinkebyChainName:
 		return &RinkebyGenesisHash
 	case networkname.GoerliChainName:
@@ -956,8 +948,6 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return MainnetChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
-	case genesisHash == RopstenGenesisHash:
-		return RopstenChainConfig
 	case genesisHash == RinkebyGenesisHash:
 		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:

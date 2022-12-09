@@ -1075,8 +1075,6 @@ func chainConfig(name string) error {
 	switch name {
 	case "mainnet":
 		chainConfig = params.MainnetChainConfig
-	case "ropsten":
-		chainConfig = params.RopstenChainConfig
 	case "sepolia":
 		chainConfig = params.SepoliaChainConfig
 	case "rinkeby":
