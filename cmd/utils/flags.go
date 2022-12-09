@@ -480,7 +480,7 @@ var (
 	}
 	P2pProtocolAllowedPorts = cli.UintSliceFlag{
 		Name:  "p2p.allowed-ports",
-		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>  If you using --port, make sure that provided port also presented as allowed port",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
 		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304),
 	}
 	SentryAddrFlag = cli.StringFlag{
