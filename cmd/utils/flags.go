@@ -935,6 +935,21 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
 		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
 	}
+
+	if ctx.IsSet(ListenPortFlag.Name) {
+		// add non-default port to allowed port list
+		lp := ctx.Int(ListenPortFlag.Name)
+		found := false
+		for _, p := range cfg.AllowedPorts {
+			if int(p) == lp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
+		}
+	}
 }
 
 // setNAT creates a port mapper from command line flags.

@@ -344,8 +344,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
-
-			log.Info("sentry gRPC server has been started", "protocol", fmt.Sprintf("eth/%d", protocol), "addr", cfg.ListenAddr)
 		}
 
 		go func() {
