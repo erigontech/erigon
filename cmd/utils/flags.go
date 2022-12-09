@@ -844,18 +844,18 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 // NewP2PConfig
 //   - doesn't setup bootnodes - they will set when genesisHash will know
 func NewP2PConfig(
-	 nodiscover bool,
-	 dirs datadir.Dirs,
-	 netRestrict string,
-	 natSetting string,
-	 maxPeers int,
-	 maxPendPeers int,
-	 nodeName string,
-	 staticPeers []string,
-	 trustedPeers []string,
-	 port,
-	 protocol uint,
-	 allowedPorts []uint,
+	nodiscover bool,
+	dirs datadir.Dirs,
+	netRestrict string,
+	natSetting string,
+	maxPeers int,
+	maxPendPeers int,
+	nodeName string,
+	staticPeers []string,
+	trustedPeers []string,
+	port,
+	protocol uint,
+	allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {

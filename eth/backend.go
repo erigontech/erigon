@@ -326,13 +326,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			// pick port from allowed list
 			var picked bool
 			for ; pi < len(refCfg.AllowedPorts); pi++ {
-				listenPort = int(refCfg.AllowedPorts[pi])
-				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, listenPort)) {
-					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", listenPort)
+				pc := int(refCfg.AllowedPorts[pi])
+				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
+					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
 					continue
 				}
 				picked = true
 				pi++
+				listenPort = pc
 
 				cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 				break
