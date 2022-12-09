@@ -230,7 +230,7 @@ type metaTx struct {
 	timestamp                 uint64 // when it was added to pool
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
-	candidate                 bool
+	alreadyYielded            bool
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestmap uint64) *metaTx {
@@ -601,9 +601,7 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-// Best - returns top `n` elements of pending queue
-// id doesn't perform full copy of txs, however underlying elements are immutable
-func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, isMining bool) (bool, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, isYielding bool) (bool, error) {
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
 		return false, nil // Too early
@@ -626,7 +624,7 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 			mt := best.ms[i]
 
-			if isMining && mt.candidate {
+			if isYielding && mt.alreadyYielded {
 				continue
 			}
 
@@ -659,8 +657,8 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			txs.Txs[j] = rlpTx
 			copy(txs.Senders.At(j), sender)
 			txs.IsLocal[j] = isLocal
-			if isMining {
-				mt.candidate = true
+			if isYielding {
+				mt.alreadyYielded = true
 			}
 			j++
 		}
@@ -675,6 +673,14 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 	}
 	return success, err
+}
+
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, true)
+}
+
+func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, false)
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
