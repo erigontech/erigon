@@ -87,7 +87,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(9): Eth1DataVotes
 	if b.isLeafDirty(Eth1DataVotesLeafIndex) {
-		votesRoot, err := state_encoding.Eth1DataVectorRoot(b.eth1DataVotes, state_encoding.Eth1DataVotesRootsLimit)
+		votesRoot, err := state_encoding.Eth1DataVectorRoot(b.eth1DataVotes)
 		if err != nil {
 			return err
 		}
@@ -101,7 +101,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(11): Validators
 	if b.isLeafDirty(ValidatorsLeafIndex) {
-		vRoot, err := state_encoding.ValidatorsVectorRoot(b.validators, state_encoding.ValidatorRegistryLimit)
+		vRoot, err := state_encoding.ValidatorsVectorRoot(b.validators)
 		if err != nil {
 			return err
 		}
