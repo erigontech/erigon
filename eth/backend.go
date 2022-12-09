@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -316,15 +317,35 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
+
+		var pi int // points to next port to be picked from refCfg.AllowedPorts
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
-			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-			listenPort++
+
+			// pick port from allowed list
+			var picked bool
+			for ; pi < len(refCfg.AllowedPorts); pi++ {
+				listenPort = int(refCfg.AllowedPorts[pi])
+				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, listenPort)) {
+					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", listenPort)
+					continue
+				}
+				picked = true
+				pi++
+
+				cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
+				break
+			}
+			if !picked {
+				return nil, fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
+			}
 
 			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+
+			log.Info("sentry gRPC server has been started", "protocol", fmt.Sprintf("eth/%d", protocol), "addr", cfg.ListenAddr)
 		}
 
 		go func() {
@@ -1065,4 +1086,13 @@ func RemoveContents(dir string) error {
 		}
 	}
 	return nil
+}
+
+func checkPortIsFree(addr string) (free bool) {
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	c.Close()
+	return false
 }

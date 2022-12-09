@@ -478,6 +478,11 @@ var (
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
+	P2pProtocolAllowedPorts = cli.UintSliceFlag{
+		Name:  "p2p.allowed-ports",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>  If you using --port, make sure that provided port also presented as allowed port",
+		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -839,17 +844,18 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 // NewP2PConfig
 //   - doesn't setup bootnodes - they will set when genesisHash will know
 func NewP2PConfig(
-	nodiscover bool,
-	dirs datadir.Dirs,
-	netRestrict string,
-	natSetting string,
-	maxPeers int,
-	maxPendPeers int,
-	nodeName string,
-	staticPeers []string,
-	trustedPeers []string,
-	port,
-	protocol uint,
+	 nodiscover bool,
+	 dirs datadir.Dirs,
+	 netRestrict string,
+	 natSetting string,
+	 maxPeers int,
+	 maxPendPeers int,
+	 nodeName string,
+	 staticPeers []string,
+	 trustedPeers []string,
+	 port,
+	 protocol uint,
+	 allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -876,6 +882,7 @@ func NewP2PConfig(
 		Name:            nodeName,
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -922,6 +929,11 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
+	}
+	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
+	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
+	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
+		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
 	}
 }
 
