@@ -4,7 +4,11 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-func (b *BeaconState) HashTreeRoot() ([]byte, error) {
+func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
+	if err := b.computeDirtyLeaves(); err != nil {
+		return [32]byte{}, err
+	}
+	return merkleRootFromLeaves(b.leaves, BellatrixLeavesSize)
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -45,10 +49,31 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(5): BlockRoots
+	if b.isLeafDirty(BlockRootsLeafIndex) {
+		blockRootsRoot, err := ArraysRoot(b.blockRoots, BlockRootsLength)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(BlockRootsLeafIndex, blockRootsRoot)
+	}
 
 	// Field(6): StateRoots
+	if b.isLeafDirty(StateRootsLeafIndex) {
+		stateRootsRoot, err := ArraysRoot(b.stateRoots, StateRootsLength)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(StateRootsLeafIndex, stateRootsRoot)
+	}
 
 	// Field(7): HistoricalRoots
+	if b.isLeafDirty(HistoricalRootsLeafIndex) {
+		historicalRootsRoot, err := ArraysRootWithLength(b.historicalRoots, HistoricalRootsLength)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(HistoricalRootsLeafIndex, historicalRootsRoot)
+	}
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
@@ -58,7 +83,15 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(Eth1DataLeafIndex, dataRoot)
 	}
+
 	// Field(9): Eth1DataVotes
+	if b.isLeafDirty(Eth1DataVotesLeafIndex) {
+		votesRoot, err := Eth1DataVectorRoot(b.eth1DataVotes, Eth1DataVotesRootsLimit)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(Eth1DataLeafIndex, votesRoot)
+	}
 
 	// Field(10): Eth1DepositIndex
 	if b.isLeafDirty(Eth1DepositIndexLeafIndex) {
@@ -66,10 +99,24 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(11): Validators
+	if b.isLeafDirty(ValidatorsLeafIndex) {
+		vRoot, err := ValidatorsVectorRoot(b.validators, ValidatorRegistryLimit)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(ValidatorsLeafIndex, vRoot)
+	}
 
 	// Field(12): Balances
 
 	// Field(13): RandaoMixes
+	if b.isLeafDirty(RandaoMixesLeafIndex) {
+		randaoRootsRoot, err := ArraysRoot(b.randaoMixes, RandaoMixesLength)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(RandaoMixesLeafIndex, randaoRootsRoot)
+	}
 
 	// Field(14): Slashings
 

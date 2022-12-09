@@ -44,10 +44,8 @@ type BeaconState struct {
 	latestExecutionPayloadHeader *cltypes.ExecutionHeader
 	// Internals
 	version       StateVersion            // State version
-	leaves        []common.Hash           // Pre-computed leaves.
+	leaves        [][32]byte              // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
-	root          common.Hash             // Cached state root.
-	//hasher        HashFunc      // Merkle root hasher.
 }
 
 // FromBellatrixState initialize the beacon state as a bellatrix state.
