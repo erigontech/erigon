@@ -325,22 +325,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 			// pick port from allowed list
 			var picked bool
-			for ; pi < len(refCfg.AllowedPorts); pi++ {
+			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
 				pc := int(refCfg.AllowedPorts[pi])
 				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
 					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
 					continue
 				}
-				picked = true
+				if listenPort != pc {
+					listenPort = pc
+				}
 				pi++
-				listenPort = pc
-
-				cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-				break
+				picked = true
 			}
 			if !picked {
 				return nil, fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
 			}
+
+			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
 			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
 			backend.sentryServers = append(backend.sentryServers, server)
