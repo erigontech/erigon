@@ -115,10 +115,6 @@ func (c *Contract) isCode(udest uint64) bool {
 		// TODO remove this
 		panic("shouldn't run jumpdest analysis on EOF")
 	}
-	// Do we already have an analysis laying around?
-	if c.analysis != nil {
-		return c.analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
-	}
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
