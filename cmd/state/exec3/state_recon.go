@@ -59,7 +59,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
 	for it.HasNext() {
-		key, val, _ := it.Next()
+		key, val := it.Next()
 		if len(val) > 0 {
 			var a accounts.Account
 			a.Reset()
@@ -109,7 +109,7 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
-		key, val, _ := it.Next()
+		key, val := it.Next()
 		copy(compositeKey[:20], key[:20])
 		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
@@ -131,7 +131,7 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 	for it.HasNext() {
-		key, val, _ := it.Next()
+		key, val := it.Next()
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
@@ -155,28 +155,25 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 }
 
 func (sw *ScanWorker) BitmapAccounts() error {
-	it := sw.as.IterateAccountsTxs(sw.txNum)
+	it := sw.as.IterateAccountsTxs()
 	for it.HasNext() {
-		_, txNum, _ := it.Next()
-		sw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
 	return nil
 }
 
 func (sw *ScanWorker) BitmapStorage() error {
-	it := sw.as.IterateStorageTxs(sw.txNum)
+	it := sw.as.IterateStorageTxs()
 	for it.HasNext() {
-		_, txNum, _ := it.Next()
-		sw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
 	return nil
 }
 
 func (sw *ScanWorker) BitmapCode() error {
-	it := sw.as.IterateCodeTxs(sw.txNum)
+	it := sw.as.IterateCodeTxs()
 	for it.HasNext() {
-		_, txNum, _ := it.Next()
-		sw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
 	return nil
 }
@@ -331,11 +328,11 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
-				panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
+				panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err))
 			}
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {

@@ -899,7 +899,7 @@ func reconstituteStep(last bool,
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
+		skipAnalysis := core.SkipAnalysis(chainConfig, bn)
 		signer := *types.MakeSigner(chainConfig, bn)
 
 		f := core.GetHashFn(header, getHeaderFunc)
@@ -910,7 +910,7 @@ func reconstituteStep(last bool,
 			return f(n)
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
-		rules := chainConfig.Rules(blockNum, b.Time())
+		rules := chainConfig.Rules(bn, b.Time())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {
