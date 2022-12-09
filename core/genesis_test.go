@@ -62,15 +62,6 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
 	}
 
-	block, _, err = DefaultFermionGenesisBlock().ToBlock()
-	require.NoError(err)
-	if block.Root() != params.FermionGenesisStateRoot {
-		t.Errorf("wrong Fermion genesis state root, got %v, want %v", block.Root(), params.FermionGenesisStateRoot)
-	}
-	if block.Hash() != params.FermionGenesisHash {
-		t.Errorf("wrong Fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
-	}
-
 	block, _, err = DefaultGnosisGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {

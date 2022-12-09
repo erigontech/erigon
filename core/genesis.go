@@ -701,17 +701,6 @@ func DefaultRialtoGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultFermionGenesisBlock() *Genesis {
-	return &Genesis{
-		Config:     params.FermionChainConfig,
-		Timestamp:  0x0,
-		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000003a03f6d88437328ce8623ef5e80c67383704ebc13ec60da1858ec7fa8edd0dc736611dba9ab4399942d5d120ad9c1692c5fa72dca20657254bbaa08d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x5B8D80,
-		Difficulty: big.NewInt(0x20000),
-		Alloc:      readPrealloc("allocs/fermion.json"),
-	}
-}
-
 func DefaultMumbaiGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.MumbaiChainConfig,
@@ -826,8 +815,6 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultGoerliGenesisBlock()
 	case networkname.SokolChainName:
 		return DefaultSokolGenesisBlock()
-	case networkname.FermionChainName:
-		return DefaultFermionGenesisBlock()
 	case networkname.BSCChainName:
 		return DefaultBSCGenesisBlock()
 	case networkname.ChapelChainName:

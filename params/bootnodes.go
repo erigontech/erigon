@@ -183,8 +183,6 @@ var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 }
 
-var FermionBootnodes = []string{}
-
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QOtcP9X1FbIMOe17QNMKqDxCpm14jcX5tiOE4_TyMrFqbmhPZHK_ZPG2Gxb1GE2xdtodOfx9-cgvNtxnRyHEmC0ghGV0aDKQ9aX9QgAAAAD__________4JpZIJ2NIJpcIQDE8KdiXNlY3AyNTZrMaEDhpehBDbZjM_L9ek699Y7vhUJ-eAdMyQW_Fil522Y0fODdGNwgiMog3VkcIIjKA",
@@ -274,8 +272,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return RialtoBootnodes
 	case networkname.SokolChainName:
 		return SokolBootnodes
-	case networkname.FermionChainName:
-		return FermionBootnodes
 	case networkname.MumbaiChainName:
 		return MumbaiBootnodes
 	case networkname.BorMainnetChainName:

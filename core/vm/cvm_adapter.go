@@ -36,7 +36,7 @@ func (cvm *CVMAdapter) Config() Config {
 }
 
 func (cvm *CVMAdapter) ChainConfig() *params.ChainConfig {
-	return params.FermionChainConfig
+	return params.AllProtocolChanges
 }
 
 func (cvm *CVMAdapter) ChainRules() *params.Rules {

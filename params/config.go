@@ -66,7 +66,6 @@ var (
 	RinkebyGenesisHash    = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash     = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	SokolGenesisHash      = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
-	FermionGenesisHash    = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 	BSCGenesisHash        = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash     = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash     = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
@@ -82,10 +81,9 @@ var (
 )
 
 var (
-	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
-	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
-	GnosisGenesisStateRoot  = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
-	ChiadoGenesisStateRoot  = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
+	SokolGenesisStateRoot  = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
+	GnosisGenesisStateRoot = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
+	ChiadoGenesisStateRoot = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
 )
 
 var (
@@ -111,8 +109,6 @@ var (
 	RialtoChainConfig = readChainSpec("chainspecs/rialto.json")
 
 	SokolChainConfig = readChainSpec("chainspecs/sokol.json")
-
-	FermionChainConfig = readChainSpec("chainspecs/fermion.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -898,8 +894,6 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return GoerliChainConfig
 	case networkname.SokolChainName:
 		return SokolChainConfig
-	case networkname.FermionChainName:
-		return FermionChainConfig
 	case networkname.BSCChainName:
 		return BSCChainConfig
 	case networkname.ChapelChainName:
@@ -935,8 +929,6 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &GoerliGenesisHash
 	case networkname.SokolChainName:
 		return &SokolGenesisHash
-	case networkname.FermionChainName:
-		return &FermionGenesisHash
 	case networkname.BSCChainName:
 		return &BSCGenesisHash
 	case networkname.ChapelChainName:
@@ -972,8 +964,6 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return GoerliChainConfig
 	case genesisHash == SokolGenesisHash:
 		return SokolChainConfig
-	case genesisHash == FermionGenesisHash:
-		return FermionChainConfig
 	case genesisHash == BSCGenesisHash:
 		return BSCChainConfig
 	case genesisHash == ChapelGenesisHash:
