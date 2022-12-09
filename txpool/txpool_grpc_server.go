@@ -51,7 +51,7 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error)
+	Best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, isMining bool) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx)
@@ -155,7 +155,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
 	txSlots := types.TxsRlp{}
-	if _, err := s.txPool.Best(math.MaxInt16, &txSlots, tx, 0 /* onTopOf */, math.MaxUint64 /* available gas */); err != nil {
+	if _, err := s.txPool.Best(math.MaxInt16, &txSlots, tx, 0 /* onTopOf */, math.MaxUint64 /* available gas */, false); err != nil {
 		return nil, err
 	}
 	var senderArr [20]byte
