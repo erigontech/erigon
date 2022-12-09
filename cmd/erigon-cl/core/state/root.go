@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -8,7 +9,7 @@ func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	return merkleRootFromLeaves(b.leaves, BellatrixLeavesSize)
+	return state_encoding.MerkleRootFromLeaves(b.leaves)
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -17,7 +18,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(0): GenesisTime
 	if b.isLeafDirty(GenesisTimeLeafIndex) {
-		b.updateLeaf(GenesisTimeLeafIndex, Uint64Root(b.genesisTime))
+		b.updateLeaf(GenesisTimeLeafIndex, state_encoding.Uint64Root(b.genesisTime))
 	}
 
 	// Field(1): GenesisValidatorsRoot
@@ -27,16 +28,16 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(2): Slot
 	if b.isLeafDirty(SlotLeafIndex) {
-		b.updateLeaf(SlotLeafIndex, Uint64Root(b.slot))
+		b.updateLeaf(SlotLeafIndex, state_encoding.Uint64Root(b.slot))
 	}
 
 	// Field(3): Fork
-	if b.isLeafDirty(LatestBlockHeaderLeafIndex) {
-		headerRoot, err := b.fork.HashTreeRoot()
+	if b.isLeafDirty(ForkLeafIndex) {
+		forkRoot, err := b.fork.HashTreeRoot()
 		if err != nil {
 			return err
 		}
-		b.updateLeaf(LatestBlockHeaderLeafIndex, headerRoot)
+		b.updateLeaf(ForkLeafIndex, forkRoot)
 	}
 
 	// Field(4): LatestBlockHeader
@@ -50,7 +51,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(5): BlockRoots
 	if b.isLeafDirty(BlockRootsLeafIndex) {
-		blockRootsRoot, err := ArraysRoot(b.blockRoots, BlockRootsLength)
+		blockRootsRoot, err := state_encoding.ArraysRoot(b.blockRoots, state_encoding.BlockRootsLength)
 		if err != nil {
 			return err
 		}
@@ -59,7 +60,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(6): StateRoots
 	if b.isLeafDirty(StateRootsLeafIndex) {
-		stateRootsRoot, err := ArraysRoot(b.stateRoots, StateRootsLength)
+		stateRootsRoot, err := state_encoding.ArraysRoot(b.stateRoots, state_encoding.StateRootsLength)
 		if err != nil {
 			return err
 		}
@@ -68,7 +69,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(7): HistoricalRoots
 	if b.isLeafDirty(HistoricalRootsLeafIndex) {
-		historicalRootsRoot, err := ArraysRootWithLength(b.historicalRoots, HistoricalRootsLength)
+		historicalRootsRoot, err := state_encoding.ArraysRootWithLimit(b.historicalRoots, state_encoding.HistoricalRootsLength)
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(9): Eth1DataVotes
 	if b.isLeafDirty(Eth1DataVotesLeafIndex) {
-		votesRoot, err := Eth1DataVectorRoot(b.eth1DataVotes, Eth1DataVotesRootsLimit)
+		votesRoot, err := state_encoding.Eth1DataVectorRoot(b.eth1DataVotes, state_encoding.Eth1DataVotesRootsLimit)
 		if err != nil {
 			return err
 		}
@@ -95,12 +96,12 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(10): Eth1DepositIndex
 	if b.isLeafDirty(Eth1DepositIndexLeafIndex) {
-		b.updateLeaf(Eth1DepositIndexLeafIndex, Uint64Root(b.eth1DepositIndex))
+		b.updateLeaf(Eth1DepositIndexLeafIndex, state_encoding.Uint64Root(b.eth1DepositIndex))
 	}
 
 	// Field(11): Validators
 	if b.isLeafDirty(ValidatorsLeafIndex) {
-		vRoot, err := ValidatorsVectorRoot(b.validators, ValidatorRegistryLimit)
+		vRoot, err := state_encoding.ValidatorsVectorRoot(b.validators, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}
@@ -109,7 +110,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
-		balancesRoot, err := Uint64ListRootWithLength(b.balances, ValidatorLimitForBalancesChunks())
+		balancesRoot, err := state_encoding.Uint64ListRootWithLimit(b.balances, state_encoding.ValidatorLimitForBalancesChunks())
 		if err != nil {
 			return err
 		}
@@ -118,7 +119,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(13): RandaoMixes
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
-		randaoRootsRoot, err := ArraysRoot(b.randaoMixes, RandaoMixesLength)
+		randaoRootsRoot, err := state_encoding.ArraysRoot(b.randaoMixes, state_encoding.RandaoMixesLength)
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(14): Slashings
 	if b.isLeafDirty(SlashingsLeafIndex) {
-		slashingsRoot, err := SlashingsRoot(b.slashings)
+		slashingsRoot, err := state_encoding.SlashingsRoot(b.slashings)
 		if err != nil {
 			return err
 		}
@@ -135,7 +136,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
-		participationRoot, err := ParticipationBitsRoot(b.previousEpochParticipation)
+		participationRoot, err := state_encoding.ParticipationBitsRoot(b.previousEpochParticipation)
 		if err != nil {
 			return err
 		}
@@ -144,7 +145,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(16): CurrentEpochParticipation
 	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
-		participationRoot, err := ParticipationBitsRoot(b.currentEpochParticipation)
+		participationRoot, err := state_encoding.ParticipationBitsRoot(b.currentEpochParticipation)
 		if err != nil {
 			return err
 		}
@@ -187,7 +188,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
-		scoresRoot, err := Uint64ListRootWithLength(b.inactivityScores, ValidatorLimitForBalancesChunks())
+		scoresRoot, err := state_encoding.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
 		if err != nil {
 			return err
 		}
