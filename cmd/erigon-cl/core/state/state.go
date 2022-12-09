@@ -78,7 +78,7 @@ func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
 		latestExecutionPayloadHeader: state.LatestExecutionPayloadHeader,
 		// Internals
 		version:       BellatrixVersion,
-		leaves:        make([]common.Hash, BellatrixLeavesSize),
+		leaves:        make([][32]byte, BellatrixLeavesSize),
 		touchedLeaves: map[StateLeafIndex]bool{},
 		// TODO: Make proper hasher
 	}

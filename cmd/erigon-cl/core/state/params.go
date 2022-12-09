@@ -41,4 +41,5 @@ const (
 	Eth1DataVotesRootsLimit = 2048
 	ValidatorRegistryLimit  = 1099511627776
 	RandaoMixesLength       = 65536
+	SlashingsLength         = 8192
 )

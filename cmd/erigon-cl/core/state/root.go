@@ -108,6 +108,13 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(12): Balances
+	if b.isLeafDirty(BalancesLeafIndex) {
+		balancesRoot, err := Uint64ListRootWithLength(b.balances, ValidatorLimitForBalancesChunks())
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(BalancesLeafIndex, balancesRoot)
+	}
 
 	// Field(13): RandaoMixes
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
@@ -119,12 +126,37 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(14): Slashings
-
+	if b.isLeafDirty(SlashingsLeafIndex) {
+		slashingsRoot, err := SlashingsRoot(b.slashings)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(SlashingsLeafIndex, slashingsRoot)
+	}
 	// Field(15): PreviousEpochParticipation
+	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
+		participationRoot, err := ParticipationBitsRoot(b.previousEpochParticipation)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(PreviousEpochParticipationLeafIndex, participationRoot)
+	}
 
 	// Field(16): CurrentEpochParticipation
+	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
+		participationRoot, err := ParticipationBitsRoot(b.currentEpochParticipation)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(CurrentEpochParticipationLeafIndex, participationRoot)
+	}
 
 	// Field(17): JustificationBits
+	if b.isLeafDirty(JustificationBitsLeafIndex) {
+		var root [32]byte
+		copy(root[:], b.justificationBits)
+		b.updateLeaf(JustificationBitsLeafIndex, root)
+	}
 
 	// Field(18): PreviousJustifiedCheckpoint
 	if b.isLeafDirty(PreviousJustifiedCheckpointLeafIndex) {
@@ -154,6 +186,13 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(21): Inactivity Scores
+	if b.isLeafDirty(InactivityScoresLeafIndex) {
+		scoresRoot, err := Uint64ListRootWithLength(b.inactivityScores, ValidatorLimitForBalancesChunks())
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(InactivityScoresLeafIndex, scoresRoot)
+	}
 
 	// Field(22): CurrentSyncCommitte
 	if b.isLeafDirty(CurrentSyncCommitteeLeafIndex) {
