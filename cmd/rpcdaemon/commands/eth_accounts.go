@@ -22,7 +22,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,11 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, fmt.Errorf("read chain config: %v", err)
+	}
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +107,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
@@ -128,7 +132,7 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
 	if err != nil {
 		return false, err
 	}
