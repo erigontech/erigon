@@ -237,10 +237,10 @@ func newStateReaderWriter(
 // ================ Erigon3 ================
 
 func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	workersCount := cfg.syncCfg.ExecWorkerCount
+	//workersCount := cfg.syncCfg.ExecWorkerCount
 	//workersCount := 2
 	if !initialCycle {
-		workersCount = 1
+		//workersCount = 1
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
@@ -274,12 +274,14 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewState22()
-	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
-		log.New(), to); err != nil {
-		return err
-	}
+	/*
+		rs := state.NewState22()
+		parallel := initialCycle && tx == nil
+		if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
+			log.New(), to); err != nil {
+			return err
+		}
+	*/
 	return nil
 }
 
