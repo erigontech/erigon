@@ -20,16 +20,13 @@ func init() {
 		genesisBlock := DefaultGenesisBlockByChainName(chainName)
 		for addr, alloc := range genesisBlock.Alloc {
 			if len(alloc.Code) > 0 {
-				list, ok := byChain[addr]
-				if !ok {
-					list = []state.CodeRecord{}
-					byChain[addr] = list
-				}
+				list := byChain[addr]
 				codeHash, err := common.HashData(alloc.Code)
 				if err != nil {
 					panic(fmt.Errorf("failed to hash system contract code: %s", err.Error()))
 				}
 				list = append(list, state.CodeRecord{BlockNumber: 0, CodeHash: codeHash})
+				byChain[addr] = list
 			}
 		}
 		// Process upgrades
@@ -81,11 +78,7 @@ func init() {
 
 func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain map[common.Address][]state.CodeRecord) {
 	for _, config := range upgrade.Configs {
-		list, ok := byChain[config.ContractAddr]
-		if !ok {
-			list = []state.CodeRecord{}
-			byChain[config.ContractAddr] = list
-		}
+		list := byChain[config.ContractAddr]
 		code, err := hex.DecodeString(config.Code)
 		if err != nil {
 			panic(fmt.Errorf("failed to decode system contract code: %s", err.Error()))
@@ -95,5 +88,6 @@ func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain m
 			panic(fmt.Errorf("failed to hash system contract code: %s", err.Error()))
 		}
 		list = append(list, state.CodeRecord{BlockNumber: blockNum, CodeHash: codeHash})
+		byChain[config.ContractAddr] = list
 	}
 }
