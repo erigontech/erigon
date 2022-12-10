@@ -395,9 +395,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if rules.IsNano {
 		for _, blackListAddr := range types.NanoBlackList {
 			if blackListAddr == sender.Address() {
+				fmt.Printf("block blacklist accountn\n")
 				return nil, fmt.Errorf("block blacklist account")
 			}
 			if msg.To() != nil && *msg.To() == blackListAddr {
+				fmt.Printf("block blacklist account from\n")
 				return nil, fmt.Errorf("block blacklist account")
 			}
 		}
