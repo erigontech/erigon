@@ -946,12 +946,6 @@ func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
 }
 
 func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	select {
-	case <-ctx.Done():
-		return nil
-	default:
-	}
-
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -1000,7 +994,10 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 		if err = historyKeysCursor.DeleteCurrent(); err != nil {
 			return err
 		}
+
 		select {
+		case <-ctx.Done():
+			return nil
 		case <-logEvery.C:
 			log.Info("[snapshots] prune history", "name", h.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(h.aggregationStep), float64(txTo)/float64(h.aggregationStep)))
 		default:
