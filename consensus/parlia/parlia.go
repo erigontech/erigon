@@ -670,6 +670,8 @@ func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 }
 
 func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs types.Transactions, systemTxs types.Transactions, err error) {
+	userTxs = types.Transactions{}
+	systemTxs = types.Transactions{}
 	for _, tx := range txs {
 		isSystemTx, err2 := p.IsSystemTransaction(tx, header)
 		if err2 != nil {
@@ -681,12 +683,6 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 		} else {
 			userTxs = append(userTxs, tx)
 		}
-	}
-	if userTxs == nil {
-		userTxs = types.Transactions{}
-	}
-	if systemTxs == nil {
-		systemTxs = types.Transactions{}
 	}
 	return
 }
@@ -767,7 +763,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			var receipt *types.Receipt
 			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
-				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal, "error", err)
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
@@ -776,6 +772,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+		//log.Error("distributeIncoming", "block hash", header.Hash(), "error", err, "systemTxs", len(systemTxs))
 		return nil, nil, err
 	}
 	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
@@ -1197,8 +1194,11 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if len(systemTxs) == 0 || systemTxs[0] == nil {
+		if len(systemTxs) == 0 {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
+		}
+		if systemTxs[0] == nil {
+			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get nil")
 		}
 		actualTx := systemTxs[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)

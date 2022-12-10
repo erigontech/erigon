@@ -280,7 +280,6 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.New(), to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
-
 	return nil
 }
 
