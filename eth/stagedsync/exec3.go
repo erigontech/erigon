@@ -261,29 +261,6 @@ func ExecV3(ctx context.Context,
 					stepsInDB := idxStepsInDB(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 					if rs.SizeEstimate() < commitThreshold {
-						// too much steps in db will slow-down everything: flush and prune
-						// it means better spend time for pruning, before flushing more data to db
-						// also better do it now - instead of before Commit() - because Commit does block execution
-						if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-						} else if stepsInDB > 2 {
-							t := time.Now()
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-
-							if time.Since(t) > 10*time.Second && // allready spent much time on this cycle, let's print for user regular logs
-								rs.SizeEstimate() < uint64(float64(commitThreshold)*0.8) { // batch is 80%-full - means commit soon, time to flush indices
-								break
-							}
-						}
-
-						// rotate indices-WAL, execution will work on new WAL while rwTx-thread can flush indices-WAL to db or prune db.
-						if err := agg.Flush(tx); err != nil {
-							panic(err)
-						}
 						break
 					}
 
@@ -379,13 +356,11 @@ func ExecV3(ctx context.Context,
 					}
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				case <-pruneEvery.C:
-					if agg.CanPrune(tx) {
-						t := time.Now()
-						for time.Since(t) < 2*time.Second {
-							if err = agg.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
-								panic(err)
-							}
-						}
+					if err = agg.Flush(tx); err != nil {
+						panic(err)
+					}
+					if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
+						panic(err)
 					}
 				}
 			}
