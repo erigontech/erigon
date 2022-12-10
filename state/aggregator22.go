@@ -1138,25 +1138,6 @@ func (ac *Aggregator22Context) TraceToIterator(addr []byte, startTxNum, endTxNum
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *Aggregator22Context) IsMaxAccountsTxNum(addr []byte, txNum uint64) bool {
-	return ac.accounts.IsMaxTxNum(addr, txNum)
-}
-
-func (ac *Aggregator22Context) IsMaxStorageTxNum(addr []byte, loc []byte, txNum uint64) bool {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.IsMaxTxNum(ac.keyBuf, txNum)
-}
-
-func (ac *Aggregator22Context) IsMaxCodeTxNum(addr []byte, txNum uint64) bool {
-	return ac.code.IsMaxTxNum(addr, txNum)
-}
-
 func (ac *Aggregator22Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoStateWithRecent(addr, txNum, ac.tx)
 }
@@ -1207,30 +1188,6 @@ func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 		return 0, false, err
 	}
 	return len(code), noState, nil
-}
-
-func (ac *Aggregator22Context) IterateAccountsHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.accounts.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateStorageHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.storage.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateCodeHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.code.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateAccountsReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.accounts.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateStorageReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.storage.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateCodeReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.code.iterateReconTxs(fromKey, toKey, txNum)
 }
 
 type FilesStats22 struct {
@@ -1298,4 +1255,114 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 		log.Warn("lastIdInDB", "err", err)
 	}
 	return lstInDb
+}
+
+// AggregatorStep is used for incremental reconstitution, it allows
+// accessing history in isolated way for each step
+type AggregatorStep struct {
+	a        *Aggregator22
+	accounts *HistoryStep
+	storage  *HistoryStep
+	code     *HistoryStep
+	keyBuf   []byte
+}
+
+func (a *Aggregator22) MakeSteps() []*AggregatorStep {
+	accountSteps := a.accounts.MakeSteps()
+	steps := make([]*AggregatorStep, len(accountSteps))
+	for i, accountStep := range accountSteps {
+		steps[i] = &AggregatorStep{
+			a:        a,
+			accounts: accountStep,
+		}
+	}
+	storageSteps := a.storage.MakeSteps()
+	for i, storageStep := range storageSteps {
+		steps[i].storage = storageStep
+	}
+	codeSteps := a.code.MakeSteps()
+	for i, codeStep := range codeSteps {
+		steps[i].code = codeStep
+	}
+	return steps
+}
+
+func (as *AggregatorStep) TxNumRange() (uint64, uint64) {
+	return as.accounts.indexFile.startTxNum, as.accounts.indexFile.endTxNum
+}
+
+func (as *AggregatorStep) IterateAccountsTxs() *ScanIteratorInc {
+	return as.accounts.iterateTxs()
+}
+
+func (as *AggregatorStep) IterateStorageTxs() *ScanIteratorInc {
+	return as.storage.iterateTxs()
+}
+
+func (as *AggregatorStep) IterateCodeTxs() *ScanIteratorInc {
+	return as.code.iterateTxs()
+}
+
+func (as *AggregatorStep) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
+	return as.accounts.GetNoState(addr, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64) {
+	if cap(as.keyBuf) < len(addr)+len(loc) {
+		as.keyBuf = make([]byte, len(addr)+len(loc))
+	} else if len(as.keyBuf) != len(addr)+len(loc) {
+		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
+	}
+	copy(as.keyBuf, addr)
+	copy(as.keyBuf[len(addr):], loc)
+	return as.storage.GetNoState(as.keyBuf, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
+	return as.code.GetNoState(addr, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64) {
+	code, noState, stateTxNum := as.code.GetNoState(addr, txNum)
+	return len(code), noState, stateTxNum
+}
+
+func (as *AggregatorStep) MaxTxNumAccounts(addr []byte) (bool, uint64) {
+	return as.accounts.MaxTxNum(addr)
+}
+
+func (as *AggregatorStep) MaxTxNumStorage(addr []byte, loc []byte) (bool, uint64) {
+	if cap(as.keyBuf) < len(addr)+len(loc) {
+		as.keyBuf = make([]byte, len(addr)+len(loc))
+	} else if len(as.keyBuf) != len(addr)+len(loc) {
+		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
+	}
+	copy(as.keyBuf, addr)
+	copy(as.keyBuf[len(addr):], loc)
+	return as.storage.MaxTxNum(as.keyBuf)
+}
+
+func (as *AggregatorStep) MaxTxNumCode(addr []byte) (bool, uint64) {
+	return as.code.MaxTxNum(addr)
+}
+
+func (as *AggregatorStep) IterateAccountsHistory(txNum uint64) *HistoryIteratorInc {
+	return as.accounts.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) IterateStorageHistory(txNum uint64) *HistoryIteratorInc {
+	return as.storage.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) IterateCodeHistory(txNum uint64) *HistoryIteratorInc {
+	return as.code.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) Clone() *AggregatorStep {
+	return &AggregatorStep{
+		a:        as.a,
+		accounts: as.accounts.Clone(),
+		storage:  as.storage.Clone(),
+		code:     as.code.Clone(),
+	}
 }
