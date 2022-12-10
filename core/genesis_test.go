@@ -180,7 +180,7 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	state := state.New(state.NewPlainState(tx, 1))
+	state := state.New(state.NewPlainState(tx, 1, nil))
 	balance := state.GetBalance(address)
 	assert.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)
