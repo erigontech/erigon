@@ -43,11 +43,9 @@ type BeaconState struct {
 	nextSyncCommittee            *cltypes.SyncCommittee
 	latestExecutionPayloadHeader *cltypes.ExecutionHeader
 	// Internals
-	version       StateVersion  // State version
-	leaves        []common.Hash // Pre-computed leaves.
-	touchedLeaves map[int]bool  // Maps each leaf to whether they were touched or not.
-	/*root          common.Hash   // Cached state root.
-	hasher        HashFunc      // Merkle root hasher.*/
+	version       StateVersion            // State version
+	leaves        [][32]byte              // Pre-computed leaves.
+	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 }
 
 // FromBellatrixState initialize the beacon state as a bellatrix state.
@@ -80,8 +78,8 @@ func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
 		latestExecutionPayloadHeader: state.LatestExecutionPayloadHeader,
 		// Internals
 		version:       BellatrixVersion,
-		leaves:        make([]common.Hash, BellatrixLeavesSize),
-		touchedLeaves: map[int]bool{},
+		leaves:        make([][32]byte, BellatrixLeavesSize),
+		touchedLeaves: map[StateLeafIndex]bool{},
 		// TODO: Make proper hasher
 	}
 }
