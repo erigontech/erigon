@@ -160,7 +160,8 @@ func StageLoopStep(
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
-		tx, err = db.BeginRw(context.Background())
+		// -- Process new blocks + commit(no_sync)
+		tx, err = db.BeginRwAsync(ctx)
 		if err != nil {
 			return headBlockHash, err
 		}
@@ -191,6 +192,9 @@ func StageLoopStep(
 		}
 		commitTime = time.Since(commitStart)
 	}
+
+	// -- send notifications START
+
 	var rotx kv.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
 		return headBlockHash, err
@@ -261,6 +265,12 @@ func StageLoopStep(
 				}
 			}
 		}
+	}
+	// -- send notifications END
+
+	// -- Prune+commit(sync)
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) }); err != nil {
+		return headBlockHash, err
 	}
 
 	return headBlockHash, nil

@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
@@ -126,8 +127,10 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			cumLogs = append(cumLogs, logs...)
 		} else {
 			// keep looping until we're out of gas for the block or the txpool has nothing left
+			simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
+			defer simulationTx.Rollback()
 			for {
-				nextBatch, err := getNextTransactions(cfg, tx, chainID, current.Header, 50, executionAt)
+				nextBatch, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx)
 				if err != nil {
 					return err
 				}
@@ -156,7 +159,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 		//if !w.isRunning() {
 		//}
-		log.Info(fmt.Sprintf("[%s] Mined transactions", logPrefix), "count", len(cumLogs), "gas_used", current.Header.GasUsed)
+		log.Info(fmt.Sprintf("[%s] Mined transactions", logPrefix), "count", len(current.Txs), "gas_used", current.Header.GasUsed)
 		NotifyPendingLogs(logPrefix, cfg.notifier, cumLogs)
 	}
 
@@ -215,11 +218,11 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 
 func getNextTransactions(
 	cfg MiningExecCfg,
-	tx kv.RwTx,
 	chainID *uint256.Int,
 	header *types.Header,
 	amount uint16,
 	executionAt uint64,
+	simulationTx *memdb.MemoryMutation,
 ) (types.TransactionsStream, error) {
 	txSlots := types2.TxsRlp{}
 	var onTime bool
@@ -228,7 +231,7 @@ func getNextTransactions(
 		counter := 0
 		for !onTime && counter < 1000 {
 			remainingGas := header.GasLimit - header.GasUsed
-			if onTime, err = cfg.txPool2.Best(amount, &txSlots, poolTx, executionAt, remainingGas); err != nil {
+			if onTime, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -266,7 +269,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee, cfg.tmpdir)
+	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simulationTx)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +280,7 @@ func getNextTransactions(
 func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
-	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
+	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs

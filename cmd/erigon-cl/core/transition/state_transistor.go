@@ -7,12 +7,12 @@ import (
 
 // StateTransistor takes care of state transition
 type StateTransistor struct {
-	state         *cltypes.BeaconState
+	state         *cltypes.BeaconStateBellatrix
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
 }
 
-func New(state *cltypes.BeaconState, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *StateTransistor {
+func New(state *cltypes.BeaconStateBellatrix, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *StateTransistor {
 	return &StateTransistor{
 		state:         state,
 		beaconConfig:  beaconConfig,
