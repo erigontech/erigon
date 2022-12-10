@@ -177,10 +177,16 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	}
 	//restore codehash
 	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+		fmt.Printf("restore codehash\n")
 		if records, ok := s.systemContractLookup[address]; ok {
+			fmt.Printf("Using system contract lookup for %x %d\n", address, s.blockNr)
+			for i, rec := range records {
+				fmt.Printf("i=%d, blockN = %d, codeHash = %x\n", i, rec.BlockNumber, rec.CodeHash)
+			}
 			p := sort.Search(len(records), func(i int) bool {
 				return records[i].BlockNumber > s.blockNr
 			})
+			fmt.Printf("p = %d\n", p)
 			a.CodeHash = records[p-1].CodeHash
 		} else if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
