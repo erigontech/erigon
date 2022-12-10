@@ -162,6 +162,9 @@ func (rs *State22) Schedule() (*exec22.TxTask, bool) {
 	for !rs.finished && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
+	if rs.finished {
+		return nil, false
+	}
 	if rs.queue.Len() > 0 {
 		return heap.Pop(&rs.queue).(*exec22.TxTask), true
 	}
