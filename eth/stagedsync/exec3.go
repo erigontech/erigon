@@ -362,6 +362,7 @@ func ExecV3(ctx context.Context,
 						panic(err)
 					}
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
+
 				}
 			}
 			if err = rs.Flush(tx); err != nil {
