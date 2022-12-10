@@ -87,6 +87,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 	for idx, txn := range block.Transactions() {
+		stream.WriteObjectStart()
+		stream.WriteObjectField("result")
 		select {
 		default:
 		case <-ctx.Done():
@@ -102,10 +104,13 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+		if err == nil {
+			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		}
+		stream.WriteObjectEnd()
 
 		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
-			stream.SetBuffer([]byte{})
 			stream.WriteMore()
 			stream.WriteObjectStart()
 			err = rpc.HandleError(err, stream)
@@ -114,8 +119,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				return err
 			}
 		}
-
-		_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		if idx != len(block.Transactions())-1 {
 			stream.WriteMore()
 		}

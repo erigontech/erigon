@@ -23,7 +23,7 @@ func EncodeNumber(n uint64) []byte {
 }
 
 // WriteBeaconState writes beacon state for specific block to database.
-func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconState) error {
+func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconStateBellatrix) error {
 	data, err := utils.EncodeSSZSnappy(state)
 	if err != nil {
 		return err
@@ -33,12 +33,12 @@ func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconState) error {
 }
 
 // ReadBeaconState reads beacon state for specific block from database.
-func ReadBeaconState(tx kv.Getter, slot uint64) (*cltypes.BeaconState, error) {
+func ReadBeaconState(tx kv.Getter, slot uint64) (*cltypes.BeaconStateBellatrix, error) {
 	data, err := tx.GetOne(kv.BeaconState, EncodeNumber(slot))
 	if err != nil {
 		return nil, err
 	}
-	state := &cltypes.BeaconState{}
+	state := &cltypes.BeaconStateBellatrix{}
 
 	if len(data) == 0 {
 		return nil, nil

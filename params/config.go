@@ -984,6 +984,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return MumbaiChainConfig
 	case genesisHash == BorMainnetGenesisHash:
 		return BorMainnetChainConfig
+	case genesisHash == BorDevnetGenesisHash:
+		return BorDevnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:

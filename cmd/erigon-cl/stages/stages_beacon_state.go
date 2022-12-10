@@ -19,13 +19,13 @@ type StageBeaconStateCfg struct {
 	db               kv.RwDB
 	genesisCfg       *clparams.GenesisConfig
 	beaconCfg        *clparams.BeaconChainConfig
-	state            *cltypes.BeaconState
+	state            *cltypes.BeaconStateBellatrix
 	clearEth1Data    bool // Whether we want to discard eth1 data.
 	triggerExecution triggerExecutionFunc
 }
 
 func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconStateBellatrix, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:               db,
 		genesisCfg:       genesisCfg,
