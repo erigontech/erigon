@@ -979,10 +979,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		networkname.FermionChainName: true,
-		networkname.BSCChainName:     true,
-		networkname.RialtoChainName:  true,
-		networkname.ChapelChainName:  true,
+		networkname.BSCChainName:    true,
+		networkname.RialtoChainName: true,
+		networkname.ChapelChainName: true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
@@ -1074,8 +1073,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.SokolChainName:
 		return networkDataDirCheckingLegacy(datadir, "sokol")
-	case networkname.FermionChainName:
-		return networkDataDirCheckingLegacy(datadir, "fermion")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
