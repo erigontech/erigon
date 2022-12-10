@@ -29,6 +29,7 @@ func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool
 }
 
 func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+	fmt.Printf("FindByHistory %x, timestamp %d\n", key, timestamp)
 	var csBucket string
 	if storage {
 		csBucket = kv.StorageChangeSet
@@ -88,6 +89,7 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 			if err != nil {
 				return nil, err
 			}
+			fmt.Printf("Restoring codehash for incarnation %d, got %x\n", acc.Incarnation, codeHash)
 			if len(codeHash) > 0 {
 				acc.CodeHash.SetBytes(codeHash)
 			}
