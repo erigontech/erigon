@@ -187,6 +187,7 @@ func ExecV3(ctx context.Context,
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
 	var rwsLock sync.RWMutex
+	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount * 4
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
@@ -199,7 +200,6 @@ func ExecV3(ctx context.Context,
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
-	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
