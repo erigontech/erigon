@@ -258,7 +258,14 @@ func ExecV3(ctx context.Context,
 
 					stepsInDB := idxStepsInDB(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
+						if err = agg.Flush(tx); err != nil {
+							panic(err)
+						}
+						if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
+							panic(err)
+						}
 						break
 					}
 
@@ -352,13 +359,7 @@ func ExecV3(ctx context.Context,
 						panic(err)
 					}
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
-				case <-pruneEvery.C:
-					if err = agg.Flush(tx); err != nil {
-						panic(err)
-					}
-					if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
-						panic(err)
-					}
+
 				}
 			}
 			if err = rs.Flush(tx); err != nil {
