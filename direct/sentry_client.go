@@ -189,6 +189,10 @@ func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *sentry.PeerMi
 	return c.server.PeerMinBlock(ctx, in)
 }
 
+func (c *SentryClientDirect) PeerUseless(ctx context.Context, in *sentry.PeerUselessRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.PeerUseless(ctx, in)
+}
+
 func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
 	return c.server.SendMessageByMinBlock(ctx, in)
 }
