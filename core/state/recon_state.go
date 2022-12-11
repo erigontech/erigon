@@ -10,13 +10,8 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	btree2 "github.com/tidwall/btree"
 )
 
@@ -47,6 +42,7 @@ type ReconnWork struct {
 	workCh        chan *exec22.TxTask
 	queue         exec22.TxTaskQueue
 	rollbackCount uint64
+	maxTxNum      uint64
 }
 
 // ReconState is the accumulator of changes to the state
@@ -71,6 +67,19 @@ func NewReconState(workCh chan *exec22.TxTask) *ReconState {
 	return rs
 }
 
+func (rs *ReconState) Reset(workCh chan *exec22.TxTask) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	rs.workCh = workCh
+	rs.triggers = map[uint64][]*exec22.TxTask{}
+	rs.rollbackCount = 0
+	rs.queue = rs.queue[:cap(rs.queue)]
+	for i := 0; i < len(rs.queue); i++ {
+		rs.queue[i] = nil
+	}
+	rs.queue = rs.queue[:0]
+}
+
 func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -86,6 +95,42 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	if ok {
 		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
 	}
+}
+
+func (rs *ReconState) Delete(table string, key1, key2 []byte, txNum uint64) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	t, ok := rs.changes[table]
+	if !ok {
+		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 128, NoLocks: true})
+		rs.changes[table] = t
+		rs.hints[table] = &btree2.PathHint{}
+	}
+	item := reconPair{key1: key1, key2: key2, val: nil, txNum: txNum}
+	old, ok := t.SetHint(item, rs.hints[table])
+	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2))
+	if ok {
+		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
+	}
+}
+
+func (rs *ReconState) RemoveAll(table string, key1 []byte) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	t, ok := rs.changes[table]
+	if !ok {
+		return
+	}
+	t.Ascend(reconPair{key1: key1, key2: nil}, func(item reconPair) bool {
+		if !bytes.Equal(item.key1, key1) {
+			return false
+		}
+		if item.key2 == nil {
+			return true
+		}
+		t.Delete(item)
+		return true
+	})
 }
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
@@ -109,9 +154,6 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 		var err error
 		t.Walk(func(items []reconPair) bool {
 			for _, item := range items {
-				if len(item.val) == 0 {
-					return true
-				}
 				var composite []byte
 				if item.key2 == nil {
 					composite = make([]byte, 8+len(item.key1))
@@ -122,8 +164,14 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 				}
 				binary.BigEndian.PutUint64(composite, item.txNum)
 				copy(composite[8:], item.key1)
-				if err = rwTx.Put(table, composite, item.val); err != nil {
-					return false
+				if len(item.val) == 0 {
+					if err = rwTx.Put(table, composite[:8], composite[8:]); err != nil {
+						return false
+					}
+				} else {
+					if err = rwTx.Put(table, composite, item.val); err != nil {
+						return false
+					}
 				}
 			}
 			return true
@@ -164,6 +212,9 @@ func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 		delete(rs.triggers, txNum)
 	}
 	rs.doneBitmap.Add(txNum)
+	if txNum > rs.maxTxNum {
+		rs.maxTxNum = txNum
+	}
 }
 
 func (rs *ReconnWork) RollbackTx(txTask *exec22.TxTask, dependency uint64) {
@@ -193,6 +244,12 @@ func (rs *ReconnWork) DoneCount() uint64 {
 	return c
 }
 
+func (rs *ReconnWork) MaxTxNum() uint64 {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.maxTxNum
+}
+
 func (rs *ReconnWork) RollbackCount() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -209,104 +266,4 @@ func (rs *ReconState) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.sizeEstimate
-}
-
-type StateReconWriter struct {
-	ac        *libstate.Aggregator22Context
-	rs        *ReconState
-	txNum     uint64
-	tx        kv.Tx
-	composite []byte
-}
-
-func NewStateReconWriter(ac *libstate.Aggregator22Context, rs *ReconState) *StateReconWriter {
-	return &StateReconWriter{
-		ac: ac,
-		rs: rs,
-	}
-}
-
-func (w *StateReconWriter) SetTxNum(txNum uint64) {
-	w.txNum = txNum
-}
-
-func (w *StateReconWriter) SetTx(tx kv.Tx) {
-	w.tx = tx
-}
-
-func (w *StateReconWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	addr := address.Bytes()
-	txKey, err := w.tx.GetOne(kv.XAccount, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	value := make([]byte, account.EncodingLengthForStorage())
-	if account.Incarnation > 0 {
-		account.Incarnation = FirstContractIncarnation
-	}
-	account.EncodeForStorage(value)
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
-	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
-	return nil
-}
-
-func (w *StateReconWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	txKey, err := w.tx.GetOne(kv.XCode, addr)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	w.rs.Put(kv.CodeR, codeHashBytes, nil, common.CopyBytes(code), w.txNum)
-	if len(code) > 0 {
-		//fmt.Printf("code [%x] => %d CodeHash: %x, txNum: %d\n", address, len(code), codeHash, w.txNum)
-		w.rs.Put(kv.PlainContractR, dbutils.PlainGenerateStoragePrefix(addr, FirstContractIncarnation), nil, codeHashBytes, w.txNum)
-	}
-	return nil
-}
-
-func (w *StateReconWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
-	return nil
-}
-
-func (w *StateReconWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if cap(w.composite) < 20+32 {
-		w.composite = make([]byte, 20+32)
-	} else {
-		w.composite = w.composite[:20+32]
-	}
-	addr, k := address.Bytes(), key.Bytes()
-
-	copy(w.composite, addr)
-	copy(w.composite[20:], k)
-	txKey, err := w.tx.GetOne(kv.XStorage, w.composite)
-	if err != nil {
-		return err
-	}
-	if txKey == nil {
-		return nil
-	}
-	if stateTxNum := binary.BigEndian.Uint64(txKey); stateTxNum != w.txNum {
-		return nil
-	}
-	if !value.IsZero() {
-		//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, value.Bytes(), w.txNum)
-		w.rs.Put(kv.PlainStateR, addr, k, value.Bytes(), w.txNum)
-	}
-	return nil
-}
-
-func (w *StateReconWriter) CreateContract(address common.Address) error {
-	return nil
 }

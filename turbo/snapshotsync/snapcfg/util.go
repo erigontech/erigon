@@ -16,14 +16,12 @@ var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)
 	Goerli     = fromToml(snapshothashes.Goerli)
 	Bsc        = fromToml(snapshothashes.Bsc)
-	Ropsten    = fromToml(snapshothashes.Ropsten)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 
 	MainnetHistory    = fromToml(snapshothashes.MainnetHistory)
 	GoerliHistory     = fromToml(snapshothashes.GoerliHistory)
 	BscHistory        = fromToml(snapshothashes.BscHistory)
-	RopstenHistory    = fromToml(snapshothashes.RopstenHistory)
 	MumbaiHistory     = fromToml(snapshothashes.MumbaiHistory)
 	BorMainnetHistory = fromToml(snapshothashes.BorMainnetHistory)
 )
@@ -55,7 +53,6 @@ var (
 	MainnetChainSnapshotCfg    = newCfg(Mainnet, MainnetHistory)
 	GoerliChainSnapshotCfg     = newCfg(Goerli, GoerliHistory)
 	BscChainSnapshotCfg        = newCfg(Bsc, BscHistory)
-	RopstenChainSnapshotCfg    = newCfg(Ropsten, RopstenHistory)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai, MumbaiHistory)
 	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, BorMainnetHistory)
 )
@@ -104,7 +101,6 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.MainnetChainName:    MainnetChainSnapshotCfg,
 	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
 	networkname.BSCChainName:        BscChainSnapshotCfg,
-	networkname.RopstenChainName:    RopstenChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
 }
