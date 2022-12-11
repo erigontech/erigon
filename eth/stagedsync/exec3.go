@@ -262,7 +262,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			defer func() { // closure - to avid defer in loop
-				fmt.Printf("rollback!!!")
+				fmt.Printf("rollback!!!\n")
 				tx.Rollback()
 			}()
 
@@ -308,6 +308,7 @@ func ExecV3(ctx context.Context,
 
 					var t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
+					fmt.Printf("here 111\n")
 					log.Info("Committing...")
 					if err := func() error {
 						rwsLock.Lock()
