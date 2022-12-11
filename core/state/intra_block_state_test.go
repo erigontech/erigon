@@ -225,7 +225,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 	var (
-		ds           = NewPlainState(tx, 1)
+		ds           = NewPlainState(tx, 1, nil)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
@@ -240,7 +240,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainState(tx, 1)
+		checkds := NewPlainState(tx, 1, nil)
 		checkstate := New(checkds)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
