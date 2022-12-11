@@ -260,7 +260,6 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			defer func() { // closure - to avid defer in loop
-				fmt.Printf("rollback!!!\n")
 				tx.Rollback()
 			}()
 
